@@ -1,0 +1,102 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nfse-app
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      REQUEST_BODY_LIMIT: 10mb
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/nfse_collector?schema=public
+      REDIS_URL: redis://redis:6379
+      S3_ENDPOINT: http://minio:9000
+      S3_ACCESS_KEY: minioadmin
+      S3_SECRET_KEY: minioadmin
+      S3_BUCKET: nfse-storage
+      S3_REGION: us-east-1
+      S3_FORCE_PATH_STYLE: 'true'
+      CERT_MASTER_KEY: change-me-with-32-byte-secret
+      JWT_SECRET: change-me
+      STORAGE_ROOT_PATH: /app/storage
+      NFSE_ADN_CLIENT_MODE: ${NFSE_ADN_CLIENT_MODE:-mock}
+      NFSE_API_BASE_URL_PRODUCAO: ${NFSE_API_BASE_URL_PRODUCAO:-https://adn.nfse.gov.br}
+      NFSE_API_BASE_URL_RESTRITA: ${NFSE_API_BASE_URL_RESTRITA:-https://adn.producaorestrita.nfse.gov.br}
+      NFSE_ADN_PATH_PREFIX: ${NFSE_ADN_PATH_PREFIX:-contribuintes}
+      NFSE_ADN_TIMEOUT_MS: ${NFSE_ADN_TIMEOUT_MS:-30000}
+      NFSE_ADN_REJECT_UNAUTHORIZED: ${NFSE_ADN_REJECT_UNAUTHORIZED:-true}
+      SYNC_AUTO_RUN_ENABLED: ${SYNC_AUTO_RUN_ENABLED:-true}
+      SYNC_AUTO_RUN_INTERVAL_MS: ${SYNC_AUTO_RUN_INTERVAL_MS:-30000}
+      SYNC_AUTO_RUN_STARTUP_DELAY_MS: ${SYNC_AUTO_RUN_STARTUP_DELAY_MS:-3000}
+      SYNC_API_RETRY_DELAY_MS: ${SYNC_API_RETRY_DELAY_MS:-60000}
+    volumes:
+      - app_storage:/app/storage
+    ports:
+      - '3000:3000'
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: nfse-postgres
+    environment:
+      POSTGRES_DB: nfse_collector
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - '5433:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d nfse_collector']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: nfse-redis
+    ports:
+      - '6379:6379'
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: nfse-minio
+    command: server /data --console-address ':9001'
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    ports:
+      - '9000:9000'
+      - '9001:9001'
+    volumes:
+      - minio_data:/data
+
+  minio-init:
+    image: minio/mc:latest
+    container_name: nfse-minio-init
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do sleep 1; done;
+      mc mb -p local/nfse-storage || true;
+      mc anonymous set none local/nfse-storage;
+      exit 0;
+      "
+
+volumes:
+  app_storage:
+  postgres_data:
+  minio_data:

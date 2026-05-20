@@ -1,0 +1,226 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Ambiente {
+  producao
+  producao_restrita
+}
+
+enum SyncMode {
+  historico_desde_nsu_1
+  historico_a_partir_de_nsu
+  somente_novas
+}
+
+enum SyncStatus {
+  ativo
+  pausado
+  erro_certificado
+  erro_autorizacao
+  erro_api
+  finalizado_historico
+}
+
+enum DocumentoOrigem {
+  adn_nsu
+  importacao_xml
+  consulta_chave
+  consulta_dps
+}
+
+model Cliente {
+  id                String                  @id @default(uuid()) @db.Uuid
+  razaoSocial       String                  @map("razao_social") @db.VarChar(255)
+  nomeFantasia      String?                 @map("nome_fantasia") @db.VarChar(255)
+  cnpj              String                  @unique @db.VarChar(14)
+  emailResponsavel  String?                 @map("email_responsavel") @db.VarChar(255)
+  telefone          String?                 @db.VarChar(30)
+  ativo             Boolean                 @default(true)
+  createdAt         DateTime                @default(now()) @map("created_at")
+  updatedAt         DateTime                @updatedAt @map("updated_at")
+
+  estabelecimentos  ClienteEstabelecimento[]
+  certificados      Certificado[]
+  syncControles     NfseSyncControle[]
+  documentos        NfseDocumento[]
+  syncLogs          NfseSyncLog[]
+  auditorias        AuditoriaUsuario[]
+
+  @@map("clientes")
+}
+
+model ClienteEstabelecimento {
+  id                 String             @id @default(uuid()) @db.Uuid
+  clienteId          String             @map("cliente_id") @db.Uuid
+  cnpj               String             @db.VarChar(14)
+  razaoSocial        String?            @map("razao_social") @db.VarChar(255)
+  inscricaoMunicipal String?            @map("inscricao_municipal") @db.VarChar(50)
+  municipioCodigoIbge String?           @map("municipio_codigo_ibge") @db.VarChar(7)
+  municipioNome      String?            @map("municipio_nome") @db.VarChar(120)
+  ativo              Boolean            @default(true)
+  createdAt          DateTime           @default(now()) @map("created_at")
+  updatedAt          DateTime           @updatedAt @map("updated_at")
+
+  cliente            Cliente            @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  certificados       Certificado[]
+  syncControles      NfseSyncControle[]
+  documentos         NfseDocumento[]
+
+  @@unique([clienteId, cnpj], map: "cliente_estabelecimentos_cliente_id_cnpj_key")
+  @@map("cliente_estabelecimentos")
+}
+
+model Certificado {
+  id                           String                  @id @default(uuid()) @db.Uuid
+  clienteId                    String                  @map("cliente_id") @db.Uuid
+  estabelecimentoId            String?                 @map("estabelecimento_id") @db.Uuid
+  nome                         String                  @db.VarChar(255)
+  cnpjTitular                  String                  @map("cnpj_titular") @db.VarChar(14)
+  tipo                         String                  @default("A1") @db.VarChar(20)
+  arquivoCriptografadoPath     String                  @map("arquivo_criptografado_path") @db.Text
+  senhaCriptografada           String                  @map("senha_criptografada") @db.Text
+  validadeInicio               DateTime?               @map("validade_inicio")
+  validadeFim                  DateTime?               @map("validade_fim")
+  thumbprint                   String?                 @db.VarChar(255)
+  serialNumber                 String?                 @map("serial_number") @db.VarChar(255)
+  emissor                      String?                 @db.Text
+  subject                      String?                 @db.Text
+  ativo                        Boolean                 @default(true)
+  substituidoPorCertificadoId  String?                 @map("substituido_por_certificado_id") @db.Uuid
+  createdAt                    DateTime                @default(now()) @map("created_at")
+  updatedAt                    DateTime                @updatedAt @map("updated_at")
+
+  cliente                      Cliente                 @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  estabelecimento              ClienteEstabelecimento? @relation(fields: [estabelecimentoId], references: [id], onDelete: SetNull)
+  syncLogs                     NfseSyncLog[]
+
+  @@map("certificados")
+}
+
+model NfseSyncControle {
+  id                         String                  @id @default(uuid()) @db.Uuid
+  clienteId                  String                  @map("cliente_id") @db.Uuid
+  estabelecimentoId          String                  @map("estabelecimento_id") @db.Uuid
+  cnpjConsulta               String                  @map("cnpj_consulta") @db.VarChar(14)
+  ambiente                   Ambiente
+  ultimoNsuConsultado        BigInt                  @default(0) @map("ultimo_nsu_consultado")
+  ultimoNsuComDocumento      BigInt                  @default(0) @map("ultimo_nsu_com_documento")
+  nsuInicial                 BigInt                  @default(1) @map("nsu_inicial")
+  modoSync                   SyncMode?               @map("modo_sync")
+  status                     SyncStatus?             @default(ativo)
+  ultimaExecucao             DateTime?               @map("ultima_execucao")
+  proximaExecucao            DateTime?               @map("proxima_execucao")
+  ultimaMensagem             String?                 @map("ultima_mensagem") @db.Text
+  totalDocumentosBaixados    Int                     @default(0) @map("total_documentos_baixados")
+  createdAt                  DateTime                @default(now()) @map("created_at")
+  updatedAt                  DateTime                @updatedAt @map("updated_at")
+
+  cliente                    Cliente                 @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  estabelecimento            ClienteEstabelecimento  @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
+  syncLogs                   NfseSyncLog[]
+
+  @@unique([cnpjConsulta, ambiente], map: "nfse_sync_controle_cnpj_consulta_ambiente_key")
+  @@map("nfse_sync_controle")
+}
+
+model NfseDocumento {
+  id                         String                  @id @default(uuid()) @db.Uuid
+  clienteId                  String                  @map("cliente_id") @db.Uuid
+  estabelecimentoId          String                  @map("estabelecimento_id") @db.Uuid
+  ambiente                   Ambiente
+  nsu                        BigInt?
+  chaveAcesso                String                  @map("chave_acesso") @db.VarChar(100)
+  numeroNfse                 String?                 @map("numero_nfse") @db.VarChar(50)
+  serie                      String?                 @db.VarChar(50)
+  dataEmissao                DateTime?               @map("data_emissao")
+  competencia                DateTime?               @db.Date
+  dataCancelamento           DateTime?               @map("data_cancelamento")
+  status                     String?                 @db.VarChar(50)
+  cnpjPrestador              String?                 @map("cnpj_prestador") @db.VarChar(14)
+  razaoSocialPrestador       String?                 @map("razao_social_prestador") @db.VarChar(255)
+  cnpjTomador                String?                 @map("cnpj_tomador") @db.VarChar(14)
+  razaoSocialTomador         String?                 @map("razao_social_tomador") @db.VarChar(255)
+  municipioPrestacaoCodigo   String?                 @map("municipio_prestacao_codigo") @db.VarChar(7)
+  municipioPrestacaoNome     String?                 @map("municipio_prestacao_nome") @db.VarChar(120)
+  valorServico               Decimal?                @map("valor_servico") @db.Decimal(15, 2)
+  valorDeducoes              Decimal?                @map("valor_deducoes") @db.Decimal(15, 2)
+  valorIss                   Decimal?                @map("valor_iss") @db.Decimal(15, 2)
+  aliquotaIss                Decimal?                @map("aliquota_iss") @db.Decimal(8, 4)
+  codigoServicoNacional      String?                 @map("codigo_servico_nacional") @db.VarChar(50)
+  itemListaServico           String?                 @map("item_lista_servico") @db.VarChar(50)
+  descricaoServico           String?                 @map("descricao_servico") @db.Text
+  xmlPath                    String?                 @map("xml_path") @db.Text
+  danfsePath                 String?                 @map("danfse_path") @db.Text
+  hashXml                    String?                 @map("hash_xml") @db.VarChar(128)
+  origem                     DocumentoOrigem?
+  createdAt                  DateTime                @default(now()) @map("created_at")
+  updatedAt                  DateTime                @updatedAt @map("updated_at")
+
+  cliente                    Cliente                 @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  estabelecimento            ClienteEstabelecimento  @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
+  eventos                    NfseEvento[]
+
+  @@unique([ambiente, chaveAcesso], map: "nfse_documentos_ambiente_chave_acesso_key")
+  @@unique([clienteId, ambiente, nsu], map: "nfse_documentos_cliente_id_ambiente_nsu_key")
+  @@map("nfse_documentos")
+}
+
+model NfseEvento {
+  id               String        @id @default(uuid()) @db.Uuid
+  nfseDocumentoId  String        @map("nfse_documento_id") @db.Uuid
+  chaveAcesso      String        @map("chave_acesso") @db.VarChar(100)
+  tipoEvento       String?       @map("tipo_evento") @db.VarChar(100)
+  dataEvento       DateTime?     @map("data_evento")
+  descricao        String?       @db.Text
+  xmlPath          String?       @map("xml_path") @db.Text
+  hashXml          String?       @map("hash_xml") @db.VarChar(128)
+  createdAt        DateTime      @default(now()) @map("created_at")
+
+  nfseDocumento    NfseDocumento @relation(fields: [nfseDocumentoId], references: [id], onDelete: Cascade)
+
+  @@unique([chaveAcesso, tipoEvento, dataEvento, hashXml], map: "nfse_eventos_chave_tipo_data_hash_key")
+  @@map("nfse_eventos")
+}
+
+model NfseSyncLog {
+  id               String           @id @default(uuid()) @db.Uuid
+  clienteId        String           @map("cliente_id") @db.Uuid
+  controleSyncId   String?          @map("controle_sync_id") @db.Uuid
+  certificadoId    String?          @map("certificado_id") @db.Uuid
+  ambiente         Ambiente?
+  nsuConsultado    BigInt?          @map("nsu_consultado")
+  status           String?          @db.VarChar(50)
+  mensagem         String?          @db.Text
+  requestId        String?          @map("request_id") @db.VarChar(255)
+  httpStatus       Int?             @map("http_status")
+  tempoRespostaMs  Int?             @map("tempo_resposta_ms")
+  createdAt        DateTime         @default(now()) @map("created_at")
+
+  cliente          Cliente          @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  controleSync     NfseSyncControle? @relation(fields: [controleSyncId], references: [id], onDelete: SetNull)
+  certificado      Certificado?      @relation(fields: [certificadoId], references: [id], onDelete: SetNull)
+
+  @@map("nfse_sync_logs")
+}
+
+model AuditoriaUsuario {
+  id               String    @id @default(uuid()) @db.Uuid
+  usuarioId        String?   @map("usuario_id") @db.Uuid
+  clienteId        String?   @map("cliente_id") @db.Uuid
+  acao             String    @db.VarChar(100)
+  entidade         String    @db.VarChar(100)
+  entidadeId       String?   @map("entidade_id") @db.Uuid
+  ip               String?   @db.VarChar(100)
+  userAgent        String?   @map("user_agent") @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  cliente          Cliente?  @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+
+  @@map("auditoria_usuario")
+}

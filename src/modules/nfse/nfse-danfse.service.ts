@@ -1,0 +1,1876 @@
+import { Injectable } from '@nestjs/common';
+import { createHash } from 'node:crypto';
+
+export interface DanfseRenderInput {
+  chaveAcesso: string;
+  ambiente?: string | null;
+  tipoAmbiente?: string | null;
+  ambienteGerador?: string | null;
+  numeroNfse?: string | null;
+  serie?: string | null;
+  numeroDps?: string | null;
+  serieDps?: string | null;
+  dataEmissao?: Date | null;
+  dataEmissaoDps?: Date | null;
+  competencia?: Date | null;
+  status?: string | null;
+  emitenteNfse?: string | null;
+  finalidade?: string | null;
+  codigoVerificacao?: string | null;
+  cnpjPrestador?: string | null;
+  razaoSocialPrestador?: string | null;
+  inscricaoMunicipalPrestador?: string | null;
+  telefonePrestador?: string | null;
+  enderecoPrestador?: string | null;
+  municipioPrestador?: string | null;
+  codigoIbgeCepPrestador?: string | null;
+  emailPrestador?: string | null;
+  simplesNacional?: string | null;
+  regimeApuracaoSn?: string | null;
+  cnpjTomador?: string | null;
+  razaoSocialTomador?: string | null;
+  inscricaoMunicipalTomador?: string | null;
+  telefoneTomador?: string | null;
+  enderecoTomador?: string | null;
+  municipioTomador?: string | null;
+  codigoIbgeCepTomador?: string | null;
+  emailTomador?: string | null;
+  cnpjDestinatario?: string | null;
+  razaoSocialDestinatario?: string | null;
+  telefoneDestinatario?: string | null;
+  enderecoDestinatario?: string | null;
+  municipioDestinatario?: string | null;
+  codigoIbgeCepDestinatario?: string | null;
+  emailDestinatario?: string | null;
+  cnpjIntermediario?: string | null;
+  razaoSocialIntermediario?: string | null;
+  inscricaoMunicipalIntermediario?: string | null;
+  telefoneIntermediario?: string | null;
+  enderecoIntermediario?: string | null;
+  municipioIntermediario?: string | null;
+  codigoIbgeCepIntermediario?: string | null;
+  emailIntermediario?: string | null;
+  municipioPrestacaoCodigo?: string | null;
+  municipioPrestacaoNome?: string | null;
+  localPrestacao?: string | null;
+  valorServico?: string | null;
+  valorDeducoes?: string | null;
+  valorDescontoIncondicionado?: string | null;
+  valorDescontoCondicionado?: string | null;
+  valorTotalRetencoes?: string | null;
+  valorLiquidoNfse?: string | null;
+  valorTotalIbscbs?: string | null;
+  valorLiquidoComIbscbs?: string | null;
+  valorIss?: string | null;
+  baseCalculoIss?: string | null;
+  retencaoIss?: string | null;
+  aliquotaIss?: string | null;
+  tipoTributacaoIssqn?: string | null;
+  municipioIncidenciaIssqn?: string | null;
+  regimeEspecialTributacaoIssqn?: string | null;
+  tipoImunidadeIssqn?: string | null;
+  suspensaoExigibilidadeIssqn?: string | null;
+  numeroProcessoSuspensaoIssqn?: string | null;
+  beneficioMunicipal?: string | null;
+  calculoBeneficioMunicipal?: string | null;
+  valorIrrf?: string | null;
+  valorContribuicaoPrevidenciaria?: string | null;
+  valorContribuicoesSociais?: string | null;
+  valorPis?: string | null;
+  valorCofins?: string | null;
+  descricaoContribuicoesSociais?: string | null;
+  cstClassTribIbsCbs?: string | null;
+  indicadorOperacaoIbsCbs?: string | null;
+  municipioIncidenciaIbsCbs?: string | null;
+  exclusoesReducoesBcIbsCbs?: string | null;
+  baseCalculoAposExclusoesIbsCbs?: string | null;
+  reducaoAliquotaIbs?: string | null;
+  reducaoAliquotaCbs?: string | null;
+  aliquotaIbsEstadualMunicipal?: string | null;
+  aliquotaEfetivaIbsMunicipal?: string | null;
+  valorApuradoIbsMunicipal?: string | null;
+  aliquotaEfetivaIbsEstadual?: string | null;
+  valorApuradoIbsEstadual?: string | null;
+  valorTotalApuradoIbs?: string | null;
+  aliquotaCbs?: string | null;
+  aliquotaEfetivaCbs?: string | null;
+  valorTotalApuradoCbs?: string | null;
+  codigoServicoNacional?: string | null;
+  codigoServicoMunicipal?: string | null;
+  codigoNbs?: string | null;
+  descricaoCodigoTributacao?: string | null;
+  itemListaServico?: string | null;
+  descricaoServico?: string | null;
+  infoComplementares?: string | null;
+  chaveNfseSubstituida?: string | null;
+  documentoReferencia?: string | null;
+  codigoObra?: string | null;
+  inscricaoImobiliaria?: string | null;
+  codigoEvento?: string | null;
+  documentoTecnico?: string | null;
+  numeroPedido?: string | null;
+  itemPedido?: string | null;
+  infoAdministracaoMunicipal?: string | null;
+  totaisAproximadosTributos?: string | null;
+}
+
+@Injectable()
+export class NfseDanfseService {
+  generateFromXml(xml: string, fallback: DanfseRenderInput): Buffer {
+    const extracted = this.extractFromXml(xml);
+    const merged = this.mergeDefined(extracted, fallback);
+
+    return this.generatePdf({ ...merged, chaveAcesso: this.normalizeChaveAcesso(fallback.chaveAcesso) });
+  }
+
+  generatePdf(input: DanfseRenderInput): Buffer {
+    const now = new Date();
+    const lines = this.buildDanfseLines(input, now);
+    const contentStreams = this.buildContentStreams(lines, this.normalizeChaveAcesso(input.chaveAcesso));
+    return this.buildPdf(contentStreams);
+  }
+
+  private buildDanfseLines(input: DanfseRenderInput, generatedAt: Date): string[] {
+    const lines: string[] = [];
+    const pushSection = (title: string) => {
+      if (lines.length > 0) {
+        lines.push('');
+      }
+      lines.push(title);
+    };
+    const pushField = (label: string, value: string) => {
+      lines.push(`${label}: ${value}`);
+    };
+    const pushWrappedField = (label: string, value: string, width = 120) => {
+      const wrapped = this.wrapText(value, width);
+      if (!wrapped.length) {
+        lines.push(`${label}: -`);
+        return;
+      }
+      lines.push(`${label}: ${wrapped[0]}`);
+      for (let i = 1; i < wrapped.length; i += 1) {
+        lines.push(`  ${wrapped[i]}`);
+      }
+    };
+
+    const chaveAcesso = this.normalizeChaveAcesso(input.chaveAcesso);
+    const tipoAmbiente = this.safeValue(input.tipoAmbiente ?? input.ambiente);
+    const isHomologacao = this.isHomologacao(tipoAmbiente);
+    const isCancelada = this.isCancelada(input.status);
+    const isSubstituida = this.isSubstituida(input.status, input.chaveNfseSubstituida);
+    const hasIbsCbs = this.hasIbsCbsData(input);
+    const qrCodeUrl = `https://www.nfse.gov.br/ConsultaPublica/?tpc=1&chave=${chaveAcesso}`;
+    const infosComplementares = this.composeInformacoesComplementares(input);
+
+    const municipioCabecalho = this.safeValue(this.formatMunicipioUfLabel(input.municipioPrestador));
+    const telefoneCabecalho = this.safeValue(this.formatPhone(input.telefonePrestador));
+    const emailCabecalho = this.safeValue(input.emailPrestador);
+
+    lines.push(`DANFSe ${hasIbsCbs ? 'v2.0' : 'v1.0'}`);
+    lines.push('Documento Auxiliar da NFS-e');
+    if (isHomologacao) {
+      lines.push('NFS-e SEM VALIDADE JURIDICA');
+    }
+    if (municipioCabecalho !== '-') {
+      lines.push(`MUNICIPIO ${municipioCabecalho}`);
+    }
+    if (telefoneCabecalho !== '-' || emailCabecalho !== '-') {
+      lines.push(`${telefoneCabecalho} ${emailCabecalho}`.trim());
+    }
+    if (isCancelada) {
+      lines.push('*** CANCELADA ***');
+    } else if (isSubstituida) {
+      lines.push('*** SUBSTITUIDA ***');
+    }
+
+    pushSection('DADOS DE IDENTIFICACAO DA NFS-E');
+    pushField('Chave de Acesso da NFS-e', chaveAcesso);
+    pushField('Numero da NFS-e', this.safeValue(input.numeroNfse));
+    pushField('Competencia da NFS-e', this.formatDateOnlyBr(input.competencia));
+    pushField('Data e Hora da emissao da NFS-e', this.formatDateBr(input.dataEmissao));
+    pushField('Numero da DPS', this.safeValue(input.numeroDps));
+    pushField('Serie da DPS', this.safeValue(input.serieDps ?? input.serie));
+    pushField('Data e Hora da emissao da DPS', this.formatDateBr(input.dataEmissaoDps));
+    pushField('Situacao da NFS-e', this.safeValue(input.status));
+    pushField('Emitente da NFS-e', this.describeEmitente(input.emitenteNfse));
+    pushField('Finalidade', this.safeValue(input.finalidade));
+    pushField('Ambiente Gerador', this.safeValue(input.ambienteGerador));
+    pushField('Tipo de Ambiente', tipoAmbiente);
+    pushField('Codigo de Verificacao', this.safeValue(input.codigoVerificacao));
+
+    lines.push('');
+    lines.push('A autenticidade desta NFS-e pode ser verificada');
+    lines.push('pela leitura deste codigo QR ou pela consulta da');
+    lines.push('chave de acesso no portal nacional da NFS-e');
+    pushField('Consulta Publica', qrCodeUrl);
+
+    pushSection('EMITENTE DA NFS-E');
+    lines.push(this.describeEmitente(input.emitenteNfse));
+    pushField('CNPJ / CPF / NIF', this.safeValue(this.formatCpfCnpj(input.cnpjPrestador)));
+    pushField('Inscricao Municipal', this.safeValue(input.inscricaoMunicipalPrestador));
+    pushField('Telefone', this.safeValue(this.formatPhone(input.telefonePrestador)));
+    pushWrappedField('Nome / Nome Empresarial', this.safeValue(input.razaoSocialPrestador), 120);
+    pushField('E-mail', this.safeValue(input.emailPrestador));
+    pushWrappedField('Endereco', this.safeValue(input.enderecoPrestador), 120);
+    pushField('Municipio', this.safeValue(this.formatMunicipioUfLabel(input.municipioPrestador)));
+    pushField('CEP', this.safeValue(this.formatCep(input.codigoIbgeCepPrestador)));
+    pushField('Simples Nacional na Data de Competencia', this.safeValue(this.describeSimplesNacional(input.simplesNacional)));
+    pushWrappedField('Regime de Apuracao Tributaria pelo SN', this.safeValue(input.regimeApuracaoSn), 120);
+
+    pushSection('TOMADOR DO SERVICO');
+    if (this.hasIdentificacao(input.cnpjTomador, input.razaoSocialTomador, input.enderecoTomador)) {
+      pushField('CNPJ / CPF / NIF', this.safeValue(this.formatCpfCnpj(input.cnpjTomador)));
+      pushField('Inscricao Municipal', this.safeValue(input.inscricaoMunicipalTomador));
+      pushField('Telefone', this.safeValue(this.formatPhone(input.telefoneTomador)));
+      pushWrappedField('Nome / Nome Empresarial', this.safeValue(input.razaoSocialTomador), 120);
+      pushField('E-mail', this.safeValue(input.emailTomador));
+      pushWrappedField('Endereco', this.safeValue(input.enderecoTomador), 120);
+      pushField('Municipio', this.safeValue(this.formatMunicipioUfLabel(input.municipioTomador)));
+      pushField('CEP', this.safeValue(this.formatCep(input.codigoIbgeCepTomador)));
+    } else {
+      lines.push('TOMADOR DO SERVICO NAO IDENTIFICADO NA NFS-E');
+    }
+
+    pushSection('INTERMEDIARIO DO SERVICO');
+    if (this.hasIdentificacao(input.cnpjIntermediario, input.razaoSocialIntermediario, input.enderecoIntermediario)) {
+      pushField('CNPJ / CPF / NIF', this.safeValue(this.formatCpfCnpj(input.cnpjIntermediario)));
+      pushField('Inscricao Municipal', this.safeValue(input.inscricaoMunicipalIntermediario));
+      pushField('Telefone', this.safeValue(this.formatPhone(input.telefoneIntermediario)));
+      pushWrappedField('Nome / Nome Empresarial', this.safeValue(input.razaoSocialIntermediario), 120);
+      pushField('E-mail', this.safeValue(input.emailIntermediario));
+      pushWrappedField('Endereco', this.safeValue(input.enderecoIntermediario), 120);
+      pushField('Municipio', this.safeValue(this.formatMunicipioUfLabel(input.municipioIntermediario)));
+      pushField('CEP', this.safeValue(this.formatCep(input.codigoIbgeCepIntermediario)));
+    } else {
+      lines.push('INTERMEDIARIO DO SERVICO NAO IDENTIFICADO NA NFS-E');
+    }
+
+    if (this.hasIdentificacao(input.cnpjDestinatario, input.razaoSocialDestinatario, input.enderecoDestinatario)) {
+      pushSection('DESTINATARIO DO SERVICO');
+      pushField('CNPJ / CPF / NIF', this.safeValue(this.formatCpfCnpj(input.cnpjDestinatario)));
+      pushField('Telefone', this.safeValue(this.formatPhone(input.telefoneDestinatario)));
+      pushWrappedField('Nome / Nome Empresarial', this.safeValue(input.razaoSocialDestinatario), 120);
+      pushField('E-mail', this.safeValue(input.emailDestinatario));
+      pushWrappedField('Endereco', this.safeValue(input.enderecoDestinatario), 120);
+      pushField('Municipio', this.safeValue(this.formatMunicipioUfLabel(input.municipioDestinatario)));
+      pushField('CEP', this.safeValue(this.formatCep(input.codigoIbgeCepDestinatario)));
+    }
+
+    pushSection('SERVICO PRESTADO');
+    pushField('Codigo de Tributacao Nacional', this.safeValue(input.codigoServicoNacional));
+    pushField('Codigo de Tributacao Municipal', this.safeValue(input.codigoServicoMunicipal ?? input.itemListaServico));
+    pushField('Codigo da NBS', this.safeValue(input.codigoNbs));
+    pushField('Local da Prestacao', this.safeValue(this.formatMunicipioUfLabel(input.localPrestacao)));
+    pushField('Pais da Prestacao', this.safeValue(this.extractPais(input.localPrestacao)));
+    pushWrappedField('Descricao do Codigo de Tributacao', this.safeValue(input.descricaoCodigoTributacao), 140);
+    pushWrappedField('Descricao do Servico', this.safeValue(input.descricaoServico), 140);
+
+    pushSection('TRIBUTACAO MUNICIPAL');
+    if (this.isOperacaoNaoSujeitaIss(input.tipoTributacaoIssqn)) {
+      lines.push('TRIBUTACAO MUNICIPAL (ISSQN) - OPERACAO NAO SUJEITA AO ISSQN');
+    } else {
+      pushField('Tributacao do ISSQN', this.safeValue(this.describeTributacaoIssqn(input.tipoTributacaoIssqn)));
+      pushField('Pais Resultado da Prestacao do Servico', this.safeValue(this.extractPais(input.municipioIncidenciaIssqn)));
+      pushField('Municipio de Incidencia do ISSQN', this.safeValue(this.formatMunicipioUfLabel(input.municipioIncidenciaIssqn)));
+      pushField('Regime Especial de Tributacao', this.safeValue(input.regimeEspecialTributacaoIssqn));
+      pushField('Tipo de Imunidade', this.safeValue(input.tipoImunidadeIssqn));
+      pushField('Suspensao da Exigibilidade do ISSQN', this.safeValue(this.describeSuspensao(input.suspensaoExigibilidadeIssqn)));
+      pushField('Numero Processo Suspensao', this.safeValue(input.numeroProcessoSuspensaoIssqn));
+      pushField('Beneficio Municipal', this.safeValue(input.beneficioMunicipal));
+      pushField('Valor do Servico', this.safeValue(this.formatMoney(input.valorServico)));
+      pushField('Desconto Incondicionado', this.safeValue(this.formatMoney(input.valorDescontoIncondicionado)));
+      pushField('Total Deducoes/Reducoes', this.safeValue(this.formatMoney(input.valorDeducoes)));
+      pushField('Calculo do BM', this.safeValue(input.calculoBeneficioMunicipal));
+      pushField('BC ISSQN', this.safeValue(this.formatMoney(input.baseCalculoIss)));
+      pushField('Aliquota Aplicada', this.safeValue(this.formatAliquota(input.aliquotaIss)));
+      pushField('Retencao do ISSQN', this.safeValue(this.describeRetencaoIss(input.retencaoIss)));
+      pushField('ISSQN Apurado', this.safeValue(this.formatMoney(input.valorIss)));
+    }
+
+    pushSection('TRIBUTACAO FEDERAL');
+    pushField('IRRF', this.safeValue(this.formatMoney(input.valorIrrf)));
+    pushField(
+      'Contribuicao Previdenciaria - Retida',
+      this.safeValue(this.formatMoney(input.valorContribuicaoPrevidenciaria))
+    );
+    pushField('Contribuicoes Sociais - Retidas', this.safeValue(this.formatMoney(input.valorContribuicoesSociais)));
+    pushWrappedField(
+      'Descricao Contrib. Sociais - Retidas',
+      this.safeValue(input.descricaoContribuicoesSociais),
+      120
+    );
+    pushField('PIS - Debito Apuracao Propria', this.safeValue(this.formatMoney(input.valorPis)));
+    pushField('COFINS - Debito Apuracao Propria', this.safeValue(this.formatMoney(input.valorCofins)));
+
+    if (hasIbsCbs) {
+      pushSection('TRIBUTACAO IBS/CBS');
+      pushField('CST / cClassTrib', this.safeValue(input.cstClassTribIbsCbs));
+      pushField('Indicador de Operacao', this.safeValue(input.indicadorOperacaoIbsCbs));
+      pushField('Municipio de Incidencia IBS/CBS', this.safeValue(input.municipioIncidenciaIbsCbs));
+      pushField('Exclusoes e Reducoes da Base de Calculo', this.safeValue(input.exclusoesReducoesBcIbsCbs));
+      pushField('Base de Calculo Apos Exclusoes e Reducoes', this.safeValue(input.baseCalculoAposExclusoesIbsCbs));
+      pushField('Reducao da Aliquota do IBS', this.safeValue(input.reducaoAliquotaIbs));
+      pushField('Reducao da Aliquota da CBS', this.safeValue(input.reducaoAliquotaCbs));
+      pushField('Aliquota do IBS Estadual / Municipal', this.safeValue(input.aliquotaIbsEstadualMunicipal));
+      pushField('Aliquota Efetiva do IBS Municipal', this.safeValue(input.aliquotaEfetivaIbsMunicipal));
+      pushField('Valor Apurado do IBS Municipal', this.safeValue(this.formatMoney(input.valorApuradoIbsMunicipal)));
+      pushField('Aliquota Efetiva do IBS Estadual', this.safeValue(input.aliquotaEfetivaIbsEstadual));
+      pushField('Valor Apurado do IBS Estadual', this.safeValue(this.formatMoney(input.valorApuradoIbsEstadual)));
+      pushField('Valor Total Apurado do IBS', this.safeValue(this.formatMoney(input.valorTotalApuradoIbs)));
+      pushField('Aliquota da CBS', this.safeValue(input.aliquotaCbs));
+      pushField('Aliquota Efetiva da CBS', this.safeValue(input.aliquotaEfetivaCbs));
+      pushField('Valor Total Apurado da CBS', this.safeValue(this.formatMoney(input.valorTotalApuradoCbs)));
+    }
+
+    pushSection('VALOR TOTAL DA NFS-E');
+    pushField('Valor do Servico', this.safeValue(this.formatMoney(input.valorServico)));
+    pushField('Desconto Condicionado', this.safeValue(this.formatMoney(input.valorDescontoCondicionado)));
+    pushField('Desconto Incondicionado', this.safeValue(this.formatMoney(input.valorDescontoIncondicionado)));
+    pushField('ISSQN Retido', this.safeValue(this.describeRetencaoIss(input.retencaoIss)));
+    pushField('Total das Retencoes Federais', this.safeValue(this.formatMoney(this.totalRetencoesFederais(input))));
+    pushField('PIS/COFINS - Debito Apur. Propria', this.safeValue(this.formatMoney(this.sumValues(input.valorPis, input.valorCofins))));
+    pushField('Total das Retencoes (ISSQN / Federais)', this.safeValue(this.formatMoney(input.valorTotalRetencoes)));
+    pushField('Valor Liquido da NFS-e', this.safeValue(this.formatMoney(input.valorLiquidoNfse)));
+    if (hasIbsCbs) {
+      pushField('Total do IBS/CBS', this.safeValue(this.formatMoney(input.valorTotalIbscbs)));
+      pushField('Valor Liquido da NFS-e + IBS/CBS', this.safeValue(this.formatMoney(input.valorLiquidoComIbscbs)));
+    }
+
+    pushSection('TOTAIS APROXIMADOS DOS TRIBUTOS');
+    pushWrappedField('Lei n 12.741/2012', this.safeValue(input.totaisAproximadosTributos), 140);
+
+    pushSection('INFORMACOES COMPLEMENTARES');
+    pushWrappedField('Informacoes Complementares', infosComplementares, 140);
+
+    lines.push('');
+    lines.push(`Gerado em: ${this.formatDateBr(generatedAt)}`);
+
+    return lines;
+  }
+
+  private extractFromXml(xml: string): Omit<DanfseRenderInput, 'chaveAcesso'> {
+    const dataEmissao = this.parseDate(this.extract(xml, ['dataEmissao', 'DataEmissao', 'dhProc']));
+    const dataEmissaoDps = this.parseDate(this.extractFromPaths(xml, [['infDPS', 'dhEmi'], ['DPS', 'infDPS', 'dhEmi']]));
+    const competencia = this.parseDateOnly(this.extract(xml, ['competencia', 'dCompet']));
+
+    const cnpjPrestador =
+      this.extractFromPaths(xml, [
+        ['infDPS', 'prest', 'CNPJ'],
+        ['emit', 'CNPJ'],
+        ['prestador', 'CNPJ']
+      ]) ?? this.extract(xml, ['CnpjPrestador']);
+
+    const cnpjTomador =
+      this.extractFromPaths(xml, [
+        ['infDPS', 'toma', 'CNPJ'],
+        ['infDPS', 'toma', 'CPF'],
+        ['tomador', 'CNPJ']
+      ]) ?? this.extract(xml, ['CnpjTomador']);
+
+    const cnpjDestinatario = this.extractFromPaths(xml, [
+      ['infDPS', 'IBSCBS', 'dest', 'CNPJ'],
+      ['infDPS', 'IBSCBS', 'dest', 'CPF']
+    ]);
+
+    const cnpjIntermediario = this.extractFromPaths(xml, [
+      ['infDPS', 'interm', 'CNPJ'],
+      ['infDPS', 'interm', 'CPF']
+    ]);
+
+    const municipioPrestacaoCodigo =
+      this.extractFromPaths(xml, [
+        ['infDPS', 'serv', 'locPrest', 'cLocPrestacao'],
+        ['serv', 'locPrest', 'cLocPrestacao']
+      ]) ?? this.extract(xml, ['municipioPrestacaoCodigo', 'codigoMunicipioPrestacao', 'cLocPrestacao']);
+
+    const municipioPrestacaoNome = this.extract(xml, ['municipioPrestacaoNome', 'xLocPrestacao']);
+    const codigoServicoNacional = this.extractFromPaths(xml, [
+      ['infDPS', 'serv', 'cServ', 'cTribNac'],
+      ['serv', 'cServ', 'cTribNac']
+    ]);
+    const codigoServicoMunicipal = this.extractFromPaths(xml, [
+      ['infDPS', 'serv', 'cServ', 'cTribMun'],
+      ['serv', 'cServ', 'cTribMun']
+    ]);
+    const descricaoCodigoTributacao =
+      this.extractFromPaths(xml, [
+        ['infDPS', 'serv', 'cServ', 'xTribMun'],
+        ['infDPS', 'serv', 'cServ', 'xTribNac'],
+        ['serv', 'cServ', 'xTribMun'],
+        ['serv', 'cServ', 'xTribNac']
+      ]) ?? this.extract(xml, ['xTribMun', 'xTribNac']);
+    const descricaoServico =
+      this.extractFromPaths(xml, [
+        ['infDPS', 'serv', 'cServ', 'xDescServ'],
+        ['serv', 'cServ', 'xDescServ']
+      ]) ?? this.extract(xml, ['descricaoServico', 'Discriminacao', 'xDescServ']);
+
+    const valorServico =
+      this.extractFromPaths(xml, [
+        ['infDPS', 'valores', 'vServPrest', 'vServ'],
+        ['valores', 'vServPrest', 'vServ']
+      ]) ??
+      this.extract(xml, ['valorServico', 'ValorServicos', 'vServ']);
+
+    const valorDeducoes = this.extract(xml, ['valorDeducoes', 'vDeducao']);
+    const valorDescontoIncondicionado = this.extractFromPaths(xml, [
+      ['infDPS', 'valores', 'vDescCondIncond', 'vDescIncond'],
+      ['valores', 'vDescCondIncond', 'vDescIncond']
+    ]);
+    const valorDescontoCondicionado = this.extractFromPaths(xml, [
+      ['infDPS', 'valores', 'vDescCondIncond', 'vDescCond'],
+      ['valores', 'vDescCondIncond', 'vDescCond']
+    ]);
+
+    const valorIrrf = this.extractFromPaths(xml, [
+      ['infDPS', 'valores', 'trib', 'tribFed', 'vRetIRRF'],
+      ['valores', 'trib', 'tribFed', 'vRetIRRF']
+    ]);
+    const valorContribuicaoPrevidenciaria = this.extractFromPaths(xml, [
+      ['infDPS', 'valores', 'trib', 'tribFed', 'vRetCP'],
+      ['valores', 'trib', 'tribFed', 'vRetCP']
+    ]);
+    const valorContribuicoesSociais = this.extractFromPaths(xml, [
+      ['infDPS', 'valores', 'trib', 'tribFed', 'vRetCSLL'],
+      ['valores', 'trib', 'tribFed', 'vRetCSLL']
+    ]);
+    const valorPis = this.extractFromPaths(xml, [
+      ['infDPS', 'valores', 'trib', 'tribFed', 'piscofins', 'vPis'],
+      ['valores', 'trib', 'tribFed', 'piscofins', 'vPis']
+    ]);
+    const valorCofins = this.extractFromPaths(xml, [
+      ['infDPS', 'valores', 'trib', 'tribFed', 'piscofins', 'vCofins'],
+      ['valores', 'trib', 'tribFed', 'piscofins', 'vCofins']
+    ]);
+
+    const vIbsTot = this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'gIBS', 'vIBSTot']]);
+    const vCbs = this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'gCBS', 'vCBS']]);
+    const valorTotalIbscbs = this.sumValues(vIbsTot, vCbs);
+
+    return {
+      ambienteGerador: this.extractFromPaths(xml, [['infNFSe', 'ambGer']]),
+      tipoAmbiente: this.extractFromPaths(xml, [['infDPS', 'tpAmb'], ['DPS', 'infDPS', 'tpAmb']]),
+      numeroNfse: this.extract(xml, ['numeroNFSe', 'numeroNfse', 'Numero', 'nNFSe']),
+      numeroDps: this.extractFromPaths(xml, [['infDPS', 'nDPS'], ['DPS', 'infDPS', 'nDPS']]),
+      serie: this.extract(xml, ['serie']),
+      serieDps: this.extractFromPaths(xml, [['infDPS', 'serie'], ['DPS', 'infDPS', 'serie']]),
+      dataEmissao,
+      dataEmissaoDps,
+      competencia,
+      status: this.extract(xml, ['status', 'Situacao', 'cStat']),
+      emitenteNfse: this.extractFromPaths(xml, [['infDPS', 'tpEmit'], ['DPS', 'infDPS', 'tpEmit']]),
+      finalidade: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'finNFSe']]),
+      codigoVerificacao: this.extract(xml, ['codigoVerificacao', 'cVerif', 'codigoVerificacaoNfse']),
+      cnpjPrestador,
+      razaoSocialPrestador: this.extractFromPaths(xml, [
+        ['infDPS', 'prest', 'xNome'],
+        ['emit', 'xNome'],
+        ['prestador', 'xNome']
+      ]),
+      inscricaoMunicipalPrestador: this.extractFromPaths(xml, [['infDPS', 'prest', 'IM']]),
+      telefonePrestador: this.extractFromPaths(xml, [['infDPS', 'prest', 'fone'], ['emit', 'fone']]),
+      enderecoPrestador: this.composeAddress(xml, [
+        ['infDPS', 'prest', 'end'],
+        ['emit', 'enderNac']
+      ]),
+      municipioPrestador: this.composeMunicipioUf(
+        this.extractFromPaths(xml, [
+          ['infDPS', 'prest', 'end', 'endNac', 'cMun'],
+          ['emit', 'enderNac', 'cMun']
+        ]),
+        this.extractFromPaths(xml, [
+          ['infDPS', 'prest', 'end', 'endNac', 'UF'],
+          ['emit', 'enderNac', 'UF']
+        ]),
+        this.extractFromPaths(xml, [['infNFSe', 'xLocEmi']])
+      ),
+      codigoIbgeCepPrestador: this.composeIbgeCep(
+        this.extractFromPaths(xml, [
+          ['infDPS', 'prest', 'end', 'endNac', 'cMun'],
+          ['emit', 'enderNac', 'cMun']
+        ]),
+        this.extractFromPaths(xml, [
+          ['infDPS', 'prest', 'end', 'endNac', 'CEP'],
+          ['emit', 'enderNac', 'CEP']
+        ])
+      ),
+      emailPrestador: this.extractFromPaths(xml, [['infDPS', 'prest', 'email'], ['emit', 'email']]),
+      simplesNacional: this.extractFromPaths(xml, [['infDPS', 'prest', 'regTrib', 'opSimpNac']]),
+      regimeApuracaoSn: this.extractFromPaths(xml, [['infDPS', 'prest', 'regTrib', 'regApTribSN']]),
+      cnpjTomador,
+      razaoSocialTomador: this.extractFromPaths(xml, [['infDPS', 'toma', 'xNome'], ['tomador', 'xNome']]),
+      inscricaoMunicipalTomador: this.extractFromPaths(xml, [['infDPS', 'toma', 'IM']]),
+      telefoneTomador: this.extractFromPaths(xml, [['infDPS', 'toma', 'fone']]),
+      enderecoTomador: this.composeAddress(xml, [['infDPS', 'toma', 'end']]),
+      municipioTomador: this.composeMunicipioUf(
+        this.extractFromPaths(xml, [['infDPS', 'toma', 'end', 'endNac', 'cMun']]),
+        this.extractFromPaths(xml, [['infDPS', 'toma', 'end', 'endNac', 'UF']])
+      ),
+      codigoIbgeCepTomador: this.composeIbgeCep(
+        this.extractFromPaths(xml, [['infDPS', 'toma', 'end', 'endNac', 'cMun']]),
+        this.extractFromPaths(xml, [['infDPS', 'toma', 'end', 'endNac', 'CEP']])
+      ),
+      emailTomador: this.extractFromPaths(xml, [['infDPS', 'toma', 'email']]),
+      cnpjDestinatario,
+      razaoSocialDestinatario: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'dest', 'xNome']]),
+      telefoneDestinatario: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'dest', 'fone']]),
+      enderecoDestinatario: this.composeAddress(xml, [['infDPS', 'IBSCBS', 'dest', 'end']]),
+      municipioDestinatario: this.composeMunicipioUf(
+        this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'dest', 'end', 'endNac', 'cMun']]),
+        this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'dest', 'end', 'endNac', 'UF']])
+      ),
+      codigoIbgeCepDestinatario: this.composeIbgeCep(
+        this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'dest', 'end', 'endNac', 'cMun']]),
+        this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'dest', 'end', 'endNac', 'CEP']])
+      ),
+      emailDestinatario: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'dest', 'email']]),
+      cnpjIntermediario,
+      razaoSocialIntermediario: this.extractFromPaths(xml, [['infDPS', 'interm', 'xNome']]),
+      inscricaoMunicipalIntermediario: this.extractFromPaths(xml, [['infDPS', 'interm', 'IM']]),
+      telefoneIntermediario: this.extractFromPaths(xml, [['infDPS', 'interm', 'fone']]),
+      enderecoIntermediario: this.composeAddress(xml, [['infDPS', 'interm', 'end']]),
+      municipioIntermediario: this.composeMunicipioUf(
+        this.extractFromPaths(xml, [['infDPS', 'interm', 'end', 'endNac', 'cMun']]),
+        this.extractFromPaths(xml, [['infDPS', 'interm', 'end', 'endNac', 'UF']])
+      ),
+      codigoIbgeCepIntermediario: this.composeIbgeCep(
+        this.extractFromPaths(xml, [['infDPS', 'interm', 'end', 'endNac', 'cMun']]),
+        this.extractFromPaths(xml, [['infDPS', 'interm', 'end', 'endNac', 'CEP']])
+      ),
+      emailIntermediario: this.extractFromPaths(xml, [['infDPS', 'interm', 'email']]),
+      municipioPrestacaoCodigo,
+      municipioPrestacaoNome,
+      localPrestacao: this.composeLocalPrestacao(
+        this.extractFromPaths(xml, [['infDPS', 'serv', 'locPrest', 'xLocPrestacao'], ['infNFSe', 'xLocPrestacao']]),
+        this.extractFromPaths(xml, [['infDPS', 'serv', 'locPrest', 'UF']]),
+        this.extractFromPaths(xml, [['infDPS', 'serv', 'locPrest', 'cPaisPrestacao']])
+      ),
+      valorServico,
+      valorDeducoes,
+      valorDescontoIncondicionado,
+      valorDescontoCondicionado,
+      valorTotalRetencoes: this.extractFromPaths(xml, [['infNFSe', 'valores', 'vTotalRet'], ['valores', 'vTotalRet']]),
+      valorLiquidoNfse: this.extractFromPaths(xml, [['infNFSe', 'valores', 'vLiq'], ['valores', 'vLiq']]),
+      valorTotalIbscbs,
+      valorLiquidoComIbscbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'vTotNF']]),
+      valorIss: this.extract(xml, ['valorIss', 'valorISS', 'vISSQN', 'vISS']),
+      baseCalculoIss: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'vBCISSQN']]),
+      retencaoIss: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'tpRetISSQN']]),
+      aliquotaIss: this.extract(xml, ['aliquotaIss', 'aliquotaISS', 'pAliq', 'pAliquota']),
+      tipoTributacaoIssqn: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'tribISSQN']]),
+      municipioIncidenciaIssqn: this.composeLocalPrestacao(
+        this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'xLocIncid'], ['infNFSe', 'xLocIncid']]),
+        this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'UFIncid']]),
+        this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'cPaisResult']])
+      ),
+      regimeEspecialTributacaoIssqn: this.extractFromPaths(xml, [['infDPS', 'prest', 'regTrib', 'regEspTrib']]),
+      tipoImunidadeIssqn: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'tpImunidade']]),
+      suspensaoExigibilidadeIssqn: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'exigSusp', 'tpSusp']]),
+      numeroProcessoSuspensaoIssqn: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'exigSusp', 'nProc']]),
+      beneficioMunicipal: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'benefMun']]),
+      calculoBeneficioMunicipal: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'calcBM']]),
+      valorIrrf,
+      valorContribuicaoPrevidenciaria,
+      valorContribuicoesSociais,
+      valorPis,
+      valorCofins,
+      descricaoContribuicoesSociais: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribFed', 'piscofins', 'tpRetPisCofins']]),
+      cstClassTribIbsCbs: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'cClassTrib'], ['infDPS', 'IBSCBS', 'CST']]),
+      indicadorOperacaoIbsCbs: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'cIndOp']]),
+      municipioIncidenciaIbsCbs: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'xLocIncid']]),
+      exclusoesReducoesBcIbsCbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'vDescIncond']]),
+      baseCalculoAposExclusoesIbsCbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'vBC']]),
+      reducaoAliquotaIbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'pRedAliqIBS']]),
+      reducaoAliquotaCbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'pRedAliqCBS']]),
+      aliquotaIbsEstadualMunicipal: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'pAliqIBSMunUF']]),
+      aliquotaEfetivaIbsMunicipal: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'mun', 'pAliqEfetMun']]),
+      valorApuradoIbsMunicipal: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'gIBS', 'gIBSMunTot', 'vIBSMun']]),
+      aliquotaEfetivaIbsEstadual: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'uf', 'pAliqEfetUF']]),
+      valorApuradoIbsEstadual: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'gIBS', 'gIBSUFTot', 'vIBSUF']]),
+      valorTotalApuradoIbs: vIbsTot,
+      aliquotaCbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'fed', 'pCBS']]),
+      aliquotaEfetivaCbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'fed', 'pAliqEfetCBS']]),
+      valorTotalApuradoCbs: vCbs,
+      codigoServicoNacional,
+      codigoServicoMunicipal,
+      codigoNbs: this.extractFromPaths(xml, [['infDPS', 'serv', 'cServ', 'cNBS']]),
+      descricaoCodigoTributacao,
+      itemListaServico: this.extract(xml, ['itemListaServico', 'ItemListaServico', 'cItemListaServ']),
+      descricaoServico,
+      infoComplementares: this.extractFromPaths(xml, [['infDPS', 'serv', 'infoCompl', 'xInfComp'], ['infDPS', 'serv', 'infoComp', 'xInfComp']]),
+      chaveNfseSubstituida: this.extractFromPaths(xml, [['infDPS', 'subst', 'chSubstda'], ['infDPS', 'subst', 'chSubstda']]),
+      documentoReferencia: this.extractFromPaths(xml, [['infDPS', 'subst', 'docRef']]),
+      codigoObra: this.extractFromPaths(xml, [['infDPS', 'serv', 'obra', 'cObra']]),
+      inscricaoImobiliaria: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'imovel', 'inscImobFisc']]),
+      codigoEvento: this.extractFromPaths(xml, [['infDPS', 'serv', 'atvEvento', 'idAtvEvt']]),
+      documentoTecnico: this.extractFromPaths(xml, [['infDPS', 'serv', 'infoCompl', 'idDocTec']]),
+      numeroPedido: this.extractFromPaths(xml, [['infDPS', 'serv', 'infoCompl', 'gItemPed', 'xPed']]),
+      itemPedido: this.extractFromPaths(xml, [['infDPS', 'serv', 'infoCompl', 'gItemPed', 'xItemPed']]),
+      infoAdministracaoMunicipal: this.extractFromPaths(xml, [['infDPS', 'serv', 'infoCompl', 'xOutInf']]),
+      totaisAproximadosTributos: this.composeTotaisAproximadosTributos(
+        this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'totTrib', 'vTotTribFed']]),
+        this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'totTrib', 'vTotTribEst']]),
+        this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'totTrib', 'vTotTribMu']]),
+        this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'totTrib', 'pTotTribFed']]),
+        this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'totTrib', 'pTotTribEst']]),
+        this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'totTrib', 'pTotTribMu']])
+      )
+    };
+  }
+
+  private buildContentStreams(lines: string[], chaveAcesso: string): string[] {
+    const page = { width: 595, height: 842 };
+    const margin = 15;
+    const contentX = margin + 5;
+    const contentWidth = page.width - margin * 2 - 10;
+    const layout = this.splitVisualBlocks(lines);
+    const streams: string[] = [];
+
+    const openPage = (pageNumber: number): { commands: string[]; yTop: number } => {
+      const commands: string[] = [];
+      let yTop = this.drawPageBase(commands, page, margin, pageNumber);
+      yTop = this.drawVisualHeader(commands, layout.header, chaveAcesso, contentX, contentWidth, yTop, pageNumber);
+      return { commands, yTop };
+    };
+
+    let pageNumber = 1;
+    let current = openPage(pageNumber);
+
+    for (const section of layout.sections) {
+      const columns = this.getSectionColumns(section.title);
+      const fields = this.parseSectionFields(section.title, section.rows, columns);
+      const layoutRows = this.layoutSectionRows(fields, columns, contentWidth);
+      const titleBarHeight = 8.4;
+      const sectionPadding = 3.4;
+      const lineHeight = 7.3;
+      const labelGap = 0.9;
+      const cellTopPadding = 2.1;
+      const cellBottomPadding = 2;
+      const sectionHeight =
+        titleBarHeight +
+        sectionPadding +
+        layoutRows.reduce((acc, row) => {
+          const rowHeight = row.reduce((maxHeight, cell) => {
+            const labelHeight = cell.label ? lineHeight : 0;
+            const valueHeight = cell.valueLines.length * lineHeight;
+            const total = cellTopPadding + labelHeight + (cell.label ? labelGap : 0) + valueHeight + cellBottomPadding;
+            return Math.max(maxHeight, total);
+          }, 0);
+          return acc + rowHeight;
+        }, 0) +
+        sectionPadding;
+
+      if (current.yTop - sectionHeight < margin + 12) {
+        this.drawText(
+          current.commands,
+          contentX + contentWidth - 110,
+          margin + 6,
+          '/F1',
+          6.2,
+          `Pagina ${pageNumber}`
+        );
+        streams.push(current.commands.join('\n'));
+        pageNumber += 1;
+        current = openPage(pageNumber);
+      }
+
+      this.drawLine(current.commands, contentX, current.yTop, contentX + contentWidth, current.yTop);
+      this.drawText(current.commands, contentX + 3, current.yTop - 6.4, '/F2', 8.9, section.title);
+
+      let rowTop = current.yTop - titleBarHeight - sectionPadding;
+      const columnWidth = contentWidth / columns;
+      for (let rowIndex = 0; rowIndex < layoutRows.length; rowIndex += 1) {
+        const row = layoutRows[rowIndex];
+        const rowHeight = row.reduce((maxHeight, cell) => {
+          const labelHeight = cell.label ? lineHeight : 0;
+          const valueHeight = cell.valueLines.length * lineHeight;
+          const total = cellTopPadding + labelHeight + (cell.label ? labelGap : 0) + valueHeight + cellBottomPadding;
+          return Math.max(maxHeight, total);
+        }, 0);
+
+        let colCursor = 0;
+        for (const cell of row) {
+          const spanWidth = columnWidth * cell.span;
+          const cellX = contentX + colCursor * columnWidth;
+          const textX = cellX + 2.6;
+
+          let textY = rowTop - cellTopPadding - 4.8;
+          if (cell.label) {
+            this.drawText(current.commands, textX, textY, '/F2', 6, cell.label);
+            textY -= lineHeight + labelGap;
+          }
+          for (const line of cell.valueLines) {
+            this.drawText(current.commands, textX, textY, '/F1', 8.1, line);
+            textY -= lineHeight;
+          }
+
+          colCursor += cell.span;
+          if (spanWidth <= 0) {
+            break;
+          }
+        }
+
+        rowTop -= rowHeight;
+      }
+
+      this.drawLine(current.commands, contentX, rowTop - sectionPadding + 1.4, contentX + contentWidth, rowTop - sectionPadding + 1.4);
+
+      current.yTop -= sectionHeight + 4;
+    }
+
+    this.drawText(current.commands, contentX + contentWidth - 110, margin + 6, '/F1', 6.2, `Pagina ${pageNumber}`);
+    streams.push(current.commands.join('\n'));
+
+    return streams;
+  }
+
+  private buildPdf(contentStreams: string[]): Buffer {
+    const objectBodies: string[] = [];
+    objectBodies.push('<< /Type /Catalog /Pages 2 0 R >>');
+
+    const firstPageObjNum = 3;
+    const kids: string[] = [];
+    for (let i = 0; i < contentStreams.length; i += 1) {
+      const pageObjNum = firstPageObjNum + i * 2;
+      kids.push(`${pageObjNum} 0 R`);
+    }
+    objectBodies.push(`<< /Type /Pages /Kids [${kids.join(' ')}] /Count ${contentStreams.length} >>`);
+
+    for (let i = 0; i < contentStreams.length; i += 1) {
+      const stream = `${contentStreams[i]}\n`;
+      const streamBytes = Buffer.from(stream, 'latin1');
+      const pageObj = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents ${firstPageObjNum + i * 2 + 1} 0 R /Resources << /Font << /F1 ${firstPageObjNum + contentStreams.length * 2} 0 R /F2 ${firstPageObjNum + contentStreams.length * 2 + 1} 0 R >> >> >>`;
+      const contentObj = `<< /Length ${streamBytes.length} >>\nstream\n${stream}endstream`;
+      objectBodies.push(pageObj);
+      objectBodies.push(contentObj);
+    }
+
+    objectBodies.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+    objectBodies.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>');
+
+    const header = Buffer.from('%PDF-1.4\n', 'latin1');
+    const objectBuffers = objectBodies.map((body, index) =>
+      Buffer.from(`${index + 1} 0 obj\n${body}\nendobj\n`, 'latin1')
+    );
+
+    const offsets: number[] = [];
+    let cursor = header.length;
+    for (const objectBuffer of objectBuffers) {
+      offsets.push(cursor);
+      cursor += objectBuffer.length;
+    }
+
+    const xrefOffset = cursor;
+    const xrefLines = ['xref', `0 ${objectBodies.length + 1}`, '0000000000 65535 f '];
+    for (const offset of offsets) {
+      xrefLines.push(`${offset.toString().padStart(10, '0')} 00000 n `);
+    }
+
+    const trailer = [
+      'trailer',
+      `<< /Size ${objectBodies.length + 1} /Root 1 0 R >>`,
+      'startxref',
+      String(xrefOffset),
+      '%%EOF'
+    ].join('\n');
+
+    return Buffer.concat([
+      header,
+      ...objectBuffers,
+      Buffer.from(`${xrefLines.join('\n')}\n`, 'latin1'),
+      Buffer.from(trailer, 'latin1')
+    ]);
+  }
+
+  private splitVisualBlocks(lines: string[]): { header: string[]; sections: Array<{ title: string; rows: string[] }> } {
+    const header: string[] = [];
+    const sections: Array<{ title: string; rows: string[] }> = [];
+    let current: { title: string; rows: string[] } | undefined;
+
+    for (const raw of lines) {
+      const line = raw.trim();
+      if (!line) {
+        continue;
+      }
+
+      if (this.isSectionTitle(line)) {
+        current = { title: line, rows: [] };
+        sections.push(current);
+        continue;
+      }
+
+      if (!current) {
+        header.push(line);
+      } else {
+        current.rows.push(raw);
+      }
+    }
+
+    return { header, sections };
+  }
+
+  private isSectionTitle(line: string): boolean {
+    const titles = new Set([
+      'DADOS DE IDENTIFICACAO DA NFS-E',
+      'EMITENTE DA NFS-E',
+      'TOMADOR DO SERVICO',
+      'INTERMEDIARIO DO SERVICO',
+      'DESTINATARIO DO SERVICO',
+      'SERVICO PRESTADO',
+      'TRIBUTACAO MUNICIPAL',
+      'TRIBUTACAO FEDERAL',
+      'TRIBUTACAO IBS/CBS',
+      'VALOR TOTAL DA NFS-E',
+      'TOTAIS APROXIMADOS DOS TRIBUTOS',
+      'INFORMACOES COMPLEMENTARES'
+    ]);
+
+    return titles.has(line);
+  }
+
+  private expandSectionRows(rows: string[]): Array<{ label?: string; value: string }> {
+    const expanded: Array<{ label?: string; value: string }> = [];
+
+    for (const original of rows) {
+      const raw = original.trimEnd();
+      const trimmed = raw.trimStart();
+      if (!trimmed) {
+        continue;
+      }
+
+      const idx = trimmed.indexOf(':');
+      if (idx > 0 && !trimmed.startsWith('http')) {
+        const label = trimmed.slice(0, idx + 1);
+        const value = trimmed.slice(idx + 1).trim();
+        const wrapped = this.wrapText(value || '-', 78);
+        expanded.push({ label, value: wrapped[0] });
+        for (let i = 1; i < wrapped.length; i += 1) {
+          expanded.push({ value: wrapped[i] });
+        }
+      } else {
+        const wrapped = this.wrapText(trimmed, 95);
+        for (const value of wrapped) {
+          expanded.push({ value });
+        }
+      }
+    }
+
+    return expanded;
+  }
+
+  private drawText(commands: string[], x: number, y: number, font: '/F1' | '/F2', size: number, text: string): void {
+    commands.push('BT');
+    commands.push(`${font} ${size.toFixed(2)} Tf`);
+    commands.push(`${x.toFixed(2)} ${y.toFixed(2)} Td`);
+    commands.push(`(${this.escapePdfText(text)}) Tj`);
+    commands.push('ET');
+  }
+
+  private drawRect(commands: string[], x: number, y: number, width: number, height: number, grayFill?: number): void {
+    if (grayFill !== undefined) {
+      commands.push(`${grayFill.toFixed(2)} g`);
+      commands.push(`${x.toFixed(2)} ${y.toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)} re f`);
+      commands.push('0 g');
+    }
+    commands.push(`${x.toFixed(2)} ${y.toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)} re S`);
+  }
+
+  private drawLine(commands: string[], x1: number, y1: number, x2: number, y2: number): void {
+    commands.push(`${x1.toFixed(2)} ${y1.toFixed(2)} m ${x2.toFixed(2)} ${y2.toFixed(2)} l S`);
+  }
+
+  private drawPageBase(
+    commands: string[],
+    page: { width: number; height: number },
+    margin: number,
+    pageNumber: number
+  ): number {
+    commands.push('0 G');
+    commands.push('0.7 w');
+    commands.push(`${margin} ${margin} ${page.width - margin * 2} ${page.height - margin * 2} re S`);
+    this.drawText(commands, margin + 6, margin + 6, '/F1', 6.1, `DANFSE - pagina ${pageNumber}`);
+    return page.height - margin - 6;
+  }
+
+  private drawVisualHeader(
+    commands: string[],
+    header: string[],
+    chaveAcesso: string,
+    contentX: number,
+    contentWidth: number,
+    yTop: number,
+    pageNumber: number
+  ): number {
+    const headerHeight = pageNumber === 1 ? 74 : 40;
+    this.drawRect(commands, contentX, yTop - headerHeight, contentWidth, headerHeight, 0.98);
+    this.drawRect(commands, contentX, yTop - headerHeight, contentWidth, headerHeight);
+
+    const stripHeight = 13;
+    this.drawRect(commands, contentX, yTop - stripHeight, contentWidth, stripHeight, 0.82);
+    this.drawRect(commands, contentX, yTop - stripHeight, contentWidth, stripHeight);
+
+    const title = header[0] ?? 'DANFSe';
+    const subtitle = header[1] ?? 'Documento Auxiliar da NFS-e';
+    this.drawText(commands, contentX + 4, yTop - 8.8, '/F2', 9.4, title);
+    this.drawText(commands, contentX + 146, yTop - 8.8, '/F1', 6.9, subtitle);
+    this.drawText(commands, contentX + contentWidth - 38, yTop - 8.8, '/F2', 7, `P${pageNumber}`);
+
+    if (pageNumber === 1) {
+      const logoX = contentX + 4;
+      const logoY = yTop - stripHeight - 3;
+      this.drawLogo(commands, logoX, logoY);
+
+      const qrSize = 47;
+      const qrX = contentX + contentWidth - qrSize - 5;
+      const qrY = yTop - headerHeight + 6;
+      this.drawPseudoQr(commands, qrX, qrY, qrSize, chaveAcesso);
+      this.drawText(commands, qrX + 13, qrY - 6, '/F1', 5.6, 'CONSULTA');
+
+      const infoX = logoX + 77;
+      const infoYTop = yTop - stripHeight - 5;
+      const infoWidth = contentWidth - 77 - qrSize - 14;
+      this.drawRect(commands, infoX, yTop - headerHeight + 6, infoWidth, headerHeight - stripHeight - 10);
+
+      const metadataLines = this.pickHeaderMetadata(header);
+      let lineY = infoYTop - 2;
+      for (let i = 0; i < metadataLines.length && lineY > yTop - headerHeight + 12; i += 1) {
+        const font = i <= 1 ? '/F2' : '/F1';
+        const size = i <= 1 ? 6.5 : 6.1;
+        this.drawText(commands, infoX + 4, lineY, font, size, metadataLines[i]);
+        lineY -= 6.8;
+      }
+    } else {
+      this.drawText(commands, contentX + 6, yTop - 22, '/F1', 6.5, `Chave: ${chaveAcesso}`);
+    }
+
+    return yTop - headerHeight - 4;
+  }
+
+  private getSectionColumns(title: string): number {
+    if (title === 'DADOS DE IDENTIFICACAO DA NFS-E') {
+      return 3;
+    }
+    if (title === 'INTERMEDIARIO DO SERVICO' || title === 'INFORMACOES COMPLEMENTARES') {
+      return 1;
+    }
+    if (title === 'TOTAIS APROXIMADOS DOS TRIBUTOS') {
+      return 3;
+    }
+    return 4;
+  }
+
+  private parseSectionFields(
+    title: string,
+    rows: string[],
+    columns: number
+  ): Array<{ label?: string; value: string; span: number }> {
+    const fields: Array<{ label?: string; value: string; span: number }> = [];
+
+    const setSpan = (label?: string): number => {
+      if (!label) {
+        return columns;
+      }
+      const fullWidthLabels = new Set([
+        'Chave de Acesso da NFS-e:',
+        'Consulta Publica:',
+        'Descricao do Codigo de Tributacao:',
+        'Descricao do Servico:',
+        'Informacoes Complementares:',
+        'Lei n 12.741/2012:'
+      ]);
+      if (fullWidthLabels.has(label)) {
+        return columns;
+      }
+
+      const wideLabels = new Set([
+        'Nome / Nome Empresarial:',
+        'Endereco:',
+        'E-mail:',
+        'Simples Nacional na Data de Competencia:',
+        'Regime de Apuracao Tributaria pelo SN:',
+        'Total das Retencoes (ISSQN / Federais):',
+        'Valor Liquido da NFS-e:',
+        'Valor Liquido da NFS-e + IBS/CBS:'
+      ]);
+      if (wideLabels.has(label)) {
+        return Math.min(columns, 2);
+      }
+
+      if (title === 'DADOS DE IDENTIFICACAO DA NFS-E') {
+        if (label === 'Codigo de Verificacao:') {
+          return Math.min(columns, 2);
+        }
+      }
+      return 1;
+    };
+
+    for (const original of rows) {
+      const raw = original.trimEnd();
+      const trimmed = raw.trimStart();
+      if (!trimmed) {
+        continue;
+      }
+
+      if (raw.startsWith('  ') && fields.length > 0) {
+        fields[fields.length - 1].value = `${fields[fields.length - 1].value} ${trimmed}`.trim();
+        continue;
+      }
+
+      const idx = trimmed.indexOf(':');
+      if (idx > 0 && !trimmed.startsWith('http')) {
+        const label = trimmed.slice(0, idx + 1);
+        const value = trimmed.slice(idx + 1).trim() || '-';
+        fields.push({
+          label,
+          value,
+          span: setSpan(label)
+        });
+      } else {
+        fields.push({
+          value: trimmed,
+          span: columns
+        });
+      }
+    }
+
+    return fields;
+  }
+
+  private layoutSectionRows(
+    fields: Array<{ label?: string; value: string; span: number }>,
+    columns: number,
+    contentWidth: number
+  ): Array<Array<{ label?: string; valueLines: string[]; span: number }>> {
+    const rows: Array<Array<{ label?: string; valueLines: string[]; span: number }>> = [];
+    let current: Array<{ label?: string; valueLines: string[]; span: number }> = [];
+    let used = 0;
+
+    for (const field of fields) {
+      const span = Math.max(1, Math.min(columns, field.span));
+      if (used + span > columns && current.length > 0) {
+        rows.push(current);
+        current = [];
+        used = 0;
+      }
+
+      const avgCharsPerColumn = Math.max(16, Math.floor((contentWidth / columns) / 3.3));
+      const widthChars = Math.max(12, avgCharsPerColumn * span - 2);
+      const valueLines = this.wrapText(field.value, widthChars);
+
+      current.push({
+        label: field.label,
+        valueLines,
+        span
+      });
+      used += span;
+
+      if (used === columns) {
+        rows.push(current);
+        current = [];
+        used = 0;
+      }
+    }
+
+    if (current.length > 0) {
+      rows.push(current);
+    }
+
+    return rows;
+  }
+
+  private drawLogo(commands: string[], x: number, yTop: number): void {
+    const w = 74;
+    const h = 54;
+    this.drawRect(commands, x, yTop - h, w, h, 0.98);
+    this.drawRect(commands, x, yTop - h, w, h);
+    this.drawText(commands, x + 7, yTop - 16, '/F2', 18, 'NFS-e');
+    this.drawText(commands, x + 7, yTop - 28, '/F1', 6.4, 'Padrao Nacional');
+    this.drawText(commands, x + 7, yTop - 36, '/F1', 6.4, 'Documento Fiscal');
+    this.drawText(commands, x + 7, yTop - 44, '/F1', 6.4, 'Eletronico');
+    this.drawText(commands, x + 7, yTop - 51, '/F1', 5.8, 'Versao oficial');
+  }
+
+  private drawPseudoQr(commands: string[], x: number, y: number, size: number, seed: string): void {
+    this.drawRect(commands, x, y, size, size, 1);
+    this.drawRect(commands, x, y, size, size);
+
+    const modules = 21;
+    const cell = size / modules;
+    const hash = createHash('sha256').update(seed).digest();
+    let bitIndex = 0;
+
+    const getBit = (): number => {
+      const byte = hash[Math.floor(bitIndex / 8) % hash.length];
+      const bit = (byte >> (bitIndex % 8)) & 1;
+      bitIndex += 1;
+      return bit;
+    };
+
+    const drawFinder = (fx: number, fy: number) => {
+      for (let yy = 0; yy < 7; yy += 1) {
+        for (let xx = 0; xx < 7; xx += 1) {
+          const isOuter = yy === 0 || yy === 6 || xx === 0 || xx === 6;
+          const isInner = yy >= 2 && yy <= 4 && xx >= 2 && xx <= 4;
+          if (isOuter || isInner) {
+            const px = x + (fx + xx) * cell;
+            const py = y + size - (fy + yy + 1) * cell;
+            commands.push('0 g');
+            commands.push(`${px.toFixed(2)} ${py.toFixed(2)} ${cell.toFixed(2)} ${cell.toFixed(2)} re f`);
+          }
+        }
+      }
+    };
+
+    drawFinder(0, 0);
+    drawFinder(modules - 7, 0);
+    drawFinder(0, modules - 7);
+
+    for (let yy = 0; yy < modules; yy += 1) {
+      for (let xx = 0; xx < modules; xx += 1) {
+        const inFinderTopLeft = xx < 8 && yy < 8;
+        const inFinderTopRight = xx >= modules - 8 && yy < 8;
+        const inFinderBottomLeft = xx < 8 && yy >= modules - 8;
+        if (inFinderTopLeft || inFinderTopRight || inFinderBottomLeft) {
+          continue;
+        }
+
+        if (getBit() === 1) {
+          const px = x + xx * cell;
+          const py = y + size - (yy + 1) * cell;
+          commands.push('0 g');
+          commands.push(`${px.toFixed(2)} ${py.toFixed(2)} ${cell.toFixed(2)} ${cell.toFixed(2)} re f`);
+        }
+      }
+    }
+
+    commands.push('0 g');
+  }
+
+  private pickHeaderMetadata(header: string[]): string[] {
+    const preferred = [
+      'MUNICIPIO ',
+      'Chave de Acesso da NFS-e:',
+      'Numero da NFS-e:',
+      'Data e Hora da emissao da NFS-e:',
+      'Competencia da NFS-e:',
+      'Situacao da NFS-e:',
+      'Codigo de Verificacao:',
+      'Tipo de Ambiente:',
+      'Consulta Publica:'
+    ];
+
+    const selected: string[] = [];
+    for (const prefix of preferred) {
+      const found = header.find((line) => line.startsWith(prefix));
+      if (found && !selected.includes(found)) {
+        selected.push(found);
+      }
+    }
+
+    return selected.slice(0, 8);
+  }
+
+  private wrapText(value: string, maxLen: number): string[] {
+    const normalized = this.normalizePrintable(value);
+    if (!normalized) {
+      return ['-'];
+    }
+
+    const words = normalized.split(/\s+/).filter(Boolean);
+    const lines: string[] = [];
+    let current = '';
+
+    for (const word of words) {
+      const candidate = current ? `${current} ${word}` : word;
+      if (candidate.length <= maxLen) {
+        current = candidate;
+        continue;
+      }
+
+      if (current) {
+        lines.push(current);
+      }
+      current = word.slice(0, maxLen);
+    }
+
+    if (current) {
+      lines.push(current);
+    }
+
+    return lines;
+  }
+
+  private escapePdfText(value: string): string {
+    return this.normalizePrintable(value).replace(/\\/g, '\\\\').replace(/\(/g, '\\(').replace(/\)/g, '\\)');
+  }
+
+  private normalizePrintable(value: string): string {
+    return value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\x20-\x7E]/g, ' ')
+      .trim();
+  }
+
+  private normalizeChaveAcesso(value: string): string {
+    const digits = value.replace(/\D/g, '');
+    if (digits.length >= 50) {
+      return digits.slice(0, 50);
+    }
+    return digits || this.safeValue(value);
+  }
+
+  private safeValue(value?: string | number | null): string {
+    if (value === undefined || value === null) {
+      return '-';
+    }
+
+    const raw = String(value).trim();
+    if (!raw) {
+      return '-';
+    }
+
+    return this.normalizePrintable(raw);
+  }
+
+  private combineSlash(left?: string | null, right?: string | null): string {
+    const first = this.safeValue(left);
+    const second = this.safeValue(right);
+
+    if (first === '-' && second === '-') {
+      return '-';
+    }
+    if (first === '-') {
+      return second;
+    }
+    if (second === '-') {
+      return first;
+    }
+
+    return `${first} / ${second}`;
+  }
+
+  private hasIdentificacao(cpfCnpj?: string | null, nome?: string | null, endereco?: string | null): boolean {
+    return this.safeValue(cpfCnpj) !== '-' || this.safeValue(nome) !== '-' || this.safeValue(endereco) !== '-';
+  }
+
+  private isDestinatarioIgualTomador(input: DanfseRenderInput): boolean {
+    const dest = this.safeValue(input.cnpjDestinatario);
+    const toma = this.safeValue(input.cnpjTomador);
+    if (dest === '-' || toma === '-') {
+      return false;
+    }
+    return dest === toma;
+  }
+
+  private isOperacaoNaoSujeitaIss(tipoTributacaoIssqn?: string | null): boolean {
+    const normalized = this.safeValue(tipoTributacaoIssqn).toLowerCase();
+    if (normalized === '-') {
+      return false;
+    }
+    return normalized.includes('nao sujeita') || normalized === '4';
+  }
+
+  private isHomologacao(tipoAmbiente?: string | null): boolean {
+    const normalized = this.safeValue(tipoAmbiente).toLowerCase();
+    return normalized === '2' || normalized.includes('homolog');
+  }
+
+  private isCancelada(status?: string | null): boolean {
+    const normalized = this.safeValue(status).toLowerCase();
+    return normalized === '101' || normalized.includes('cancel');
+  }
+
+  private isSubstituida(status?: string | null, chaveSubstituida?: string | null): boolean {
+    if (this.safeValue(chaveSubstituida) !== '-') {
+      return true;
+    }
+    const normalized = this.safeValue(status).toLowerCase();
+    return normalized.includes('substitu');
+  }
+
+  private describeEmitente(value?: string | null): string {
+    const normalized = this.safeValue(value);
+    if (normalized === '-') {
+      return '-';
+    }
+
+    if (normalized === '1') {
+      return 'Prestador';
+    }
+    if (normalized === '2') {
+      return 'Tomador';
+    }
+    if (normalized === '3') {
+      return 'Intermediario';
+    }
+
+    return normalized;
+  }
+
+  private composeInformacoesComplementares(input: DanfseRenderInput): string {
+    const chunks: string[] = [];
+    const push = (label: string, value?: string | null) => {
+      const normalized = this.safeValue(value);
+      if (normalized !== '-') {
+        chunks.push(`${label}: ${normalized}`);
+      }
+    };
+
+    push('Inf. Cont.', input.infoComplementares);
+    push('NFS-e Subst.', input.chaveNfseSubstituida);
+    push('Doc. Ref.', input.documentoReferencia);
+    push('Cod. Obra', input.codigoObra);
+    push('Insc. Imob.', input.inscricaoImobiliaria);
+    push('Cod. Evt.', input.codigoEvento);
+    push('Doc. Tec.', input.documentoTecnico);
+    push('Num. Ped.', input.numeroPedido);
+    push('Item Ped.', input.itemPedido);
+    push('Inf. A. T. Mun.', input.infoAdministracaoMunicipal);
+
+    const totaisAproximados =
+      this.safeValue(input.totaisAproximadosTributos) !== '-'
+        ? this.safeValue(input.totaisAproximadosTributos)
+        : 'Totais Aproximados dos Tributos cfe. Lei n 12.741/2012: Federais: - ; Estaduais: - ; Municipais: -';
+    chunks.push(totaisAproximados);
+
+    return chunks.join(' | ');
+  }
+
+  private composeTotaisAproximadosTributos(
+    vFed?: string,
+    vEst?: string,
+    vMun?: string,
+    pFed?: string,
+    pEst?: string,
+    pMun?: string
+  ): string | undefined {
+    const hasValores = [vFed, vEst, vMun].some((value) => this.safeValue(value) !== '-');
+    const hasPercentuais = [pFed, pEst, pMun].some((value) => this.safeValue(value) !== '-');
+
+    if (!hasValores && !hasPercentuais) {
+      return undefined;
+    }
+
+    if (hasValores) {
+      return `Totais Aproximados dos Tributos cfe. Lei n 12.741/2012: Federais: ${this.safeValue(vFed)} ; Estaduais: ${this.safeValue(vEst)} ; Municipais: ${this.safeValue(vMun)}`;
+    }
+
+    return `Totais Aproximados dos Tributos cfe. Lei n 12.741/2012: Federais: ${this.safeValue(pFed)}% ; Estaduais: ${this.safeValue(pEst)}% ; Municipais: ${this.safeValue(pMun)}%`;
+  }
+
+  private composeAddress(xml: string, basePaths: string[][]): string | undefined {
+    for (const basePath of basePaths) {
+      const logradouro = this.extractFromPath(xml, [...basePath, 'xLgr']);
+      const numero = this.extractFromPath(xml, [...basePath, 'nro']);
+      const complemento = this.extractFromPath(xml, [...basePath, 'xCpl']);
+      const bairro = this.extractFromPath(xml, [...basePath, 'xBairro']);
+
+      const value = [logradouro, numero, complemento, bairro]
+        .map((item) => this.safeValue(item))
+        .filter((item) => item !== '-')
+        .join(', ');
+
+      if (value) {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  private composeMunicipioUf(
+    codigoMunicipio?: string,
+    uf?: string,
+    nomeMunicipio?: string
+  ): string | undefined {
+    const nome = this.safeValue(nomeMunicipio);
+    const codigo = this.safeValue(codigoMunicipio);
+    const ufNormalized = this.safeValue(uf);
+
+    if (nome !== '-' && ufNormalized !== '-') {
+      return `${nome} / ${ufNormalized}`;
+    }
+    if (nome !== '-') {
+      return nome;
+    }
+    if (codigo !== '-' && ufNormalized !== '-') {
+      return `${codigo} / ${ufNormalized}`;
+    }
+    if (codigo !== '-') {
+      return codigo;
+    }
+
+    return undefined;
+  }
+
+  private composeIbgeCep(codigoIbge?: string, cep?: string): string | undefined {
+    const ibge = this.safeValue(codigoIbge);
+    const cepValue = this.safeValue(cep);
+    if (ibge === '-' && cepValue === '-') {
+      return undefined;
+    }
+    if (ibge === '-') {
+      return cepValue;
+    }
+    if (cepValue === '-') {
+      return ibge;
+    }
+    return `${ibge} / ${cepValue}`;
+  }
+
+  private composeLocalPrestacao(local?: string, uf?: string, pais?: string): string | undefined {
+    const parts = [this.safeValue(local), this.safeValue(uf), this.safeValue(pais)].filter((part) => part !== '-');
+    if (!parts.length) {
+      return undefined;
+    }
+    return parts.join(' / ');
+  }
+
+  private sumValues(first?: string | null, second?: string | null): string | undefined {
+    const firstValue = this.toNumber(first);
+    const secondValue = this.toNumber(second);
+    if (firstValue === undefined && secondValue === undefined) {
+      return undefined;
+    }
+    return ((firstValue ?? 0) + (secondValue ?? 0)).toFixed(2);
+  }
+
+  private hasIbsCbsData(input: DanfseRenderInput): boolean {
+    const values = [
+      input.valorTotalIbscbs,
+      input.valorLiquidoComIbscbs,
+      input.valorTotalApuradoIbs,
+      input.valorTotalApuradoCbs,
+      input.cstClassTribIbsCbs,
+      input.aliquotaCbs
+    ];
+    return values.some((value) => this.safeValue(value) !== '-');
+  }
+
+  private totalRetencoesFederais(input: DanfseRenderInput): string | undefined {
+    const irrf = this.toNumber(input.valorIrrf);
+    const cp = this.toNumber(input.valorContribuicaoPrevidenciaria);
+    const cs = this.toNumber(input.valorContribuicoesSociais);
+    const total = (irrf ?? 0) + (cp ?? 0) + (cs ?? 0);
+    if (total === 0 && irrf === undefined && cp === undefined && cs === undefined) {
+      return undefined;
+    }
+    return total.toFixed(2);
+  }
+
+  private formatCpfCnpj(value?: string | null): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+    const digits = value.replace(/\D/g, '');
+    if (digits.length === 14) {
+      return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+    }
+    if (digits.length === 11) {
+      return digits.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+    }
+    return value;
+  }
+
+  private formatCep(value?: string | null): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+    const digits = value.replace(/\D/g, '');
+    if (digits.length === 8) {
+      return digits.replace(/^(\d{5})(\d{3})$/, '$1-$2');
+    }
+    if (digits.length > 8) {
+      const last = digits.slice(-8);
+      return last.replace(/^(\d{5})(\d{3})$/, '$1-$2');
+    }
+    return value;
+  }
+
+  private formatPhone(value?: string | null): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+    const digits = value.replace(/\D/g, '');
+    if (digits.length === 10) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
+    }
+    if (digits.length === 11) {
+      return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
+    }
+    return value;
+  }
+
+  private formatMunicipioUfLabel(value?: string | null): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+    return value.replace(/\s*\/\s*/g, ' - ');
+  }
+
+  private formatDateBr(value?: Date | null): string {
+    if (!value) {
+      return '-';
+    }
+
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return '-';
+    }
+
+    const formatter = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false
+    });
+
+    return formatter.format(parsed).replace(',', '');
+  }
+
+  private formatDateOnlyBr(value?: Date | null): string {
+    if (!value) {
+      return '-';
+    }
+
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return '-';
+    }
+
+    const formatter = new Intl.DateTimeFormat('pt-BR', {
+      timeZone: 'America/Sao_Paulo',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    });
+    return formatter.format(parsed);
+  }
+
+  private formatMoney(value?: string | number | null): string | undefined {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+    const parsed =
+      typeof value === 'number'
+        ? value
+        : this.toNumber(value) ??
+          this.toNumber(
+            String(value)
+              .replace(/\s/g, '')
+              .replace('R$', '')
+          );
+    if (parsed === undefined || Number.isNaN(parsed)) {
+      return undefined;
+    }
+    const formatted = parsed.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return `R$ ${formatted}`;
+  }
+
+  private formatAliquota(value?: string | null): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+    const normalized = value.trim();
+    if (!normalized) {
+      return undefined;
+    }
+    if (normalized.includes('%')) {
+      return normalized;
+    }
+    const parsed = this.toNumber(normalized);
+    if (parsed === undefined) {
+      return normalized;
+    }
+    return `${parsed.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}%`;
+  }
+
+  private describeRetencaoIss(value?: string | null): string | undefined {
+    const normalized = this.safeValue(value);
+    if (normalized === '-') {
+      return undefined;
+    }
+    if (normalized === '1') {
+      return 'Nao Retido';
+    }
+    if (normalized === '2') {
+      return 'Retido';
+    }
+    return normalized;
+  }
+
+  private describeTributacaoIssqn(value?: string | null): string | undefined {
+    const normalized = this.safeValue(value);
+    if (normalized === '-') {
+      return undefined;
+    }
+    if (normalized === '1') {
+      return 'Operacao Tributavel';
+    }
+    if (normalized === '2') {
+      return 'Operacao sem incidencia';
+    }
+    if (normalized === '3') {
+      return 'Imunidade';
+    }
+    if (normalized === '4') {
+      return 'Operacao nao sujeita ao ISSQN';
+    }
+    return normalized;
+  }
+
+  private describeSuspensao(value?: string | null): string | undefined {
+    const normalized = this.safeValue(value);
+    if (normalized === '-') {
+      return undefined;
+    }
+    if (normalized === '0') {
+      return 'Nao';
+    }
+    if (normalized === '1') {
+      return 'Sim';
+    }
+    return normalized;
+  }
+
+  private describeSimplesNacional(value?: string | null): string | undefined {
+    const normalized = this.safeValue(value);
+    if (normalized === '-') {
+      return undefined;
+    }
+    if (normalized === '1') {
+      return 'Nao Optante';
+    }
+    if (normalized === '2') {
+      return 'Optante';
+    }
+    return normalized;
+  }
+
+  private extractPais(value?: string | null): string | undefined {
+    const normalized = this.safeValue(value);
+    if (normalized === '-') {
+      return undefined;
+    }
+    const parts = normalized.split('/');
+    if (parts.length > 1) {
+      return parts[parts.length - 1].trim();
+    }
+    const hyphenParts = normalized.split('-');
+    if (hyphenParts.length > 2) {
+      return hyphenParts[hyphenParts.length - 1].trim();
+    }
+    return undefined;
+  }
+
+  private formatDate(value?: Date | null): string {
+    if (!value) {
+      return '-';
+    }
+
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return '-';
+    }
+
+    const yyyy = parsed.getUTCFullYear();
+    const mm = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(parsed.getUTCDate()).padStart(2, '0');
+    const hh = String(parsed.getUTCHours()).padStart(2, '0');
+    const mi = String(parsed.getUTCMinutes()).padStart(2, '0');
+    const ss = String(parsed.getUTCSeconds()).padStart(2, '0');
+
+    return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss} UTC`;
+  }
+
+  private parseDate(value?: string): Date | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return undefined;
+    }
+
+    return parsed;
+  }
+
+  private extract(xml: string, tags: string[]): string | undefined {
+    for (const tag of tags) {
+      const regex = new RegExp(`<(?:\\w+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${tag}>`, 'i');
+      const match = xml.match(regex);
+      if (match?.[1]) {
+        const cleaned = this.cleanText(match[1]);
+        if (cleaned) {
+          return cleaned;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractFromPaths(xml: string, paths: string[][]): string | undefined {
+    for (const path of paths) {
+      const value = this.extractFromPath(xml, path);
+      if (value) {
+        return value;
+      }
+    }
+    return undefined;
+  }
+
+  private extractFromPath(xml: string, path: string[]): string | undefined {
+    if (!path.length) {
+      return undefined;
+    }
+
+    let scope = xml;
+    for (let i = 0; i < path.length - 1; i += 1) {
+      const parentRegex = new RegExp(
+        `<(?:\\w+:)?${path[i]}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${path[i]}>`,
+        'i'
+      );
+      const parentMatch = scope.match(parentRegex);
+      if (!parentMatch?.[1]) {
+        return undefined;
+      }
+      scope = parentMatch[1];
+    }
+
+    const finalTag = path[path.length - 1];
+    const finalRegex = new RegExp(`<(?:\\w+:)?${finalTag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${finalTag}>`, 'i');
+    const finalMatch = scope.match(finalRegex);
+    if (!finalMatch?.[1]) {
+      return undefined;
+    }
+
+    return this.cleanText(finalMatch[1]);
+  }
+
+  private extractNestedAny(xml: string, parentTags: string[], childTags: string[]): string | undefined {
+    for (const parentTag of parentTags) {
+      const value = this.extractNested(xml, parentTag, childTags);
+      if (value) {
+        return value;
+      }
+    }
+    return undefined;
+  }
+
+  private extractNested(xml: string, parentTag: string, childTags: string[]): string | undefined {
+    const parentRegex = new RegExp(
+      `<(?:\\w+:)?${parentTag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${parentTag}>`,
+      'ig'
+    );
+    const parentMatch = parentRegex.exec(xml);
+    if (!parentMatch?.[1]) {
+      return undefined;
+    }
+
+    for (const childTag of childTags) {
+      const childRegex = new RegExp(
+        `<(?:\\w+:)?${childTag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${childTag}>`,
+        'i'
+      );
+      const childMatch = parentMatch[1].match(childRegex);
+      const cleaned = childMatch?.[1] ? this.cleanText(childMatch[1]) : undefined;
+      if (cleaned) {
+        return cleaned;
+      }
+    }
+
+    return undefined;
+  }
+
+  private cleanText(value: string): string {
+    return value
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&apos;/gi, "'")
+      .trim();
+  }
+
+  private parseDateOnly(value?: string): Date | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const [yearRaw, monthRaw, dayRaw] = value.slice(0, 10).split('-');
+    const year = Number(yearRaw);
+    const month = Number(monthRaw);
+    const day = Number(dayRaw);
+    if (!year || !month || !day) {
+      return undefined;
+    }
+
+    return new Date(Date.UTC(year, month - 1, day));
+  }
+
+  private toNumber(value?: string | null): number | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    const normalized =
+      trimmed.includes(',') && trimmed.includes('.')
+        ? trimmed.replace(/\./g, '').replace(',', '.')
+        : trimmed.replace(',', '.');
+    const parsed = Number(normalized);
+    if (Number.isNaN(parsed)) {
+      return undefined;
+    }
+
+    return parsed;
+  }
+
+  private formatDateOnly(value?: Date | null): string {
+    if (!value) {
+      return '-';
+    }
+
+    const parsed = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(parsed.getTime())) {
+      return '-';
+    }
+
+    const yyyy = parsed.getUTCFullYear();
+    const mm = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(parsed.getUTCDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  private mergeDefined(
+    extracted: Omit<DanfseRenderInput, 'chaveAcesso'>,
+    fallback: DanfseRenderInput
+  ): Omit<DanfseRenderInput, 'chaveAcesso'> {
+    const merged = { ...extracted } as Record<string, unknown>;
+    const fallbackEntries = Object.entries(fallback) as Array<[keyof DanfseRenderInput, unknown]>;
+
+    for (const [key, value] of fallbackEntries) {
+      if (key === 'chaveAcesso') {
+        continue;
+      }
+      if (value !== undefined && value !== null && value !== '') {
+        merged[key] = value;
+      }
+    }
+
+    return merged as Omit<DanfseRenderInput, 'chaveAcesso'>;
+  }
+}
