@@ -57,6 +57,8 @@ const syncSingleNsuInput = document.getElementById('syncSingleNsuInput');
 const syncSingleNsuEnvSelect = document.getElementById('syncSingleNsuEnv');
 const syncTestSingleNsuBtn = document.getElementById('syncTestSingleNsu');
 
+const NFSE_TABLE_COLUMNS = 7;
+
 let selectRequestCounter = 0;
 
 boot();
@@ -391,7 +393,7 @@ function clearClientContext() {
   summaryIm.textContent = '-';
   certificatesSummary.className = 'status-box muted';
   certificatesSummary.textContent = 'Sem leitura de certificados ainda.';
-  nfseRows.innerHTML = '<tr><td colspan="8">Nenhum resultado ainda.</td></tr>';
+  nfseRows.innerHTML = `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhum resultado ainda.</td></tr>`;
 }
 
 async function onCreateClient(event) {
@@ -661,20 +663,19 @@ function buildSearchQueryString() {
 
 function renderNfseRows(items) {
   if (!Array.isArray(items) || items.length === 0) {
-    nfseRows.innerHTML = '<tr><td colspan="8">Nenhum resultado encontrado.</td></tr>';
+    nfseRows.innerHTML = `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhum resultado encontrado.</td></tr>`;
     return;
   }
 
   nfseRows.innerHTML = items
     .map((item) => {
       return `<tr>
-        <td><code>${escapeHtml(item.id ?? '-')}</code></td>
-        <td><code>${escapeHtml(item.chaveAcesso ?? '-')}</code></td>
-        <td>${item.nsu ?? '-'}</td>
+        <td>${escapeHtml(item.numeroNfse ?? '-')}</td>
+        <td>${escapeHtml(formatEmissionDate(item.dataEmissao))}</td>
         <td>${escapeHtml(item.status ?? '-')}</td>
-        <td>${escapeHtml(item.cnpjPrestador ?? '-')}</td>
-        <td>${escapeHtml(resolveRelacao(item))}</td>
-        <td>${item.valorServico ?? '-'}</td>
+        <td>${escapeHtml(formatParty(item.razaoSocialPrestador, item.cnpjPrestador))}</td>
+        <td>${escapeHtml(formatParty(item.razaoSocialTomador, item.cnpjTomador))}</td>
+        <td>${escapeHtml(formatCurrencyValue(item.valorServico))}</td>
         <td>
           <button class="btn ghost" type="button" data-action="xml" data-id="${item.id}">XML</button>
           <button class="btn ghost" type="button" data-action="danfse" data-id="${item.id}">DANFSE</button>
@@ -691,24 +692,23 @@ function renderSeparatedRows(payload) {
   const tomadas = Array.isArray(payload?.tomadas) ? payload.tomadas : [];
 
   if (emitidas.length === 0 && tomadas.length === 0) {
-    nfseRows.innerHTML = '<tr><td colspan="8">Nenhum resultado encontrado para o CNPJ informado.</td></tr>';
+    nfseRows.innerHTML = `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhum resultado encontrado para o CNPJ informado.</td></tr>`;
     return;
   }
 
   const groupRow = (title) =>
-    `<tr class="group-row"><td colspan="8"><strong>${escapeHtml(title)}</strong></td></tr>`;
+    `<tr class="group-row"><td colspan="${NFSE_TABLE_COLUMNS}"><strong>${escapeHtml(title)}</strong></td></tr>`;
 
-  const itemRows = (items, relacao) =>
+  const itemRows = (items) =>
     items
       .map((item) => {
         return `<tr>
-          <td><code>${escapeHtml(item.id ?? '-')}</code></td>
-          <td><code>${escapeHtml(item.chaveAcesso ?? '-')}</code></td>
-          <td>${item.nsu ?? '-'}</td>
+          <td>${escapeHtml(item.numeroNfse ?? '-')}</td>
+          <td>${escapeHtml(formatEmissionDate(item.dataEmissao))}</td>
           <td>${escapeHtml(item.status ?? '-')}</td>
-          <td>${escapeHtml(item.cnpjPrestador ?? '-')}</td>
-          <td>${escapeHtml(relacao)}</td>
-          <td>${item.valorServico ?? '-'}</td>
+          <td>${escapeHtml(formatParty(item.razaoSocialPrestador, item.cnpjPrestador))}</td>
+          <td>${escapeHtml(formatParty(item.razaoSocialTomador, item.cnpjTomador))}</td>
+          <td>${escapeHtml(formatCurrencyValue(item.valorServico))}</td>
           <td>
             <button class="btn ghost" type="button" data-action="xml" data-id="${item.id}">XML</button>
             <button class="btn ghost" type="button" data-action="danfse" data-id="${item.id}">DANFSE</button>
@@ -719,9 +719,13 @@ function renderSeparatedRows(payload) {
 
   nfseRows.innerHTML = [
     groupRow(`Emitidas (${emitidas.length})`),
-    emitidas.length ? itemRows(emitidas, 'emitida') : '<tr><td colspan="8">Nenhuma nota emitida.</td></tr>',
+    emitidas.length
+      ? itemRows(emitidas)
+      : `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhuma nota emitida.</td></tr>`,
     groupRow(`Tomadas (${tomadas.length})`),
-    tomadas.length ? itemRows(tomadas, 'tomada') : '<tr><td colspan="8">Nenhuma nota tomada.</td></tr>'
+    tomadas.length
+      ? itemRows(tomadas)
+      : `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhuma nota tomada.</td></tr>`
   ].join('');
 
   wireDownloadButtons();
@@ -932,6 +936,122 @@ function formatCnpj(value) {
   }
 
   return digits.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+}
+
+function formatParty(nome, cnpj) {
+  const nomeLimpo = String(nome || '').trim();
+  const cnpjFormatado = formatCnpj(cnpj || '');
+
+  if (!nomeLimpo && cnpjFormatado === '-') {
+    return '-';
+  }
+
+  if (!nomeLimpo) {
+    return cnpjFormatado;
+  }
+
+  if (cnpjFormatado === '-') {
+    return nomeLimpo;
+  }
+
+  return `${nomeLimpo} (${cnpjFormatado})`;
+}
+
+function formatCurrencyValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return '-';
+  }
+
+  const numeric = toNumericValue(value);
+  if (numeric === null || Number.isNaN(numeric)) {
+    return '-';
+  }
+
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+  }).format(numeric);
+}
+
+function toNumericValue(value) {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : null;
+  }
+
+  if (typeof value === 'string') {
+    return parseLocalizedNumber(value);
+  }
+
+  if (typeof value === 'object') {
+    if (typeof value.$numberDecimal === 'string') {
+      return parseLocalizedNumber(value.$numberDecimal);
+    }
+
+    if (typeof value.value === 'number' || typeof value.value === 'string') {
+      return toNumericValue(value.value);
+    }
+
+    if (typeof value.toString === 'function' && value.toString !== Object.prototype.toString) {
+      return parseLocalizedNumber(value.toString());
+    }
+
+    const serialized = JSON.stringify(value);
+    if (!serialized) {
+      return null;
+    }
+
+    const match = serialized.match(/-?\d+(?:[.,]\d+)?/);
+    return match ? parseLocalizedNumber(match[0]) : null;
+  }
+
+  return null;
+}
+
+function parseLocalizedNumber(raw) {
+  const normalized = String(raw || '').trim();
+  if (!normalized) {
+    return null;
+  }
+
+  let sanitized = normalized.replace(/\s/g, '').replace(/[^\d,.\-+eE]/g, '');
+  if (!sanitized) {
+    return null;
+  }
+
+  const hasComma = sanitized.includes(',');
+  const hasDot = sanitized.includes('.');
+
+  if (hasComma && hasDot) {
+    if (sanitized.lastIndexOf(',') > sanitized.lastIndexOf('.')) {
+      sanitized = sanitized.replace(/\./g, '').replace(/,/g, '.');
+    } else {
+      sanitized = sanitized.replace(/,/g, '');
+    }
+  } else if (hasComma) {
+    sanitized = sanitized.replace(/,/g, '.');
+  }
+
+  const parsed = Number(sanitized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formatEmissionDate(value) {
+  if (!value) {
+    return '-';
+  }
+
+  const date = value instanceof Date ? value : new Date(String(value));
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date);
 }
 
 function tryParseJson(text) {

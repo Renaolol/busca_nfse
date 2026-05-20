@@ -1,4 +1,5 @@
 import { CallHandler, ExecutionContext, Injectable, NestInterceptor } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { Observable, map } from 'rxjs';
 
 @Injectable()
@@ -9,6 +10,10 @@ export class BigIntSerializerInterceptor implements NestInterceptor {
 
   private serializeBigInt(value: unknown): unknown {
     if (typeof value === 'bigint') {
+      return value.toString();
+    }
+
+    if (value instanceof Prisma.Decimal) {
       return value.toString();
     }
 

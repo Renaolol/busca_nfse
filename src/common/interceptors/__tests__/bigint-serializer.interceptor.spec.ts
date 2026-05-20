@@ -1,4 +1,5 @@
 import { CallHandler, ExecutionContext } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { firstValueFrom, of } from 'rxjs';
 import { BigIntSerializerInterceptor } from '../bigint-serializer.interceptor';
 
@@ -13,7 +14,8 @@ describe('BigIntSerializerInterceptor', () => {
         value: 456n
       },
       list: [1n, { inside: 2n }],
-      date: now
+      date: now,
+      valorServico: new Prisma.Decimal('1720.50')
     };
 
     const callHandler: CallHandler = {
@@ -30,7 +32,8 @@ describe('BigIntSerializerInterceptor', () => {
         value: '456'
       },
       list: ['1', { inside: '2' }],
-      date: now
+      date: now,
+      valorServico: '1720.5'
     });
   });
 });
