@@ -37,12 +37,13 @@ describe('NfseService', () => {
   it('retorna XML com metadados de download', async () => {
     prisma.nfseDocumento.findUnique.mockResolvedValue({
       id: 'doc-1',
+      clienteId: 'cliente-1',
       chaveAcesso: '42110092206960810000176000000000000126019687178145',
       xmlPath: 'nfse/producao/123/2026/05/xml/a.xml'
     });
     storage.getObject.mockResolvedValue(Buffer.from('<xml>conteudo</xml>', 'utf8'));
 
-    const result = await service.getXml('doc-1');
+    const result = await service.getXml('doc-1', 'cliente-1');
 
     expect(result.fileName).toBe('NFSE-42110092206960810000176000000000000126019687178145.xml');
     expect(result.contentType).toBe('application/xml');
@@ -53,6 +54,7 @@ describe('NfseService', () => {
   it('gera DANFSE quando nao existir caminho salvo', async () => {
     prisma.nfseDocumento.findUnique.mockResolvedValue({
       id: 'doc-2',
+      clienteId: 'cliente-1',
       chaveAcesso: '42110092206960810000176000000000000226015757529368',
       ambiente: Ambiente.producao,
       danfsePath: null,
@@ -75,7 +77,7 @@ describe('NfseService', () => {
     storage.putObject.mockResolvedValue('/tmp/danfse.pdf');
     prisma.nfseDocumento.update.mockResolvedValue({});
 
-    const result = await service.getDanfse('doc-2');
+    const result = await service.getDanfse('doc-2', 'cliente-1');
 
     expect(storage.putObject).toHaveBeenCalledWith(
       expect.stringContaining('/danfse/42110092206960810000176000000000000226015757529368.pdf'),
@@ -156,6 +158,7 @@ describe('NfseService', () => {
   it('regenera DANFSE legado mesmo quando ja existe caminho salvo', async () => {
     prisma.nfseDocumento.findUnique.mockResolvedValue({
       id: 'doc-4',
+      clienteId: 'cliente-1',
       chaveAcesso: '42110092206960810000176000000000000426016992784181',
       ambiente: Ambiente.producao,
       danfsePath: 'nfse/producao/06960810000176/2026/01/danfse/42110092206960810000176000000000000426016992784181.pdf',
@@ -179,7 +182,7 @@ describe('NfseService', () => {
       .mockResolvedValueOnce(Buffer.from('<NFSe><nNFSe>4</nNFSe></NFSe>', 'utf8'));
     storage.putObject.mockResolvedValue('/tmp/danfse-regenerado.pdf');
 
-    const result = await service.getDanfse('doc-4');
+    const result = await service.getDanfse('doc-4', 'cliente-1');
 
     expect(storage.putObject).toHaveBeenCalledTimes(1);
     expect(storage.putObject).toHaveBeenCalledWith(
@@ -188,5 +191,16 @@ describe('NfseService', () => {
     );
     expect(result.contentType).toBe('application/pdf');
     expect(result.contentBase64.length).toBeGreaterThan(20);
+  });
+
+  it('bloqueia leitura quando NFS-e nao pertence ao cliente informado', async () => {
+    prisma.nfseDocumento.findUnique.mockResolvedValue({
+      id: 'doc-5',
+      clienteId: 'cliente-2',
+      chaveAcesso: '42110092206960810000176000000000000526016992784182',
+      xmlPath: 'nfse/producao/123/2026/05/xml/doc-5.xml'
+    });
+
+    await expect(service.getXml('doc-5', 'cliente-1')).rejects.toThrow('NFS-e nao encontrada');
   });
 });

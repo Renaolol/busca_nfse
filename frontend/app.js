@@ -3,11 +3,13 @@ const state = {
   clientId: localStorage.getItem('nfseClientId') || '',
   establishmentId: localStorage.getItem('nfseEstablishmentId') || '',
   certificateId: localStorage.getItem('nfseCertificateId') || '',
+  currentMenu: localStorage.getItem('nfseConsoleMenu') || 'menuClientes',
   clientList: [],
   selectedClient: null,
   selectedEstablishment: null,
   selectedCertificates: [],
-  lastNotes: []
+  lastNotes: [],
+  selectedNoteIds: new Set()
 };
 
 const apiBaseInput = document.getElementById('apiBase');
@@ -16,6 +18,8 @@ const clientSelect = document.getElementById('clientSelect');
 const pendingBox = document.getElementById('pendingBox');
 const certificatesSummary = document.getElementById('certificatesSummary');
 const certificatesList = document.getElementById('certificatesList');
+const menuButtons = Array.from(document.querySelectorAll('button[data-menu-target]'));
+const menuPanels = Array.from(document.querySelectorAll('.menu-panel'));
 
 const ctxClientId = document.getElementById('ctxClientId');
 const ctxEstablishmentId = document.getElementById('ctxEstablishmentId');
@@ -44,6 +48,10 @@ const newClientBtn = document.getElementById('newClientBtn');
 const editClientBtn = document.getElementById('editClientBtn');
 const editCertificateBtn = document.getElementById('editCertificateBtn');
 const searchSeparatedBtn = document.getElementById('searchSeparatedBtn');
+const notesSelectAllBtn = document.getElementById('notesSelectAll');
+const notesClearSelectionBtn = document.getElementById('notesClearSelection');
+const notesDownloadXmlSelectedBtn = document.getElementById('notesDownloadXmlSelected');
+const notesDownloadDanfseSelectedBtn = document.getElementById('notesDownloadDanfseSelected');
 
 const syncStartBtn = document.getElementById('syncStart');
 const syncPauseBtn = document.getElementById('syncPause');
@@ -56,8 +64,9 @@ const syncReprocessXmlsBtn = document.getElementById('syncReprocessXmls');
 const syncSingleNsuInput = document.getElementById('syncSingleNsuInput');
 const syncSingleNsuEnvSelect = document.getElementById('syncSingleNsuEnv');
 const syncTestSingleNsuBtn = document.getElementById('syncTestSingleNsu');
+const syncModeSelect = document.getElementById('syncMode');
 
-const NFSE_TABLE_COLUMNS = 7;
+const NFSE_TABLE_COLUMNS = 8;
 
 let selectRequestCounter = 0;
 
@@ -66,6 +75,7 @@ boot();
 async function boot() {
   apiBaseInput.value = state.apiBase;
   wireEvents();
+  setActiveMenu(state.currentMenu, false);
   fillLinkedInputs();
   renderContext();
   await refreshClientList({ preserveSelection: true, autoSelectFirst: true });
@@ -73,6 +83,16 @@ async function boot() {
 }
 
 function wireEvents() {
+  menuButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const menuId = button.getAttribute('data-menu-target');
+      if (!menuId) {
+        return;
+      }
+      setActiveMenu(menuId);
+    });
+  });
+
   saveApiBaseBtn.addEventListener('click', async () => {
     state.apiBase = normalizeBaseUrl(apiBaseInput.value);
     localStorage.setItem('nfseApiBase', state.apiBase);
@@ -123,6 +143,10 @@ function wireEvents() {
   certificateForm.addEventListener('submit', onCreateCertificate);
   searchForm.addEventListener('submit', onSearchNfse);
   searchSeparatedBtn.addEventListener('click', onSearchSeparated);
+  notesSelectAllBtn.addEventListener('click', () => setVisibleNoteSelection(true));
+  notesClearSelectionBtn.addEventListener('click', () => setVisibleNoteSelection(false));
+  notesDownloadXmlSelectedBtn.addEventListener('click', () => downloadSelectedNotes('xml'));
+  notesDownloadDanfseSelectedBtn.addEventListener('click', () => downloadSelectedNotes('danfse'));
 
   syncStartBtn.addEventListener('click', () => runSyncAction('iniciar'));
   syncPauseBtn.addEventListener('click', () => runSyncAction('pausar'));
@@ -328,7 +352,12 @@ async function onCertificateActionClick(event) {
     return;
   }
 
-  const result = await apiCall(endpoint, { method });
+  if (!state.clientId) {
+    showPending(['Selecione um cliente antes de operar certificados.'], true);
+    return;
+  }
+
+  const result = await apiCall(withClientScope(endpoint), { method });
   if (state.clientId) {
     await selectClient(state.clientId);
   }
@@ -383,6 +412,7 @@ function clearClientContext() {
   state.selectedEstablishment = null;
   state.selectedCertificates = [];
   state.lastNotes = [];
+  state.selectedNoteIds = new Set();
 
   persistState();
   fillLinkedInputs();
@@ -488,8 +518,16 @@ async function runSyncAction(action) {
     return;
   }
 
+  let body;
+  if (action === 'iniciar') {
+    body = JSON.stringify({
+      modo: syncModeSelect?.value === 'diario' ? 'diario' : 'historico'
+    });
+  }
+
   const result = await apiCall(`/clientes/${state.clientId}/sync/${action}`, {
-    method: 'POST'
+    method: 'POST',
+    body
   });
 
   await selectClient(state.clientId);
@@ -523,7 +561,12 @@ async function runSyncNow(times) {
 }
 
 async function runSyncLogs() {
-  const result = await apiCall('/sync/logs');
+  if (!state.clientId) {
+    showPending(['Selecione um cliente para consultar os logs de sync.'], true);
+    return;
+  }
+
+  const result = await apiCall(withClientScope('/sync/logs'));
   writeConsole('Logs de sync', result);
 }
 
@@ -663,13 +706,17 @@ function buildSearchQueryString() {
 
 function renderNfseRows(items) {
   if (!Array.isArray(items) || items.length === 0) {
+    state.selectedNoteIds = new Set();
     nfseRows.innerHTML = `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhum resultado encontrado.</td></tr>`;
     return;
   }
 
+  keepSelectedIdsVisible(items.map((item) => item.id));
   nfseRows.innerHTML = items
     .map((item) => {
+      const checked = state.selectedNoteIds.has(item.id) ? 'checked' : '';
       return `<tr>
+        <td><input type="checkbox" class="note-select" data-note-id="${item.id}" ${checked} /></td>
         <td>${escapeHtml(item.numeroNfse ?? '-')}</td>
         <td>${escapeHtml(formatEmissionDate(item.dataEmissao))}</td>
         <td>${escapeHtml(item.status ?? '-')}</td>
@@ -684,6 +731,7 @@ function renderNfseRows(items) {
     })
     .join('');
 
+  wireSelectionCheckboxes();
   wireDownloadButtons();
 }
 
@@ -692,17 +740,21 @@ function renderSeparatedRows(payload) {
   const tomadas = Array.isArray(payload?.tomadas) ? payload.tomadas : [];
 
   if (emitidas.length === 0 && tomadas.length === 0) {
+    state.selectedNoteIds = new Set();
     nfseRows.innerHTML = `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhum resultado encontrado para o CNPJ informado.</td></tr>`;
     return;
   }
 
+  keepSelectedIdsVisible([...emitidas, ...tomadas].map((item) => item.id));
   const groupRow = (title) =>
     `<tr class="group-row"><td colspan="${NFSE_TABLE_COLUMNS}"><strong>${escapeHtml(title)}</strong></td></tr>`;
 
   const itemRows = (items) =>
     items
       .map((item) => {
+        const checked = state.selectedNoteIds.has(item.id) ? 'checked' : '';
         return `<tr>
+          <td><input type="checkbox" class="note-select" data-note-id="${item.id}" ${checked} /></td>
           <td>${escapeHtml(item.numeroNfse ?? '-')}</td>
           <td>${escapeHtml(formatEmissionDate(item.dataEmissao))}</td>
           <td>${escapeHtml(item.status ?? '-')}</td>
@@ -728,6 +780,7 @@ function renderSeparatedRows(payload) {
       : `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhuma nota tomada.</td></tr>`
   ].join('');
 
+  wireSelectionCheckboxes();
   wireDownloadButtons();
 }
 
@@ -741,14 +794,14 @@ function wireDownloadButtons() {
       }
       try {
         if (action === 'xml') {
-          const xml = await apiCall(`/nfse/${id}/xml`);
+          const xml = await apiCall(withClientScope(`/nfse/${id}/xml`));
           downloadFromPayload(xml, `NFSE-${id}.xml`);
           writeConsole(`XML da NFS-e ${id}`, xml);
           return;
         }
 
         if (action === 'danfse') {
-          const danfse = await apiCall(`/nfse/${id}/danfse`);
+          const danfse = await apiCall(withClientScope(`/nfse/${id}/danfse`));
           downloadFromPayload(danfse, `DANFSE-${id}.pdf`);
           writeConsole(`DANFSE da NFS-e ${id}`, danfse);
         }
@@ -756,6 +809,100 @@ function wireDownloadButtons() {
         showPending([`Falha ao baixar arquivo da NFS-e ${id}: ${extractErrorMessage(error)}`], true);
       }
     });
+  });
+}
+
+function wireSelectionCheckboxes() {
+  nfseRows.querySelectorAll('input.note-select[data-note-id]').forEach((input) => {
+    input.addEventListener('change', () => {
+      const noteId = input.getAttribute('data-note-id');
+      if (!noteId) {
+        return;
+      }
+      if (input.checked) {
+        state.selectedNoteIds.add(noteId);
+      } else {
+        state.selectedNoteIds.delete(noteId);
+      }
+    });
+  });
+}
+
+function keepSelectedIdsVisible(visibleIds) {
+  const visibleSet = new Set((visibleIds || []).filter(Boolean));
+  const nextSelection = new Set();
+  state.selectedNoteIds.forEach((id) => {
+    if (visibleSet.has(id)) {
+      nextSelection.add(id);
+    }
+  });
+  state.selectedNoteIds = nextSelection;
+}
+
+function setVisibleNoteSelection(checked) {
+  const visibleInputs = Array.from(nfseRows.querySelectorAll('input.note-select[data-note-id]'));
+  if (visibleInputs.length === 0) {
+    return;
+  }
+
+  visibleInputs.forEach((input) => {
+    const noteId = input.getAttribute('data-note-id');
+    if (!noteId) {
+      return;
+    }
+    input.checked = checked;
+    if (checked) {
+      state.selectedNoteIds.add(noteId);
+    } else {
+      state.selectedNoteIds.delete(noteId);
+    }
+  });
+}
+
+async function downloadSelectedNotes(type) {
+  const selectedIds = Array.from(state.selectedNoteIds);
+  if (selectedIds.length === 0) {
+    showPending(['Selecione ao menos uma nota para baixar em lote.'], true);
+    return;
+  }
+
+  let success = 0;
+  let failed = 0;
+  for (const noteId of selectedIds) {
+    try {
+      if (type === 'xml') {
+        const xml = await apiCall(withClientScope(`/nfse/${noteId}/xml`));
+        downloadFromPayload(xml, `NFSE-${noteId}.xml`);
+      } else {
+        const danfse = await apiCall(withClientScope(`/nfse/${noteId}/danfse`));
+        downloadFromPayload(danfse, `DANFSE-${noteId}.pdf`);
+      }
+      success += 1;
+    } catch {
+      failed += 1;
+    }
+  }
+
+  const actionLabel = type === 'xml' ? 'XML' : 'DANFSE';
+  if (failed > 0) {
+    showPending(
+      [
+        `Download em lote concluido com alertas: ${success} ${actionLabel} baixado(s), ${failed} falha(s).`
+      ],
+      true
+    );
+  } else {
+    showPending(
+      [`Download em lote concluido: ${success} ${actionLabel} baixado(s).`],
+      false,
+      true
+    );
+  }
+
+  writeConsole(`Download em lote (${actionLabel})`, {
+    totalSelecionadas: selectedIds.length,
+    sucesso: success,
+    falhas: failed
   });
 }
 
@@ -807,6 +954,15 @@ async function apiCall(path, options = {}) {
   }
 
   return data ?? text;
+}
+
+function withClientScope(path) {
+  if (!state.clientId) {
+    return path;
+  }
+
+  const separator = path.includes('?') ? '&' : '?';
+  return `${path}${separator}clienteId=${encodeURIComponent(state.clientId)}`;
 }
 
 function downloadFromPayload(payload, fallbackName) {
@@ -904,6 +1060,25 @@ function persistState() {
   localStorage.setItem('nfseClientId', state.clientId);
   localStorage.setItem('nfseEstablishmentId', state.establishmentId);
   localStorage.setItem('nfseCertificateId', state.certificateId);
+}
+
+function setActiveMenu(menuId, persist = true) {
+  const hasPanel = menuPanels.some((panel) => panel.id === menuId);
+  const targetMenuId = hasPanel ? menuId : 'menuClientes';
+
+  menuPanels.forEach((panel) => {
+    panel.classList.toggle('hidden', panel.id !== targetMenuId);
+  });
+
+  menuButtons.forEach((button) => {
+    const isActive = button.getAttribute('data-menu-target') === targetMenuId;
+    button.classList.toggle('active', isActive);
+  });
+
+  state.currentMenu = targetMenuId;
+  if (persist) {
+    localStorage.setItem('nfseConsoleMenu', targetMenuId);
+  }
 }
 
 function writeConsole(title, payload = null, isError = false) {

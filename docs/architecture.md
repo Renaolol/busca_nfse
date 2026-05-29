@@ -7,7 +7,7 @@ A aplicacao segue arquitetura backend-first:
 1. Adapter da API oficial NFS-e/ADN
 2. Worker de sincronizacao por NSU
 3. Persistencia em PostgreSQL
-4. Armazenamento de XML/PDF em S3 (MinIO local)
+4. Armazenamento de XML/PDF via provider de storage (implementacao local no MVP)
 5. API interna para consulta e download
 
 ## Modulos
@@ -19,4 +19,5 @@ A aplicacao segue arquitetura backend-first:
 - `nfse`
 - `audit`
 - `storage`
+- `jobs`
 - `health`

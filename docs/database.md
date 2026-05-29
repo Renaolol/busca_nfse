@@ -14,5 +14,5 @@ O schema inicial usa Prisma + PostgreSQL com as tabelas:
 Regras principais:
 
 - Deduplicacao por `UNIQUE (ambiente, chave_acesso)` em documentos.
-- Controle NSU por contexto (`cliente/cnpj/ambiente`).
+- Controle NSU por contexto (`cliente/cnpj/ambiente`) com `UNIQUE (cliente_id, cnpj_consulta, ambiente)` em `nfse_sync_controle`.
 - Historico de certificados e vinculo de substituicao.

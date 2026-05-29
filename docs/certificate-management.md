@@ -12,5 +12,6 @@
 - Servico de criptografia AES-256-GCM local.
 - Persistencia de binario criptografado em storage local (`storage/certificados/...`).
 - Validade, thumbprint, serial, issuer e subject sao extraidos automaticamente do `.pfx/.p12` no cadastro.
-- Exclusao via API permitida apenas para certificados inativos (`DELETE /certificados/:id`).
+- Operacoes por ID de certificado exigem escopo por `clienteId` (query string, UUID valido).
+- Exclusao via API permitida apenas para certificados inativos (`DELETE /certificados/:id?clienteId=...`).
 - Pronto para evolucao para S3/MinIO.

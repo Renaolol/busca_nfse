@@ -7,6 +7,7 @@ import { AppModule } from './app.module';
 import { BigIntSerializerInterceptor } from './common/interceptors/bigint-serializer.interceptor';
 
 async function bootstrap(): Promise<void> {
+  validateRequiredEnvironment();
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
   const requestBodyLimit = process.env.REQUEST_BODY_LIMIT ?? '10mb';
 
@@ -35,6 +36,13 @@ async function bootstrap(): Promise<void> {
 
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);
+}
+
+function validateRequiredEnvironment(): void {
+  const certMasterKey = process.env.CERT_MASTER_KEY?.trim();
+  if (!certMasterKey || /^change[-_ ]?me/i.test(certMasterKey)) {
+    throw new Error('CERT_MASTER_KEY obrigatoria e deve ser configurada com valor seguro');
+  }
 }
 
 bootstrap();

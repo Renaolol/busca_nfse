@@ -1,7 +1,9 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
-import { ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { SyncService } from './sync.service';
 import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
+import { StartSyncDto } from './dto/start-sync.dto';
 
 @ApiTags('sync')
 @Controller()
@@ -9,8 +11,8 @@ export class SyncController {
   constructor(private readonly syncService: SyncService) {}
 
   @Post('clientes/:clienteId/sync/iniciar')
-  iniciar(@Param('clienteId') clienteId: string) {
-    return this.syncService.iniciarSync(clienteId);
+  iniciar(@Param('clienteId') clienteId: string, @Body() dto: StartSyncDto) {
+    return this.syncService.iniciarSync(clienteId, dto);
   }
 
   @Post('clientes/:clienteId/sync/pausar')
@@ -39,7 +41,8 @@ export class SyncController {
   }
 
   @Get('sync/logs')
-  logs() {
-    return this.syncService.listLogs();
+  @ApiQuery({ name: 'clienteId', required: true, description: 'Escopo do cliente para leitura de logs' })
+  logs(@Query() query: ClienteScopeQueryDto) {
+    return this.syncService.listLogs(query.clienteId);
   }
 }

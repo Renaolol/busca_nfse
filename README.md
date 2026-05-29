@@ -65,6 +65,9 @@ Veja `.env.example`.
 - `SYNC_AUTO_RUN_INTERVAL_MS`: intervalo entre ciclos automaticos (padrao `30000`).
 - `SYNC_AUTO_RUN_STARTUP_DELAY_MS`: atraso inicial apos boot para primeiro ciclo automatico (padrao `3000`).
 - `SYNC_API_RETRY_DELAY_MS`: espera antes de tentar novamente quando ocorrer erro temporario de API (ex.: HTTP 429) (padrao `60000`).
+- `SYNC_DAILY_INTERVAL_MS`: intervalo da rotina diaria quando o controle esta no modo `somente_novas` (padrao `86400000` = 24h).
+- `SYNC_DAILY_MAX_NSU_PER_RUN`: quantidade maxima de NSUs processados por ciclo para controles no modo diario (padrao `50`).
+- `CERT_MASTER_KEY`: obrigatoria e deve ser configurada com segredo proprio (a API recusa iniciar com valor placeholder `CHANGE_ME...`).
 
 ## Comandos principais
 
@@ -79,6 +82,10 @@ npm run prisma:generate
 npm run docker:up
 npm run docker:down
 npm run sync:run-once
+npm run job:verificar-certificados
+npm run job:gerar-danfse-pendente
+npm run job:reprocessar-erros
+npm run job:limpar-temporarios
 ```
 
 ## Sincronizacao manual
@@ -86,6 +93,24 @@ npm run sync:run-once
 O endpoint `POST /sync/rodar-agora` dispara uma execucao manual do ciclo de sincronizacao (por padrao com adapter mock).
 Para teste pontual da API ADN, use o endpoint temporario `POST /sync/testar-nsu` com `clienteId`, `estabelecimentoId` e `nsu`.
 Para teste real, defina `NFSE_ADN_CLIENT_MODE=real` e use certificado A1 valido no cadastro.
+Para consultar logs de sync por cliente, use `GET /sync/logs?clienteId=UUID`.
+
+### Iniciar sync com modo
+
+Endpoint: `POST /clientes/:clienteId/sync/iniciar`
+
+Body opcional:
+
+```json
+{
+  "modo": "historico"
+}
+```
+
+Valores aceitos:
+
+- `historico`: sincroniza a partir do NSU 1 (comportamento padrao).
+- `diario`: usa modo `somente_novas`, com agendamento diario apos encontrar que nao ha novos documentos.
 
 ## Sincronizacao automatica
 
@@ -104,6 +129,8 @@ No momento da importacao, o sistema tambem gera e salva o DANFSE em PDF.
 - `GET /nfse/:id/xml`: retorna XML da nota com `fileName`, `contentType` e `contentBase64`.
 - `GET /nfse/:id/danfse`: retorna DANFSE em PDF com `fileName`, `contentType` e `contentBase64`.
 - `POST /nfse/reprocessar-xmls`: reprocessa XMLs ja salvos para preencher campos faltantes e (opcionalmente) regenerar DANFSE.
+- Os endpoints `GET /nfse/:id`, `GET /nfse/:id/xml` e `GET /nfse/:id/danfse` exigem `?clienteId=...` para garantir escopo de acesso por cliente.
+  - `clienteId` deve ser UUID valido.
 
 Quando o DANFSE nao existir para uma nota ja salva, ele e gerado automaticamente a partir do XML no primeiro download.
 
@@ -127,15 +154,33 @@ Com a API rodando, abra:
 - `http://localhost:3000/app`
 
 Esse frontend permite testar onboarding de cliente/certificado, controle de sync e pesquisa de NFS-e.
+O layout esta separado em 3 menus:
+
+- `Clientes`: cadastro/edicao, certificados e contexto ativo.
+- `Notas`: filtros, listagem, separacao emitidas/tomadas e download em lote (XML/DANFSE) das linhas selecionadas.
+- `Busca API`: operacoes de sync, logs, teste de NSU e escolha de modo `historico` ou `diario`.
 Use a lista suspensa de clientes para selecionar o contexto ativo; ao selecionar, as notas do cliente sao carregadas automaticamente.
 Edicao de dados e certificados fica disponivel via botoes \"Editar dados\" e \"Editar certificados\".
 Ao criar cliente, o backend ja cria automaticamente o estabelecimento principal com o mesmo CNPJ.
 No cadastro de certificado, a API extrai automaticamente validade, thumbprint, serial, emissor e subject do arquivo `.pfx/.p12`.
 Certificados inativos podem ser excluidos por `DELETE /certificados/:id` (ativos exigem desativacao antes).
+Nos endpoints por `id` de certificado (`GET/POST/DELETE /certificados/:id...`), informe `?clienteId=...` para validar escopo.
+  - `clienteId` deve ser UUID valido.
 Tambem permite consultar por CNPJ base e separar NFS-e em emitidas e tomadas.
 Na tabela de resultados, os botoes `XML` e `DANFSE` fazem download direto dos arquivos.
+As operacoes por ID em certificado e NFS-e usam `clienteId` como escopo (query string) para evitar acesso cruzado entre clientes.
 No bloco de sincronizacao, o botao `Reprocessar XMLs` executa `POST /nfse/reprocessar-xmls` para backfill de campos e regeneracao das DANFSE.
 Quando houver pendencias (sem certificado, sem sync ou sem notas), o painel exibe mensagens explicativas.
+
+## Jobs avulsos (operacao)
+
+- `npm run sync:run-once`: executa 1 ciclo de sincronizacao ADN.
+- `npm run job:verificar-certificados`: desativa certificados vencidos e ajusta status de controles.
+- `npm run job:gerar-danfse-pendente`: reprocessa XMLs incompletos e regenera DANFSE.
+  - Parametros opcionais: `JOB_CLIENTE_ID` (UUID) e `JOB_LIMIT` (inteiro > 0).
+- `npm run job:reprocessar-erros`: reativa controles em `erro_api` prontos para nova tentativa.
+- `npm run job:limpar-temporarios`: remove pastas temporarias antigas (`nfse-cert-*`, `nfse-mtls-*`).
+  - Parametro opcional: `JOB_OLDER_THAN_HOURS` (inteiro > 0, padrao `1`).
 
 ## Links oficiais NFS-e
 

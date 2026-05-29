@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
+import { ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { DownloadLoteDto } from './dto/download-lote.dto';
 import { DownloadDocumentDto } from './dto/download-document.dto';
 import { ImportXmlDto } from './dto/import-xml.dto';
@@ -23,20 +24,23 @@ export class NfseController {
   }
 
   @Get(':id')
-  findOne(@Param('id') id: string) {
-    return this.nfseService.findOne(id);
+  @ApiQuery({ name: 'clienteId', required: true, description: 'Escopo do cliente para acesso ao documento' })
+  findOne(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
+    return this.nfseService.findOne(id, query.clienteId);
   }
 
   @Get(':id/xml')
   @ApiOkResponse({ type: DownloadDocumentDto })
-  getXml(@Param('id') id: string) {
-    return this.nfseService.getXml(id);
+  @ApiQuery({ name: 'clienteId', required: true, description: 'Escopo do cliente para acesso ao documento' })
+  getXml(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
+    return this.nfseService.getXml(id, query.clienteId);
   }
 
   @Get(':id/danfse')
   @ApiOkResponse({ type: DownloadDocumentDto })
-  getDanfse(@Param('id') id: string) {
-    return this.nfseService.getDanfse(id);
+  @ApiQuery({ name: 'clienteId', required: true, description: 'Escopo do cliente para acesso ao documento' })
+  getDanfse(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
+    return this.nfseService.getDanfse(id, query.clienteId);
   }
 
   @Post('importar-xml')

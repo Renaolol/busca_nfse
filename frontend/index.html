@@ -71,132 +71,105 @@
         </div>
       </section>
 
-      <section class="context-grid reveal">
-        <article class="context-card">
-          <h2>Cliente ativo</h2>
-          <code id="ctxClientId">-</code>
-        </article>
-        <article class="context-card">
-          <h2>Estabelecimento ativo</h2>
-          <code id="ctxEstablishmentId">-</code>
-        </article>
-        <article class="context-card">
-          <h2>Certificado ativo</h2>
-          <code id="ctxCertificateId">-</code>
-        </article>
+      <nav class="menu-nav reveal" aria-label="Menu principal do painel">
+        <button class="menu-btn active" type="button" data-menu-target="menuClientes">Clientes</button>
+        <button class="menu-btn" type="button" data-menu-target="menuNotas">Notas</button>
+        <button class="menu-btn" type="button" data-menu-target="menuBuscaApi">Busca API</button>
+      </nav>
+
+      <section id="menuClientes" class="menu-panel">
+        <section class="context-grid reveal">
+          <article class="context-card">
+            <h2>Cliente ativo</h2>
+            <code id="ctxClientId">-</code>
+          </article>
+          <article class="context-card">
+            <h2>Estabelecimento ativo</h2>
+            <code id="ctxEstablishmentId">-</code>
+          </article>
+          <article class="context-card">
+            <h2>Certificado ativo</h2>
+            <code id="ctxCertificateId">-</code>
+          </article>
+        </section>
+
+        <div class="panel-grid">
+          <section id="createClientCard" class="card reveal stagger-1 hidden">
+            <h2>Novo cliente</h2>
+            <form id="clientForm" class="stack">
+              <label>
+                Razao social
+                <input name="razaoSocial" required />
+              </label>
+              <label>
+                CNPJ (14 digitos)
+                <input name="cnpj" maxlength="14" required />
+              </label>
+              <label>
+                Inscricao municipal (IM)
+                <input name="inscricaoMunicipal" />
+              </label>
+              <button class="btn" type="submit">Criar cliente</button>
+            </form>
+          </section>
+
+          <section id="editClientCard" class="card reveal stagger-2 hidden">
+            <h2>Editar dados do cliente</h2>
+            <form id="clientEditForm" class="stack">
+              <label>
+                Razao social
+                <input name="razaoSocial" required />
+              </label>
+              <label>
+                CNPJ (14 digitos)
+                <input name="cnpj" maxlength="14" required />
+              </label>
+              <label>
+                Inscricao municipal (IM)
+                <input name="inscricaoMunicipal" />
+              </label>
+              <button class="btn" type="submit">Salvar alteracoes</button>
+            </form>
+          </section>
+
+          <section id="certificateCard" class="card reveal stagger-3 hidden wide">
+            <h2>Certificados</h2>
+            <form id="certificateForm" class="stack">
+              <label>
+                Cliente ID
+                <input id="certClientId" name="clienteId" required />
+              </label>
+              <label>
+                Estabelecimento ID
+                <input id="certEstablishmentId" name="estabelecimentoId" required />
+              </label>
+              <label>
+                Nome
+                <input name="nome" required />
+              </label>
+              <label>
+                CNPJ titular (14 digitos)
+                <input name="cnpjTitular" maxlength="14" required />
+              </label>
+              <label>
+                Senha do certificado
+                <input name="senha" type="password" required />
+              </label>
+              <p class="muted">A validade sera identificada automaticamente pelo backend ao ler o arquivo do certificado.</p>
+              <label>
+                Arquivo .pfx/.p12
+                <input id="certFile" name="arquivo" type="file" accept=".pfx,.p12" required />
+              </label>
+              <button class="btn" type="submit">Salvar certificado</button>
+            </form>
+            <div id="certificatesSummary" class="status-box muted">Sem leitura de certificados ainda.</div>
+            <div id="certificatesList" class="stack"></div>
+          </section>
+        </div>
       </section>
 
-      <div class="panel-grid">
-        <section id="createClientCard" class="card reveal stagger-1 hidden">
-          <h2>Novo cliente</h2>
-          <form id="clientForm" class="stack">
-            <label>
-              Razao social
-              <input name="razaoSocial" required />
-            </label>
-            <label>
-              CNPJ (14 digitos)
-              <input name="cnpj" maxlength="14" required />
-            </label>
-            <label>
-              Inscricao municipal (IM)
-              <input name="inscricaoMunicipal" />
-            </label>
-            <button class="btn" type="submit">Criar cliente</button>
-          </form>
-        </section>
-
-        <section id="editClientCard" class="card reveal stagger-2 hidden">
-          <h2>Editar dados do cliente</h2>
-          <form id="clientEditForm" class="stack">
-            <label>
-              Razao social
-              <input name="razaoSocial" required />
-            </label>
-            <label>
-              CNPJ (14 digitos)
-              <input name="cnpj" maxlength="14" required />
-            </label>
-            <label>
-              Inscricao municipal (IM)
-              <input name="inscricaoMunicipal" />
-            </label>
-            <button class="btn" type="submit">Salvar alteracoes</button>
-          </form>
-        </section>
-
-        <section id="certificateCard" class="card reveal stagger-3 hidden">
-          <h2>Certificados</h2>
-          <form id="certificateForm" class="stack">
-            <label>
-              Cliente ID
-              <input id="certClientId" name="clienteId" required />
-            </label>
-            <label>
-              Estabelecimento ID
-              <input id="certEstablishmentId" name="estabelecimentoId" required />
-            </label>
-            <label>
-              Nome
-              <input name="nome" required />
-            </label>
-            <label>
-              CNPJ titular (14 digitos)
-              <input name="cnpjTitular" maxlength="14" required />
-            </label>
-            <label>
-              Senha do certificado
-              <input name="senha" type="password" required />
-            </label>
-            <p class="muted">A validade sera identificada automaticamente pelo backend ao ler o arquivo do certificado.</p>
-            <label>
-              Arquivo .pfx/.p12
-              <input id="certFile" name="arquivo" type="file" accept=".pfx,.p12" required />
-            </label>
-            <button class="btn" type="submit">Salvar certificado</button>
-          </form>
-          <div id="certificatesSummary" class="status-box muted">Sem leitura de certificados ainda.</div>
-          <div id="certificatesList" class="stack"></div>
-        </section>
-
-        <section class="card reveal stagger-4">
-          <h2>Sincronizacao e status</h2>
-          <form id="syncForm" class="stack">
-            <label>
-              Cliente ID
-              <input id="syncClientId" name="clienteId" required />
-            </label>
-          </form>
-          <div class="btn-row">
-            <button id="syncStart" class="btn" type="button">Iniciar sync</button>
-            <button id="syncPause" class="btn secondary" type="button">Pausar</button>
-            <button id="syncResume" class="btn secondary" type="button">Retomar</button>
-            <button id="syncStatus" class="btn ghost" type="button">Status</button>
-          </div>
-          <div class="btn-row">
-            <button id="syncRunOnce" class="btn" type="button">Rodar agora (1x)</button>
-            <button id="syncRunFive" class="btn ghost" type="button">Rodar agora (5x)</button>
-            <button id="syncLogs" class="btn ghost" type="button">Ver logs</button>
-            <button id="syncReprocessXmls" class="btn ghost" type="button">Reprocessar XMLs</button>
-          </div>
-          <div class="btn-row">
-            <label class="sync-nsu-inline">
-              Ambiente
-              <select id="syncSingleNsuEnv">
-                <option value="producao_restrita" selected>Producao restrita (teste)</option>
-                <option value="producao">Producao</option>
-              </select>
-            </label>
-            <label class="sync-nsu-inline">
-              NSU para teste
-              <input id="syncSingleNsuInput" type="text" inputmode="numeric" placeholder="Ex.: 10" />
-            </label>
-            <button id="syncTestSingleNsu" class="btn secondary" type="button">Teste: buscar 1 NSU</button>
-          </div>
-          <p class="muted">Botao temporario: testa apenas 1 NSU via API ADN, sem persistir NFS-e.</p>
-        </section>
-
-        <section class="card reveal stagger-5 wide">
+      <section id="menuNotas" class="menu-panel hidden">
+        <section class="card reveal stagger-5">
           <h2>Pesquisar NFS-e</h2>
           <form id="searchForm" class="search-grid">
             <label>
@@ -253,10 +226,18 @@
             </button>
           </form>
 
+          <div class="btn-row notes-bulk-actions">
+            <button id="notesSelectAll" class="btn ghost" type="button">Selecionar todas visiveis</button>
+            <button id="notesClearSelection" class="btn ghost" type="button">Limpar selecao</button>
+            <button id="notesDownloadXmlSelected" class="btn secondary" type="button">Baixar XML selecionadas</button>
+            <button id="notesDownloadDanfseSelected" class="btn secondary" type="button">Baixar DANFSE selecionadas</button>
+          </div>
+
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
+                  <th>Selecionar</th>
                   <th>Numero da nota</th>
                   <th>Data emissao</th>
                   <th>Status</th>
@@ -268,13 +249,60 @@
               </thead>
               <tbody id="nfseRows">
                 <tr>
-                  <td colspan="7">Nenhum resultado ainda.</td>
+                  <td colspan="8">Nenhum resultado ainda.</td>
                 </tr>
               </tbody>
             </table>
           </div>
         </section>
-      </div>
+      </section>
+
+      <section id="menuBuscaApi" class="menu-panel hidden">
+        <section class="card reveal stagger-4">
+          <h2>Busca de notas via API</h2>
+          <p class="helper">Use este menu para minerar o banco pela API ADN e manter a captura diaria de novas notas.</p>
+          <form id="syncForm" class="stack">
+            <label>
+              Cliente ID
+              <input id="syncClientId" name="clienteId" required />
+            </label>
+            <label>
+              Modo de sincronizacao
+              <select id="syncMode">
+                <option value="historico">Historico completo (desde NSU 1)</option>
+                <option value="diario">Diario (somente novas)</option>
+              </select>
+            </label>
+          </form>
+          <div class="btn-row">
+            <button id="syncStart" class="btn" type="button">Iniciar sync</button>
+            <button id="syncPause" class="btn secondary" type="button">Pausar</button>
+            <button id="syncResume" class="btn secondary" type="button">Retomar</button>
+            <button id="syncStatus" class="btn ghost" type="button">Status</button>
+          </div>
+          <div class="btn-row">
+            <button id="syncRunOnce" class="btn" type="button">Rodar agora (1x)</button>
+            <button id="syncRunFive" class="btn ghost" type="button">Rodar agora (5x)</button>
+            <button id="syncLogs" class="btn ghost" type="button">Ver logs</button>
+            <button id="syncReprocessXmls" class="btn ghost" type="button">Reprocessar XMLs</button>
+          </div>
+          <div class="btn-row">
+            <label class="sync-nsu-inline">
+              Ambiente
+              <select id="syncSingleNsuEnv">
+                <option value="producao_restrita" selected>Producao restrita (teste)</option>
+                <option value="producao">Producao</option>
+              </select>
+            </label>
+            <label class="sync-nsu-inline">
+              NSU para teste
+              <input id="syncSingleNsuInput" type="text" inputmode="numeric" placeholder="Ex.: 10" />
+            </label>
+            <button id="syncTestSingleNsu" class="btn secondary" type="button">Teste: buscar 1 NSU</button>
+          </div>
+          <p class="muted">Botao temporario: testa apenas 1 NSU via API ADN, sem persistir NFS-e.</p>
+        </section>
+      </section>
 
       <section class="card reveal">
         <h2>Console de respostas</h2>

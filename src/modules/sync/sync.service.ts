@@ -7,6 +7,7 @@ import { NfseDanfseService } from '../nfse/nfse-danfse.service';
 import { NfseXmlParserService } from '../nfse/nfse-xml-parser.service';
 import { LocalStorageService } from '../storage/storage.service';
 import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
+import { StartSyncDto } from './dto/start-sync.dto';
 
 @Injectable()
 export class SyncService implements OnModuleInit, OnModuleDestroy {
@@ -17,6 +18,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   private readonly autoSyncIntervalMs = this.parsePositiveNumberEnv('SYNC_AUTO_RUN_INTERVAL_MS', 30000);
   private readonly autoSyncStartupDelayMs = this.parsePositiveNumberEnv('SYNC_AUTO_RUN_STARTUP_DELAY_MS', 3000);
   private readonly apiRetryDelayMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_DELAY_MS', 60000);
+  private readonly dailySyncIntervalMs = this.parsePositiveNumberEnv('SYNC_DAILY_INTERVAL_MS', 24 * 60 * 60 * 1000);
+  private readonly dailySyncMaxNsuPerRun = this.parsePositiveNumberEnv('SYNC_DAILY_MAX_NSU_PER_RUN', 50);
 
   constructor(
     private readonly prisma: PrismaService,
@@ -52,35 +55,63 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     this.autoSyncTimer = null;
   }
 
-  async iniciarSync(clienteId: string): Promise<{ controlesCriadosOuAtualizados: number }> {
+  async iniciarSync(clienteId: string, options?: StartSyncDto): Promise<{ controlesCriadosOuAtualizados: number }> {
     await this.ensureClient(clienteId);
+    const modoSync = options?.modo === 'diario' ? SyncMode.somente_novas : SyncMode.historico_desde_nsu_1;
 
     const establishments = await this.prisma.clienteEstabelecimento.findMany({
       where: { clienteId, ativo: true }
     });
 
     for (const establishment of establishments) {
-      await this.prisma.nfseSyncControle.upsert({
+      const existingControl = await this.prisma.nfseSyncControle.findUnique({
         where: {
-          cnpjConsulta_ambiente: {
+          clienteId_cnpjConsulta_ambiente: {
+            clienteId,
             cnpjConsulta: establishment.cnpj,
             ambiente: Ambiente.producao
           }
-        },
-        update: {
-          status: SyncStatus.ativo,
-          ultimaMensagem: 'Sincronizacao ativada manualmente'
-        },
-        create: {
+        }
+      });
+
+      if (existingControl) {
+        await this.prisma.nfseSyncControle.update({
+          where: { id: existingControl.id },
+          data: {
+            clienteId,
+            estabelecimentoId: establishment.id,
+            status: SyncStatus.ativo,
+            modoSync,
+            proximaExecucao: null,
+            ultimaMensagem:
+              modoSync === SyncMode.somente_novas
+                ? 'Sincronizacao diaria ativada manualmente'
+                : 'Sincronizacao ativada manualmente'
+          }
+        });
+        continue;
+      }
+
+      const initialNsu =
+        modoSync === SyncMode.somente_novas
+          ? await this.resolveInitialNsuForOnlyNew(clienteId, establishment.cnpj, Ambiente.producao)
+          : BigInt(0);
+
+      await this.prisma.nfseSyncControle.create({
+        data: {
           clienteId,
           estabelecimentoId: establishment.id,
           cnpjConsulta: establishment.cnpj,
           ambiente: Ambiente.producao,
-          ultimoNsuConsultado: BigInt(0),
-          ultimoNsuComDocumento: BigInt(0),
-          nsuInicial: BigInt(1),
-          modoSync: SyncMode.historico_desde_nsu_1,
-          status: SyncStatus.ativo
+          ultimoNsuConsultado: initialNsu,
+          ultimoNsuComDocumento: initialNsu,
+          nsuInicial: initialNsu + BigInt(1),
+          modoSync,
+          status: SyncStatus.ativo,
+          ultimaMensagem:
+            modoSync === SyncMode.somente_novas
+              ? 'Sincronizacao diaria ativada manualmente'
+              : 'Sincronizacao ativada manualmente'
         }
       });
     }
@@ -184,164 +215,180 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
-      const nextNsu = control.ultimoNsuConsultado + BigInt(1);
+      const isDailyMode = control.modoSync === SyncMode.somente_novas;
+      const maxSteps = isDailyMode ? this.dailySyncMaxNsuPerRun : 1;
+      let currentNsu = control.ultimoNsuConsultado;
+      let shouldStop = false;
 
-      const result = await this.adnClient.getDFeByNsu({
-        cnpjConsulta: control.cnpjConsulta,
-        nsu: nextNsu,
-        ambiente:
-          control.ambiente === Ambiente.producao
-            ? NfseAmbiente.PRODUCAO
-            : NfseAmbiente.PRODUCAO_RESTRITA,
-        certificateId: certificate.id
-      });
+      for (let step = 0; step < maxSteps && !shouldStop; step += 1) {
+        const nextNsu = currentNsu + BigInt(1);
+        const result = await this.adnClient.getDFeByNsu({
+          cnpjConsulta: control.cnpjConsulta,
+          nsu: nextNsu,
+          ambiente:
+            control.ambiente === Ambiente.producao
+              ? NfseAmbiente.PRODUCAO
+              : NfseAmbiente.PRODUCAO_RESTRITA,
+          certificateId: certificate.id
+        });
 
-      if (this.mustRetryWithoutAdvancingNsu(result)) {
-        const retryAt = new Date(Date.now() + this.apiRetryDelayMs);
-        await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'erro_api', result.message ?? 'Falha temporaria ao consultar ADN');
-        await this.prisma.nfseSyncControle.update({
-          where: { id: control.id },
-          data: {
-            ultimaExecucao: new Date(),
-            proximaExecucao: retryAt,
-            ultimaMensagem: result.message ?? 'Falha temporaria ao consultar ADN; nova tentativa agendada'
+        if (this.mustRetryWithoutAdvancingNsu(result)) {
+          const retryAt = new Date(Date.now() + this.apiRetryDelayMs);
+          await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'erro_api', result.message ?? 'Falha temporaria ao consultar ADN');
+          await this.prisma.nfseSyncControle.update({
+            where: { id: control.id },
+            data: {
+              ultimaExecucao: new Date(),
+              proximaExecucao: retryAt,
+              ultimaMensagem: result.message ?? 'Falha temporaria ao consultar ADN; nova tentativa agendada'
+            }
+          });
+          shouldStop = true;
+          continue;
+        }
+
+        if (!result.hasDocument || !result.xml || !result.chaveAcesso) {
+          const nextExecution = isDailyMode ? new Date(Date.now() + this.dailySyncIntervalMs) : null;
+          const message =
+            result.message ??
+            (isDailyMode
+              ? 'Sem documento para o NSU informado; proxima busca diaria agendada'
+              : 'Sem documento para o NSU informado');
+          await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'sem_documento', message);
+          await this.prisma.nfseSyncControle.update({
+            where: { id: control.id },
+            data: {
+              ultimoNsuConsultado: nextNsu,
+              ultimaExecucao: new Date(),
+              proximaExecucao: nextExecution,
+              ultimaMensagem: message
+            }
+          });
+          currentNsu = nextNsu;
+          shouldStop = true;
+          continue;
+        }
+
+        const chave = result.chaveAcesso;
+        let parsedXml: ReturnType<NfseXmlParserService['parse']> | null = null;
+        try {
+          parsedXml = this.parser.parse(result.xml);
+        } catch (error) {
+          this.logger.warn(`Falha ao parsear XML da chave ${chave}: ${this.toErrorMessage(error)}`);
+        }
+
+        const dataReferencia = parsedXml?.dataEmissao ?? new Date();
+        const competencia =
+          parsedXml?.competencia ??
+          (parsedXml?.dataEmissao
+            ? new Date(Date.UTC(parsedXml.dataEmissao.getUTCFullYear(), parsedXml.dataEmissao.getUTCMonth(), 1))
+            : undefined);
+        const year = dataReferencia.getUTCFullYear();
+        const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
+        const cnpjPasta =
+          this.normalizeCnpj(parsedXml?.cnpjPrestador) ??
+          this.normalizeCnpj(parsedXml?.cnpjTomador) ??
+          control.cnpjConsulta;
+        const xmlKey = `nfse/${control.ambiente}/${cnpjPasta}/${year}/${month}/xml/${chave}.xml`;
+        await this.storage.putObject(xmlKey, result.xml);
+        const danfseKey = `nfse/${control.ambiente}/${cnpjPasta}/${year}/${month}/danfse/${chave}.pdf`;
+        const danfsePdf = this.danfse.generateFromXml(result.xml, {
+          chaveAcesso: chave,
+          numeroNfse: parsedXml?.numeroNfse,
+          dataEmissao: parsedXml?.dataEmissao,
+          status: this.normalizeStatus(parsedXml?.status),
+          cnpjPrestador: parsedXml?.cnpjPrestador ?? control.cnpjConsulta,
+          razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
+          cnpjTomador: parsedXml?.cnpjTomador,
+          razaoSocialTomador: parsedXml?.razaoSocialTomador,
+          valorServico: parsedXml?.valorServico,
+          descricaoServico: parsedXml?.descricaoServico
+        });
+        await this.storage.putObject(danfseKey, danfsePdf);
+        const hash = this.parser.getHash(result.xml);
+
+        await this.prisma.nfseDocumento.upsert({
+          where: {
+            ambiente_chaveAcesso: {
+              ambiente: control.ambiente,
+              chaveAcesso: chave
+            }
+          },
+          update: {
+            nsu: nextNsu,
+            numeroNfse: parsedXml?.numeroNfse,
+            serie: parsedXml?.serie,
+            dataEmissao: parsedXml?.dataEmissao,
+            competencia,
+            status: this.normalizeStatus(parsedXml?.status) ?? 'autorizada',
+            cnpjPrestador: parsedXml?.cnpjPrestador ?? control.cnpjConsulta,
+            razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
+            cnpjTomador: parsedXml?.cnpjTomador,
+            razaoSocialTomador: parsedXml?.razaoSocialTomador,
+            municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
+            municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
+            valorServico: this.toDecimal(parsedXml?.valorServico),
+            valorDeducoes: this.toDecimal(parsedXml?.valorDeducoes),
+            valorIss: this.toDecimal(parsedXml?.valorIss),
+            aliquotaIss: this.toDecimal(parsedXml?.aliquotaIss),
+            codigoServicoNacional: parsedXml?.codigoServicoNacional,
+            itemListaServico: parsedXml?.itemListaServico,
+            descricaoServico: parsedXml?.descricaoServico,
+            xmlPath: xmlKey,
+            danfsePath: danfseKey,
+            hashXml: hash,
+            origem: DocumentoOrigem.adn_nsu,
+            updatedAt: new Date()
+          },
+          create: {
+            clienteId: control.clienteId,
+            estabelecimentoId: control.estabelecimentoId,
+            ambiente: control.ambiente,
+            nsu: nextNsu,
+            chaveAcesso: chave,
+            numeroNfse: parsedXml?.numeroNfse,
+            serie: parsedXml?.serie,
+            dataEmissao: parsedXml?.dataEmissao,
+            competencia,
+            status: this.normalizeStatus(parsedXml?.status) ?? 'autorizada',
+            cnpjPrestador: parsedXml?.cnpjPrestador ?? control.cnpjConsulta,
+            razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
+            cnpjTomador: parsedXml?.cnpjTomador,
+            razaoSocialTomador: parsedXml?.razaoSocialTomador,
+            municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
+            municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
+            valorServico: this.toDecimal(parsedXml?.valorServico),
+            valorDeducoes: this.toDecimal(parsedXml?.valorDeducoes),
+            valorIss: this.toDecimal(parsedXml?.valorIss),
+            aliquotaIss: this.toDecimal(parsedXml?.aliquotaIss),
+            codigoServicoNacional: parsedXml?.codigoServicoNacional,
+            itemListaServico: parsedXml?.itemListaServico,
+            descricaoServico: parsedXml?.descricaoServico,
+            xmlPath: xmlKey,
+            danfsePath: danfseKey,
+            hashXml: hash,
+            origem: DocumentoOrigem.adn_nsu
           }
         });
-        continue;
-      }
 
-      if (!result.hasDocument || !result.xml || !result.chaveAcesso) {
-        await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'sem_documento', result.message ?? 'Sem documento para o NSU');
         await this.prisma.nfseSyncControle.update({
           where: { id: control.id },
           data: {
             ultimoNsuConsultado: nextNsu,
+            ultimoNsuComDocumento: nextNsu,
+            totalDocumentosBaixados: {
+              increment: 1
+            },
             ultimaExecucao: new Date(),
             proximaExecucao: null,
-            ultimaMensagem: result.message ?? 'Sem documento para o NSU informado'
+            ultimaMensagem: 'Documento sincronizado com sucesso'
           }
         });
-        continue;
+
+        await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'sucesso', 'Documento sincronizado');
+        documentsSaved += 1;
+        currentNsu = nextNsu;
       }
-
-      const chave = result.chaveAcesso;
-      let parsedXml: ReturnType<NfseXmlParserService['parse']> | null = null;
-      try {
-        parsedXml = this.parser.parse(result.xml);
-      } catch (error) {
-        this.logger.warn(`Falha ao parsear XML da chave ${chave}: ${this.toErrorMessage(error)}`);
-      }
-
-      const dataReferencia = parsedXml?.dataEmissao ?? new Date();
-      const competencia =
-        parsedXml?.competencia ??
-        (parsedXml?.dataEmissao
-          ? new Date(Date.UTC(parsedXml.dataEmissao.getUTCFullYear(), parsedXml.dataEmissao.getUTCMonth(), 1))
-          : undefined);
-      const year = dataReferencia.getUTCFullYear();
-      const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
-      const cnpjPasta =
-        this.normalizeCnpj(parsedXml?.cnpjPrestador) ??
-        this.normalizeCnpj(parsedXml?.cnpjTomador) ??
-        control.cnpjConsulta;
-      const xmlKey = `nfse/${control.ambiente}/${cnpjPasta}/${year}/${month}/xml/${chave}.xml`;
-      await this.storage.putObject(xmlKey, result.xml);
-      const danfseKey = `nfse/${control.ambiente}/${cnpjPasta}/${year}/${month}/danfse/${chave}.pdf`;
-      const danfsePdf = this.danfse.generateFromXml(result.xml, {
-        chaveAcesso: chave,
-        numeroNfse: parsedXml?.numeroNfse,
-        dataEmissao: parsedXml?.dataEmissao,
-        status: this.normalizeStatus(parsedXml?.status),
-        cnpjPrestador: parsedXml?.cnpjPrestador ?? control.cnpjConsulta,
-        razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
-        cnpjTomador: parsedXml?.cnpjTomador,
-        razaoSocialTomador: parsedXml?.razaoSocialTomador,
-        valorServico: parsedXml?.valorServico,
-        descricaoServico: parsedXml?.descricaoServico
-      });
-      await this.storage.putObject(danfseKey, danfsePdf);
-      const hash = this.parser.getHash(result.xml);
-
-      await this.prisma.nfseDocumento.upsert({
-        where: {
-          ambiente_chaveAcesso: {
-            ambiente: control.ambiente,
-            chaveAcesso: chave
-          }
-        },
-        update: {
-          nsu: nextNsu,
-          numeroNfse: parsedXml?.numeroNfse,
-          serie: parsedXml?.serie,
-          dataEmissao: parsedXml?.dataEmissao,
-          competencia,
-          status: this.normalizeStatus(parsedXml?.status) ?? 'autorizada',
-          cnpjPrestador: parsedXml?.cnpjPrestador ?? control.cnpjConsulta,
-          razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
-          cnpjTomador: parsedXml?.cnpjTomador,
-          razaoSocialTomador: parsedXml?.razaoSocialTomador,
-          municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
-          municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
-          valorServico: this.toDecimal(parsedXml?.valorServico),
-          valorDeducoes: this.toDecimal(parsedXml?.valorDeducoes),
-          valorIss: this.toDecimal(parsedXml?.valorIss),
-          aliquotaIss: this.toDecimal(parsedXml?.aliquotaIss),
-          codigoServicoNacional: parsedXml?.codigoServicoNacional,
-          itemListaServico: parsedXml?.itemListaServico,
-          descricaoServico: parsedXml?.descricaoServico,
-          xmlPath: xmlKey,
-          danfsePath: danfseKey,
-          hashXml: hash,
-          origem: DocumentoOrigem.adn_nsu,
-          updatedAt: new Date()
-        },
-        create: {
-          clienteId: control.clienteId,
-          estabelecimentoId: control.estabelecimentoId,
-          ambiente: control.ambiente,
-          nsu: nextNsu,
-          chaveAcesso: chave,
-          numeroNfse: parsedXml?.numeroNfse,
-          serie: parsedXml?.serie,
-          dataEmissao: parsedXml?.dataEmissao,
-          competencia,
-          status: this.normalizeStatus(parsedXml?.status) ?? 'autorizada',
-          cnpjPrestador: parsedXml?.cnpjPrestador ?? control.cnpjConsulta,
-          razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
-          cnpjTomador: parsedXml?.cnpjTomador,
-          razaoSocialTomador: parsedXml?.razaoSocialTomador,
-          municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
-          municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
-          valorServico: this.toDecimal(parsedXml?.valorServico),
-          valorDeducoes: this.toDecimal(parsedXml?.valorDeducoes),
-          valorIss: this.toDecimal(parsedXml?.valorIss),
-          aliquotaIss: this.toDecimal(parsedXml?.aliquotaIss),
-          codigoServicoNacional: parsedXml?.codigoServicoNacional,
-          itemListaServico: parsedXml?.itemListaServico,
-          descricaoServico: parsedXml?.descricaoServico,
-          xmlPath: xmlKey,
-          danfsePath: danfseKey,
-          hashXml: hash,
-          origem: DocumentoOrigem.adn_nsu
-        }
-      });
-
-      await this.prisma.nfseSyncControle.update({
-        where: { id: control.id },
-        data: {
-          ultimoNsuConsultado: nextNsu,
-          ultimoNsuComDocumento: nextNsu,
-          totalDocumentosBaixados: {
-            increment: 1
-          },
-          ultimaExecucao: new Date(),
-          proximaExecucao: null,
-          ultimaMensagem: 'Documento sincronizado com sucesso'
-        }
-      });
-
-      await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'sucesso', 'Documento sincronizado');
-      documentsSaved += 1;
     }
 
     return {
@@ -391,8 +438,17 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  async listLogs() {
+  async listLogs(clienteId: string) {
+    if (!clienteId) {
+      throw new BadRequestException('clienteId obrigatorio para consulta de logs');
+    }
+
+    await this.ensureClient(clienteId);
+
     return this.prisma.nfseSyncLog.findMany({
+      where: {
+        clienteId
+      },
       orderBy: { createdAt: 'desc' },
       take: 200
     });
@@ -464,6 +520,27 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
   private toNfseAmbiente(ambiente: Ambiente): NfseAmbiente {
     return ambiente === Ambiente.producao ? NfseAmbiente.PRODUCAO : NfseAmbiente.PRODUCAO_RESTRITA;
+  }
+
+  private async resolveInitialNsuForOnlyNew(clienteId: string, cnpjConsulta: string, ambiente: Ambiente): Promise<bigint> {
+    const documento = await this.prisma.nfseDocumento.findFirst({
+      where: {
+        clienteId,
+        ambiente,
+        nsu: {
+          not: null
+        },
+        OR: [{ cnpjPrestador: cnpjConsulta }, { cnpjTomador: cnpjConsulta }]
+      },
+      orderBy: {
+        nsu: 'desc'
+      },
+      select: {
+        nsu: true
+      }
+    });
+
+    return documento?.nsu ?? BigInt(0);
   }
 
   private async runAutomaticSyncCycle(): Promise<void> {

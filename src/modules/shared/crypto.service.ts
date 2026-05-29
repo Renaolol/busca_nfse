@@ -28,7 +28,11 @@ export class CryptoService {
   }
 
   private getKey(): Buffer {
-    const secret = process.env.CERT_MASTER_KEY ?? 'change-me-with-32-byte-secret';
+    const secret = process.env.CERT_MASTER_KEY?.trim();
+    if (!secret || /^change[-_ ]?me/i.test(secret)) {
+      throw new Error('CERT_MASTER_KEY nao configurada com valor seguro');
+    }
+
     return createHash('sha256').update(secret).digest();
   }
 }

@@ -18,7 +18,11 @@
     "prisma:deploy": "prisma migrate deploy",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down -v",
-    "sync:run-once": "node dist/jobs/run-sync-once.js"
+    "sync:run-once": "node dist/jobs/run-sync-once.js",
+    "job:verificar-certificados": "node dist/jobs/run-verificar-certificados-once.js",
+    "job:gerar-danfse-pendente": "node dist/jobs/run-gerar-danfse-pendente-once.js",
+    "job:reprocessar-erros": "node dist/jobs/run-reprocessar-erros-once.js",
+    "job:limpar-temporarios": "node dist/jobs/run-limpar-temporarios-once.js"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.798.0",

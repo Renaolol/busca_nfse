@@ -77,20 +77,22 @@ export class CertificatesService {
     return certificates.map((certificate) => this.toPublic(certificate));
   }
 
-  async findOne(id: string): Promise<Record<string, unknown>> {
+  async findOne(id: string, clienteId: string): Promise<Record<string, unknown>> {
     const certificate = await this.prisma.certificado.findUnique({ where: { id } });
     if (!certificate) {
       throw new NotFoundException('Certificado nao encontrado');
     }
+    this.assertCertificateClientScope(certificate, clienteId);
 
     return this.toPublic(certificate);
   }
 
-  async setActive(id: string, ativo: boolean): Promise<Record<string, unknown>> {
+  async setActive(id: string, ativo: boolean, clienteId: string): Promise<Record<string, unknown>> {
     const certificate = await this.prisma.certificado.findUnique({ where: { id } });
     if (!certificate) {
       throw new NotFoundException('Certificado nao encontrado');
     }
+    this.assertCertificateClientScope(certificate, clienteId);
 
     const updated = await this.prisma.certificado.update({
       where: { id },
@@ -100,11 +102,12 @@ export class CertificatesService {
     return this.toPublic(updated);
   }
 
-  async remove(id: string): Promise<{ id: string; removido: true }> {
+  async remove(id: string, clienteId: string): Promise<{ id: string; removido: true }> {
     const certificate = await this.prisma.certificado.findUnique({ where: { id } });
     if (!certificate) {
       throw new NotFoundException('Certificado nao encontrado');
     }
+    this.assertCertificateClientScope(certificate, clienteId);
 
     if (certificate.ativo) {
       throw new BadRequestException('Certificado ativo nao pode ser excluido. Desative antes de excluir.');
@@ -116,7 +119,7 @@ export class CertificatesService {
     return { id, removido: true };
   }
 
-  async validate(id: string): Promise<{
+  async validate(id: string, clienteId: string): Promise<{
     valido: boolean;
     motivos: string[];
     validadeFim?: Date | null;
@@ -126,6 +129,7 @@ export class CertificatesService {
     if (!certificate) {
       throw new NotFoundException('Certificado nao encontrado');
     }
+    this.assertCertificateClientScope(certificate, clienteId);
 
     const motivos: string[] = [];
 
@@ -184,6 +188,16 @@ export class CertificatesService {
 
     if (!establishment || establishment.clienteId !== clienteId) {
       throw new NotFoundException('Estabelecimento nao encontrado para o cliente informado');
+    }
+  }
+
+  private assertCertificateClientScope(certificate: Certificado, clienteId: string): void {
+    if (!clienteId) {
+      throw new BadRequestException('clienteId obrigatorio para operacao de certificado');
+    }
+
+    if (certificate.clienteId !== clienteId) {
+      throw new NotFoundException('Certificado nao encontrado');
     }
   }
 

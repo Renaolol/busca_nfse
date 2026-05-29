@@ -136,17 +136,18 @@ export class NfseService {
     return digits || undefined;
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, clienteId: string) {
     const found = await this.prisma.nfseDocumento.findUnique({ where: { id } });
     if (!found) {
       throw new NotFoundException('NFS-e nao encontrada');
     }
+    this.assertNfseClientScope(found, clienteId);
 
     return found;
   }
 
-  async getXml(id: string) {
-    const doc = await this.findOne(id);
+  async getXml(id: string, clienteId: string) {
+    const doc = await this.findOne(id, clienteId);
     if (!doc.xmlPath) {
       throw new NotFoundException('XML nao disponivel para esta NFS-e');
     }
@@ -165,8 +166,8 @@ export class NfseService {
     };
   }
 
-  async getDanfse(id: string) {
-    const doc = await this.findOne(id);
+  async getDanfse(id: string, clienteId: string) {
+    const doc = await this.findOne(id, clienteId);
     const { danfsePath, pdf } = await this.ensureDanfseFile(doc);
 
     return {
@@ -568,5 +569,15 @@ export class NfseService {
     }
 
     return normalized;
+  }
+
+  private assertNfseClientScope(doc: NfseDocumento, clienteId: string): void {
+    if (!clienteId) {
+      throw new BadRequestException('clienteId obrigatorio para operacao de NFS-e');
+    }
+
+    if (doc.clienteId !== clienteId) {
+      throw new NotFoundException('NFS-e nao encontrada');
+    }
   }
 }

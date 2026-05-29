@@ -22,7 +22,9 @@ describe('SyncService', () => {
     },
     nfseSyncControle: {
       findMany: jest.fn(),
+      findUnique: jest.fn(),
       update: jest.fn(),
+      create: jest.fn(),
       upsert: jest.fn(),
       updateMany: jest.fn()
     },
@@ -31,7 +33,8 @@ describe('SyncService', () => {
       findMany: jest.fn()
     },
     nfseDocumento: {
-      upsert: jest.fn()
+      upsert: jest.fn(),
+      findFirst: jest.fn()
     }
   };
 
@@ -82,11 +85,14 @@ describe('SyncService', () => {
       validadeFim: new Date(Date.now() + 24 * 60 * 60 * 1000)
     });
     prisma.nfseSyncControle.findMany.mockResolvedValue([]);
+    prisma.nfseSyncControle.findUnique.mockResolvedValue(null);
     prisma.nfseSyncControle.update.mockResolvedValue({});
+    prisma.nfseSyncControle.create.mockResolvedValue({});
     prisma.nfseSyncControle.upsert.mockResolvedValue({});
     prisma.nfseSyncControle.updateMany.mockResolvedValue({ count: 1 });
     prisma.nfseSyncLog.create.mockResolvedValue({});
     prisma.nfseDocumento.upsert.mockResolvedValue({});
+    prisma.nfseDocumento.findFirst.mockResolvedValue(null);
     storage.putObject.mockResolvedValue(undefined);
   });
 
@@ -290,7 +296,43 @@ describe('SyncService', () => {
     const result = await service.iniciarSync('cliente-1');
 
     expect(result).toEqual({ controlesCriadosOuAtualizados: 1 });
-    expect(prisma.nfseSyncControle.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.nfseSyncControle.create).toHaveBeenCalledTimes(1);
     expect(runNowSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('iniciarSync consulta controle por cliente, cnpj e ambiente', async () => {
+    jest.spyOn(service, 'runNow').mockResolvedValue({
+      processed: 0,
+      documentsSaved: 0
+    });
+
+    await service.iniciarSync('cliente-1');
+
+    expect(prisma.nfseSyncControle.findUnique).toHaveBeenCalledWith({
+      where: {
+        clienteId_cnpjConsulta_ambiente: {
+          clienteId: 'cliente-1',
+          cnpjConsulta: '12345678000199',
+          ambiente: Ambiente.producao
+        }
+      }
+    });
+  });
+
+  it('filtra logs por cliente', async () => {
+    prisma.nfseSyncLog.findMany.mockResolvedValue([{ id: 'log-1' }]);
+
+    const result = await service.listLogs('cliente-1');
+
+    expect(prisma.nfseSyncLog.findMany).toHaveBeenCalledWith({
+      where: { clienteId: 'cliente-1' },
+      orderBy: { createdAt: 'desc' },
+      take: 200
+    });
+    expect(result).toEqual([{ id: 'log-1' }]);
+  });
+
+  it('exige clienteId para listar logs', async () => {
+    await expect(service.listLogs('')).rejects.toThrow(BadRequestException);
   });
 });

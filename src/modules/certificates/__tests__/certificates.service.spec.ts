@@ -266,7 +266,7 @@ describe('CertificatesService', () => {
 
     prisma.certificado.findUnique.mockResolvedValue(certificate);
 
-    const result = await service.remove('cert-inativo');
+    const result = await service.remove('cert-inativo', 'cliente-1');
 
     expect(prisma.certificado.delete).toHaveBeenCalledWith({ where: { id: 'cert-inativo' } });
     expect(storage.deleteObject).toHaveBeenCalledWith('certificados/cliente-1/cert-inativo.bin');
@@ -287,9 +287,30 @@ describe('CertificatesService', () => {
 
     prisma.certificado.findUnique.mockResolvedValue(certificate);
 
-    await expect(service.remove('cert-ativo')).rejects.toThrow(BadRequestException);
+    await expect(service.remove('cert-ativo', 'cliente-1')).rejects.toThrow(BadRequestException);
     expect(prisma.certificado.delete).not.toHaveBeenCalled();
     expect(storage.deleteObject).not.toHaveBeenCalled();
+  });
+
+  it('bloqueia operacao quando certificado nao pertence ao cliente informado', async () => {
+    const certificate = buildCertificateRecord(
+      {
+        id: 'cert-outro-cliente',
+        clienteId: 'cliente-2',
+        estabelecimentoId: 'estab-2',
+        nome: 'Certificado Outro Cliente',
+        cnpjTitular: '12345678000199',
+        tipo: 'A1',
+        arquivoCriptografadoPath: 'certificados/cliente-2/cert-outro-cliente.bin',
+        senhaCriptografada: 'enc:senha'
+      },
+      { ativo: false }
+    );
+
+    prisma.certificado.findUnique.mockResolvedValue(certificate);
+
+    await expect(service.remove('cert-outro-cliente', 'cliente-1')).rejects.toThrow('Certificado nao encontrado');
+    expect(prisma.certificado.delete).not.toHaveBeenCalled();
   });
 });
 

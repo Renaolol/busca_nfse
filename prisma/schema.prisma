@@ -125,7 +125,7 @@ model NfseSyncControle {
   estabelecimento            ClienteEstabelecimento  @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
   syncLogs                   NfseSyncLog[]
 
-  @@unique([cnpjConsulta, ambiente], map: "nfse_sync_controle_cnpj_consulta_ambiente_key")
+  @@unique([clienteId, cnpjConsulta, ambiente], map: "nfse_sync_controle_cliente_id_cnpj_consulta_ambiente_key")
   @@map("nfse_sync_controle")
 }
 

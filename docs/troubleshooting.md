@@ -14,6 +14,7 @@
 
 - Verificar status em `nfse_sync_controle`.
 - Consultar `nfse_sync_logs`.
+- Para `GET /sync/logs`, informar `clienteId` valido (UUID) na query string.
 - Validar certificado ativo e validade.
 - Se o objetivo for teste real, confirmar `NFSE_ADN_CLIENT_MODE=real`.
 - Conferir `NFSE_API_BASE_URL_RESTRITA`/`NFSE_API_BASE_URL_PRODUCAO` e conectividade HTTPS mTLS.
@@ -22,6 +23,12 @@
   - `SYNC_API_RETRY_DELAY_MS`
 - Em `429/timeout/5xx`, o sistema nao avanca NSU (evita pulo de documento) e agenda nova tentativa.
 
+## Erro de escopo (`clienteId`)
+
+- Em endpoints por `id` (`/certificados/:id...`, `/nfse/:id...`, `/sync/logs`), `clienteId` e obrigatorio.
+- O valor de `clienteId` precisa ser UUID valido; caso contrario a API retorna `400`.
+- Se o `clienteId` nao corresponder ao dono do recurso, a API responde como nao encontrado (`404`) para evitar vazamento de contexto.
+
 ## Erro ao cadastrar certificado
 
 - Conferir se o arquivo enviado e `.pfx` ou `.p12`.
@@ -29,3 +36,8 @@
 - O backend extrai a validade automaticamente; se falhar, o cadastro e recusado.
 - Se ocorrer `413 Payload Too Large`, aumentar `REQUEST_BODY_LIMIT` (ex.: `10mb`).
 - Se aparecer erro de OpenSSL ausente, instalar OpenSSL no ambiente onde a API esta rodando.
+
+## Erro ao iniciar a API
+
+- Se a API falhar no bootstrap com mensagem sobre `CERT_MASTER_KEY`, configure valor seguro em `.env`.
+- Valores placeholder iniciando com `CHANGE_ME` sao recusados por seguranca.
