@@ -1,12 +1,14 @@
 export type AppRole = 'admin' | 'cliente';
 
 export interface AuthenticatedUser {
+  userId?: string;
   username: string;
   role: AppRole;
   clienteId?: string;
 }
 
 export interface AuthTokenPayload {
+  uid?: string;
   sub: string;
   role: AppRole;
   clienteId?: string;
@@ -15,6 +17,7 @@ export interface AuthTokenPayload {
 }
 
 export interface AuthUserConfig {
+  userId?: string;
   username: string;
   password: string;
   role: AppRole;

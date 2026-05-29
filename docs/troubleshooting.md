@@ -51,4 +51,5 @@
 - Se a API falhar no bootstrap com mensagem sobre `CERT_MASTER_KEY`, configure valor seguro em `.env`.
 - Se a API falhar no bootstrap com mensagem sobre `JWT_SECRET`, configure valor seguro em `.env`.
 - Se a API falhar com mensagem sobre `AUTH_USERS_JSON`, configure um array JSON valido com usuarios.
+- Se `AUTH_USERS_JSON` usar `userId`, o valor precisa ser UUID valido.
 - Valores placeholder iniciando com `CHANGE_ME` sao recusados por seguranca.

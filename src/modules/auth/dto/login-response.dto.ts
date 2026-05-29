@@ -1,6 +1,9 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 class LoginUserDto {
+  @ApiPropertyOptional({ description: 'UUID do usuario quando configurado em AUTH_USERS_JSON' })
+  userId?: string;
+
   @ApiProperty()
   username!: string;
 

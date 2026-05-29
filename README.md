@@ -82,7 +82,7 @@ Veja `.env.example`.
 - `CERT_MASTER_KEY`: obrigatoria e deve ser configurada com segredo proprio (a API recusa iniciar com valor placeholder `CHANGE_ME...`).
 - `JWT_SECRET`: obrigatoria e deve ser configurada com segredo proprio (a API recusa iniciar com valor placeholder `CHANGE_ME...`).
 - `JWT_EXPIRES_IN_SECONDS`: tempo de expiracao do token JWT em segundos (padrao `43200` = 12h).
-- `AUTH_USERS_JSON`: array JSON com usuarios de acesso (`admin` e/ou `cliente`).
+- `AUTH_USERS_JSON`: array JSON com usuarios de acesso (`admin` e/ou `cliente`). `userId` (UUID) e opcional, mas recomendado para trilha de auditoria.
 
 ## Autenticacao e autorizacao
 
@@ -91,17 +91,20 @@ Veja `.env.example`.
 - Todos os demais endpoints exigem `Authorization: Bearer <token>`.
 - Para usuarios `role=cliente`, o backend valida automaticamente o escopo por `clienteId` (path/query/body) e bloqueia acesso cruzado.
 - Operacoes administrativas globais (ex.: `POST /sync/rodar-agora` e `POST /nfse/download-lote`) exigem `role=admin`.
+- Operacoes de escrita (`POST/PATCH/DELETE`) geram trilha de auditoria automatica em `auditoria_usuario` (acao, entidade, cliente, ip e user-agent).
 
 Exemplo de `AUTH_USERS_JSON`:
 
 ```json
 [
   {
+    "userId": "00000000-0000-4000-8000-000000000001",
     "username": "admin",
     "password": "senha-forte-admin",
     "role": "admin"
   },
   {
+    "userId": "00000000-0000-4000-8000-000000000002",
     "username": "cliente-acme",
     "password": "senha-forte-cliente",
     "role": "cliente",

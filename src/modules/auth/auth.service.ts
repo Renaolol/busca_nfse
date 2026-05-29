@@ -33,6 +33,7 @@ export class AuthService {
 
     const nowInSeconds = Math.floor(Date.now() / 1000);
     const payload: AuthTokenPayload = {
+      uid: user.userId,
       sub: user.username,
       role: user.role,
       clienteId: user.clienteId,
@@ -45,6 +46,7 @@ export class AuthService {
       tokenType: 'Bearer',
       expiresIn: this.expiresInSeconds,
       user: {
+        userId: user.userId,
         username: user.username,
         role: user.role,
         clienteId: user.clienteId
@@ -92,6 +94,7 @@ export class AuthService {
     }
 
     return {
+      userId: payload.uid,
       username: payload.sub,
       role: payload.role,
       clienteId: payload.clienteId
@@ -173,6 +176,7 @@ export class AuthService {
     const username = typeof record.username === 'string' ? record.username.trim() : '';
     const password = typeof record.password === 'string' ? record.password : '';
     const role = record.role;
+    const userId = typeof record.userId === 'string' ? record.userId.trim() : undefined;
     const clienteId = typeof record.clienteId === 'string' ? record.clienteId.trim() : undefined;
 
     if (!username) {
@@ -191,7 +195,12 @@ export class AuthService {
       throw new Error(`AUTH_USERS_JSON usuario ${username} role=cliente exige clienteId`);
     }
 
+    if (userId && !this.isUuid(userId)) {
+      throw new Error(`AUTH_USERS_JSON usuario ${username} com userId invalido`);
+    }
+
     return {
+      userId,
       username,
       password,
       role,
@@ -229,5 +238,9 @@ export class AuthService {
     } catch {
       throw new UnauthorizedException(errorMessage);
     }
+  }
+
+  private isUuid(value: string): boolean {
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
   }
 }

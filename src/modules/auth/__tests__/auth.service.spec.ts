@@ -37,6 +37,7 @@ describe('AuthService', () => {
     expect(result.tokenType).toBe('Bearer');
     expect(result.expiresIn).toBe(3600);
     expect(result.user).toEqual({
+      userId: undefined,
       username: 'admin',
       role: 'admin',
       clienteId: undefined
@@ -58,6 +59,7 @@ describe('AuthService', () => {
     const user = service.verifyAccessToken(login.accessToken);
 
     expect(user).toEqual({
+      userId: undefined,
       username: 'cliente1',
       role: 'cliente',
       clienteId: '550e8400-e29b-41d4-a716-446655440000'
@@ -70,6 +72,37 @@ describe('AuthService', () => {
     const tampered = `${login.accessToken}x`;
 
     expect(() => service.verifyAccessToken(tampered)).toThrow(UnauthorizedException);
+  });
+
+  it('propaga userId quando configurado', () => {
+    process.env.AUTH_USERS_JSON = JSON.stringify([
+      {
+        userId: '550e8400-e29b-41d4-a716-446655440123',
+        username: 'admin',
+        password: 'admin123',
+        role: 'admin'
+      }
+    ]);
+
+    const service = new AuthService();
+    const login = service.login({ username: 'admin', password: 'admin123' });
+    const user = service.verifyAccessToken(login.accessToken);
+
+    expect(login.user.userId).toBe('550e8400-e29b-41d4-a716-446655440123');
+    expect(user.userId).toBe('550e8400-e29b-41d4-a716-446655440123');
+  });
+
+  it('falha ao iniciar quando userId nao e UUID valido', () => {
+    process.env.AUTH_USERS_JSON = JSON.stringify([
+      {
+        userId: 'invalido',
+        username: 'admin',
+        password: 'admin123',
+        role: 'admin'
+      }
+    ]);
+
+    expect(() => new AuthService()).toThrow('AUTH_USERS_JSON usuario admin com userId invalido');
   });
 
   it('falha ao iniciar quando AUTH_USERS_JSON nao esta configurado', () => {
