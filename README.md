@@ -90,7 +90,7 @@ Veja `.env.example`.
 - Endpoints publicos sem token: `GET /health` e `POST /auth/login`.
 - Todos os demais endpoints exigem `Authorization: Bearer <token>`.
 - Para usuarios `role=cliente`, o backend valida automaticamente o escopo por `clienteId` (path/query/body) e bloqueia acesso cruzado.
-- Operacoes administrativas globais (ex.: `POST /sync/rodar-agora` e `POST /nfse/download-lote`) exigem `role=admin`.
+- Operacoes administrativas globais (ex.: `POST /sync/rodar-agora`) exigem `role=admin`.
 - Operacoes de escrita (`POST/PATCH/DELETE`) geram trilha de auditoria automatica em `auditoria_usuario` (acao, entidade, cliente, ip e user-agent).
 
 Exemplo de `AUTH_USERS_JSON`:
@@ -180,12 +180,26 @@ No momento da importacao, o sistema tambem gera e salva o DANFSE em PDF.
 
 - `GET /nfse/:id/xml`: retorna XML da nota com `fileName`, `contentType` e `contentBase64`.
 - `GET /nfse/:id/danfse`: retorna DANFSE em PDF com `fileName`, `contentType` e `contentBase64`.
+- `POST /nfse/download-lote`: gera um arquivo ZIP em Base64 para baixar XML/DANFSE em lote.
 - `POST /nfse/reprocessar-xmls`: reprocessa XMLs ja salvos para preencher campos faltantes e (opcionalmente) regenerar DANFSE.
 - Os endpoints `GET /nfse/:id`, `GET /nfse/:id/xml` e `GET /nfse/:id/danfse` exigem `?clienteId=...` para garantir escopo de acesso por cliente.
   - `clienteId` deve ser UUID valido.
 - Para token `role=cliente`, o valor de `clienteId` precisa ser o mesmo cliente do token.
 
 Quando o DANFSE nao existir para uma nota ja salva, ele e gerado automaticamente a partir do XML no primeiro download.
+
+Exemplo de body para lote:
+
+```json
+{
+  "ids": [
+    "550e8400-e29b-41d4-a716-446655440010",
+    "550e8400-e29b-41d4-a716-446655440011"
+  ],
+  "tipoArquivo": "ambos",
+  "clienteId": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
 
 ## Guia de layout do DANFSE
 

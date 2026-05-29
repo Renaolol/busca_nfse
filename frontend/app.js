@@ -955,44 +955,39 @@ async function downloadSelectedNotes(type) {
     return;
   }
 
-  let success = 0;
-  let failed = 0;
-  for (const noteId of selectedIds) {
-    try {
-      if (type === 'xml') {
-        const xml = await apiCall(withClientScope(`/nfse/${noteId}/xml`));
-        downloadFromPayload(xml, `NFSE-${noteId}.xml`);
-      } else {
-        const danfse = await apiCall(withClientScope(`/nfse/${noteId}/danfse`));
-        downloadFromPayload(danfse, `DANFSE-${noteId}.pdf`);
-      }
-      success += 1;
-    } catch {
-      failed += 1;
-    }
-  }
-
   const actionLabel = type === 'xml' ? 'XML' : 'DANFSE';
-  if (failed > 0) {
+  const tipoArquivo = type === 'xml' ? 'xml' : 'danfse';
+
+  const payload = {
+    ids: selectedIds,
+    tipoArquivo,
+    clienteId: state.clientId || undefined
+  };
+
+  const result = await apiCall('/nfse/download-lote', {
+    method: 'POST',
+    body: JSON.stringify(payload)
+  });
+
+  downloadFromPayload(result, `NFSE-LOTE-${actionLabel}.zip`);
+
+  const totalAlertas = (result?.idsNaoEncontrados?.length || 0) + (result?.erros?.length || 0);
+  if (totalAlertas > 0) {
     showPending(
       [
-        `Download em lote concluido com alertas: ${success} ${actionLabel} baixado(s), ${failed} falha(s).`
+        `ZIP gerado com alertas: ${result.totalArquivosIncluidos} arquivo(s) incluido(s), ${totalAlertas} pendencia(s).`
       ],
       true
     );
   } else {
     showPending(
-      [`Download em lote concluido: ${success} ${actionLabel} baixado(s).`],
+      [`ZIP gerado com sucesso: ${result.totalArquivosIncluidos} arquivo(s) incluido(s).`],
       false,
       true
     );
   }
 
-  writeConsole(`Download em lote (${actionLabel})`, {
-    totalSelecionadas: selectedIds.length,
-    sucesso: success,
-    falhas: failed
-  });
+  writeConsole(`Download em lote (${actionLabel})`, result);
 }
 
 function resolveRelacao(item) {

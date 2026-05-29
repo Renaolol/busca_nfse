@@ -1,9 +1,9 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
-import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { DownloadLoteDto } from './dto/download-lote.dto';
+import { DownloadLoteResponseDto } from './dto/download-lote-response.dto';
 import { DownloadDocumentDto } from './dto/download-document.dto';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
@@ -57,7 +57,8 @@ export class NfseController {
   }
 
   @Post('download-lote')
-  @Roles('admin')
+  @ApiOkResponse({ type: DownloadLoteResponseDto })
+  @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
   downloadLote(@Body() dto: DownloadLoteDto) {
     return this.nfseService.downloadLote(dto);
   }

@@ -1,4 +1,5 @@
 import { Ambiente } from '@prisma/client';
+import JSZip from 'jszip';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LocalStorageService } from '../../storage/storage.service';
 import { NfseDanfseService } from '../nfse-danfse.service';
@@ -202,5 +203,89 @@ describe('NfseService', () => {
     });
 
     await expect(service.getXml('doc-5', 'cliente-1')).rejects.toThrow('NFS-e nao encontrada');
+  });
+
+  it('gera ZIP de lote com XMLs e manifest', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        id: '550e8400-e29b-41d4-a716-446655440010',
+        clienteId: '550e8400-e29b-41d4-a716-446655440001',
+        chaveAcesso: '42110092206960810000176000000000001026016992784180',
+        ambiente: Ambiente.producao,
+        xmlPath: 'nfse/producao/123/2026/05/xml/doc-10.xml',
+        danfsePath: null,
+        numeroNfse: '10',
+        dataEmissao: new Date('2026-01-10T00:00:00.000Z'),
+        status: 'autorizada',
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador',
+        cnpjTomador: '12345678000199',
+        razaoSocialTomador: 'Tomador',
+        valorServico: null,
+        descricaoServico: null,
+        createdAt: new Date('2026-01-10T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-10T00:00:00.000Z')
+      }
+    ]);
+
+    storage.getObject.mockResolvedValue(Buffer.from('<xml>doc-10</xml>', 'utf8'));
+
+    const result = await service.downloadLote({
+      ids: ['550e8400-e29b-41d4-a716-446655440010'],
+      tipoArquivo: 'xml',
+      clienteId: '550e8400-e29b-41d4-a716-446655440001'
+    });
+
+    expect(result.contentType).toBe('application/zip');
+    expect(result.totalArquivosIncluidos).toBe(1);
+    expect(result.idsNaoEncontrados).toEqual([]);
+    expect(result.erros).toEqual([]);
+
+    const zipBuffer = Buffer.from(result.contentBase64, 'base64');
+    const zip = await JSZip.loadAsync(zipBuffer);
+    const xmlEntry = zip.file('xml/NFSE-42110092206960810000176000000000001026016992784180.xml');
+    const manifestEntry = zip.file('manifest.json');
+
+    expect(xmlEntry).toBeTruthy();
+    expect(manifestEntry).toBeTruthy();
+
+    const xmlContent = await xmlEntry!.async('string');
+    expect(xmlContent).toBe('<xml>doc-10</xml>');
+  });
+
+  it('retorna IDs nao encontrados no manifest de lote', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        id: '550e8400-e29b-41d4-a716-446655440011',
+        clienteId: '550e8400-e29b-41d4-a716-446655440001',
+        chaveAcesso: '42110092206960810000176000000000001126016992784181',
+        ambiente: Ambiente.producao,
+        xmlPath: 'nfse/producao/123/2026/05/xml/doc-11.xml',
+        danfsePath: null,
+        numeroNfse: '11',
+        dataEmissao: new Date('2026-01-11T00:00:00.000Z'),
+        status: 'autorizada',
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador',
+        cnpjTomador: '12345678000199',
+        razaoSocialTomador: 'Tomador',
+        valorServico: null,
+        descricaoServico: null,
+        createdAt: new Date('2026-01-11T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-11T00:00:00.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValue(Buffer.from('<xml>doc-11</xml>', 'utf8'));
+
+    const result = await service.downloadLote({
+      ids: [
+        '550e8400-e29b-41d4-a716-446655440011',
+        '550e8400-e29b-41d4-a716-446655440012'
+      ],
+      tipoArquivo: 'xml',
+      clienteId: '550e8400-e29b-41d4-a716-446655440001'
+    });
+
+    expect(result.idsNaoEncontrados).toEqual(['550e8400-e29b-41d4-a716-446655440012']);
   });
 });

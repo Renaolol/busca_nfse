@@ -35,7 +35,7 @@
 - `401 Token Bearer obrigatorio`: enviar header `Authorization: Bearer <token>`.
 - `401 Credenciais invalidas`: validar `POST /auth/login` e credenciais configuradas em `AUTH_USERS_JSON`.
 - `401 Token expirado`: gerar novo token via login.
-- `403 Perfil sem permissao`: endpoint exige `role=admin`.
+- `403 Perfil sem permissao`: endpoint exige `role=admin` (ex.: `POST /sync/rodar-agora`).
 - `403 Rota nao disponivel para usuario de cliente`: endpoint sem escopo de cliente para esse perfil.
 
 ## Erro ao cadastrar certificado

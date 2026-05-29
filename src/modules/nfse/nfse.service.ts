@@ -1,5 +1,6 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Ambiente, DocumentoOrigem, NfseDocumento, Prisma } from '@prisma/client';
+import JSZip from 'jszip';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DownloadLoteDto } from './dto/download-lote.dto';
@@ -439,24 +440,92 @@ export class NfseService {
   }
 
   async downloadLote(dto: DownloadLoteDto) {
+    const uniqueIds = [...new Set(dto.ids)];
+    const tipoArquivo = dto.tipoArquivo ?? 'ambos';
+
     const docs = await this.prisma.nfseDocumento.findMany({
       where: {
         id: {
-          in: dto.ids
-        }
-      },
-      select: {
-        id: true,
-        chaveAcesso: true,
-        xmlPath: true,
-        danfsePath: true
+          in: uniqueIds
+        },
+        clienteId: dto.clienteId ?? undefined
       }
     });
 
+    if (docs.length === 0) {
+      throw new NotFoundException('Nenhuma NFS-e encontrada para os IDs informados');
+    }
+
+    const docsById = new Set(docs.map((doc) => doc.id));
+    const idsNaoEncontrados = uniqueIds.filter((id) => !docsById.has(id));
+    const errors: Array<{ id: string; erro: string }> = [];
+    const zip = new JSZip();
+    let totalArquivosIncluidos = 0;
+
+    for (const doc of docs) {
+      if (tipoArquivo === 'ambos' || tipoArquivo === 'xml') {
+        if (!doc.xmlPath) {
+          errors.push({ id: doc.id, erro: 'XML nao disponivel para esta NFS-e' });
+        } else {
+          try {
+            const xmlBuffer = await this.storage.getObject(doc.xmlPath);
+            zip.file(`xml/NFSE-${this.toSafeFileName(doc.chaveAcesso)}.xml`, xmlBuffer);
+            totalArquivosIncluidos += 1;
+          } catch (error) {
+            errors.push({ id: doc.id, erro: `Falha ao ler XML: ${this.toErrorMessage(error)}` });
+          }
+        }
+      }
+
+      if (tipoArquivo === 'ambos' || tipoArquivo === 'danfse') {
+        try {
+          const { pdf } = await this.ensureDanfseFile(doc);
+          zip.file(`danfse/DANFSE-${this.toSafeFileName(doc.chaveAcesso)}.pdf`, pdf);
+          totalArquivosIncluidos += 1;
+        } catch (error) {
+          errors.push({ id: doc.id, erro: `Falha ao obter DANFSE: ${this.toErrorMessage(error)}` });
+        }
+      }
+    }
+
+    if (totalArquivosIncluidos === 0) {
+      throw new NotFoundException('Nenhum arquivo disponivel para os filtros informados');
+    }
+
+    zip.file(
+      'manifest.json',
+      JSON.stringify(
+        {
+          geradoEm: new Date().toISOString(),
+          tipoArquivo,
+          totalSolicitados: uniqueIds.length,
+          totalDocumentosEncontrados: docs.length,
+          totalArquivosIncluidos,
+          idsNaoEncontrados,
+          erros: errors
+        },
+        null,
+        2
+      )
+    );
+
+    const zipBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 }
+    });
+
+    const fileName = `nfse-lote-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
+
     return {
-      total: docs.length,
-      documentos: docs,
-      observacao: 'Geracao de ZIP em lote sera implementada na fase operacional.'
+      fileName,
+      contentType: 'application/zip',
+      contentBase64: zipBuffer.toString('base64'),
+      totalSolicitados: uniqueIds.length,
+      totalDocumentosEncontrados: docs.length,
+      totalArquivosIncluidos,
+      idsNaoEncontrados,
+      erros: errors
     };
   }
 
@@ -569,6 +638,18 @@ export class NfseService {
     }
 
     return normalized;
+  }
+
+  private toSafeFileName(value: string): string {
+    return value.replace(/[^a-zA-Z0-9._-]/g, '_');
+  }
+
+  private toErrorMessage(error: unknown): string {
+    if (error instanceof Error && error.message.trim()) {
+      return error.message.trim();
+    }
+
+    return String(error);
   }
 
   private assertNfseClientScope(doc: NfseDocumento, clienteId: string): void {
