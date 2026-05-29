@@ -222,11 +222,12 @@ Com a API rodando, abra:
 
 Esse frontend permite testar onboarding de cliente/certificado, controle de sync e pesquisa de NFS-e.
 Antes de operar, faca login no bloco superior (`Usuario`/`Senha`) para obter sessao JWT.
-O layout esta separado em 3 menus:
+O layout esta separado em 4 menus:
 
 - `Clientes`: cadastro/edicao, certificados e contexto ativo.
 - `Notas`: filtros, listagem, separacao emitidas/tomadas e download em lote (XML/DANFSE) das linhas selecionadas.
 - `Busca API`: operacoes de sync, logs, teste de NSU e escolha de modo `historico` ou `diario`.
+- `Auditoria`: consulta de trilha operacional por `cliente_id` e `acao`.
 Use a lista suspensa de clientes para selecionar o contexto ativo; ao selecionar, as notas do cliente sao carregadas automaticamente.
 Edicao de dados e certificados fica disponivel via botoes \"Editar dados\" e \"Editar certificados\".
 Ao criar cliente, o backend ja cria automaticamente o estabelecimento principal com o mesmo CNPJ.

@@ -42,10 +42,13 @@ const clientEditForm = document.getElementById('clientEditForm');
 const certificateForm = document.getElementById('certificateForm');
 const searchForm = document.getElementById('searchForm');
 const nfseRows = document.getElementById('nfseRows');
+const auditForm = document.getElementById('auditForm');
+const auditRows = document.getElementById('auditRows');
 
 const certClientId = document.getElementById('certClientId');
 const certEstablishmentId = document.getElementById('certEstablishmentId');
 const syncClientId = document.getElementById('syncClientId');
+const auditClienteIdInput = document.getElementById('auditClienteId');
 
 const saveApiBaseBtn = document.getElementById('saveApiBase');
 const authLoginBtn = document.getElementById('authLoginBtn');
@@ -74,6 +77,7 @@ const syncTestSingleNsuBtn = document.getElementById('syncTestSingleNsu');
 const syncModeSelect = document.getElementById('syncMode');
 
 const NFSE_TABLE_COLUMNS = 8;
+const AUDIT_TABLE_COLUMNS = 8;
 
 let selectRequestCounter = 0;
 
@@ -86,6 +90,7 @@ async function boot() {
   }
   wireEvents();
   setActiveMenu(state.currentMenu, false);
+  resetAuditView();
   fillLinkedInputs();
   renderContext();
   renderAuthStatus();
@@ -172,6 +177,7 @@ function wireEvents() {
   clientEditForm.addEventListener('submit', onEditClient);
   certificateForm.addEventListener('submit', onCreateCertificate);
   searchForm.addEventListener('submit', onSearchNfse);
+  auditForm.addEventListener('submit', onSearchAudit);
   searchSeparatedBtn.addEventListener('click', onSearchSeparated);
   notesSelectAllBtn.addEventListener('click', () => setVisibleNoteSelection(true));
   notesClearSelectionBtn.addEventListener('click', () => setVisibleNoteSelection(false));
@@ -224,6 +230,7 @@ async function runLogin() {
 function runLogout() {
   clearAuthState();
   clearClientContext();
+  resetAuditView();
   showPending(['Sessao finalizada.'], true);
   writeConsole('Logout executado');
 }
@@ -246,6 +253,7 @@ function clearAuthState() {
   state.authUser = null;
   persistState();
   renderAuthStatus();
+  updateAuditClienteFilter();
 }
 
 async function refreshClientList({ preserveSelection, autoSelectFirst }) {
@@ -750,6 +758,33 @@ async function onSearchSeparated() {
   writeConsole('Resultado separado por relacao', result);
 }
 
+async function onSearchAudit(event) {
+  event.preventDefault();
+  if (!state.authToken) {
+    showPending(['Autentique-se antes de consultar auditoria.'], true);
+    return;
+  }
+
+  const params = new URLSearchParams();
+  const clienteId = String(auditForm.elements.clienteId.value || '').trim();
+  const acao = String(auditForm.elements.acao.value || '').trim();
+
+  if (clienteId) {
+    params.set('cliente_id', clienteId);
+  }
+  if (acao) {
+    params.set('acao', acao);
+  }
+
+  const query = params.toString();
+  const result = await apiCall(`/auditoria${query ? `?${query}` : ''}`);
+  const rows = Array.isArray(result) ? result : [];
+  renderAuditRows(rows);
+
+  showPending([`Consulta de auditoria concluida: ${rows.length} registro(s).`], false, true);
+  writeConsole('Resultado da auditoria', rows);
+}
+
 async function searchClientNotes() {
   if (!state.clientId) {
     state.lastNotes = [];
@@ -871,6 +906,28 @@ function renderSeparatedRows(payload) {
 
   wireSelectionCheckboxes();
   wireDownloadButtons();
+}
+
+function renderAuditRows(items) {
+  if (!Array.isArray(items) || items.length === 0) {
+    auditRows.innerHTML = `<tr><td colspan="${AUDIT_TABLE_COLUMNS}">Nenhum registro encontrado.</td></tr>`;
+    return;
+  }
+
+  auditRows.innerHTML = items
+    .map((item) => {
+      return `<tr>
+        <td>${escapeHtml(formatEmissionDate(item.createdAt))}</td>
+        <td><code>${escapeHtml(item.acao || '-')}</code></td>
+        <td>${escapeHtml(item.entidade || '-')}</td>
+        <td><code>${escapeHtml(item.entidadeId || '-')}</code></td>
+        <td><code>${escapeHtml(item.clienteId || '-')}</code></td>
+        <td><code>${escapeHtml(item.usuarioId || '-')}</code></td>
+        <td>${escapeHtml(item.ip || '-')}</td>
+        <td>${escapeHtml(item.userAgent || '-')}</td>
+      </tr>`;
+    })
+    .join('');
 }
 
 function wireDownloadButtons() {
@@ -1134,9 +1191,40 @@ function fillLinkedInputs() {
   certEstablishmentId.value = state.establishmentId;
   syncClientId.value = state.clientId;
   searchForm.elements.clienteId.value = state.clientId;
+  updateAuditClienteFilter();
 
   if (state.selectedClient?.cnpj) {
     certificateForm.cnpjTitular.value = onlyDigits(state.selectedClient.cnpj);
+  }
+}
+
+function updateAuditClienteFilter() {
+  if (!auditClienteIdInput) {
+    return;
+  }
+
+  const tokenRole = state.authUser?.role;
+  const tokenClienteId = state.authUser?.clienteId || '';
+  if (tokenRole === 'cliente' && tokenClienteId) {
+    auditClienteIdInput.value = tokenClienteId;
+    auditClienteIdInput.readOnly = true;
+    return;
+  }
+
+  auditClienteIdInput.readOnly = false;
+  if (state.clientId) {
+    auditClienteIdInput.value = state.clientId;
+  } else if (state.authUser?.role !== 'cliente') {
+    auditClienteIdInput.value = '';
+  }
+}
+
+function resetAuditView() {
+  if (auditForm?.elements?.acao) {
+    auditForm.elements.acao.value = '';
+  }
+  if (auditRows) {
+    auditRows.innerHTML = `<tr><td colspan="${AUDIT_TABLE_COLUMNS}">Nenhuma consulta de auditoria executada ainda.</td></tr>`;
   }
 }
 

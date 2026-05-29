@@ -86,6 +86,7 @@
         <button class="menu-btn active" type="button" data-menu-target="menuClientes">Clientes</button>
         <button class="menu-btn" type="button" data-menu-target="menuNotas">Notas</button>
         <button class="menu-btn" type="button" data-menu-target="menuBuscaApi">Busca API</button>
+        <button class="menu-btn" type="button" data-menu-target="menuAuditoria">Auditoria</button>
       </nav>
 
       <section id="menuClientes" class="menu-panel">
@@ -312,6 +313,52 @@
             <button id="syncTestSingleNsu" class="btn secondary" type="button">Teste: buscar 1 NSU</button>
           </div>
           <p class="muted">Botao temporario: testa apenas 1 NSU via API ADN, sem persistir NFS-e.</p>
+        </section>
+      </section>
+
+      <section id="menuAuditoria" class="menu-panel hidden">
+        <section class="card reveal stagger-5">
+          <h2>Auditoria operacional</h2>
+          <p class="helper">Consulte trilha de operacoes de escrita por cliente, acao, usuario e origem.</p>
+          <form id="auditForm" class="search-grid">
+            <label>
+              Cliente ID
+              <input id="auditClienteId" name="clienteId" placeholder="UUID do cliente (opcional para admin)" />
+            </label>
+            <label>
+              Acao
+              <select id="auditAction" name="acao">
+                <option value="">Todas</option>
+                <option value="create">create</option>
+                <option value="update">update</option>
+                <option value="delete">delete</option>
+                <option value="mutate">mutate</option>
+              </select>
+            </label>
+            <button id="auditSearchBtn" class="btn" type="submit">Buscar auditoria</button>
+          </form>
+
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Data</th>
+                  <th>Acao</th>
+                  <th>Entidade</th>
+                  <th>Entidade ID</th>
+                  <th>Cliente ID</th>
+                  <th>Usuario ID</th>
+                  <th>IP</th>
+                  <th>User-Agent</th>
+                </tr>
+              </thead>
+              <tbody id="auditRows">
+                <tr>
+                  <td colspan="8">Nenhuma consulta de auditoria executada ainda.</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </section>
       </section>
 
