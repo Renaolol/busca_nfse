@@ -28,6 +28,15 @@
 - Em endpoints por `id` (`/certificados/:id...`, `/nfse/:id...`, `/sync/logs`), `clienteId` e obrigatorio.
 - O valor de `clienteId` precisa ser UUID valido; caso contrario a API retorna `400`.
 - Se o `clienteId` nao corresponder ao dono do recurso, a API responde como nao encontrado (`404`) para evitar vazamento de contexto.
+- Para token `role=cliente`, `clienteId` informado no request precisa coincidir com o `clienteId` do token; caso contrario a API responde `403`.
+
+## Erro de autenticacao/autorizacao
+
+- `401 Token Bearer obrigatorio`: enviar header `Authorization: Bearer <token>`.
+- `401 Credenciais invalidas`: validar `POST /auth/login` e credenciais configuradas em `AUTH_USERS_JSON`.
+- `401 Token expirado`: gerar novo token via login.
+- `403 Perfil sem permissao`: endpoint exige `role=admin`.
+- `403 Rota nao disponivel para usuario de cliente`: endpoint sem escopo de cliente para esse perfil.
 
 ## Erro ao cadastrar certificado
 
@@ -40,4 +49,6 @@
 ## Erro ao iniciar a API
 
 - Se a API falhar no bootstrap com mensagem sobre `CERT_MASTER_KEY`, configure valor seguro em `.env`.
+- Se a API falhar no bootstrap com mensagem sobre `JWT_SECRET`, configure valor seguro em `.env`.
+- Se a API falhar com mensagem sobre `AUTH_USERS_JSON`, configure um array JSON valido com usuarios.
 - Valores placeholder iniciando com `CHANGE_ME` sao recusados por seguranca.

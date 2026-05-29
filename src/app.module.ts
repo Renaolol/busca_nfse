@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JobsModule } from './jobs/jobs.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { AuthModule } from './modules/auth/auth.module';
 import { CertificatesModule } from './modules/certificates/certificates.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { EstablishmentsModule } from './modules/establishments/establishments.module';
@@ -16,6 +17,7 @@ import { PrismaModule } from './prisma/prisma.module';
     ConfigModule.forRoot({ isGlobal: true }),
     PrismaModule,
     StorageModule,
+    AuthModule,
     HealthModule,
     ClientsModule,
     EstablishmentsModule,

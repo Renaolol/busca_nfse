@@ -2,6 +2,7 @@
 
 ## Estrategia
 
+- Autenticacao JWT obrigatoria nas rotas de sync.
 - Controle incremental por NSU (`ultimo_nsu_consultado`).
 - Contexto por `cliente/cnpj/ambiente` (chave unica de controle por esse trio).
 - Adapter ADN isolado.
@@ -14,10 +15,12 @@
 
 - Endpoint temporario: `POST /sync/testar-nsu`.
 - Recebe `clienteId`, `estabelecimentoId` e `nsu`.
+- Requer `Authorization: Bearer <token>`.
 - Valida certificado ativo/nao vencido e consulta apenas esse NSU na API ADN.
 - Retorna payload bruto e metadados, sem persistir NFS-e no banco.
 - Usa `NFSE_ADN_CLIENT_MODE` para escolher entre mock e integracao real.
 - A consulta de logs (`GET /sync/logs`) exige `clienteId` (UUID valido) para retornar apenas o escopo do cliente informado.
+- `POST /sync/rodar-agora` e rota administrativa global e exige `role=admin`.
 
 ## Jobs implementados
 

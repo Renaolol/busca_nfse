@@ -27,6 +27,15 @@ async function bootstrap(): Promise<void> {
     .setTitle('NFS-e Collector API')
     .setDescription('API interna para sincronizacao, armazenamento e consulta de NFS-e Nacional')
     .setVersion('0.1.0')
+    .addBearerAuth(
+      {
+        type: 'http',
+        scheme: 'bearer',
+        bearerFormat: 'JWT'
+      },
+      'bearer'
+    )
+    .addSecurityRequirements('bearer')
     .build();
 
   const document = SwaggerModule.createDocument(app, swaggerConfig);
@@ -42,6 +51,11 @@ function validateRequiredEnvironment(): void {
   const certMasterKey = process.env.CERT_MASTER_KEY?.trim();
   if (!certMasterKey || /^change[-_ ]?me/i.test(certMasterKey)) {
     throw new Error('CERT_MASTER_KEY obrigatoria e deve ser configurada com valor seguro');
+  }
+
+  const jwtSecret = process.env.JWT_SECRET?.trim();
+  if (!jwtSecret || /^change[-_ ]?me/i.test(jwtSecret)) {
+    throw new Error('JWT_SECRET obrigatoria e deve ser configurada com valor seguro');
   }
 }
 

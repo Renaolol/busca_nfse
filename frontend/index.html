@@ -32,6 +32,17 @@
             <input id="apiBase" type="text" placeholder="http://localhost:3000" />
           </label>
           <button id="saveApiBase" class="btn secondary" type="button">Salvar base URL</button>
+          <label>
+            Usuario
+            <input id="authUsername" type="text" placeholder="admin" />
+          </label>
+          <label>
+            Senha
+            <input id="authPassword" type="password" placeholder="********" />
+          </label>
+          <button id="authLoginBtn" class="btn" type="button">Entrar</button>
+          <button id="authLogoutBtn" class="btn secondary" type="button">Sair</button>
+          <div id="authStatus" class="status-box muted">Nao autenticado.</div>
           <a class="btn ghost" href="/api/docs" target="_blank" rel="noreferrer">Abrir Swagger</a>
         </div>
       </header>

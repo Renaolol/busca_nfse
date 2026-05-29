@@ -29,9 +29,12 @@ export class EstablishmentsService {
     });
   }
 
-  async update(id: string, dto: UpdateEstablishmentDto): Promise<ClienteEstabelecimento> {
+  async update(id: string, dto: UpdateEstablishmentDto, clienteId: string): Promise<ClienteEstabelecimento> {
     const found = await this.prisma.clienteEstabelecimento.findUnique({ where: { id } });
     if (!found) {
+      throw new NotFoundException('Estabelecimento nao encontrado');
+    }
+    if (found.clienteId !== clienteId) {
       throw new NotFoundException('Estabelecimento nao encontrado');
     }
 

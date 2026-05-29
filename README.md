@@ -2,6 +2,18 @@
 
 Backend para sincronizar, armazenar e consultar NFS-e Nacional usando a API oficial do ADN por NSU.
 
+## Objetivo do projeto
+
+Centralizar a captura de NFS-e Nacional por cliente, usando consulta incremental por NSU na API oficial ADN, com trilha operacional para cadastro, sincronizacao, armazenamento, consulta e download de documentos fiscais.
+
+## Resultado final esperado
+
+1. Onboarding completo de cliente, estabelecimento e certificado A1 com dados sensiveis protegidos.
+2. Sincronizacao historica e diaria por NSU, com controles por `cliente/cnpj/ambiente` e sem pulo de NSU em erros temporarios.
+3. Base fiscal consolidada, deduplicada por `ambiente + chave_acesso`, com XML e DANFSE armazenados.
+4. API interna e painel operacional com autenticacao JWT, escopo por cliente e operacoes de status/logs/pesquisa/download.
+5. Jobs idempotentes para manutencao continua (validacao de certificado, reprocessamento e limpeza tecnica).
+
 ## Stack
 
 - NestJS + TypeScript
@@ -68,6 +80,43 @@ Veja `.env.example`.
 - `SYNC_DAILY_INTERVAL_MS`: intervalo da rotina diaria quando o controle esta no modo `somente_novas` (padrao `86400000` = 24h).
 - `SYNC_DAILY_MAX_NSU_PER_RUN`: quantidade maxima de NSUs processados por ciclo para controles no modo diario (padrao `50`).
 - `CERT_MASTER_KEY`: obrigatoria e deve ser configurada com segredo proprio (a API recusa iniciar com valor placeholder `CHANGE_ME...`).
+- `JWT_SECRET`: obrigatoria e deve ser configurada com segredo proprio (a API recusa iniciar com valor placeholder `CHANGE_ME...`).
+- `JWT_EXPIRES_IN_SECONDS`: tempo de expiracao do token JWT em segundos (padrao `43200` = 12h).
+- `AUTH_USERS_JSON`: array JSON com usuarios de acesso (`admin` e/ou `cliente`).
+
+## Autenticacao e autorizacao
+
+- Endpoint publico de login: `POST /auth/login`.
+- Endpoints publicos sem token: `GET /health` e `POST /auth/login`.
+- Todos os demais endpoints exigem `Authorization: Bearer <token>`.
+- Para usuarios `role=cliente`, o backend valida automaticamente o escopo por `clienteId` (path/query/body) e bloqueia acesso cruzado.
+- Operacoes administrativas globais (ex.: `POST /sync/rodar-agora` e `POST /nfse/download-lote`) exigem `role=admin`.
+
+Exemplo de `AUTH_USERS_JSON`:
+
+```json
+[
+  {
+    "username": "admin",
+    "password": "senha-forte-admin",
+    "role": "admin"
+  },
+  {
+    "username": "cliente-acme",
+    "password": "senha-forte-cliente",
+    "role": "cliente",
+    "clienteId": "550e8400-e29b-41d4-a716-446655440000"
+  }
+]
+```
+
+Exemplo de login:
+
+```bash
+curl -X POST http://localhost:3000/auth/login \\
+  -H "Content-Type: application/json" \\
+  -d '{"username":"admin","password":"senha-forte-admin"}'
+```
 
 ## Comandos principais
 
@@ -90,7 +139,7 @@ npm run job:limpar-temporarios
 
 ## Sincronizacao manual
 
-O endpoint `POST /sync/rodar-agora` dispara uma execucao manual do ciclo de sincronizacao (por padrao com adapter mock).
+O endpoint `POST /sync/rodar-agora` dispara uma execucao manual do ciclo de sincronizacao (por padrao com adapter mock) e exige token `admin`.
 Para teste pontual da API ADN, use o endpoint temporario `POST /sync/testar-nsu` com `clienteId`, `estabelecimentoId` e `nsu`.
 Para teste real, defina `NFSE_ADN_CLIENT_MODE=real` e use certificado A1 valido no cadastro.
 Para consultar logs de sync por cliente, use `GET /sync/logs?clienteId=UUID`.
@@ -131,6 +180,7 @@ No momento da importacao, o sistema tambem gera e salva o DANFSE em PDF.
 - `POST /nfse/reprocessar-xmls`: reprocessa XMLs ja salvos para preencher campos faltantes e (opcionalmente) regenerar DANFSE.
 - Os endpoints `GET /nfse/:id`, `GET /nfse/:id/xml` e `GET /nfse/:id/danfse` exigem `?clienteId=...` para garantir escopo de acesso por cliente.
   - `clienteId` deve ser UUID valido.
+- Para token `role=cliente`, o valor de `clienteId` precisa ser o mesmo cliente do token.
 
 Quando o DANFSE nao existir para uma nota ja salva, ele e gerado automaticamente a partir do XML no primeiro download.
 
@@ -154,6 +204,7 @@ Com a API rodando, abra:
 - `http://localhost:3000/app`
 
 Esse frontend permite testar onboarding de cliente/certificado, controle de sync e pesquisa de NFS-e.
+Antes de operar, faca login no bloco superior (`Usuario`/`Senha`) para obter sessao JWT.
 O layout esta separado em 3 menus:
 
 - `Clientes`: cadastro/edicao, certificados e contexto ativo.

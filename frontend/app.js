@@ -1,5 +1,7 @@
 const state = {
   apiBase: localStorage.getItem('nfseApiBase') || window.location.origin,
+  authToken: localStorage.getItem('nfseAuthToken') || '',
+  authUser: readStoredJson('nfseAuthUser'),
   clientId: localStorage.getItem('nfseClientId') || '',
   establishmentId: localStorage.getItem('nfseEstablishmentId') || '',
   certificateId: localStorage.getItem('nfseCertificateId') || '',
@@ -13,6 +15,9 @@ const state = {
 };
 
 const apiBaseInput = document.getElementById('apiBase');
+const authUsernameInput = document.getElementById('authUsername');
+const authPasswordInput = document.getElementById('authPassword');
+const authStatus = document.getElementById('authStatus');
 const consoleOutput = document.getElementById('consoleOutput');
 const clientSelect = document.getElementById('clientSelect');
 const pendingBox = document.getElementById('pendingBox');
@@ -43,6 +48,8 @@ const certEstablishmentId = document.getElementById('certEstablishmentId');
 const syncClientId = document.getElementById('syncClientId');
 
 const saveApiBaseBtn = document.getElementById('saveApiBase');
+const authLoginBtn = document.getElementById('authLoginBtn');
+const authLogoutBtn = document.getElementById('authLogoutBtn');
 const refreshClientsBtn = document.getElementById('refreshClientsBtn');
 const newClientBtn = document.getElementById('newClientBtn');
 const editClientBtn = document.getElementById('editClientBtn');
@@ -74,11 +81,25 @@ boot();
 
 async function boot() {
   apiBaseInput.value = state.apiBase;
+  if (state.authUser?.username) {
+    authUsernameInput.value = state.authUser.username;
+  }
   wireEvents();
   setActiveMenu(state.currentMenu, false);
   fillLinkedInputs();
   renderContext();
-  await refreshClientList({ preserveSelection: true, autoSelectFirst: true });
+  renderAuthStatus();
+  if (state.authToken) {
+    try {
+      await refreshClientList({ preserveSelection: true, autoSelectFirst: true });
+    } catch (error) {
+      clearAuthState();
+      showPending([`Sessao expirada: ${extractErrorMessage(error)}`], true);
+    }
+  } else {
+    clearClientContext();
+    showPending(['Autentique-se para carregar os dados do cliente.'], true);
+  }
   writeConsole('Frontend pronto.');
 }
 
@@ -97,10 +118,19 @@ function wireEvents() {
     state.apiBase = normalizeBaseUrl(apiBaseInput.value);
     localStorage.setItem('nfseApiBase', state.apiBase);
     writeConsole(`API Base URL atualizada: ${state.apiBase}`);
-    await refreshClientList({ preserveSelection: true, autoSelectFirst: true });
+    if (state.authToken) {
+      await refreshClientList({ preserveSelection: true, autoSelectFirst: true });
+    }
   });
 
+  authLoginBtn.addEventListener('click', runLogin);
+  authLogoutBtn.addEventListener('click', runLogout);
+
   refreshClientsBtn.addEventListener('click', async () => {
+    if (!state.authToken) {
+      showPending(['Autentique-se antes de atualizar a lista de clientes.'], true);
+      return;
+    }
     await refreshClientList({ preserveSelection: true, autoSelectFirst: true });
   });
 
@@ -157,6 +187,65 @@ function wireEvents() {
   syncLogsBtn.addEventListener('click', runSyncLogs);
   syncReprocessXmlsBtn.addEventListener('click', runReprocessXmls);
   syncTestSingleNsuBtn.addEventListener('click', runSingleNsuTest);
+}
+
+async function runLogin() {
+  const username = String(authUsernameInput.value || '').trim();
+  const password = String(authPasswordInput.value || '');
+
+  if (!username || !password) {
+    showPending(['Informe usuario e senha para autenticar.'], true);
+    return;
+  }
+
+  try {
+    const response = await apiCall('/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+      skipAuth: true
+    });
+
+    state.authToken = response.accessToken || '';
+    state.authUser = response.user || null;
+    authPasswordInput.value = '';
+    persistState();
+    renderAuthStatus();
+    await refreshClientList({ preserveSelection: true, autoSelectFirst: true });
+
+    writeConsole('Login realizado', {
+      user: response.user,
+      expiresIn: response.expiresIn
+    });
+  } catch (error) {
+    showPending([`Falha no login: ${extractErrorMessage(error)}`], true);
+  }
+}
+
+function runLogout() {
+  clearAuthState();
+  clearClientContext();
+  showPending(['Sessao finalizada.'], true);
+  writeConsole('Logout executado');
+}
+
+function renderAuthStatus() {
+  if (!state.authToken || !state.authUser) {
+    authStatus.className = 'status-box warn';
+    authStatus.textContent = 'Nao autenticado.';
+    return;
+  }
+
+  authStatus.className = 'status-box ok';
+  const role = state.authUser.role === 'admin' ? 'admin' : 'cliente';
+  const scope = state.authUser.clienteId ? ` | clienteId=${state.authUser.clienteId}` : '';
+  authStatus.textContent = `Autenticado como ${state.authUser.username} (${role})${scope}`;
+}
+
+function clearAuthState() {
+  state.authToken = '';
+  state.authUser = null;
+  persistState();
+  renderAuthStatus();
 }
 
 async function refreshClientList({ preserveSelection, autoSelectFirst }) {
@@ -931,12 +1020,15 @@ function resolveRelacao(item) {
 async function apiCall(path, options = {}) {
   const url = `${state.apiBase}${path}`;
 
+  const headers = {
+    'Content-Type': 'application/json',
+    ...(state.authToken && !options.skipAuth ? { Authorization: `Bearer ${state.authToken}` } : {}),
+    ...(options.headers || {})
+  };
+
   const response = await fetch(url, {
     method: options.method || 'GET',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(options.headers || {})
-    },
+    headers,
     body: options.body
   });
 
@@ -947,6 +1039,9 @@ async function apiCall(path, options = {}) {
     const payload = data || { statusCode: response.status, message: text };
     const message = extractApiMessage(payload) || `Erro ${response.status} em ${path}`;
     writeConsole(`Erro ${response.status} em ${path}`, payload, true);
+    if (response.status === 401 && !options.skipAuth) {
+      clearAuthState();
+    }
     const error = new Error(message);
     error.statusCode = response.status;
     error.payload = payload;
@@ -1057,6 +1152,12 @@ function renderContext() {
 }
 
 function persistState() {
+  localStorage.setItem('nfseAuthToken', state.authToken || '');
+  if (state.authUser) {
+    localStorage.setItem('nfseAuthUser', JSON.stringify(state.authUser));
+  } else {
+    localStorage.removeItem('nfseAuthUser');
+  }
   localStorage.setItem('nfseClientId', state.clientId);
   localStorage.setItem('nfseEstablishmentId', state.establishmentId);
   localStorage.setItem('nfseCertificateId', state.certificateId);
@@ -1102,6 +1203,19 @@ function onlyDigits(value) {
 
 function normalizeBaseUrl(value) {
   return String(value || '').trim().replace(/\/$/, '') || window.location.origin;
+}
+
+function readStoredJson(key) {
+  const raw = localStorage.getItem(key);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 function formatCnpj(value) {

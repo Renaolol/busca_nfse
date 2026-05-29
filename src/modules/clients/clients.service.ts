@@ -42,8 +42,13 @@ export class ClientsService {
     });
   }
 
-  async findAll(): Promise<Cliente[]> {
+  async findAll(clienteId?: string): Promise<Cliente[]> {
     return this.prisma.cliente.findMany({
+      where: clienteId
+        ? {
+            id: clienteId
+          }
+        : undefined,
       orderBy: { createdAt: 'desc' }
     });
   }
