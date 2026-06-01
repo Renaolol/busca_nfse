@@ -2,6 +2,7 @@ const state = {
   apiBase: localStorage.getItem('nfseApiBase') || window.location.origin,
   authToken: localStorage.getItem('nfseAuthToken') || '',
   authUser: readStoredJson('nfseAuthUser'),
+  notesRelation: localStorage.getItem('nfseNotesRelation') || 'emitidas',
   clientId: localStorage.getItem('nfseClientId') || '',
   establishmentId: localStorage.getItem('nfseEstablishmentId') || '',
   certificateId: localStorage.getItem('nfseCertificateId') || '',
@@ -44,6 +45,8 @@ const searchForm = document.getElementById('searchForm');
 const nfseRows = document.getElementById('nfseRows');
 const auditForm = document.getElementById('auditForm');
 const auditRows = document.getElementById('auditRows');
+const notesRelationEmitidasBtn = document.getElementById('notesRelationEmitidas');
+const notesRelationRecebidasBtn = document.getElementById('notesRelationRecebidas');
 
 const certClientId = document.getElementById('certClientId');
 const certEstablishmentId = document.getElementById('certEstablishmentId');
@@ -57,7 +60,6 @@ const refreshClientsBtn = document.getElementById('refreshClientsBtn');
 const newClientBtn = document.getElementById('newClientBtn');
 const editClientBtn = document.getElementById('editClientBtn');
 const editCertificateBtn = document.getElementById('editCertificateBtn');
-const searchSeparatedBtn = document.getElementById('searchSeparatedBtn');
 const notesSelectAllBtn = document.getElementById('notesSelectAll');
 const notesClearSelectionBtn = document.getElementById('notesClearSelection');
 const notesDownloadXmlSelectedBtn = document.getElementById('notesDownloadXmlSelected');
@@ -85,6 +87,7 @@ boot();
 
 async function boot() {
   apiBaseInput.value = state.apiBase;
+  state.notesRelation = normalizeNotesRelation(state.notesRelation);
   if (state.authUser?.username) {
     authUsernameInput.value = state.authUser.username;
   }
@@ -178,7 +181,8 @@ function wireEvents() {
   certificateForm.addEventListener('submit', onCreateCertificate);
   searchForm.addEventListener('submit', onSearchNfse);
   auditForm.addEventListener('submit', onSearchAudit);
-  searchSeparatedBtn.addEventListener('click', onSearchSeparated);
+  notesRelationEmitidasBtn.addEventListener('click', () => onChangeNotesRelation('emitidas'));
+  notesRelationRecebidasBtn.addEventListener('click', () => onChangeNotesRelation('tomadas'));
   notesSelectAllBtn.addEventListener('click', () => setVisibleNoteSelection(true));
   notesClearSelectionBtn.addEventListener('click', () => setVisibleNoteSelection(false));
   notesDownloadXmlSelectedBtn.addEventListener('click', () => downloadSelectedNotes('xml'));
@@ -298,6 +302,7 @@ async function selectClient(clientId) {
     return;
   }
 
+  const previousClientId = state.clientId;
   const requestId = ++selectRequestCounter;
 
   const [client, establishments, certificates, syncStatus] = await Promise.all([
@@ -327,6 +332,10 @@ async function selectClient(clientId) {
   state.establishmentId = selectedEstablishment?.id || '';
   state.certificateId = selectedCertificate?.id || '';
 
+  if (previousClientId !== clientId) {
+    searchForm.elements.competencia.value = getPreviousMonthCompetencia();
+  }
+
   persistState();
   fillLinkedInputs();
   fillClientEditForm();
@@ -348,6 +357,15 @@ async function selectClient(clientId) {
     certificadoId: state.certificateId || null,
     notas: notes.length
   });
+}
+
+async function onChangeNotesRelation(relation) {
+  setNotesRelation(relation);
+  if (!state.clientId) {
+    return;
+  }
+
+  await runNotesSearch();
 }
 
 function renderClientSummary() {
@@ -733,29 +751,16 @@ async function onSearchNfse(event) {
     return;
   }
 
+  await runNotesSearch();
+}
+
+async function runNotesSearch() {
   const query = buildSearchQueryString();
   const result = await apiCall(`/nfse${query ? `?${query}` : ''}`);
   state.lastNotes = Array.isArray(result) ? result : [];
   renderNfseRows(state.lastNotes);
   writeConsole('Resultado da pesquisa NFS-e', result);
-}
-
-async function onSearchSeparated() {
-  if (!state.clientId) {
-    showPending(['Selecione um cliente para pesquisar notas separadas.'], true);
-    return;
-  }
-
-  const cnpjConsulta = onlyDigits(searchForm.elements.cnpjConsulta.value);
-  if (!cnpjConsulta || cnpjConsulta.length !== 14) {
-    showPending(['Informe CNPJ consulta com 14 digitos para separar emitidas e tomadas.'], true);
-    return;
-  }
-
-  const query = buildSearchQueryString();
-  const result = await apiCall(`/nfse/separadas${query ? `?${query}` : ''}`);
-  renderSeparatedRows(result);
-  writeConsole('Resultado separado por relacao', result);
+  return state.lastNotes;
 }
 
 async function onSearchAudit(event) {
@@ -791,11 +796,8 @@ async function searchClientNotes() {
     return [];
   }
 
-  const result = await apiCall(`/nfse?clienteId=${encodeURIComponent(state.clientId)}`);
-  const notes = Array.isArray(result) ? result : [];
-  state.lastNotes = notes;
-  renderNfseRows(notes);
-  return notes;
+  ensureNotesCompetenciaDefault();
+  return runNotesSearch();
 }
 
 function buildSearchQueryString() {
@@ -805,7 +807,6 @@ function buildSearchQueryString() {
     'cnpjPrestador',
     'cnpjTomador',
     'cnpjConsulta',
-    'tipoRelacao',
     'status',
     'competencia',
     'dataInicio',
@@ -824,6 +825,8 @@ function buildSearchQueryString() {
   if (!params.get('clienteId') && state.clientId) {
     params.set('clienteId', state.clientId);
   }
+
+  params.set('tipoRelacao', normalizeNotesRelation(state.notesRelation));
 
   return params.toString();
 }
@@ -854,55 +857,6 @@ function renderNfseRows(items) {
       </tr>`;
     })
     .join('');
-
-  wireSelectionCheckboxes();
-  wireDownloadButtons();
-}
-
-function renderSeparatedRows(payload) {
-  const emitidas = Array.isArray(payload?.emitidas) ? payload.emitidas : [];
-  const tomadas = Array.isArray(payload?.tomadas) ? payload.tomadas : [];
-
-  if (emitidas.length === 0 && tomadas.length === 0) {
-    state.selectedNoteIds = new Set();
-    nfseRows.innerHTML = `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhum resultado encontrado para o CNPJ informado.</td></tr>`;
-    return;
-  }
-
-  keepSelectedIdsVisible([...emitidas, ...tomadas].map((item) => item.id));
-  const groupRow = (title) =>
-    `<tr class="group-row"><td colspan="${NFSE_TABLE_COLUMNS}"><strong>${escapeHtml(title)}</strong></td></tr>`;
-
-  const itemRows = (items) =>
-    items
-      .map((item) => {
-        const checked = state.selectedNoteIds.has(item.id) ? 'checked' : '';
-        return `<tr>
-          <td><input type="checkbox" class="note-select" data-note-id="${item.id}" ${checked} /></td>
-          <td>${escapeHtml(item.numeroNfse ?? '-')}</td>
-          <td>${escapeHtml(formatEmissionDate(item.dataEmissao))}</td>
-          <td>${escapeHtml(item.status ?? '-')}</td>
-          <td>${escapeHtml(formatParty(item.razaoSocialPrestador, item.cnpjPrestador))}</td>
-          <td>${escapeHtml(formatParty(item.razaoSocialTomador, item.cnpjTomador))}</td>
-          <td>${escapeHtml(formatCurrencyValue(item.valorServico))}</td>
-          <td>
-            <button class="btn ghost" type="button" data-action="xml" data-id="${item.id}">XML</button>
-            <button class="btn ghost" type="button" data-action="danfse" data-id="${item.id}">DANFSE</button>
-          </td>
-        </tr>`;
-      })
-      .join('');
-
-  nfseRows.innerHTML = [
-    groupRow(`Emitidas (${emitidas.length})`),
-    emitidas.length
-      ? itemRows(emitidas)
-      : `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhuma nota emitida.</td></tr>`,
-    groupRow(`Tomadas (${tomadas.length})`),
-    tomadas.length
-      ? itemRows(tomadas)
-      : `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhuma nota tomada.</td></tr>`
-  ].join('');
 
   wireSelectionCheckboxes();
   wireDownloadButtons();
@@ -1191,11 +1145,54 @@ function fillLinkedInputs() {
   certEstablishmentId.value = state.establishmentId;
   syncClientId.value = state.clientId;
   searchForm.elements.clienteId.value = state.clientId;
+  ensureNotesCompetenciaDefault();
+  syncNotesRelationControls();
   updateAuditClienteFilter();
 
   if (state.selectedClient?.cnpj) {
     certificateForm.cnpjTitular.value = onlyDigits(state.selectedClient.cnpj);
   }
+}
+
+function setNotesRelation(relation) {
+  state.notesRelation = normalizeNotesRelation(relation);
+  persistState();
+  syncNotesRelationControls();
+}
+
+function syncNotesRelationControls() {
+  const relation = normalizeNotesRelation(state.notesRelation);
+  state.notesRelation = relation;
+  if (searchForm?.elements?.tipoRelacao) {
+    searchForm.elements.tipoRelacao.value = relation;
+  }
+
+  const isEmitidas = relation === 'emitidas';
+  notesRelationEmitidasBtn.classList.toggle('active', isEmitidas);
+  notesRelationRecebidasBtn.classList.toggle('active', !isEmitidas);
+  notesRelationEmitidasBtn.setAttribute('aria-pressed', isEmitidas ? 'true' : 'false');
+  notesRelationRecebidasBtn.setAttribute('aria-pressed', !isEmitidas ? 'true' : 'false');
+}
+
+function normalizeNotesRelation(value) {
+  return value === 'tomadas' ? 'tomadas' : 'emitidas';
+}
+
+function ensureNotesCompetenciaDefault() {
+  const currentCompetencia = String(searchForm?.elements?.competencia?.value || '').trim();
+  if (currentCompetencia) {
+    return;
+  }
+
+  searchForm.elements.competencia.value = getPreviousMonthCompetencia();
+}
+
+function getPreviousMonthCompetencia(referenceDate = new Date()) {
+  const year = referenceDate.getFullYear();
+  const month = referenceDate.getMonth();
+  const previousMonthDate = new Date(year, month - 1, 1);
+  const previousMonth = String(previousMonthDate.getMonth() + 1).padStart(2, '0');
+  return `${previousMonthDate.getFullYear()}-${previousMonth}`;
 }
 
 function updateAuditClienteFilter() {
@@ -1241,6 +1238,7 @@ function persistState() {
   } else {
     localStorage.removeItem('nfseAuthUser');
   }
+  localStorage.setItem('nfseNotesRelation', normalizeNotesRelation(state.notesRelation));
   localStorage.setItem('nfseClientId', state.clientId);
   localStorage.setItem('nfseEstablishmentId', state.establishmentId);
   localStorage.setItem('nfseCertificateId', state.certificateId);

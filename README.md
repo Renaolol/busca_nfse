@@ -225,17 +225,19 @@ Antes de operar, faca login no bloco superior (`Usuario`/`Senha`) para obter ses
 O layout esta separado em 4 menus:
 
 - `Clientes`: cadastro/edicao, certificados e contexto ativo.
-- `Notas`: filtros, listagem, separacao emitidas/tomadas e download em lote (XML/DANFSE) das linhas selecionadas.
+- `Notas`: filtros, listagem e download em lote (ZIP XML/DANFSE) das linhas selecionadas.
 - `Busca API`: operacoes de sync, logs, teste de NSU e escolha de modo `historico` ou `diario`.
 - `Auditoria`: consulta de trilha operacional por `cliente_id` e `acao`.
 Use a lista suspensa de clientes para selecionar o contexto ativo; ao selecionar, as notas do cliente sao carregadas automaticamente.
+Ao abrir/selecionar cliente, a listagem inicia com competencia do mes anterior ao atual.
+No cabecalho da aba `Notas`, use o switcher `Emitidas/Recebidas` para alternar rapidamente a relacao consultada.
 Edicao de dados e certificados fica disponivel via botoes \"Editar dados\" e \"Editar certificados\".
 Ao criar cliente, o backend ja cria automaticamente o estabelecimento principal com o mesmo CNPJ.
 No cadastro de certificado, a API extrai automaticamente validade, thumbprint, serial, emissor e subject do arquivo `.pfx/.p12`.
 Certificados inativos podem ser excluidos por `DELETE /certificados/:id` (ativos exigem desativacao antes).
 Nos endpoints por `id` de certificado (`GET/POST/DELETE /certificados/:id...`), informe `?clienteId=...` para validar escopo.
   - `clienteId` deve ser UUID valido.
-Tambem permite consultar por CNPJ base e separar NFS-e em emitidas e tomadas.
+Tambem permite consultar por CNPJ base e alternar entre NFS-e emitidas e recebidas.
 Na tabela de resultados, os botoes `XML` e `DANFSE` fazem download direto dos arquivos.
 As operacoes por ID em certificado e NFS-e usam `clienteId` como escopo (query string) para evitar acesso cruzado entre clientes.
 No bloco de sincronizacao, o botao `Reprocessar XMLs` executa `POST /nfse/reprocessar-xmls` para backfill de campos e regeneracao das DANFSE.

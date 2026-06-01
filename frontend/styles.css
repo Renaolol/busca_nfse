@@ -295,6 +295,45 @@ h2 {
   font-size: 1.22rem;
 }
 
+.notes-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+}
+
+.notes-header h2 {
+  margin: 0;
+}
+
+.notes-relation-switch {
+  display: inline-flex;
+  border: 1px solid #ccbca4;
+  border-radius: 999px;
+  overflow: hidden;
+  background: #fffaf2;
+}
+
+.relation-switch-btn {
+  border: none;
+  background: transparent;
+  color: var(--ink-soft);
+  padding: 0.45rem 0.8rem;
+  cursor: pointer;
+  transition: all 120ms ease;
+  font-weight: 600;
+}
+
+.relation-switch-btn:hover {
+  background: #f4ebdd;
+}
+
+.relation-switch-btn.active {
+  background: linear-gradient(135deg, #0f766e, #16988d);
+  color: #f2faf8;
+}
+
 .helper {
   margin: 0;
   font-size: 0.8rem;
@@ -512,5 +551,13 @@ pre {
 
   .btn {
     width: 100%;
+  }
+
+  .notes-relation-switch {
+    width: 100%;
+  }
+
+  .relation-switch-btn {
+    flex: 1;
   }
 }
