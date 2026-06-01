@@ -13,13 +13,33 @@ import { StartSyncDto } from './dto/start-sync.dto';
 export class SyncService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SyncService.name);
   private autoSyncTimer: NodeJS.Timeout | null = null;
+  private nightlySweepTimer: NodeJS.Timeout | null = null;
   private autoSyncRunning = false;
+  private nightlySweepRunning = false;
+  private lastNightlySweepDateKey: string | null = null;
   private readonly autoSyncEnabled = process.env.SYNC_AUTO_RUN_ENABLED !== 'false';
   private readonly autoSyncIntervalMs = this.parsePositiveNumberEnv('SYNC_AUTO_RUN_INTERVAL_MS', 30000);
   private readonly autoSyncStartupDelayMs = this.parsePositiveNumberEnv('SYNC_AUTO_RUN_STARTUP_DELAY_MS', 3000);
   private readonly apiRetryDelayMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_DELAY_MS', 60000);
   private readonly dailySyncIntervalMs = this.parsePositiveNumberEnv('SYNC_DAILY_INTERVAL_MS', 24 * 60 * 60 * 1000);
-  private readonly dailySyncMaxNsuPerRun = this.parsePositiveNumberEnv('SYNC_DAILY_MAX_NSU_PER_RUN', 50);
+  private readonly dailySyncMaxNsuPerRun = this.parsePositiveNumberEnv('SYNC_DAILY_MAX_NSU_PER_RUN', 10);
+  private readonly dailySyncStopOnFirstDocument = process.env.SYNC_DAILY_STOP_ON_FIRST_DOCUMENT !== 'false';
+  private readonly dailySyncSuccessCooldownMs = this.parsePositiveNumberEnv('SYNC_DAILY_SUCCESS_COOLDOWN_MS', 60000);
+  private readonly adnRequestIntervalMs = this.parsePositiveNumberEnv('SYNC_ADN_REQUEST_INTERVAL_MS', 1200);
+  private readonly apiRetryJitterMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_JITTER_MS', 30000);
+  private readonly rateLimitGlobalCooldownMs = this.parsePositiveNumberEnv('SYNC_ADN_RATE_LIMIT_COOLDOWN_MS', 180000);
+  private readonly nightlySweepEnabled = process.env.SYNC_NIGHTLY_SWEEP_ENABLED !== 'false';
+  private readonly nightlySweepCheckIntervalMs = this.parsePositiveNumberEnv('SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS', 60000);
+  private readonly nightlySweepHour = this.parseBoundedIntegerEnv('SYNC_NIGHTLY_SWEEP_HOUR', 2, 0, 23);
+  private readonly nightlySweepMinute = this.parseBoundedIntegerEnv('SYNC_NIGHTLY_SWEEP_MINUTE', 0, 0, 59);
+  private readonly nightlySweepTimezoneOffsetMinutes = this.parseBoundedIntegerEnv(
+    'SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES',
+    -180,
+    -720,
+    840
+  );
+  private rateLimitCooldownUntil: Date | null = null;
+  private lastAdnRequestAtMs = 0;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -30,95 +50,56 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    if (!this.autoSyncEnabled) {
+    if (this.autoSyncEnabled) {
+      this.autoSyncTimer = setInterval(() => {
+        void this.runAutomaticSyncCycle();
+      }, this.autoSyncIntervalMs);
+
+      setTimeout(() => {
+        void this.runAutomaticSyncCycle();
+      }, this.autoSyncStartupDelayMs);
+
+      this.logger.log(`Execucao automatica de sync habilitada a cada ${this.autoSyncIntervalMs}ms`);
+    } else {
       this.logger.log('Execucao automatica de sync desativada (SYNC_AUTO_RUN_ENABLED=false)');
-      return;
     }
 
-    this.autoSyncTimer = setInterval(() => {
-      void this.runAutomaticSyncCycle();
-    }, this.autoSyncIntervalMs);
+    if (this.nightlySweepEnabled) {
+      this.nightlySweepTimer = setInterval(() => {
+        void this.tryRunNightlySweep();
+      }, this.nightlySweepCheckIntervalMs);
+      setTimeout(() => {
+        void this.tryRunNightlySweep();
+      }, 5000);
 
-    setTimeout(() => {
-      void this.runAutomaticSyncCycle();
-    }, this.autoSyncStartupDelayMs);
-
-    this.logger.log(`Execucao automatica de sync habilitada a cada ${this.autoSyncIntervalMs}ms`);
+      this.logger.log(
+        `Busca noturna habilitada para ${String(this.nightlySweepHour).padStart(2, '0')}:${String(this.nightlySweepMinute).padStart(2, '0')} (UTC${this.nightlySweepTimezoneOffsetMinutes >= 0 ? '+' : ''}${this.nightlySweepTimezoneOffsetMinutes / 60})`
+      );
+    } else {
+      this.logger.log('Busca noturna desativada (SYNC_NIGHTLY_SWEEP_ENABLED=false)');
+    }
   }
 
   onModuleDestroy(): void {
-    if (!this.autoSyncTimer) {
-      return;
+    if (this.autoSyncTimer) {
+      clearInterval(this.autoSyncTimer);
+      this.autoSyncTimer = null;
     }
 
-    clearInterval(this.autoSyncTimer);
-    this.autoSyncTimer = null;
+    if (this.nightlySweepTimer) {
+      clearInterval(this.nightlySweepTimer);
+      this.nightlySweepTimer = null;
+    }
   }
 
   async iniciarSync(clienteId: string, options?: StartSyncDto): Promise<{ controlesCriadosOuAtualizados: number }> {
     await this.ensureClient(clienteId);
     const modoSync = options?.modo === 'diario' ? SyncMode.somente_novas : SyncMode.historico_desde_nsu_1;
-
-    const establishments = await this.prisma.clienteEstabelecimento.findMany({
-      where: { clienteId, ativo: true }
-    });
-
-    for (const establishment of establishments) {
-      const existingControl = await this.prisma.nfseSyncControle.findUnique({
-        where: {
-          clienteId_cnpjConsulta_ambiente: {
-            clienteId,
-            cnpjConsulta: establishment.cnpj,
-            ambiente: Ambiente.producao
-          }
-        }
-      });
-
-      if (existingControl) {
-        await this.prisma.nfseSyncControle.update({
-          where: { id: existingControl.id },
-          data: {
-            clienteId,
-            estabelecimentoId: establishment.id,
-            status: SyncStatus.ativo,
-            modoSync,
-            proximaExecucao: null,
-            ultimaMensagem:
-              modoSync === SyncMode.somente_novas
-                ? 'Sincronizacao diaria ativada manualmente'
-                : 'Sincronizacao ativada manualmente'
-          }
-        });
-        continue;
-      }
-
-      const initialNsu =
-        modoSync === SyncMode.somente_novas
-          ? await this.resolveInitialNsuForOnlyNew(clienteId, establishment.cnpj, Ambiente.producao)
-          : BigInt(0);
-
-      await this.prisma.nfseSyncControle.create({
-        data: {
-          clienteId,
-          estabelecimentoId: establishment.id,
-          cnpjConsulta: establishment.cnpj,
-          ambiente: Ambiente.producao,
-          ultimoNsuConsultado: initialNsu,
-          ultimoNsuComDocumento: initialNsu,
-          nsuInicial: initialNsu + BigInt(1),
-          modoSync,
-          status: SyncStatus.ativo,
-          ultimaMensagem:
-            modoSync === SyncMode.somente_novas
-              ? 'Sincronizacao diaria ativada manualmente'
-              : 'Sincronizacao ativada manualmente'
-        }
-      });
-    }
+    const totalControles = await this.activateSyncControlsForClient(clienteId, modoSync, 'manual');
 
     await this.runNow();
 
-    return { controlesCriadosOuAtualizados: establishments.length };
+    return { controlesCriadosOuAtualizados: totalControles };
   }
 
   async pausarSync(clienteId: string): Promise<{ total: number }> {
@@ -140,6 +121,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       where: { clienteId },
       data: {
         status: SyncStatus.ativo,
+        proximaExecucao: null,
         ultimaMensagem: 'Sincronizacao retomada manualmente'
       }
     });
@@ -165,6 +147,17 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   async runNow(): Promise<{ processed: number; documentsSaved: number }> {
+    if (this.isRateLimitCooldownActive()) {
+      const until = this.rateLimitCooldownUntil;
+      this.logger.warn(
+        `Consulta ADN pausada por cooldown de rate limit ate ${until ? until.toISOString() : 'desconhecido'}`
+      );
+      return {
+        processed: 0,
+        documentsSaved: 0
+      };
+    }
+
     const now = new Date();
     const controls = await this.prisma.nfseSyncControle.findMany({
       where: {
@@ -178,8 +171,13 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     });
 
     let documentsSaved = 0;
+    let rateLimitTriggered = false;
 
     for (const control of controls) {
+      if (rateLimitTriggered) {
+        break;
+      }
+
       const certificate = await this.prisma.certificado.findFirst({
         where: {
           clienteId: control.clienteId,
@@ -219,9 +217,11 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       const maxSteps = isDailyMode ? this.dailySyncMaxNsuPerRun : 1;
       let currentNsu = control.ultimoNsuConsultado;
       let shouldStop = false;
+      let documentsSavedForControl = 0;
 
       for (let step = 0; step < maxSteps && !shouldStop; step += 1) {
         const nextNsu = currentNsu + BigInt(1);
+        await this.waitForAdnRequestSlot();
         const result = await this.adnClient.getDFeByNsu({
           cnpjConsulta: control.cnpjConsulta,
           nsu: nextNsu,
@@ -232,15 +232,46 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           certificateId: certificate.id
         });
 
+        if (this.isCertificateDecryptError(result)) {
+          const message =
+            'Falha ao descriptografar certificado/senha. Verifique CERT_MASTER_KEY e recadastre o certificado.';
+          await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'erro_certificado', message);
+          await this.prisma.nfseSyncControle.update({
+            where: { id: control.id },
+            data: {
+              status: SyncStatus.erro_certificado,
+              ultimaExecucao: new Date(),
+              proximaExecucao: null,
+              ultimaMensagem: message
+            }
+          });
+          shouldStop = true;
+          continue;
+        }
+
         if (this.mustRetryWithoutAdvancingNsu(result)) {
-          const retryAt = new Date(Date.now() + this.apiRetryDelayMs);
-          await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'erro_api', result.message ?? 'Falha temporaria ao consultar ADN');
+          const isRateLimitError = result.statusCode === 429;
+          const recoveredAtLeastOneDocument = documentsSavedForControl > 0;
+          if (isRateLimitError) {
+            this.activateRateLimitCooldown();
+            rateLimitTriggered = true;
+          }
+
+          const retryAt = this.computeRetryDate(isRateLimitError);
+          const rateLimitMessage =
+            result.message ??
+            (isRateLimitError ? 'Falha na consulta ADN. HTTP 429.' : 'Falha temporaria ao consultar ADN');
+          const message = recoveredAtLeastOneDocument
+            ? `${rateLimitMessage} Limite temporario apos sincronizacao parcial; retomada agendada automaticamente.`
+            : rateLimitMessage;
+          const status = isRateLimitError && recoveredAtLeastOneDocument ? 'rate_limit' : 'erro_api';
+          await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, status, message);
           await this.prisma.nfseSyncControle.update({
             where: { id: control.id },
             data: {
               ultimaExecucao: new Date(),
               proximaExecucao: retryAt,
-              ultimaMensagem: result.message ?? 'Falha temporaria ao consultar ADN; nova tentativa agendada'
+              ultimaMensagem: message
             }
           });
           shouldStop = true;
@@ -380,14 +411,22 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               increment: 1
             },
             ultimaExecucao: new Date(),
-            proximaExecucao: null,
+            proximaExecucao:
+              isDailyMode && this.dailySyncStopOnFirstDocument
+                ? new Date(Date.now() + this.dailySyncSuccessCooldownMs)
+                : null,
             ultimaMensagem: 'Documento sincronizado com sucesso'
           }
         });
 
         await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'sucesso', 'Documento sincronizado');
         documentsSaved += 1;
+        documentsSavedForControl += 1;
         currentNsu = nextNsu;
+
+        if (isDailyMode && this.dailySyncStopOnFirstDocument) {
+          shouldStop = true;
+        }
       }
     }
 
@@ -416,6 +455,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     const nsu = this.parseNsu(dto.nsu);
     const ambiente = dto.ambiente === 'producao_restrita' ? Ambiente.producao_restrita : Ambiente.producao;
 
+    await this.waitForAdnRequestSlot();
     const result = await this.adnClient.getDFeByNsu({
       cnpjConsulta: establishment.cnpj,
       nsu,
@@ -452,6 +492,150 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       orderBy: { createdAt: 'desc' },
       take: 200
     });
+  }
+
+  private async activateSyncControlsForClient(
+    clienteId: string,
+    modoSync: SyncMode,
+    origem: 'manual' | 'noturna'
+  ): Promise<number> {
+    const establishments = await this.prisma.clienteEstabelecimento.findMany({
+      where: { clienteId, ativo: true }
+    });
+
+    for (const establishment of establishments) {
+      const existingControl = await this.prisma.nfseSyncControle.findUnique({
+        where: {
+          clienteId_cnpjConsulta_ambiente: {
+            clienteId,
+            cnpjConsulta: establishment.cnpj,
+            ambiente: Ambiente.producao
+          }
+        }
+      });
+
+      if (existingControl) {
+        await this.prisma.nfseSyncControle.update({
+          where: { id: existingControl.id },
+          data: {
+            clienteId,
+            estabelecimentoId: establishment.id,
+            status: SyncStatus.ativo,
+            modoSync,
+            proximaExecucao: this.buildActivationSchedule(origem),
+            ultimaMensagem: this.buildActivationMessage(modoSync, origem)
+          }
+        });
+        continue;
+      }
+
+      const initialNsu =
+        modoSync === SyncMode.somente_novas
+          ? await this.resolveInitialNsuForOnlyNew(clienteId, establishment.cnpj, Ambiente.producao)
+          : BigInt(0);
+
+      await this.prisma.nfseSyncControle.create({
+        data: {
+          clienteId,
+          estabelecimentoId: establishment.id,
+          cnpjConsulta: establishment.cnpj,
+          ambiente: Ambiente.producao,
+          ultimoNsuConsultado: initialNsu,
+          ultimoNsuComDocumento: initialNsu,
+          nsuInicial: initialNsu + BigInt(1),
+          modoSync,
+          status: SyncStatus.ativo,
+          proximaExecucao: this.buildActivationSchedule(origem),
+          ultimaMensagem: this.buildActivationMessage(modoSync, origem)
+        }
+      });
+    }
+
+    return establishments.length;
+  }
+
+  private async tryRunNightlySweep(): Promise<void> {
+    if (this.nightlySweepRunning) {
+      return;
+    }
+
+    const localReference = this.getNightlyReferenceDate(new Date());
+    const hour = localReference.getUTCHours();
+    const minute = localReference.getUTCMinutes();
+    const dateKey = this.toDateKey(localReference);
+
+    if (hour !== this.nightlySweepHour || minute !== this.nightlySweepMinute) {
+      return;
+    }
+
+    if (this.lastNightlySweepDateKey === dateKey) {
+      return;
+    }
+
+    this.lastNightlySweepDateKey = dateKey;
+    this.nightlySweepRunning = true;
+
+    try {
+      await this.runNightlySweepForAllClients();
+    } catch (error) {
+      this.logger.error(`Falha na busca noturna automatica: ${this.toErrorMessage(error)}`);
+    } finally {
+      this.nightlySweepRunning = false;
+    }
+  }
+
+  private async runNightlySweepForAllClients(): Promise<void> {
+    const clients = await this.prisma.cliente.findMany({
+      select: { id: true }
+    });
+
+    if (clients.length === 0) {
+      this.logger.log('Busca noturna: nenhum cliente cadastrado.');
+      return;
+    }
+
+    let totalControlesAtivados = 0;
+    let totalFalhas = 0;
+
+    for (const client of clients) {
+      try {
+        totalControlesAtivados += await this.activateSyncControlsForClient(client.id, SyncMode.somente_novas, 'noturna');
+      } catch (error) {
+        totalFalhas += 1;
+        this.logger.warn(
+          `Busca noturna: falha ao ativar sync diario para cliente ${client.id}: ${this.toErrorMessage(error)}`
+        );
+      }
+    }
+
+    this.logger.log(
+      `Busca noturna: clientes=${clients.length}, controles_ativados=${totalControlesAtivados}, falhas=${totalFalhas}`
+    );
+
+    if (totalControlesAtivados > 0) {
+      await this.runAutomaticSyncCycle();
+    }
+  }
+
+  private buildActivationMessage(modoSync: SyncMode, origem: 'manual' | 'noturna'): string {
+    if (modoSync === SyncMode.somente_novas) {
+      return origem === 'noturna'
+        ? 'Sincronizacao diaria ativada automaticamente pela busca noturna'
+        : 'Sincronizacao diaria ativada manualmente';
+    }
+
+    return origem === 'noturna'
+      ? 'Sincronizacao ativada automaticamente pela busca noturna'
+      : 'Sincronizacao ativada manualmente';
+  }
+
+  private buildActivationSchedule(origem: 'manual' | 'noturna'): Date | null {
+    if (origem !== 'noturna') {
+      return null;
+    }
+
+    const jitterMs = Math.floor(Math.random() * 5 * 60 * 1000);
+    return new Date(Date.now() + jitterMs);
   }
 
   private async ensureClient(clienteId: string): Promise<void> {
@@ -558,6 +742,56 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async waitForAdnRequestSlot(): Promise<void> {
+    if (this.adnRequestIntervalMs <= 0) {
+      return;
+    }
+
+    const now = Date.now();
+    const elapsed = now - this.lastAdnRequestAtMs;
+    if (elapsed < this.adnRequestIntervalMs) {
+      await this.sleep(this.adnRequestIntervalMs - elapsed);
+    }
+
+    this.lastAdnRequestAtMs = Date.now();
+  }
+
+  private computeRetryDate(rateLimited: boolean): Date {
+    const nowMs = Date.now();
+    const jitterMs = rateLimited ? Math.floor(Math.random() * this.apiRetryJitterMs) : 0;
+    let retryAtMs = nowMs + this.apiRetryDelayMs + jitterMs;
+
+    if (rateLimited && this.rateLimitCooldownUntil) {
+      retryAtMs = Math.max(retryAtMs, this.rateLimitCooldownUntil.getTime());
+    }
+
+    return new Date(retryAtMs);
+  }
+
+  private activateRateLimitCooldown(): void {
+    const nextCooldown = new Date(Date.now() + this.rateLimitGlobalCooldownMs);
+    if (!this.rateLimitCooldownUntil || nextCooldown.getTime() > this.rateLimitCooldownUntil.getTime()) {
+      this.rateLimitCooldownUntil = nextCooldown;
+    }
+
+    this.logger.warn(
+      `ADN retornou 429. Novas consultas ficarao pausadas ate ${this.rateLimitCooldownUntil.toISOString()}`
+    );
+  }
+
+  private isRateLimitCooldownActive(): boolean {
+    if (!this.rateLimitCooldownUntil) {
+      return false;
+    }
+
+    if (this.rateLimitCooldownUntil.getTime() <= Date.now()) {
+      this.rateLimitCooldownUntil = null;
+      return false;
+    }
+
+    return true;
+  }
+
   private mustRetryWithoutAdvancingNsu(result: AdnDFeResult): boolean {
     if (result.hasDocument) {
       return false;
@@ -568,6 +802,19 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     return result.statusCode >= 500;
+  }
+
+  private isCertificateDecryptError(result: AdnDFeResult): boolean {
+    if (result.hasDocument || result.statusCode !== 0) {
+      return false;
+    }
+
+    const message = (result.message ?? '').toLowerCase();
+    return (
+      message.includes('falha ao descriptografar certificado/senha') ||
+      message.includes('unable to authenticate data') ||
+      message.includes('unsupported state or unable to authenticate data')
+    );
   }
 
   private parsePositiveNumberEnv(name: string, fallback: number): number {
@@ -582,6 +829,37 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     return Math.floor(parsed);
+  }
+
+  private parseBoundedIntegerEnv(name: string, fallback: number, min: number, max: number): number {
+    const raw = process.env[name];
+    if (!raw) {
+      return fallback;
+    }
+
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed) || parsed < min || parsed > max) {
+      return fallback;
+    }
+
+    return parsed;
+  }
+
+  private getNightlyReferenceDate(now: Date): Date {
+    return new Date(now.getTime() + this.nightlySweepTimezoneOffsetMinutes * 60 * 1000);
+  }
+
+  private toDateKey(referenceDate: Date): string {
+    const year = referenceDate.getUTCFullYear();
+    const month = String(referenceDate.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(referenceDate.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      setTimeout(resolve, ms);
+    });
   }
 
   private toErrorMessage(error: unknown): string {

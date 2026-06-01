@@ -21,22 +21,20 @@
 - Se aparecer `HTTP 429`, reduzir frequencia de consulta e ajustar:
   - `SYNC_AUTO_RUN_INTERVAL_MS`
   - `SYNC_API_RETRY_DELAY_MS`
+  - `SYNC_DAILY_STOP_ON_FIRST_DOCUMENT=true`
+  - `SYNC_DAILY_SUCCESS_COOLDOWN_MS`
 - Em `429/timeout/5xx`, o sistema nao avanca NSU (evita pulo de documento) e agenda nova tentativa.
+- Se a busca noturna nao estiver rodando, conferir:
+  - `SYNC_NIGHTLY_SWEEP_ENABLED=true`
+  - `SYNC_NIGHTLY_SWEEP_HOUR` / `SYNC_NIGHTLY_SWEEP_MINUTE`
+  - `SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES`
+  - logs da aplicacao contendo `Busca noturna`.
 
 ## Erro de escopo (`clienteId`)
 
 - Em endpoints por `id` (`/certificados/:id...`, `/nfse/:id...`, `/sync/logs`), `clienteId` e obrigatorio.
 - O valor de `clienteId` precisa ser UUID valido; caso contrario a API retorna `400`.
 - Se o `clienteId` nao corresponder ao dono do recurso, a API responde como nao encontrado (`404`) para evitar vazamento de contexto.
-- Para token `role=cliente`, `clienteId` informado no request precisa coincidir com o `clienteId` do token; caso contrario a API responde `403`.
-
-## Erro de autenticacao/autorizacao
-
-- `401 Token Bearer obrigatorio`: enviar header `Authorization: Bearer <token>`.
-- `401 Credenciais invalidas`: validar `POST /auth/login` e credenciais configuradas em `AUTH_USERS_JSON`.
-- `401 Token expirado`: gerar novo token via login.
-- `403 Perfil sem permissao`: endpoint exige `role=admin` (ex.: `POST /sync/rodar-agora`).
-- `403 Rota nao disponivel para usuario de cliente`: endpoint sem escopo de cliente para esse perfil.
 
 ## Erro ao cadastrar certificado
 
@@ -49,7 +47,4 @@
 ## Erro ao iniciar a API
 
 - Se a API falhar no bootstrap com mensagem sobre `CERT_MASTER_KEY`, configure valor seguro em `.env`.
-- Se a API falhar no bootstrap com mensagem sobre `JWT_SECRET`, configure valor seguro em `.env`.
-- Se a API falhar com mensagem sobre `AUTH_USERS_JSON`, configure um array JSON valido com usuarios.
-- Se `AUTH_USERS_JSON` usar `userId`, o valor precisa ser UUID valido.
 - Valores placeholder iniciando com `CHANGE_ME` sao recusados por seguranca.

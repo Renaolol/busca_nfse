@@ -4,7 +4,6 @@ import {
   mockClients,
   mockRunningExecution,
   mockSearchRuns,
-  mockUsers,
   mockXmlFiles
 } from './mocks/index.js';
 
@@ -12,6 +11,7 @@ const appRoot = document.getElementById('app');
 const modalRoot = document.getElementById('modalRoot');
 const drawerRoot = document.getElementById('drawerRoot');
 const toastRoot = document.getElementById('toastRoot');
+const API_TIMEOUT_MS = 20000;
 
 const navItems = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', route: '/dashboard' },
@@ -62,6 +62,7 @@ const state = {
   route: parseRoute(window.location.hash),
   mobileSidebarOpen: false,
   dataReady: false,
+  dataSource: 'mock',
   modal: null,
   drawer: null,
   toasts: [],
@@ -71,9 +72,29 @@ const state = {
   certificates: [],
   searchRuns: [],
   runningExecution: null,
+  executionMonitor: {
+    active: false,
+    mode: 'Automatica',
+    startedAt: null,
+    finishedAt: null,
+    currentClientName: null,
+    processed: 0,
+    total: 0,
+    successful: 0,
+    failed: 0,
+    message: 'Aguardando execucao.',
+    updatedAt: null,
+    lastXml: null
+  },
+  manualActivation: {
+    running: false,
+    stopRequested: false,
+    disabling: false
+  },
   xmlFiles: [],
   alerts: [],
-  users: [],
+  establishmentsByClient: {},
+  syncByClient: {},
   settings: {
     tab: 'geral',
     geral: {
@@ -127,8 +148,7 @@ const state = {
       downloadFim: '',
       municipio: 'Todos',
       tipo: 'Todos',
-      status: 'Todos',
-      caminho: ''
+      status: 'Todos'
     },
     alerts: {
       severidade: 'Todos',
@@ -165,18 +185,69 @@ async function initializeData() {
   setGlobalLoading(true);
   render();
 
-  await wait(350);
+  await wait(250);
 
+  try {
+    await hydrateFromApi();
+    state.dataSource = 'api';
+  } catch (error) {
+    console.error('Falha ao carregar dados reais da API. Usando fallback mock.', error);
+    hydrateFromMocks();
+    state.dataSource = 'mock';
+    pushToast('Nao foi possivel carregar dados reais. Exibindo dados de exemplo.', 'error');
+  }
+
+  setGlobalLoading(false);
+  render();
+}
+
+function hydrateFromMocks() {
   state.clients = deepClone(mockClients);
   state.certificates = deepClone(mockCertificates);
   state.searchRuns = deepClone(mockSearchRuns);
   state.runningExecution = deepClone(mockRunningExecution);
   state.xmlFiles = deepClone(mockXmlFiles);
   state.alerts = deepClone(mockAlerts);
-  state.users = deepClone(mockUsers);
+  state.establishmentsByClient = {};
+  state.syncByClient = {};
+  syncExecutionMonitorWithData();
+}
 
-  setGlobalLoading(false);
-  render();
+async function hydrateFromApi() {
+  const apiClientsRaw = await apiRequest('/clientes');
+  if (!Array.isArray(apiClientsRaw)) {
+    throw new Error('Resposta inesperada em /clientes');
+  }
+
+  const apiClients = apiClientsRaw.map((client) => ({
+    ...client,
+    cnpj: normalizeDigits(client.cnpj || '')
+  }));
+  const clientIds = apiClients.map((client) => client.id);
+
+  const [establishmentsByClient, certificatesByClient, syncByClient, nfseDocs, auditRows] = await Promise.all([
+    fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/estabelecimentos`, []),
+    fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/certificados`, []),
+    fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/sync/status`, { controles: [], logs: [] }),
+    apiRequest('/nfse').catch(() => []),
+    apiRequest('/auditoria').catch(() => [])
+  ]);
+
+  const clients = buildClientsFromApi(apiClients, establishmentsByClient, certificatesByClient, syncByClient, nfseDocs);
+  const certificates = buildCertificatesFromApi(apiClients, certificatesByClient);
+  const xmlFiles = buildXmlFilesFromApi(nfseDocs, clients);
+  const searchRuns = buildSearchRunsFromApi(syncByClient, clients);
+  const alerts = buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, auditRows);
+
+  state.clients = clients;
+  state.certificates = certificates;
+  state.searchRuns = searchRuns.length ? searchRuns : deepClone(mockSearchRuns);
+  state.runningExecution = null;
+  state.xmlFiles = xmlFiles;
+  state.alerts = alerts.length ? alerts : deepClone(mockAlerts);
+  state.establishmentsByClient = establishmentsByClient;
+  state.syncByClient = syncByClient;
+  syncExecutionMonitorWithData();
 }
 
 function wireGlobalEvents() {
@@ -199,6 +270,10 @@ function onDocumentClick(event) {
 
   const action = actionNode.getAttribute('data-action');
   if (!action) {
+    return;
+  }
+
+  if (action === 'overlay-close' && event.target !== actionNode) {
     return;
   }
 
@@ -270,17 +345,7 @@ function onDocumentClick(event) {
       if (!clientId) {
         return;
       }
-      const client = findClientById(clientId);
-      if (!client) {
-        return;
-      }
-      client.buscaAtiva = !client.buscaAtiva;
-      client.buscaStatus = client.buscaAtiva ? 'Ativo' : 'Inativo';
-      pushToast(
-        `Busca ${client.buscaAtiva ? 'ativada' : 'desativada'} para ${client.razaoSocial}.`,
-        client.buscaAtiva ? 'success' : 'info'
-      );
-      render();
+      void toggleClientSearchStatus(clientId);
       return;
     }
     case 'clients-toggle-all': {
@@ -304,11 +369,11 @@ function onDocumentClick(event) {
       return;
     }
     case 'clients-bulk-activate': {
-      bulkUpdateClientSearch(true);
+      void bulkUpdateClientSearch(true);
       return;
     }
     case 'clients-bulk-deactivate': {
-      bulkUpdateClientSearch(false);
+      void bulkUpdateClientSearch(false);
       return;
     }
     case 'clients-bulk-reprocess': {
@@ -335,7 +400,7 @@ function onDocumentClick(event) {
       if (!certificateId) {
         return;
       }
-      simulateCertificateTest(certificateId);
+      void simulateCertificateTest(certificateId);
       return;
     }
     case 'certificate-view-client': {
@@ -362,9 +427,25 @@ function onDocumentClick(event) {
       openModal({
         kind: 'confirm',
         title: 'Remover vinculo de certificado',
-        subtitle: 'Deseja remover o vinculo deste certificado com o cliente atual?',
+        subtitle: 'Deseja remover o vinculo deste certificado com o cliente atual? Isso vai desativar o certificado.',
         confirmLabel: 'Remover vinculo',
         payload: { type: 'unlink-certificate', certId }
+      });
+      return;
+    }
+    case 'certificate-delete': {
+      const certId = actionNode.getAttribute('data-cert-id');
+      const cert = state.certificates.find((item) => item.id === certId);
+      if (!cert) {
+        return;
+      }
+      openModal({
+        kind: 'confirm',
+        title: 'Excluir certificado',
+        subtitle: 'Deseja excluir este certificado definitivamente?',
+        confirmLabel: 'Excluir certificado',
+        intent: 'danger',
+        payload: { type: 'delete-certificate', certId }
       });
       return;
     }
@@ -395,11 +476,30 @@ function onDocumentClick(event) {
       refreshRunningExecution();
       return;
     }
+    case 'execution-monitor-refresh': {
+      void refreshExecutionMonitorNow();
+      return;
+    }
     case 'execution-reprocess-client': {
       const clientId = actionNode.getAttribute('data-client-id');
       const client = findClientById(clientId);
       if (client) {
-        pushToast(`Cliente ${client.razaoSocial} enviado para fila de reprocessamento.`, 'success');
+        if (state.dataSource === 'api') {
+          void (async () => {
+            try {
+              await apiRequest(`/clientes/${client.id}/sync/iniciar`, {
+                method: 'POST',
+                body: { modo: 'diario' }
+              });
+              pushToast(`Cliente ${client.razaoSocial} enviado para reprocessamento.`, 'success');
+              await refreshApiData();
+            } catch (error) {
+              pushToast(`Falha ao reprocessar cliente: ${toErrorMessage(error)}`, 'error');
+            }
+          })();
+        } else {
+          pushToast(`Cliente ${client.razaoSocial} enviado para fila de reprocessamento.`, 'success');
+        }
       }
       return;
     }
@@ -420,7 +520,7 @@ function onDocumentClick(event) {
       if (!xmlId) {
         return;
       }
-      openModal({ kind: 'xml-view', xmlId });
+      void openXmlViewer(xmlId);
       return;
     }
     case 'xml-download': {
@@ -428,20 +528,15 @@ function onDocumentClick(event) {
       if (!xmlId) {
         return;
       }
-      downloadXmlById(xmlId);
+      void downloadXmlById(xmlId);
       return;
     }
-    case 'xml-copy-path': {
+    case 'xml-download-danfse': {
       const xmlId = actionNode.getAttribute('data-xml-id');
-      const xmlFile = findXmlById(xmlId);
-      if (!xmlFile) {
+      if (!xmlId) {
         return;
       }
-      void copyToClipboard(xmlFile.caminhoServidor);
-      return;
-    }
-    case 'xml-open-folder': {
-      pushToast('Abertura de pasta delegada para o agente local (mock).', 'info');
+      void downloadDanfseByXmlId(xmlId);
       return;
     }
     case 'alerts-mark-selected': {
@@ -494,10 +589,6 @@ function onDocumentClick(event) {
       render();
       return;
     }
-    case 'settings-new-user': {
-      openModal({ kind: 'user-form' });
-      return;
-    }
     case 'drawer-close':
     case 'overlay-close': {
       closeDrawer();
@@ -508,7 +599,7 @@ function onDocumentClick(event) {
       if (!state.modal || state.modal.kind !== 'confirm') {
         return;
       }
-      executeConfirmAction(state.modal.payload);
+      void executeConfirmAction(state.modal.payload);
       closeModal();
       return;
     }
@@ -531,12 +622,12 @@ function onDocumentSubmit(event) {
     }
     case 'clientForm': {
       event.preventDefault();
-      submitClientForm(target);
+      void submitClientForm(target);
       return;
     }
     case 'certificatesModalForm': {
       event.preventDefault();
-      submitCertificateForm(target);
+      void submitCertificateForm(target);
       return;
     }
     case 'runsFilterForm': {
@@ -565,11 +656,6 @@ function onDocumentSubmit(event) {
     case 'settingsNotificacoesForm': {
       event.preventDefault();
       pushToast('Configuracoes salvas com sucesso.', 'success');
-      return;
-    }
-    case 'settingsUserForm': {
-      event.preventDefault();
-      submitUserForm(target);
       return;
     }
     default:
@@ -677,6 +763,7 @@ function renderHeader(meta) {
         <div class="header-meta">
           <div>Ultima rotina: ${escapeHtml(lastRoutineText)}</div>
           <div>${escapeHtml(healthStatus.description)}</div>
+          <div>Fonte: ${state.dataSource === 'api' ? 'Banco local' : 'Dados mockados'}</div>
         </div>
         ${statusBadge(healthStatus.label, healthStatus.tone)}
         <div class="avatar" aria-label="Usuario GC">GC</div>
@@ -1072,7 +1159,6 @@ function renderClientDetailsPage(clientId) {
                     <th>Data emissao</th>
                     <th>Prestador/Tomador</th>
                     <th>Valor</th>
-                    <th>Caminho no servidor</th>
                     <th>Acoes</th>
                   </tr>
                 </thead>
@@ -1085,18 +1171,17 @@ function renderClientDetailsPage(clientId) {
                             <td>${escapeHtml(formatDate(xml.dataEmissao))}</td>
                             <td>${escapeHtml(`${xml.prestador} / ${xml.tomador}`)}</td>
                             <td>${escapeHtml(formatCurrency(xml.valor))}</td>
-                            <td><code>${escapeHtml(xml.caminhoServidor)}</code></td>
                             <td>
                               <div class="table-actions">
                                 <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar</button>
                                 <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
-                                <button class="icon-btn" data-action="xml-open-folder" data-xml-id="${xml.id}">Abrir localizacao</button>
+                                <button class="icon-btn" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
                               </div>
                             </td>
                           </tr>`;
                         })
                         .join('')
-                    : '<tr><td colspan="6" class="table-state">Nenhum XML encontrado.</td></tr>'}
+                    : '<tr><td colspan="5" class="table-state">Nenhum XML encontrado.</td></tr>'}
                 </tbody>
               </table>
             </div>
@@ -1217,6 +1302,7 @@ function renderCertificatesPage() {
                 rowsHtml: certificates
                   .map((cert) => {
                     const rowClass = cert.status === 'Vencido' ? ' style="background:#fff5f5;"' : cert.status === 'A vencer' ? ' style="background:#fffbf0;"' : '';
+                    const canDelete = state.dataSource !== 'api' || !cert.ativo;
                     return `<tr${rowClass}>
                       <td>${escapeHtml(cert.cliente)}</td>
                       <td>${escapeHtml(formatCnpj(cert.cnpj))}</td>
@@ -1232,6 +1318,7 @@ function renderCertificatesPage() {
                           <button class="icon-btn" data-action="certificate-test" data-cert-id="${escapeHtml(cert.id)}">Testar certificado</button>
                           <button class="icon-btn" data-action="certificate-replace" data-cert-id="${escapeHtml(cert.id)}">Substituir</button>
                           <button class="icon-btn" data-action="certificate-unlink" data-cert-id="${escapeHtml(cert.id)}">Remover vinculo</button>
+                          <button class="icon-btn" data-action="certificate-delete" data-cert-id="${escapeHtml(cert.id)}" ${canDelete ? '' : 'disabled'}>Excluir certificado</button>
                         </div>
                       </td>
                     </tr>`;
@@ -1256,10 +1343,13 @@ function renderSearchRunsPage() {
         title: 'Buscas NFS-e',
         description: 'Historico das rotinas automaticas e reprocessamentos manuais.',
         actions: [
-          actionButton('Nova busca manual', 'open-new-manual-run', 'primary'),
-          actionButton('Agendar reprocessamento', 'open-schedule-reprocess', 'secondary')
+          actionButton('Ligar busca automatica agora', 'enable-auto-search', 'primary'),
+          actionButton('Desligar busca manual', 'disable-manual-started-search', 'secondary'),
+          actionButton('Nova busca manual', 'open-new-manual-run', 'secondary')
         ]
       })}
+
+      ${renderExecutionMonitorCard()}
 
       <article class="card filter-card">
         <h3 class="card-title">Filtros</h3>
@@ -1353,6 +1443,52 @@ function renderSearchRunsPage() {
   `;
 }
 
+function renderExecutionMonitorCard() {
+  const monitor = state.executionMonitor;
+  const statusLabel = monitor.active ? 'Em execucao' : monitor.finishedAt ? 'Concluida' : 'Aguardando';
+  const statusTone = monitor.active ? 'info' : monitor.failed > 0 ? 'warning' : monitor.finishedAt ? 'success' : 'neutral';
+  const progress = monitor.total > 0 ? Math.min(100, Math.round((monitor.processed / monitor.total) * 100)) : 0;
+  const lastXml = monitor.lastXml;
+
+  return `
+    <article class="card progress-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <h3 class="card-title">Monitor de execucao</h3>
+        ${statusBadge(statusLabel, statusTone)}
+      </div>
+      <p class="card-subtitle" style="margin-top:4px;">${escapeHtml(monitor.message || 'Aguardando nova execucao de busca.')}</p>
+      <div class="progress-track" aria-label="Progresso da execucao">
+        <div class="progress-fill" style="width:${progress}%;"></div>
+      </div>
+      <div class="progress-meta">
+        <span>Modo: <strong>${escapeHtml(monitor.mode || '-')}</strong></span>
+        <span>Executando para: <strong>${escapeHtml(monitor.currentClientName || '-')}</strong></span>
+        <span>Processados: <strong>${monitor.processed}/${monitor.total || '-'}</strong></span>
+        <span>Sucessos: <strong>${monitor.successful}</strong></span>
+        <span>Falhas: <strong>${monitor.failed}</strong></span>
+      </div>
+      <div class="card" style="margin-top:12px; border:1px dashed #d8d8de; box-shadow:none;">
+        <h4 class="card-title" style="margin:0 0 6px 0;">Ultimo XML baixado</h4>
+        ${
+          lastXml
+            ? `<div class="progress-meta" style="row-gap:8px;">
+              <span>Cliente: <strong>${escapeHtml(lastXml.cliente || '-')}</strong></span>
+              <span>NFS-e: <strong>${escapeHtml(lastXml.numeroNfse || '-')}</strong></span>
+              <span>Emissao: <strong>${escapeHtml(formatDateTime(lastXml.dataEmissao || lastXml.dataDownload))}</strong></span>
+              <span>Valor: <strong>${escapeHtml(formatCurrency(lastXml.valor || 0))}</strong></span>
+              <span>Tipo: <strong>${escapeHtml(lastXml.tipo || '-')}</strong></span>
+            </div>`
+            : '<p class="card-subtitle" style="margin:0;">Nenhum XML registrado ainda.</p>'
+        }
+      </div>
+      <div class="table-actions" style="margin-top:12px;">
+        <button class="btn secondary" data-action="execution-monitor-refresh">Atualizar painel</button>
+      </div>
+      <p class="card-subtitle" style="margin-top:8px;">Atualizado em ${escapeHtml(formatDateTime(monitor.updatedAt || new Date().toISOString()))}</p>
+    </article>
+  `;
+}
+
 function renderRunningExecutionCard() {
   const run = state.runningExecution;
   if (!run || run.status !== 'Em execucao') {
@@ -1434,10 +1570,6 @@ function renderXmlsPage() {
             Status do armazenamento
             <select name="status">${renderOptions(['Todos', 'Armazenado', 'Pendente', 'Erro'], state.filters.xmls.status)}</select>
           </label>
-          <label class="field" style="grid-column: span 2;">
-            Caminho no servidor
-            <input name="caminho" value="${escapeHtml(state.filters.xmls.caminho)}" />
-          </label>
           <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
             <button class="btn primary" type="submit">Filtrar</button>
             <button class="btn secondary" type="button" data-action="xmls-clear-filters">Limpar</button>
@@ -1459,14 +1591,13 @@ function renderXmlsPage() {
                 <th>Valor</th>
                 <th>Tipo</th>
                 <th>Status</th>
-                <th>Caminho no servidor</th>
                 <th>Acoes</th>
               </tr>
             </thead>
             <tbody>
               ${renderTableRowsOrState({
                 key: 'xmls',
-                colSpan: 11,
+                colSpan: 10,
                 rowsHtml: xmls
                   .map((xml) => {
                     return `<tr>
@@ -1479,14 +1610,12 @@ function renderXmlsPage() {
                       <td>${escapeHtml(formatCurrency(xml.valor))}</td>
                       <td>${escapeHtml(xml.tipo)}</td>
                       <td>${statusBadge(xml.statusArmazenamento, toneFromStorageStatus(xml.statusArmazenamento))}</td>
-                      <td><code>${escapeHtml(xml.caminhoServidor)}</code></td>
                       <td>
                         <div class="table-actions">
                           <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar detalhes</button>
                           <button class="icon-btn" data-action="xml-view" data-xml-id="${xml.id}">Ver XML</button>
                           <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
-                          <button class="icon-btn" data-action="xml-copy-path" data-xml-id="${xml.id}">Copiar caminho</button>
-                          <button class="icon-btn" data-action="xml-open-folder" data-xml-id="${xml.id}">Abrir pasta</button>
+                          <button class="icon-btn" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
                         </div>
                       </td>
                     </tr>`;
@@ -1616,7 +1745,6 @@ function renderSettingsPage() {
           ${renderTabButton('rotina', 'Rotina noturna')}
           ${renderTabButton('servidor', 'Servidor de XMLs')}
           ${renderTabButton('notificacoes', 'Notificacoes')}
-          ${renderTabButton('usuarios', 'Usuarios e permissoes')}
         </div>
         ${renderSettingsTabPanel()}
       </article>
@@ -1733,41 +1861,6 @@ function renderSettingsTabPanel() {
           </div>
         </form>
       `;
-    case 'usuarios':
-      return `
-        <div class="page-section">
-          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
-            <h3 class="card-title">Usuarios e permissoes</h3>
-            <button class="btn primary" data-action="settings-new-user">Novo usuario</button>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Nome</th>
-                  <th>E-mail</th>
-                  <th>Perfil</th>
-                  <th>Status</th>
-                  <th>Acoes</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${state.users
-                  .map((user) => {
-                    return `<tr>
-                      <td>${escapeHtml(user.nome)}</td>
-                      <td>${escapeHtml(user.email)}</td>
-                      <td>${statusBadge(user.perfil, 'neutral')}</td>
-                      <td>${statusBadge(user.status, user.status === 'Ativo' ? 'success' : 'neutral')}</td>
-                      <td><button class="icon-btn" data-action="settings-user-edit" data-user-id="${user.id}">Editar</button></td>
-                    </tr>`;
-                  })
-                  .join('')}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      `;
     default:
       return '';
   }
@@ -1782,7 +1875,7 @@ function renderModal() {
     case 'confirm':
       return `
         <div class="overlay" data-action="overlay-close">
-          <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+          <div class="modal" role="dialog" aria-modal="true">
             <div class="modal-header">
               <h3 class="modal-title">${escapeHtml(state.modal.title)}</h3>
               <p class="modal-subtitle">${escapeHtml(state.modal.subtitle)}</p>
@@ -1797,7 +1890,7 @@ function renderModal() {
     case 'import-clients':
       return `
         <div class="overlay" data-action="overlay-close">
-          <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+          <div class="modal" role="dialog" aria-modal="true">
             <div class="modal-header">
               <h3 class="modal-title">Importar clientes</h3>
               <p class="modal-subtitle">Este fluxo ainda sera integrado ao backend. No momento, a acao e simulada.</p>
@@ -1819,8 +1912,6 @@ function renderModal() {
       return renderXmlDetailsModal(state.modal.xmlId);
     case 'xml-view':
       return renderXmlViewerModal(state.modal.xmlId);
-    case 'user-form':
-      return renderUserFormModal();
     default:
       return '';
   }
@@ -1830,7 +1921,7 @@ function renderClientFormModal() {
   const client = state.modal.mode === 'edit' ? findClientById(state.modal.clientId) : null;
   return `
     <div class="overlay" data-action="overlay-close">
-      <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+      <div class="modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <h3 class="modal-title">${state.modal.mode === 'edit' ? 'Editar cliente' : 'Novo cliente'}</h3>
           <p class="modal-subtitle">Preencha os dados cadastrais e o status de busca automatica.</p>
@@ -1885,9 +1976,11 @@ function renderClientFormModal() {
 }
 
 function renderCertificateFormModal() {
+  const autoValidity = state.dataSource === 'api';
+
   return `
     <div class="overlay" data-action="overlay-close">
-      <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+      <div class="modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <h3 class="modal-title">Cadastrar certificado</h3>
           <p class="modal-subtitle">Formulario preparado para integracao com backend de certificados.</p>
@@ -1915,10 +2008,17 @@ function renderCertificateFormModal() {
                 Tipo
                 <input name="tipo" value="A1" required />
               </label>
-              <label class="field">
+              ${
+                autoValidity
+                  ? `<label class="field">
+                Data de validade
+                <input value="Preenchimento automatico pelo certificado" disabled />
+              </label>`
+                  : `<label class="field">
                 Data de validade
                 <input name="validade" type="date" required />
-              </label>
+              </label>`
+              }
             </div>
           </div>
           <div class="modal-footer">
@@ -1939,7 +2039,7 @@ function renderXmlDetailsModal(xmlId) {
 
   return `
     <div class="overlay" data-action="overlay-close">
-      <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+      <div class="modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <h3 class="modal-title">Detalhes da NFS-e ${escapeHtml(xml.numeroNfse)}</h3>
           <p class="modal-subtitle">Informacoes de armazenamento do XML no servidor interno.</p>
@@ -1955,14 +2055,11 @@ function renderXmlDetailsModal(xmlId) {
             ${detailItem('ISS', formatCurrency(xml.iss))}
             ${detailItem('Municipio', xml.municipio)}
             ${detailItem('Status de armazenamento', xml.statusArmazenamento)}
-            <div style="grid-column: span 2;">
-              <small style="color:#606062; display:block; margin-bottom:4px;">Caminho completo</small>
-              <code>${escapeHtml(xml.caminhoServidor)}</code>
-            </div>
           </div>
         </div>
         <div class="modal-footer">
           <button class="btn secondary" data-action="xml-view" data-xml-id="${xml.id}">Ver conteudo XML</button>
+          <button class="btn secondary" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
           <button class="btn primary" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
         </div>
       </div>
@@ -1978,57 +2075,19 @@ function renderXmlViewerModal(xmlId) {
 
   return `
     <div class="overlay" data-action="overlay-close">
-      <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+      <div class="modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <h3 class="modal-title">Visualizador XML - NFS-e ${escapeHtml(xml.numeroNfse)}</h3>
-          <p class="modal-subtitle">Visualizacao formatada (mock) para leitura interna.</p>
+          <p class="modal-subtitle">Visualizacao formatada para leitura interna.</p>
         </div>
         <div class="modal-body">
           <pre class="xml-viewer">${escapeHtml(formatXml(xml.conteudoXml))}</pre>
         </div>
         <div class="modal-footer">
           <button class="btn secondary" data-action="close-modal">Fechar</button>
+          <button class="btn secondary" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
           <button class="btn primary" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
         </div>
-      </div>
-    </div>
-  `;
-}
-
-function renderUserFormModal() {
-  return `
-    <div class="overlay" data-action="overlay-close">
-      <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
-        <div class="modal-header">
-          <h3 class="modal-title">Novo usuario</h3>
-          <p class="modal-subtitle">Cadastro interno de usuario e perfil de acesso.</p>
-        </div>
-        <form id="settingsUserForm">
-          <div class="modal-body">
-            <div class="form-grid two">
-              <label class="field">
-                Nome
-                <input name="nome" required />
-              </label>
-              <label class="field">
-                E-mail
-                <input name="email" type="email" required />
-              </label>
-              <label class="field">
-                Perfil
-                <select name="perfil">${renderOptions(['Administrador', 'Operador fiscal', 'Consulta'], 'Operador fiscal')}</select>
-              </label>
-              <label class="field">
-                Status
-                <select name="status">${renderOptions(['Ativo', 'Inativo'], 'Ativo')}</select>
-              </label>
-            </div>
-          </div>
-          <div class="modal-footer">
-            <button class="btn secondary" type="button" data-action="close-modal">Cancelar</button>
-            <button class="btn primary" type="submit">Salvar usuario</button>
-          </div>
-        </form>
       </div>
     </div>
   `;
@@ -2323,9 +2382,59 @@ function isAllFilteredClientsSelected(filteredClients) {
   return filteredClients.every((client) => state.selectedClientIds.has(client.id));
 }
 
-function bulkUpdateClientSearch(active) {
+async function toggleClientSearchStatus(clientId) {
+  const client = findClientById(clientId);
+  if (!client) {
+    return;
+  }
+
+  if (state.dataSource === 'api') {
+    const active = !client.buscaAtiva;
+    try {
+      await apiRequest(`/clientes/${clientId}/${active ? 'ativar' : 'pausar'}`, {
+        method: 'POST'
+      });
+      pushToast(`Busca ${active ? 'ativada' : 'desativada'} para ${client.razaoSocial}.`, active ? 'success' : 'info');
+      await refreshApiData();
+    } catch (error) {
+      pushToast(`Falha ao atualizar status de busca: ${toErrorMessage(error)}`, 'error');
+    }
+    return;
+  }
+
+  client.buscaAtiva = !client.buscaAtiva;
+  client.buscaStatus = client.buscaAtiva ? 'Ativo' : 'Inativo';
+  pushToast(`Busca ${client.buscaAtiva ? 'ativada' : 'desativada'} para ${client.razaoSocial}.`, client.buscaAtiva ? 'success' : 'info');
+  render();
+}
+
+async function bulkUpdateClientSearch(active) {
   if (state.selectedClientIds.size === 0) {
     pushToast('Selecione clientes para aplicacao em massa.', 'error');
+    return;
+  }
+
+  if (state.dataSource === 'api') {
+    const clientIds = Array.from(state.selectedClientIds);
+    let success = 0;
+    let failure = 0;
+
+    for (const clientId of clientIds) {
+      try {
+        await apiRequest(`/clientes/${clientId}/${active ? 'ativar' : 'pausar'}`, {
+          method: 'POST'
+        });
+        success += 1;
+      } catch {
+        failure += 1;
+      }
+    }
+
+    await refreshApiData();
+    pushToast(
+      `${success} cliente(s) atualizado(s) para busca ${active ? 'ativa' : 'inativa'}${failure ? `, ${failure} falha(s)` : ''}.`,
+      failure ? 'error' : 'success'
+    );
     return;
   }
 
@@ -2336,14 +2445,11 @@ function bulkUpdateClientSearch(active) {
     }
   });
 
-  pushToast(
-    `${state.selectedClientIds.size} cliente(s) atualizado(s): busca ${active ? 'ativa' : 'inativa'}.`,
-    'success'
-  );
+  pushToast(`${state.selectedClientIds.size} cliente(s) atualizado(s): busca ${active ? 'ativa' : 'inativa'}.`, 'success');
   render();
 }
 
-function submitClientForm(form) {
+async function submitClientForm(form) {
   const formData = new FormData(form);
   const mode = String(formData.get('mode') || 'create');
   const clientId = String(formData.get('clientId') || '');
@@ -2361,6 +2467,44 @@ function submitClientForm(form) {
   if (payload.cnpj.length !== 14) {
     pushToast('Informe um CNPJ com 14 digitos.', 'error');
     return;
+  }
+
+  if (state.dataSource === 'api') {
+    const apiPayload = {
+      razaoSocial: payload.razaoSocial,
+      nomeFantasia: payload.nomeFantasia || undefined,
+      cnpj: payload.cnpj,
+      inscricaoMunicipal: payload.inscricaoMunicipal || undefined,
+      ativo: payload.buscaAtiva
+    };
+
+    const responsavelEmail = sanitizeEmail(payload.responsavelInterno);
+    if (responsavelEmail) {
+      apiPayload.emailResponsavel = responsavelEmail;
+    }
+
+    try {
+      if (mode === 'edit') {
+        await apiRequest(`/clientes/${clientId}`, {
+          method: 'PATCH',
+          body: apiPayload
+        });
+        pushToast('Cliente atualizado com sucesso.', 'success');
+      } else {
+        await apiRequest('/clientes', {
+          method: 'POST',
+          body: apiPayload
+        });
+        pushToast('Cliente criado com sucesso.', 'success');
+      }
+
+      closeModal();
+      await refreshApiData();
+      return;
+    } catch (error) {
+      pushToast(`Falha ao salvar cliente: ${toErrorMessage(error)}`, 'error');
+      return;
+    }
   }
 
   if (mode === 'edit') {
@@ -2402,10 +2546,33 @@ function getFilteredCertificates() {
   return [...state.certificates].sort((a, b) => a.diasRestantes - b.diasRestantes);
 }
 
-function simulateCertificateTest(certificateId) {
+async function simulateCertificateTest(certificateId) {
   const cert = state.certificates.find((item) => item.id === certificateId);
   if (!cert) {
     pushToast('Certificado nao encontrado.', 'error');
+    return;
+  }
+
+  if (state.dataSource === 'api') {
+    if (!cert.clientId) {
+      pushToast('Certificado sem cliente vinculado para validacao.', 'error');
+      return;
+    }
+
+    pushToast(`Testando certificado ${cert.apelido}...`, 'info');
+    try {
+      const result = await apiRequest(`/certificados/${certificateId}/validar?clienteId=${encodeURIComponent(cert.clientId)}`, {
+        method: 'POST'
+      });
+      const valido = Boolean(result?.valido);
+      const motivos = Array.isArray(result?.motivos) ? result.motivos : [];
+      pushToast(
+        valido ? `Certificado ${cert.apelido} validado com sucesso.` : `Falha na validacao: ${motivos.join(', ') || 'motivo nao informado'}.`,
+        valido ? 'success' : 'error'
+      );
+    } catch (error) {
+      pushToast(`Falha ao validar certificado: ${toErrorMessage(error)}`, 'error');
+    }
     return;
   }
 
@@ -2421,12 +2588,47 @@ function simulateCertificateTest(certificateId) {
   }, 1200);
 }
 
-function submitCertificateForm(form) {
+async function submitCertificateForm(form) {
   const formData = new FormData(form);
   const clientId = String(formData.get('clientId') || '');
   const client = findClientById(clientId);
   if (!client) {
     pushToast('Selecione um cliente valido para vincular o certificado.', 'error');
+    return;
+  }
+
+  if (state.dataSource === 'api') {
+    const file = formData.get('arquivo');
+    if (!(file instanceof File) || file.size === 0) {
+      pushToast('Selecione um arquivo de certificado valido.', 'error');
+      return;
+    }
+
+    try {
+      const arquivoBase64 = await fileToBase64(file);
+      const estabelecimentoId = client.estabelecimentoIdPrincipal || state.establishmentsByClient?.[clientId]?.[0]?.id;
+      const created = await apiRequest(`/clientes/${clientId}/certificados`, {
+        method: 'POST',
+        body: {
+          nome: String(formData.get('apelido') || 'Certificado'),
+          cnpjTitular: normalizeDigits(client.cnpj),
+          estabelecimentoId: estabelecimentoId || undefined,
+          arquivoBase64,
+          senha: String(formData.get('senha') || '')
+        }
+      });
+
+      closeModal();
+      const detectedValidity = created?.validadeFim || created?.validadeInicio;
+      if (detectedValidity) {
+        pushToast(`Certificado cadastrado. Validade detectada: ${formatDate(detectedValidity)}.`, 'success');
+      } else {
+        pushToast('Certificado cadastrado com sucesso.', 'success');
+      }
+      await refreshApiData();
+    } catch (error) {
+      pushToast(`Falha ao cadastrar certificado: ${toErrorMessage(error)}`, 'error');
+    }
     return;
   }
 
@@ -2533,8 +2735,7 @@ function applyXmlFilters(form) {
     downloadFim: String(data.get('downloadFim') || ''),
     municipio: String(data.get('municipio') || 'Todos'),
     tipo: String(data.get('tipo') || 'Todos'),
-    status: String(data.get('status') || 'Todos'),
-    caminho: String(data.get('caminho') || '').trim().toLowerCase()
+    status: String(data.get('status') || 'Todos')
   };
 
   state.tableState.xmls = 'data';
@@ -2551,7 +2752,6 @@ function getFilteredXmls() {
     const matchesMunicipio = filters.municipio === 'Todos' || xml.municipio === filters.municipio;
     const matchesTipo = filters.tipo === 'Todos' || xml.tipo === filters.tipo;
     const matchesStatus = filters.status === 'Todos' || xml.statusArmazenamento === filters.status;
-    const matchesPath = !filters.caminho || xml.caminhoServidor.toLowerCase().includes(filters.caminho);
 
     const emDate = Date.parse(xml.dataEmissao);
     const dlDate = Date.parse(xml.dataDownload);
@@ -2568,7 +2768,6 @@ function getFilteredXmls() {
       matchesMunicipio &&
       matchesTipo &&
       matchesStatus &&
-      matchesPath &&
       matchesEmissaoInicio &&
       matchesEmissaoFim &&
       matchesDownloadInicio &&
@@ -2637,22 +2836,7 @@ function resolveAlert(alertId) {
   render();
 }
 
-function submitUserForm(form) {
-  const data = new FormData(form);
-  state.users.unshift({
-    id: `usr-${Math.random().toString(16).slice(2, 8)}`,
-    nome: String(data.get('nome') || '').trim(),
-    email: String(data.get('email') || '').trim(),
-    perfil: String(data.get('perfil') || 'Consulta'),
-    status: String(data.get('status') || 'Ativo')
-  });
-
-  closeModal();
-  pushToast('Usuario cadastrado com sucesso.', 'success');
-  render();
-}
-
-function executeConfirmAction(payload) {
+async function executeConfirmAction(payload) {
   if (!payload || !payload.type) {
     return;
   }
@@ -2661,11 +2845,48 @@ function executeConfirmAction(payload) {
     case 'reprocess-client': {
       const client = findClientById(payload.clientId);
       if (client) {
+        if (state.dataSource === 'api') {
+          try {
+            await apiRequest(`/clientes/${client.id}/sync/iniciar`, {
+              method: 'POST',
+              body: { modo: 'diario' }
+            });
+            pushToast(`Reprocessamento iniciado para ${client.razaoSocial}.`, 'success');
+            await refreshApiData();
+          } catch (error) {
+            pushToast(`Falha ao reprocessar cliente: ${toErrorMessage(error)}`, 'error');
+          }
+          return;
+        }
+
         pushToast(`Cliente ${client.razaoSocial} marcado para reprocessamento na proxima execucao.`, 'success');
       }
       return;
     }
     case 'reprocess-selected': {
+      if (state.dataSource === 'api') {
+        const clientIds = Array.from(state.selectedClientIds);
+        let success = 0;
+        let failure = 0;
+        for (const clientId of clientIds) {
+          try {
+            await apiRequest(`/clientes/${clientId}/sync/iniciar`, {
+              method: 'POST',
+              body: { modo: 'diario' }
+            });
+            success += 1;
+          } catch {
+            failure += 1;
+          }
+        }
+        pushToast(
+          `${success} cliente(s) enviados para reprocessamento${failure ? `, ${failure} falha(s)` : ''}.`,
+          failure ? 'error' : 'success'
+        );
+        await refreshApiData();
+        return;
+      }
+
       pushToast(`${state.selectedClientIds.size} cliente(s) enviados para reprocessamento.`, 'success');
       return;
     }
@@ -2676,6 +2897,23 @@ function executeConfirmAction(payload) {
     case 'unlink-certificate': {
       const cert = state.certificates.find((item) => item.id === payload.certId);
       if (cert) {
+        if (state.dataSource === 'api') {
+          if (!cert.clientId) {
+            pushToast('Certificado sem cliente vinculado para desativacao.', 'error');
+            return;
+          }
+
+          try {
+            await apiRequest(`/certificados/${cert.id}/desativar?clienteId=${encodeURIComponent(cert.clientId)}`, {
+              method: 'POST'
+            });
+            pushToast('Vinculo removido do uso ativo. Agora voce pode excluir o certificado.', 'success');
+            await refreshApiData();
+          } catch (error) {
+            pushToast(`Falha ao remover vinculo: ${toErrorMessage(error)}`, 'error');
+          }
+          return;
+        }
         cert.clientId = null;
         cert.cliente = 'Sem cliente vinculado';
         cert.cnpj = '-';
@@ -2684,11 +2922,66 @@ function executeConfirmAction(payload) {
       }
       return;
     }
+    case 'delete-certificate': {
+      const cert = state.certificates.find((item) => item.id === payload.certId);
+      if (!cert) {
+        return;
+      }
+
+      if (state.dataSource === 'api') {
+        if (!cert.clientId) {
+          pushToast('Certificado sem cliente associado para exclusao.', 'error');
+          return;
+        }
+        if (cert.ativo) {
+          pushToast('Remova o vinculo (desative) antes de excluir o certificado.', 'error');
+          return;
+        }
+
+        try {
+          await apiRequest(`/certificados/${cert.id}?clienteId=${encodeURIComponent(cert.clientId)}`, {
+            method: 'DELETE'
+          });
+          pushToast('Certificado excluido com sucesso.', 'success');
+          await refreshApiData();
+        } catch (error) {
+          pushToast(`Falha ao excluir certificado: ${toErrorMessage(error)}`, 'error');
+        }
+        return;
+      }
+
+      state.certificates = state.certificates.filter((item) => item.id !== cert.id);
+      pushToast('Certificado excluido.', 'success');
+      render();
+      return;
+    }
     case 'reprocess-run-failures': {
+      if (state.dataSource === 'api') {
+        try {
+          await apiRequest('/sync/rodar-agora', { method: 'POST' });
+          pushToast('Reprocessamento de falhas iniciado.', 'success');
+          await refreshApiData();
+        } catch (error) {
+          pushToast(`Falha ao reprocessar: ${toErrorMessage(error)}`, 'error');
+        }
+        return;
+      }
+
       pushToast('Falhas da execucao enviadas para reprocessamento.', 'success');
       return;
     }
     case 'reprocess-alert': {
+      if (state.dataSource === 'api') {
+        try {
+          await apiRequest('/sync/rodar-agora', { method: 'POST' });
+          pushToast('Reprocessamento solicitado com sucesso.', 'success');
+          await refreshApiData();
+        } catch (error) {
+          pushToast(`Falha ao solicitar reprocessamento: ${toErrorMessage(error)}`, 'error');
+        }
+        return;
+      }
+
       pushToast('Reprocessamento solicitado para o alerta selecionado.', 'success');
       return;
     }
@@ -2788,6 +3081,727 @@ function pushToast(message, tone = 'info') {
     state.toasts = state.toasts.filter((item) => item.id !== toast.id);
     render();
   }, 3200);
+}
+
+async function refreshApiData() {
+  if (state.dataSource !== 'api') {
+    render();
+    return;
+  }
+
+  try {
+    await hydrateFromApi();
+  } catch (error) {
+    pushToast(`Falha ao atualizar dados reais: ${toErrorMessage(error)}`, 'error');
+  }
+  render();
+}
+
+async function refreshExecutionMonitorNow() {
+  if (state.dataSource === 'api') {
+    await refreshApiData();
+  }
+  syncExecutionMonitorWithData();
+  render();
+}
+
+async function pauseSyncForAllClients(clients) {
+  const targets = Array.isArray(clients) ? clients.filter((client) => client && client.id) : [];
+  if (!targets.length) {
+    return {
+      clientsProcessed: 0,
+      clientsPaused: 0,
+      controlsPaused: 0,
+      failed: 0
+    };
+  }
+
+  const results = await mapWithConcurrency(targets, 6, async (client) => {
+    try {
+      const result = await apiRequest(`/clientes/${client.id}/sync/pausar`, { method: 'POST' });
+      const total = Number(result?.total || 0);
+      return { ok: true, total };
+    } catch (error) {
+      return { ok: false, message: toErrorMessage(error) };
+    }
+  });
+
+  let clientsPaused = 0;
+  let controlsPaused = 0;
+  let failed = 0;
+
+  results.forEach((item) => {
+    if (!item?.ok) {
+      failed += 1;
+      return;
+    }
+
+    if (item.total > 0) {
+      clientsPaused += 1;
+      controlsPaused += item.total;
+    }
+  });
+
+  return {
+    clientsProcessed: targets.length,
+    clientsPaused,
+    controlsPaused,
+    failed
+  };
+}
+
+function startExecutionMonitor(mode, total, message) {
+  state.executionMonitor.active = true;
+  state.executionMonitor.mode = mode;
+  state.executionMonitor.startedAt = new Date().toISOString();
+  state.executionMonitor.finishedAt = null;
+  state.executionMonitor.currentClientName = null;
+  state.executionMonitor.processed = 0;
+  state.executionMonitor.total = total;
+  state.executionMonitor.successful = 0;
+  state.executionMonitor.failed = 0;
+  state.executionMonitor.message = message || 'Iniciando execucao...';
+  state.executionMonitor.updatedAt = new Date().toISOString();
+  state.executionMonitor.lastXml = state.executionMonitor.lastXml || getLastXmlSummary();
+  render();
+}
+
+function updateExecutionMonitorStep(clientName, success, message) {
+  state.executionMonitor.currentClientName = clientName || state.executionMonitor.currentClientName;
+  state.executionMonitor.processed += 1;
+  if (success) {
+    state.executionMonitor.successful += 1;
+  } else {
+    state.executionMonitor.failed += 1;
+  }
+  state.executionMonitor.message = message || state.executionMonitor.message;
+  state.executionMonitor.updatedAt = new Date().toISOString();
+  render();
+}
+
+function finishExecutionMonitor(message) {
+  state.executionMonitor.active = false;
+  state.executionMonitor.finishedAt = new Date().toISOString();
+  state.executionMonitor.message = message || 'Execucao finalizada.';
+  state.executionMonitor.updatedAt = new Date().toISOString();
+  syncExecutionMonitorWithData();
+  render();
+}
+
+function syncExecutionMonitorWithData() {
+  const lastXml = getLastXmlSummary();
+  if (lastXml) {
+    state.executionMonitor.lastXml = lastXml;
+  }
+
+  const latestActivity = getLatestSyncActivitySummary();
+  if (!latestActivity) {
+    return;
+  }
+
+  state.executionMonitor.currentClientName = latestActivity.clientName || state.executionMonitor.currentClientName;
+  state.executionMonitor.updatedAt = latestActivity.createdAt || new Date().toISOString();
+
+  if (!state.executionMonitor.active) {
+    state.executionMonitor.message = latestActivity.message || 'Ultima atividade de sincronizacao registrada.';
+  }
+}
+
+function getLastXmlSummary() {
+  if (!Array.isArray(state.xmlFiles) || state.xmlFiles.length === 0) {
+    return null;
+  }
+
+  const latest = [...state.xmlFiles].sort((a, b) => Date.parse(b.dataDownload || 0) - Date.parse(a.dataDownload || 0))[0];
+  if (!latest) {
+    return null;
+  }
+
+  return {
+    cliente: latest.cliente,
+    numeroNfse: latest.numeroNfse,
+    dataEmissao: latest.dataEmissao,
+    dataDownload: latest.dataDownload,
+    valor: latest.valor,
+    tipo: latest.tipo
+  };
+}
+
+function getLatestSyncActivitySummary() {
+  let latest = null;
+
+  Object.entries(state.syncByClient || {}).forEach(([clientId, payload]) => {
+    const logs = Array.isArray(payload?.logs) ? payload.logs : [];
+    const row = logs[0];
+    if (!row?.createdAt) {
+      return;
+    }
+
+    if (!latest || Date.parse(row.createdAt) > Date.parse(latest.createdAt || 0)) {
+      const client = state.clients.find((item) => item.id === clientId);
+      latest = {
+        clientId,
+        clientName: client?.razaoSocial || 'Cliente nao identificado',
+        createdAt: row.createdAt,
+        status: row.status || '',
+        message: row.mensagem || 'Sem mensagem'
+      };
+    }
+  });
+
+  return latest;
+}
+
+async function fetchJsonByClientId(clientIds, buildPath, fallbackValue) {
+  const entries = await mapWithConcurrency(clientIds, 8, async (clientId) => {
+    try {
+      const data = await apiRequest(buildPath(clientId));
+      return [clientId, data];
+    } catch {
+      return [clientId, deepClone(fallbackValue)];
+    }
+  });
+
+  return Object.fromEntries(entries);
+}
+
+async function mapWithConcurrency(items, limit, worker) {
+  if (!items.length) {
+    return [];
+  }
+
+  const safeLimit = Math.max(1, Math.min(limit, items.length));
+  const result = new Array(items.length);
+  let nextIndex = 0;
+
+  const runners = Array.from({ length: safeLimit }, async () => {
+    while (true) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      if (currentIndex >= items.length) {
+        return;
+      }
+
+      result[currentIndex] = await worker(items[currentIndex], currentIndex);
+    }
+  });
+
+  await Promise.all(runners);
+  return result;
+}
+
+function buildClientsFromApi(apiClients, establishmentsByClient, certificatesByClient, syncByClient, nfseDocs) {
+  const totalNfseByClient = (Array.isArray(nfseDocs) ? nfseDocs : []).reduce((acc, doc) => {
+    const clientId = doc?.clienteId;
+    if (clientId) {
+      acc[clientId] = (acc[clientId] || 0) + 1;
+    }
+    return acc;
+  }, {});
+
+  return apiClients.map((client) => {
+    const establishments = Array.isArray(establishmentsByClient[client.id]) ? establishmentsByClient[client.id] : [];
+    const certs = Array.isArray(certificatesByClient[client.id]) ? certificatesByClient[client.id] : [];
+    const sync = syncByClient[client.id] || { controles: [], logs: [] };
+    const controles = Array.isArray(sync.controles) ? sync.controles : [];
+    const logs = Array.isArray(sync.logs) ? sync.logs : [];
+    const latestLog = logs[0] || null;
+    const latestControl = controles[0] || null;
+    const primaryEstablishment = establishments.find((item) => item.ativo) || establishments[0] || null;
+    const certificateSummary = summarizeCertificateStatus(certs);
+    const buscaStatus = deriveClientSearchStatus(controles, Boolean(client.ativo));
+
+    return {
+      id: client.id,
+      razaoSocial: client.razaoSocial || '-',
+      nomeFantasia: client.nomeFantasia || '',
+      cnpj: normalizeDigits(client.cnpj || ''),
+      inscricaoMunicipal: primaryEstablishment?.inscricaoMunicipal || '',
+      municipio: primaryEstablishment?.municipioNome || '-',
+      uf: '-',
+      responsavelInterno: client.emailResponsavel || '-',
+      buscaAtiva: buscaStatus === 'Ativo',
+      buscaStatus,
+      ultimaBusca: latestLog?.createdAt || latestControl?.ultimaExecucao || client.updatedAt || client.createdAt,
+      xmlsEncontrados: totalNfseByClient[client.id] || 0,
+      certificadoStatus: certificateSummary.status,
+      certificadoValidade: certificateSummary.validade,
+      statusOperacional: deriveClientOperationalStatus(latestLog),
+      horarioPreferencial: '02:00',
+      tipoBusca: 'Ambas',
+      municipioIntegrado: Boolean(primaryEstablishment?.municipioNome),
+      estabelecimentoIdPrincipal: primaryEstablishment?.id || null
+    };
+  });
+}
+
+function buildCertificatesFromApi(apiClients, certificatesByClient) {
+  const clientById = Object.fromEntries(apiClients.map((client) => [client.id, client]));
+  const result = [];
+
+  for (const [clientId, certsRaw] of Object.entries(certificatesByClient || {})) {
+    const certs = Array.isArray(certsRaw) ? certsRaw : [];
+    const client = clientById[clientId];
+
+    certs.forEach((cert) => {
+      const validade = cert.validadeFim || cert.validadeInicio || null;
+      const days = validade ? daysUntil(validade) : 9999;
+      result.push({
+        id: cert.id,
+        clientId: cert.clienteId || clientId,
+        estabelecimentoId: cert.estabelecimentoId || null,
+        cliente: client?.razaoSocial || 'Cliente nao identificado',
+        cnpj: normalizeDigits(cert.cnpjTitular || client?.cnpj || ''),
+        tipo: cert.tipo || 'A1',
+        apelido: cert.nome || 'Sem apelido',
+        validade,
+        diasRestantes: days,
+        status: deriveCertificateStatus(cert, days),
+        ultimaValidacao: cert.updatedAt || cert.createdAt || null,
+        ativo: Boolean(cert.ativo)
+      });
+    });
+  }
+
+  return result.sort((a, b) => a.diasRestantes - b.diasRestantes);
+}
+
+function buildXmlFilesFromApi(nfseDocs, clients) {
+  const docs = Array.isArray(nfseDocs) ? nfseDocs : [];
+  const clientById = Object.fromEntries(clients.map((client) => [client.id, client]));
+
+  return docs
+    .map((doc) => {
+      const client = clientById[doc.clienteId] || null;
+      const clientCnpj = normalizeDigits(client?.cnpj || '');
+      const cnpjPrestador = normalizeDigits(doc.cnpjPrestador || '');
+      const cnpjTomador = normalizeDigits(doc.cnpjTomador || '');
+
+      let tipo = 'Emitida';
+      if (clientCnpj && cnpjTomador === clientCnpj) {
+        tipo = 'Tomada';
+      } else if (clientCnpj && cnpjPrestador === clientCnpj) {
+        tipo = 'Emitida';
+      } else if (!clientCnpj && cnpjTomador && !cnpjPrestador) {
+        tipo = 'Tomada';
+      }
+
+      return {
+        id: `xml-${doc.id}`,
+        apiNfseId: doc.id,
+        clientId: doc.clienteId,
+        cliente: client?.razaoSocial || 'Cliente nao identificado',
+        cnpj: normalizeDigits(client?.cnpj || doc.cnpjPrestador || doc.cnpjTomador || ''),
+        municipio: doc.municipioPrestacaoNome || client?.municipio || '-',
+        numeroNfse: doc.numeroNfse || (doc.chaveAcesso ? String(doc.chaveAcesso).slice(-8) : '-'),
+        codigoVerificacao: '-',
+        dataEmissao: doc.dataEmissao || doc.createdAt || doc.updatedAt,
+        dataDownload: doc.updatedAt || doc.createdAt || doc.dataEmissao,
+        valor: toNumber(doc.valorServico),
+        tipo,
+        statusArmazenamento: doc.xmlPath ? 'Armazenado' : 'Erro',
+        caminhoServidor: doc.xmlPath || '-',
+        prestador: doc.razaoSocialPrestador || '-',
+        tomador: doc.razaoSocialTomador || '-',
+        iss: toNumber(doc.valorIss),
+        conteudoXml: null
+      };
+    })
+    .sort((a, b) => Date.parse(b.dataDownload || 0) - Date.parse(a.dataDownload || 0));
+}
+
+function buildSearchRunsFromApi(syncByClient, clients) {
+  const clientById = Object.fromEntries(clients.map((client) => [client.id, client]));
+  const flatLogs = [];
+
+  Object.entries(syncByClient || {}).forEach(([clientId, payload]) => {
+    const logs = Array.isArray(payload?.logs) ? payload.logs : [];
+    logs.slice(0, 30).forEach((log) => {
+      flatLogs.push({ clientId, log });
+    });
+  });
+
+  flatLogs.sort((a, b) => Date.parse(b.log?.createdAt || 0) - Date.parse(a.log?.createdAt || 0));
+
+  return flatLogs.slice(0, 30).map((entry, index) => {
+    const client = clientById[entry.clientId];
+    const logDate = entry.log?.createdAt || new Date().toISOString();
+    const statusInfo = mapLogToRunStatus(entry.log?.status);
+    const xmlCount = entry.log?.status === 'sucesso' ? 1 : 0;
+    const codigo = `RUN-${compactDate(logDate)}-${String(index + 1).padStart(3, '0')}`;
+
+    return {
+      id: `run-${entry.log?.id || index}`,
+      codigo,
+      tipo: 'Automatica',
+      data: formatIsoDate(logDate),
+      inicio: logDate,
+      fim: logDate,
+      clientesProcessados: 1,
+      xmlsEncontrados: xmlCount,
+      xmlsArmazenados: xmlCount,
+      falhas: statusInfo.hasFailure ? 1 : 0,
+      status: statusInfo.runStatus,
+      resumoStatus: statusInfo.summary,
+      detalhes: [
+        {
+          clientId: client?.id || entry.clientId,
+          cliente: client?.razaoSocial || 'Cliente nao identificado',
+          cnpj: client?.cnpj || '',
+          municipio: client?.municipio || '-',
+          xmlsEncontrados: xmlCount,
+          status: statusInfo.clientStatus,
+          mensagem: entry.log?.mensagem || '-'
+        }
+      ]
+    };
+  });
+}
+
+function buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, auditRows) {
+  const alerts = [];
+  const clientById = Object.fromEntries(clients.map((client) => [client.id, client]));
+
+  certificates.forEach((cert) => {
+    if (cert.status === 'Vencido') {
+      alerts.push({
+        id: `cert-vencido-${cert.id}`,
+        severity: 'Critico',
+        tipo: 'Certificado',
+        titulo: 'Certificado vencido',
+        descricao: `Certificado ${cert.apelido} esta vencido e pode bloquear a sincronizacao.`,
+        clientId: cert.clientId,
+        cliente: cert.cliente,
+        dataHora: cert.ultimaValidacao || new Date().toISOString(),
+        status: 'Aberto',
+        origem: 'validacao-certificado',
+        mensagemTecnica: 'validade_fim expirada',
+        sugestaoAcao: 'Atualizar certificado digital do cliente.',
+        historicoTentativas: [],
+        allowsReprocess: true
+      });
+    } else if (cert.status === 'A vencer') {
+      alerts.push({
+        id: `cert-vencer-${cert.id}`,
+        severity: 'Atencao',
+        tipo: 'Certificado',
+        titulo: `Certificado vence em ${Math.max(cert.diasRestantes, 0)} dia(s)`,
+        descricao: `Planejar renovacao do certificado ${cert.apelido}.`,
+        clientId: cert.clientId,
+        cliente: cert.cliente,
+        dataHora: cert.ultimaValidacao || new Date().toISOString(),
+        status: 'Em analise',
+        origem: 'monitor-validade',
+        mensagemTecnica: `validade_fim=${cert.validade || '-'}`,
+        sugestaoAcao: 'Solicitar renovacao antes do vencimento.',
+        historicoTentativas: [],
+        allowsReprocess: false
+      });
+    }
+  });
+
+  Object.entries(syncByClient || {}).forEach(([clientId, payload]) => {
+    const logs = Array.isArray(payload?.logs) ? payload.logs : [];
+    logs
+      .filter((log) => String(log?.status || '').startsWith('erro'))
+      .slice(0, 10)
+      .forEach((log) => {
+        const isCertError = log.status === 'erro_certificado';
+        const client = clientById[clientId];
+        alerts.push({
+          id: `sync-${log.id}`,
+          severity: 'Critico',
+          tipo: isCertError ? 'Certificado' : 'Prefeitura',
+          titulo: isCertError ? 'Falha de certificado na sincronizacao' : 'Falha de sincronizacao na API',
+          descricao: log.mensagem || 'Falha registrada durante sincronizacao.',
+          clientId,
+          cliente: client?.razaoSocial || 'Cliente nao identificado',
+          dataHora: log.createdAt || new Date().toISOString(),
+          status: 'Aberto',
+          origem: 'sync-log',
+          mensagemTecnica: log.mensagem || '-',
+          sugestaoAcao: isCertError ? 'Verificar certificado ativo e validade.' : 'Reprocessar sincronizacao e verificar conectividade.',
+          historicoTentativas: [],
+          allowsReprocess: true
+        });
+      });
+  });
+
+  xmlFiles
+    .filter((xml) => xml.statusArmazenamento !== 'Armazenado')
+    .slice(0, 20)
+    .forEach((xml) => {
+      alerts.push({
+        id: `xml-storage-${xml.id}`,
+        severity: 'Atencao',
+        tipo: 'XML',
+        titulo: 'XML encontrado, mas nao armazenado',
+        descricao: `NFS-e ${xml.numeroNfse} sem armazenamento confirmado no servidor.`,
+        clientId: xml.clientId,
+        cliente: xml.cliente,
+        dataHora: xml.dataDownload || new Date().toISOString(),
+        status: 'Aberto',
+        origem: 'storage-writer',
+        mensagemTecnica: xml.caminhoServidor || '-',
+        sugestaoAcao: 'Reprocessar download e validar permissao de escrita.',
+        historicoTentativas: [],
+        allowsReprocess: true
+      });
+    });
+
+  (Array.isArray(auditRows) ? auditRows : [])
+    .slice(0, 10)
+    .forEach((row) => {
+      if (!row?.clienteId) {
+        return;
+      }
+      if (row?.acao !== 'create' && row?.acao !== 'update') {
+        return;
+      }
+      const client = clientById[row.clienteId];
+      alerts.push({
+        id: `audit-${row.id}`,
+        severity: 'Informativo',
+        tipo: 'Cliente',
+        titulo: `Evento de auditoria: ${row.acao}`,
+        descricao: `${row.entidade || 'registro'} alterado no sistema.`,
+        clientId: row.clienteId,
+        cliente: client?.razaoSocial || 'Cliente nao identificado',
+        dataHora: row.createdAt || new Date().toISOString(),
+        status: 'Em analise',
+        origem: 'auditoria',
+        mensagemTecnica: row.userAgent || '-',
+        sugestaoAcao: 'Registrar acompanhamento interno, se necessario.',
+        historicoTentativas: [],
+        allowsReprocess: false
+      });
+    });
+
+  return alerts.sort((a, b) => Date.parse(b.dataHora || 0) - Date.parse(a.dataHora || 0)).slice(0, 120);
+}
+
+function summarizeCertificateStatus(certsRaw) {
+  const certs = Array.isArray(certsRaw) ? certsRaw : [];
+  if (!certs.length) {
+    return { status: 'Nao cadastrado', validade: null };
+  }
+
+  const sorted = [...certs].sort((a, b) => Date.parse(b.updatedAt || b.createdAt || 0) - Date.parse(a.updatedAt || a.createdAt || 0));
+  const active = sorted.find((item) => item.ativo) || sorted[0];
+  const validade = active.validadeFim || active.validadeInicio || null;
+  const days = validade ? daysUntil(validade) : 9999;
+
+  return {
+    status: deriveCertificateStatus(active, days),
+    validade
+  };
+}
+
+function deriveClientSearchStatus(controlesRaw, clientIsActive) {
+  const controles = Array.isArray(controlesRaw) ? controlesRaw : [];
+  if (!controles.length) {
+    return clientIsActive ? 'Ativo' : 'Inativo';
+  }
+
+  const statuses = controles.map((item) => String(item.status || '').toLowerCase());
+  if (statuses.some((status) => status.startsWith('erro'))) {
+    return 'Erro';
+  }
+  if (statuses.includes('ativo')) {
+    return 'Ativo';
+  }
+  if (statuses.includes('pausado')) {
+    return 'Inativo';
+  }
+
+  return 'Pendente';
+}
+
+function deriveClientOperationalStatus(latestLog) {
+  if (!latestLog || !latestLog.status) {
+    return 'Pendente';
+  }
+
+  const normalized = String(latestLog.status).toLowerCase();
+  if (normalized === 'sucesso') {
+    return 'Sucesso';
+  }
+  if (normalized.startsWith('erro')) {
+    return 'Erro';
+  }
+  if (normalized === 'sem_documento') {
+    return 'Aviso';
+  }
+  if (normalized === 'rate_limit') {
+    return 'Aviso';
+  }
+
+  return 'Pendente';
+}
+
+function deriveCertificateStatus(cert, precomputedDays) {
+  if (!cert?.ativo) {
+    return 'Nao validado';
+  }
+
+  const days = Number.isFinite(precomputedDays) ? precomputedDays : daysUntil(cert.validadeFim);
+  if (Number.isFinite(days)) {
+    if (days < 0) {
+      return 'Vencido';
+    }
+    if (days <= 30) {
+      return 'A vencer';
+    }
+  }
+
+  return 'Valido';
+}
+
+function mapLogToRunStatus(logStatus) {
+  const status = String(logStatus || '').toLowerCase();
+  if (status === 'sucesso') {
+    return {
+      runStatus: 'Concluida',
+      summary: 'Sucesso',
+      clientStatus: 'Sucesso',
+      hasFailure: false
+    };
+  }
+
+  if (status === 'sem_documento') {
+    return {
+      runStatus: 'Concluida com avisos',
+      summary: 'Aviso',
+      clientStatus: 'Pendente',
+      hasFailure: false
+    };
+  }
+
+  if (status.startsWith('erro')) {
+    return {
+      runStatus: 'Falha critica',
+      summary: 'Erro',
+      clientStatus: 'Erro',
+      hasFailure: true
+    };
+  }
+
+  return {
+    runStatus: 'Concluida com avisos',
+    summary: 'Aviso',
+    clientStatus: 'Aviso',
+    hasFailure: false
+  };
+}
+
+async function apiRequest(path, options = {}) {
+  const { method = 'GET', body, timeoutMs = API_TIMEOUT_MS } = options;
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const headers = {};
+    const init = {
+      method,
+      headers,
+      signal: controller.signal
+    };
+
+    if (body !== undefined) {
+      headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(body);
+    }
+
+    const response = await fetch(path, init);
+    if (!response.ok) {
+      const errorText = await safeReadResponseText(response);
+      throw new Error(`HTTP ${response.status}${errorText ? ` - ${errorText}` : ''}`);
+    }
+
+    if (response.status === 204) {
+      return null;
+    }
+
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return await response.json();
+    }
+
+    return await response.text();
+  } catch (error) {
+    if (error?.name === 'AbortError') {
+      throw new Error('Tempo limite excedido na chamada da API');
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function safeReadResponseText(response) {
+  try {
+    return await response.text();
+  } catch {
+    return '';
+  }
+}
+
+function sanitizeEmail(value) {
+  if (!value) {
+    return undefined;
+  }
+
+  const normalized = String(value).trim().toLowerCase();
+  if (!normalized) {
+    return undefined;
+  }
+
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : undefined;
+}
+
+function toNumber(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function compactDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '00000000';
+  }
+  return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatIsoDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return new Date().toISOString().slice(0, 10);
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+function toErrorMessage(error) {
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return 'erro inesperado';
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = String(reader.result || '');
+      const commaIndex = result.indexOf(',');
+      if (commaIndex >= 0) {
+        resolve(result.slice(commaIndex + 1));
+        return;
+      }
+      resolve(result);
+    };
+    reader.onerror = () => reject(new Error('Falha ao ler arquivo do certificado'));
+    reader.readAsDataURL(file);
+  });
 }
 
 function findClientById(clientId) {
@@ -3039,10 +4053,32 @@ function deepClone(input) {
   return JSON.parse(JSON.stringify(input));
 }
 
-function downloadXmlById(xmlId) {
+async function openXmlViewer(xmlId) {
   const xml = findXmlById(xmlId);
   if (!xml) {
     pushToast('XML nao encontrado.', 'error');
+    return;
+  }
+
+  try {
+    await ensureXmlContentLoaded(xml);
+    openModal({ kind: 'xml-view', xmlId });
+  } catch (error) {
+    pushToast(`Falha ao carregar XML: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function downloadXmlById(xmlId) {
+  const xml = findXmlById(xmlId);
+  if (!xml) {
+    pushToast('XML nao encontrado.', 'error');
+    return;
+  }
+
+  try {
+    await ensureXmlContentLoaded(xml);
+  } catch (error) {
+    pushToast(`Falha ao baixar XML: ${toErrorMessage(error)}`, 'error');
     return;
   }
 
@@ -3058,17 +4094,76 @@ function downloadXmlById(xmlId) {
   pushToast(`Download do XML ${xml.numeroNfse} iniciado.`, 'success');
 }
 
-async function copyToClipboard(text) {
-  if (!text) {
+async function downloadDanfseByXmlId(xmlId) {
+  const xml = findXmlById(xmlId);
+  if (!xml) {
+    pushToast('NFS-e nao encontrada para DANFSE.', 'error');
+    return;
+  }
+
+  if (!xml.apiNfseId || !xml.clientId) {
+    pushToast('DANFSE indisponivel para este registro.', 'error');
     return;
   }
 
   try {
-    await navigator.clipboard.writeText(text);
-    pushToast('Caminho copiado para a area de transferencia.', 'success');
-  } catch {
-    pushToast('Nao foi possivel copiar automaticamente. Copie manualmente.', 'error');
+    const payload = await apiRequest(`/nfse/${xml.apiNfseId}/danfse?clienteId=${encodeURIComponent(xml.clientId)}`);
+    downloadFromPayload(payload, `DANFSE-${xml.numeroNfse}.pdf`);
+    pushToast(`Download do DANFSE ${xml.numeroNfse} iniciado.`, 'success');
+  } catch (error) {
+    pushToast(`Falha ao baixar DANFSE: ${toErrorMessage(error)}`, 'error');
   }
+}
+
+async function ensureXmlContentLoaded(xml) {
+  if (xml.conteudoXml) {
+    return;
+  }
+
+  if (!xml.apiNfseId || !xml.clientId) {
+    throw new Error('Documento sem referencia para recuperar XML na API');
+  }
+
+  const result = await apiRequest(`/nfse/${xml.apiNfseId}/xml?clienteId=${encodeURIComponent(xml.clientId)}`);
+  const rawXml = result?.xml || (result?.contentBase64 ? atob(result.contentBase64) : '');
+  if (!rawXml) {
+    throw new Error('Conteudo XML vazio');
+  }
+
+  xml.conteudoXml = rawXml;
+}
+
+function downloadFromPayload(payload, fallbackName) {
+  if (!payload?.contentBase64) {
+    throw new Error('Resposta sem conteudo para download.');
+  }
+
+  const fileName = payload.fileName || fallbackName || 'download.bin';
+  const contentType = payload.contentType || 'application/octet-stream';
+  const blob = base64ToBlob(payload.contentBase64, contentType);
+  triggerBrowserDownload(fileName, blob);
+}
+
+function base64ToBlob(base64, contentType) {
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let index = 0; index < len; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return new Blob([bytes], { type: contentType });
+}
+
+function triggerBrowserDownload(fileName, blob) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
 }
 
 function formatXml(xml) {
@@ -3172,8 +4267,7 @@ document.addEventListener('click', (event) => {
     downloadFim: '',
     municipio: 'Todos',
     tipo: 'Todos',
-    status: 'Todos',
-    caminho: ''
+    status: 'Todos'
   };
   state.tableState.xmls = 'data';
   render();
@@ -3197,11 +4291,205 @@ document.addEventListener('click', (event) => {
 });
 
 document.addEventListener('click', (event) => {
+  const node = event.target.closest('[data-action="enable-auto-search"]');
+  if (!node) {
+    return;
+  }
+
+  if (state.manualActivation.running) {
+    pushToast('Ja existe uma ativacao manual em andamento.', 'info');
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    startExecutionMonitor('Automatica', state.clients.length || 1, 'Executando busca automatica (mock)...');
+    state.executionMonitor.currentClientName = state.clients[0]?.razaoSocial || 'Cliente exemplo';
+    state.executionMonitor.lastXml = getLastXmlSummary();
+    finishExecutionMonitor('Busca automatica mock finalizada.');
+    pushToast('Busca automatica ativada (mock).', 'success');
+    return;
+  }
+
+  void (async () => {
+    const clients = [...state.clients];
+    if (!clients.length) {
+      pushToast('Nenhum cliente disponivel para ativar busca automatica.', 'error');
+      return;
+    }
+
+    state.manualActivation.running = true;
+    state.manualActivation.stopRequested = false;
+    startExecutionMonitor(
+      'Automatica',
+      clients.length,
+      `Ativando busca automatica e executando sincronizacao para ${clients.length} cliente(s)...`
+    );
+    pushToast(`Ativando busca automatica para ${clients.length} cliente(s)...`, 'info');
+
+    let resumed = 0;
+    let initialized = 0;
+    let failed = 0;
+    let interrupted = false;
+
+    try {
+      for (let index = 0; index < clients.length; index += 1) {
+        if (state.manualActivation.stopRequested) {
+          interrupted = true;
+          break;
+        }
+
+        const client = clients[index];
+        state.executionMonitor.currentClientName = client.razaoSocial;
+        state.executionMonitor.message = `Executando para empresa ${client.razaoSocial}`;
+        state.executionMonitor.updatedAt = new Date().toISOString();
+        render();
+
+        try {
+          const resumedResult = await apiRequest(`/clientes/${client.id}/sync/retomar`, { method: 'POST' });
+          const resumedCount = Number(resumedResult?.total || 0);
+          if (resumedCount > 0) {
+            resumed += 1;
+            updateExecutionMonitorStep(client.razaoSocial, true, `Sync retomado para ${client.razaoSocial}.`);
+            continue;
+          }
+
+          await apiRequest(`/clientes/${client.id}/sync/iniciar`, {
+            method: 'POST',
+            body: { modo: 'diario' }
+          });
+          initialized += 1;
+          updateExecutionMonitorStep(client.razaoSocial, true, `Sync inicializado para ${client.razaoSocial}.`);
+        } catch {
+          failed += 1;
+          updateExecutionMonitorStep(client.razaoSocial, false, `Falha ao ativar sync para ${client.razaoSocial}.`);
+        }
+
+        if ((index + 1) % 3 === 0 || index === clients.length - 1 || state.manualActivation.stopRequested) {
+          await refreshApiData();
+          syncExecutionMonitorWithData();
+          render();
+        }
+      }
+
+      if (interrupted || state.manualActivation.stopRequested) {
+        return;
+      }
+
+      try {
+        state.executionMonitor.message = 'Disparando execucao imediata da busca...';
+        state.executionMonitor.updatedAt = new Date().toISOString();
+        render();
+        await apiRequest('/sync/rodar-agora', { method: 'POST' });
+      } catch {
+        // Ignora erro aqui: os inicios individuais podem ter disparado execucao.
+      }
+
+      await refreshApiData();
+      finishExecutionMonitor('Execucao concluida. Consulte o ultimo XML baixado no painel.');
+      pushToast(
+        `Busca automatica ligada para ${resumed + initialized} cliente(s) (${resumed} retomados, ${initialized} inicializados)${failed ? `, ${failed} falha(s)` : ''}.`,
+        failed ? 'error' : 'success'
+      );
+    } finally {
+      state.manualActivation.running = false;
+      state.manualActivation.stopRequested = false;
+    }
+  })();
+});
+
+document.addEventListener('click', (event) => {
   const node = event.target.closest('[data-action="open-new-manual-run"]');
   if (!node) {
     return;
   }
-  pushToast('Nova busca manual agendada (mock).', 'success');
+  if (state.dataSource !== 'api') {
+    startExecutionMonitor('Manual', 1, 'Executando busca manual (mock)...');
+    state.executionMonitor.currentClientName = 'Lote manual';
+    state.executionMonitor.lastXml = getLastXmlSummary();
+    finishExecutionMonitor('Busca manual mock finalizada.');
+    pushToast('Nova busca manual agendada (mock).', 'success');
+    return;
+  }
+
+  void (async () => {
+    try {
+      const totalAtivos = state.clients.filter((client) => client.buscaAtiva).length || state.clients.length;
+      startExecutionMonitor('Manual', totalAtivos, 'Executando busca manual para clientes ativos...');
+      state.executionMonitor.currentClientName = 'Processamento em lote';
+      state.executionMonitor.updatedAt = new Date().toISOString();
+      render();
+
+      const result = await apiRequest('/sync/rodar-agora', { method: 'POST' });
+
+      state.executionMonitor.processed = Number(result?.processed || state.executionMonitor.processed || 0);
+      state.executionMonitor.successful = state.executionMonitor.processed;
+      state.executionMonitor.failed = 0;
+      state.executionMonitor.message = 'Busca manual concluida. Atualizando painel...';
+      state.executionMonitor.updatedAt = new Date().toISOString();
+      render();
+
+      pushToast('Busca manual executada com sucesso.', 'success');
+      await refreshApiData();
+      finishExecutionMonitor(
+        `Busca manual finalizada. Clientes processados: ${Number(result?.processed || 0)}. XMLs salvos: ${Number(result?.documentsSaved || 0)}.`
+      );
+    } catch (error) {
+      state.executionMonitor.failed += 1;
+      finishExecutionMonitor('Busca manual finalizada com falha.');
+      pushToast(`Falha ao executar busca manual: ${toErrorMessage(error)}`, 'error');
+    }
+  })();
+});
+
+document.addEventListener('click', (event) => {
+  const node = event.target.closest('[data-action="disable-manual-started-search"]');
+  if (!node) {
+    return;
+  }
+
+  if (state.manualActivation.disabling) {
+    pushToast('Desligamento da busca ja esta em andamento.', 'info');
+    return;
+  }
+
+  state.manualActivation.stopRequested = true;
+
+  if (state.dataSource !== 'api') {
+    finishExecutionMonitor('Busca manual desligada (mock).');
+    pushToast('Busca manual desligada (mock).', 'success');
+    state.manualActivation.stopRequested = false;
+    return;
+  }
+
+  void (async () => {
+    const clients = [...state.clients];
+    if (!clients.length) {
+      pushToast('Nenhum cliente disponivel para pausar sincronizacao.', 'error');
+      state.manualActivation.stopRequested = false;
+      return;
+    }
+
+    state.manualActivation.disabling = true;
+    startExecutionMonitor('Automatica', clients.length, `Desligando busca para ${clients.length} cliente(s)...`);
+    state.executionMonitor.currentClientName = 'Pausando sincronizacoes';
+    state.executionMonitor.updatedAt = new Date().toISOString();
+    render();
+
+    try {
+      const summary = await pauseSyncForAllClients(clients);
+      await refreshApiData();
+      finishExecutionMonitor(
+        `Busca desligada. Clientes pausados: ${summary.clientsPaused}/${summary.clientsProcessed}. Controles pausados: ${summary.controlsPaused}.`
+      );
+      pushToast(
+        `Busca desligada para ${summary.clientsPaused} cliente(s)${summary.failed ? `, com ${summary.failed} falha(s)` : ''}.`,
+        summary.failed ? 'error' : 'success'
+      );
+    } finally {
+      state.manualActivation.disabling = false;
+      state.manualActivation.stopRequested = false;
+    }
+  })();
 });
 
 document.addEventListener('click', (event) => {
@@ -3209,7 +4497,20 @@ document.addEventListener('click', (event) => {
   if (!node) {
     return;
   }
-  pushToast('Reprocessamento agendado para a proxima janela noturna (mock).', 'success');
+  if (state.dataSource !== 'api') {
+    pushToast('Reprocessamento agendado para a proxima janela noturna (mock).', 'success');
+    return;
+  }
+
+  void (async () => {
+    try {
+      await apiRequest('/sync/rodar-agora', { method: 'POST' });
+      pushToast('Reprocessamento iniciado para controles ativos.', 'success');
+      await refreshApiData();
+    } catch (error) {
+      pushToast(`Falha ao iniciar reprocessamento: ${toErrorMessage(error)}`, 'error');
+    }
+  })();
 });
 
 document.addEventListener('click', (event) => {
@@ -3217,7 +4518,20 @@ document.addEventListener('click', (event) => {
   if (!node) {
     return;
   }
-  pushToast('Teste da rotina noturna iniciado (mock).', 'info');
+  if (state.dataSource !== 'api') {
+    pushToast('Teste da rotina noturna iniciado (mock).', 'info');
+    return;
+  }
+
+  void (async () => {
+    try {
+      await apiRequest('/sync/rodar-agora', { method: 'POST' });
+      pushToast('Execucao de teste disparada com sucesso.', 'success');
+      await refreshApiData();
+    } catch (error) {
+      pushToast(`Falha ao executar teste: ${toErrorMessage(error)}`, 'error');
+    }
+  })();
 });
 
 document.addEventListener('click', (event) => {
@@ -3226,12 +4540,4 @@ document.addEventListener('click', (event) => {
     return;
   }
   pushToast('Conexao com servidor validada com sucesso (mock).', 'success');
-});
-
-document.addEventListener('click', (event) => {
-  const node = event.target.closest('[data-action="settings-user-edit"]');
-  if (!node) {
-    return;
-  }
-  pushToast('Edicao de usuario sera integrada em fluxo dedicado.', 'info');
 });

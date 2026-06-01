@@ -53,13 +53,7 @@ describe('SyncService', () => {
     getHash: jest.fn().mockReturnValue('hash')
   };
 
-  const service = new SyncService(
-    prisma as unknown as PrismaService,
-    storage as unknown as LocalStorageService,
-    danfse as unknown as NfseDanfseService,
-    parser as unknown as NfseXmlParserService,
-    adnClient as NfseAdnClient
-  );
+  let service: SyncService;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -94,6 +88,14 @@ describe('SyncService', () => {
     prisma.nfseDocumento.upsert.mockResolvedValue({});
     prisma.nfseDocumento.findFirst.mockResolvedValue(null);
     storage.putObject.mockResolvedValue(undefined);
+
+    service = new SyncService(
+      prisma as unknown as PrismaService,
+      storage as unknown as LocalStorageService,
+      danfse as unknown as NfseDanfseService,
+      parser as unknown as NfseXmlParserService,
+      adnClient as NfseAdnClient
+    );
   });
 
   it('consulta um NSU especifico sem persistir nota', async () => {
@@ -282,6 +284,61 @@ describe('SyncService', () => {
           cnpjTomador: '06960810000176',
           codigoServicoNacional: '170101',
           descricaoServico: 'consultoria'
+        })
+      })
+    );
+  });
+
+  it('em modo diario interrompe o ciclo apos primeiro documento e agenda cooldown de sucesso', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        modoSync: 'somente_novas',
+        ultimoNsuConsultado: 8n
+      }
+    ]);
+
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 9n,
+      hasDocument: true,
+      chaveAcesso: '42110092206960810000176000000000000226015757529368',
+      xml: '<NFSe>ok</NFSe>',
+      statusCode: 200,
+      message: null,
+      rawResponse: {}
+    });
+
+    parser.parse.mockReturnValue({
+      chaveAcesso: '42110092206960810000176000000000000226015757529368',
+      numeroNfse: '2',
+      serie: '900',
+      dataEmissao: new Date('2024-08-01T14:08:50.000Z'),
+      competencia: new Date('2024-08-01T00:00:00.000Z'),
+      status: '100',
+      cnpjPrestador: '44454248000106',
+      razaoSocialPrestador: 'Prestador',
+      cnpjTomador: '06960810000176',
+      razaoSocialTomador: 'Tomador',
+      municipioPrestacaoCodigo: '4211009',
+      municipioPrestacaoNome: 'Mondai',
+      valorServico: '1720.00',
+      codigoServicoNacional: '170101',
+      descricaoServico: 'consultoria'
+    });
+
+    await service.runNow();
+
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
+    expect(prisma.nfseSyncControle.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ctrl-1' },
+        data: expect.objectContaining({
+          proximaExecucao: expect.any(Date),
+          ultimaMensagem: 'Documento sincronizado com sucesso'
         })
       })
     );

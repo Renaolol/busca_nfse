@@ -96,27 +96,3 @@ export const mockAlerts = [
     allowsReprocess: false
   }
 ];
-
-export const mockUsers = [
-  {
-    id: 'usr-001',
-    nome: 'Giselle Coelho',
-    email: 'giselle@gcont.local',
-    perfil: 'Administrador',
-    status: 'Ativo'
-  },
-  {
-    id: 'usr-002',
-    nome: 'Rafaela Prado',
-    email: 'rafaela@gcont.local',
-    perfil: 'Operador fiscal',
-    status: 'Ativo'
-  },
-  {
-    id: 'usr-003',
-    nome: 'Leonardo Martins',
-    email: 'leonardo@gcont.local',
-    perfil: 'Consulta',
-    status: 'Inativo'
-  }
-];

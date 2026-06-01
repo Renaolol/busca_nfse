@@ -106,12 +106,13 @@ export class RealNfseAdnClient implements NfseAdnClient {
         message: itemMessage ?? undefined
       };
     } catch (error) {
+      const normalizedMessage = this.normalizeAdnQueryErrorMessage(error);
       return {
         nsu: params.nsu,
         hasDocument: false,
-        rawResponse: { error: this.toErrorMessage(error) },
+        rawResponse: { error: normalizedMessage },
         statusCode: 0,
-        message: `Erro ao consultar ADN real: ${this.toErrorMessage(error)}`
+        message: `Erro ao consultar ADN real: ${normalizedMessage}`
       };
     }
   }
@@ -481,5 +482,19 @@ export class RealNfseAdnClient implements NfseAdnClient {
     }
 
     return String(error);
+  }
+
+  private normalizeAdnQueryErrorMessage(error: unknown): string {
+    const message = this.toErrorMessage(error);
+    const normalized = message.toLowerCase();
+
+    if (
+      normalized.includes('unsupported state or unable to authenticate data') ||
+      normalized.includes('unable to authenticate data')
+    ) {
+      return 'Falha ao descriptografar certificado/senha. Verifique CERT_MASTER_KEY e recadastre o certificado.';
+    }
+
+    return message;
   }
 }

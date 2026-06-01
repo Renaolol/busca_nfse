@@ -11,7 +11,7 @@ Centralizar a captura de NFS-e Nacional por cliente, usando consulta incremental
 1. Onboarding completo de cliente, estabelecimento e certificado A1 com dados sensiveis protegidos.
 2. Sincronizacao historica e diaria por NSU, com controles por `cliente/cnpj/ambiente` e sem pulo de NSU em erros temporarios.
 3. Base fiscal consolidada, deduplicada por `ambiente + chave_acesso`, com XML e DANFSE armazenados.
-4. API interna e painel operacional com autenticacao JWT, escopo por cliente e operacoes de status/logs/pesquisa/download.
+4. API interna e painel operacional com acesso direto na rede interna, escopo por cliente nos endpoints e operacoes de status/logs/pesquisa/download.
 5. Jobs idempotentes para manutencao continua (validacao de certificado, reprocessamento e limpeza tecnica).
 
 ## Stack
@@ -78,48 +78,22 @@ Veja `.env.example`.
 - `SYNC_AUTO_RUN_STARTUP_DELAY_MS`: atraso inicial apos boot para primeiro ciclo automatico (padrao `3000`).
 - `SYNC_API_RETRY_DELAY_MS`: espera antes de tentar novamente quando ocorrer erro temporario de API (ex.: HTTP 429) (padrao `60000`).
 - `SYNC_DAILY_INTERVAL_MS`: intervalo da rotina diaria quando o controle esta no modo `somente_novas` (padrao `86400000` = 24h).
-- `SYNC_DAILY_MAX_NSU_PER_RUN`: quantidade maxima de NSUs processados por ciclo para controles no modo diario (padrao `50`).
+- `SYNC_DAILY_MAX_NSU_PER_RUN`: quantidade maxima de NSUs processados por ciclo para controles no modo diario (padrao `10`).
+- `SYNC_DAILY_STOP_ON_FIRST_DOCUMENT`: quando `true`, no modo diario encerra o ciclo apos sincronizar 1 documento e agenda a proxima tentativa (padrao `true`).
+- `SYNC_DAILY_SUCCESS_COOLDOWN_MS`: espera minima entre ciclos diarios apos sucesso de documento (padrao `60000`).
+- `SYNC_NIGHTLY_SWEEP_ENABLED`: habilita busca noturna automatica para todos os clientes cadastrados (padrao `true`).
+- `SYNC_NIGHTLY_SWEEP_HOUR`: hora da execucao noturna (0-23, padrao `2`).
+- `SYNC_NIGHTLY_SWEEP_MINUTE`: minuto da execucao noturna (0-59, padrao `0`).
+- `SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES`: offset de fuso em minutos para agendamento noturno (padrao `-180`, UTC-3).
+- `SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS`: intervalo de verificacao do agendamento noturno (padrao `60000`).
 - `CERT_MASTER_KEY`: obrigatoria e deve ser configurada com segredo proprio (a API recusa iniciar com valor placeholder `CHANGE_ME...`).
-- `JWT_SECRET`: obrigatoria e deve ser configurada com segredo proprio (a API recusa iniciar com valor placeholder `CHANGE_ME...`).
-- `JWT_EXPIRES_IN_SECONDS`: tempo de expiracao do token JWT em segundos (padrao `43200` = 12h).
-- `AUTH_USERS_JSON`: array JSON com usuarios de acesso (`admin` e/ou `cliente`). `userId` (UUID) e opcional, mas recomendado para trilha de auditoria.
 
-## Autenticacao e autorizacao
+## Acesso interno
 
-- Endpoint publico de login: `POST /auth/login`.
-- Endpoints publicos sem token: `GET /health` e `POST /auth/login`.
-- Todos os demais endpoints exigem `Authorization: Bearer <token>`.
-- Para usuarios `role=cliente`, o backend valida automaticamente o escopo por `clienteId` (path/query/body) e bloqueia acesso cruzado.
-- Operacoes administrativas globais (ex.: `POST /sync/rodar-agora`) exigem `role=admin`.
-- Operacoes de escrita (`POST/PATCH/DELETE`) geram trilha de auditoria automatica em `auditoria_usuario` (acao, entidade, cliente, ip e user-agent).
-
-Exemplo de `AUTH_USERS_JSON`:
-
-```json
-[
-  {
-    "userId": "00000000-0000-4000-8000-000000000001",
-    "username": "admin",
-    "password": "senha-forte-admin",
-    "role": "admin"
-  },
-  {
-    "userId": "00000000-0000-4000-8000-000000000002",
-    "username": "cliente-acme",
-    "password": "senha-forte-cliente",
-    "role": "cliente",
-    "clienteId": "550e8400-e29b-41d4-a716-446655440000"
-  }
-]
-```
-
-Exemplo de login:
-
-```bash
-curl -X POST http://localhost:3000/auth/login \\
-  -H "Content-Type: application/json" \\
-  -d '{"username":"admin","password":"senha-forte-admin"}'
-```
+- O app esta configurado para uso interno e nao exige login por usuario/senha.
+- Todos os endpoints ficam acessiveis na rede interna onde a API estiver publicada.
+- O isolamento de contexto continua sendo feito por `clienteId` nos endpoints que exigem escopo (ex.: `/certificados/:id`, `/nfse/:id/*`, `/sync/logs`).
+- Operacoes de escrita (`POST/PATCH/DELETE`) continuam gerando trilha de auditoria automatica em `auditoria_usuario` (acao, entidade, cliente, ip e user-agent).
 
 ## Comandos principais
 
@@ -142,8 +116,7 @@ npm run job:limpar-temporarios
 
 ## Sincronizacao manual
 
-O endpoint `POST /sync/rodar-agora` dispara uma execucao manual do ciclo de sincronizacao (por padrao com adapter mock) e exige token `admin`.
-Para teste pontual da API ADN, use o endpoint temporario `POST /sync/testar-nsu` com `clienteId`, `estabelecimentoId` e `nsu`.
+O endpoint `POST /sync/rodar-agora` dispara uma execucao manual do ciclo de sincronizacao (por padrao com adapter mock).
 Para teste real, defina `NFSE_ADN_CLIENT_MODE=real` e use certificado A1 valido no cadastro.
 Para consultar logs de sync por cliente, use `GET /sync/logs?clienteId=UUID`.
 
@@ -170,6 +143,8 @@ Valores aceitos:
 - O ciclo automatico consulta apenas controles ativos e respeita `proximaExecucao` quando houver backoff.
 - Em erro temporario da API (ex.: `HTTP 429`, timeout, `5xx`), o sistema **nao avanca o NSU** para evitar pulo de documentos.
 - Nesses casos, a proxima tentativa e agendada com base em `SYNC_API_RETRY_DELAY_MS`.
+- No modo diario, por padrao o ciclo para apos o primeiro documento sincronizado e agenda nova execucao curta (`SYNC_DAILY_SUCCESS_COOLDOWN_MS`) para reduzir `HTTP 429`.
+- A busca noturna (`SYNC_NIGHTLY_SWEEP_*`) ativa modo diario para todos os clientes cadastrados e dispara varredura incremental a partir do ultimo NSU salvo.
 
 ## Importacao de XML
 
@@ -184,7 +159,6 @@ No momento da importacao, o sistema tambem gera e salva o DANFSE em PDF.
 - `POST /nfse/reprocessar-xmls`: reprocessa XMLs ja salvos para preencher campos faltantes e (opcionalmente) regenerar DANFSE.
 - Os endpoints `GET /nfse/:id`, `GET /nfse/:id/xml` e `GET /nfse/:id/danfse` exigem `?clienteId=...` para garantir escopo de acesso por cliente.
   - `clienteId` deve ser UUID valido.
-- Para token `role=cliente`, o valor de `clienteId` precisa ser o mesmo cliente do token.
 
 Quando o DANFSE nao existir para uma nota ja salva, ele e gerado automaticamente a partir do XML no primeiro download.
 
@@ -221,12 +195,11 @@ Com a API rodando, abra:
 - `http://localhost:3000/app`
 
 Esse frontend permite testar onboarding de cliente/certificado, controle de sync e pesquisa de NFS-e.
-Antes de operar, faca login no bloco superior (`Usuario`/`Senha`) para obter sessao JWT.
 O layout esta separado em 4 menus:
 
 - `Clientes`: cadastro/edicao, certificados e contexto ativo.
 - `Notas`: filtros, listagem e download em lote (ZIP XML/DANFSE) das linhas selecionadas.
-- `Busca API`: operacoes de sync, logs, teste de NSU e escolha de modo `historico` ou `diario`.
+- `Busca API`: execucao continua da sincronizacao ate a ultima NSU, com pausa/retomada e destaque da ultima nota capturada.
 - `Auditoria`: consulta de trilha operacional por `cliente_id` e `acao`.
 Use a lista suspensa de clientes para selecionar o contexto ativo; ao selecionar, as notas do cliente sao carregadas automaticamente.
 Ao abrir/selecionar cliente, a listagem inicia com competencia do mes anterior ao atual.
@@ -240,7 +213,6 @@ Nos endpoints por `id` de certificado (`GET/POST/DELETE /certificados/:id...`), 
 Tambem permite consultar por CNPJ base e alternar entre NFS-e emitidas e recebidas.
 Na tabela de resultados, os botoes `XML` e `DANFSE` fazem download direto dos arquivos.
 As operacoes por ID em certificado e NFS-e usam `clienteId` como escopo (query string) para evitar acesso cruzado entre clientes.
-No bloco de sincronizacao, o botao `Reprocessar XMLs` executa `POST /nfse/reprocessar-xmls` para backfill de campos e regeneracao das DANFSE.
 Quando houver pendencias (sem certificado, sem sync ou sem notas), o painel exibe mensagens explicativas.
 
 ## Jobs avulsos (operacao)

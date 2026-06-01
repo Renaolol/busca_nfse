@@ -150,8 +150,8 @@ describe('Jobs', () => {
       const oldDate = new Date(Date.now() - 3 * 60 * 60 * 1000);
       await utimes(oldDir, oldDate, oldDate);
 
-      const job = new LimparTemporariosJob(baseDir);
-      const result = await job.run({ olderThanHours: 1 });
+      const job = new LimparTemporariosJob();
+      const result = await job.run({ olderThanHours: 1, baseTempPath: baseDir });
 
       expect(result.scanned).toBe(2);
       expect(result.removed).toBe(1);

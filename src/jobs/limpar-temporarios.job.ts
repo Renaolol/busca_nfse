@@ -7,18 +7,17 @@ import { tmpdir } from 'node:os';
 export class LimparTemporariosJob {
   static readonly jobName = 'limpar_temporarios';
 
-  constructor(private readonly baseTempPath = tmpdir()) {}
-
-  async run(options?: { olderThanHours?: number }): Promise<{
+  async run(options?: { olderThanHours?: number; baseTempPath?: string }): Promise<{
     scanned: number;
     removed: number;
     kept: number;
     errors: number;
   }> {
     const olderThanHours = options?.olderThanHours ?? 1;
+    const baseTempPath = options?.baseTempPath ?? tmpdir();
     const cutoff = Date.now() - olderThanHours * 60 * 60 * 1000;
 
-    const entries = await readdir(this.baseTempPath, { withFileTypes: true });
+    const entries = await readdir(baseTempPath, { withFileTypes: true });
     const candidates = entries.filter(
       (entry) =>
         entry.isDirectory() &&
@@ -30,7 +29,7 @@ export class LimparTemporariosJob {
     let errors = 0;
 
     for (const entry of candidates) {
-      const targetPath = join(this.baseTempPath, entry.name);
+      const targetPath = join(baseTempPath, entry.name);
       try {
         const fileStat = await stat(targetPath);
         if (fileStat.mtimeMs > cutoff) {
