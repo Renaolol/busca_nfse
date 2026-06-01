@@ -1,12 +1,3 @@
-import {
-  mockAlerts,
-  mockCertificates,
-  mockClients,
-  mockRunningExecution,
-  mockSearchRuns,
-  mockXmlFiles
-} from './mocks/index.js';
-
 const appRoot = document.getElementById('app');
 const modalRoot = document.getElementById('modalRoot');
 const drawerRoot = document.getElementById('drawerRoot');
@@ -62,7 +53,7 @@ const state = {
   route: parseRoute(window.location.hash),
   mobileSidebarOpen: false,
   dataReady: false,
-  dataSource: 'mock',
+  dataSource: 'api',
   modal: null,
   drawer: null,
   toasts: [],
@@ -191,26 +182,18 @@ async function initializeData() {
     await hydrateFromApi();
     state.dataSource = 'api';
   } catch (error) {
-    console.error('Falha ao carregar dados reais da API. Usando fallback mock.', error);
-    hydrateFromMocks();
-    state.dataSource = 'mock';
-    pushToast('Nao foi possivel carregar dados reais. Exibindo dados de exemplo.', 'error');
+    console.error('Falha ao carregar dados reais da API.', error);
+    state.dataSource = 'api';
+    Object.keys(state.tableState).forEach((key) => {
+      state.tableState[key] = 'error';
+    });
+    state.executionMonitor.message = 'Falha ao carregar dados reais da API.';
+    state.executionMonitor.updatedAt = new Date().toISOString();
+    pushToast('Nao foi possivel carregar dados reais da API. Verifique backend e banco.', 'error');
   }
 
   setGlobalLoading(false);
   render();
-}
-
-function hydrateFromMocks() {
-  state.clients = deepClone(mockClients);
-  state.certificates = deepClone(mockCertificates);
-  state.searchRuns = deepClone(mockSearchRuns);
-  state.runningExecution = deepClone(mockRunningExecution);
-  state.xmlFiles = deepClone(mockXmlFiles);
-  state.alerts = deepClone(mockAlerts);
-  state.establishmentsByClient = {};
-  state.syncByClient = {};
-  syncExecutionMonitorWithData();
 }
 
 async function hydrateFromApi() {
@@ -241,10 +224,10 @@ async function hydrateFromApi() {
 
   state.clients = clients;
   state.certificates = certificates;
-  state.searchRuns = searchRuns.length ? searchRuns : deepClone(mockSearchRuns);
+  state.searchRuns = searchRuns;
   state.runningExecution = null;
   state.xmlFiles = xmlFiles;
-  state.alerts = alerts.length ? alerts : deepClone(mockAlerts);
+  state.alerts = alerts;
   state.establishmentsByClient = establishmentsByClient;
   state.syncByClient = syncByClient;
   syncExecutionMonitorWithData();

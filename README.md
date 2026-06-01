@@ -34,7 +34,19 @@ npm run docker:up
 
 ```text
 http://localhost:3000/app
+```
+
+Se precisar da documentacao Swagger localmente, habilite `ENABLE_SWAGGER=true` e abra:
+
+```text
 http://localhost:3000/api/docs
+```
+
+Para desenvolvimento local usando adapter fake da ADN:
+
+```bash
+NFSE_ADN_CLIENT_MODE=mock
+ENABLE_SWAGGER=true
 ```
 
 ## Desenvolvimento sem container da API
@@ -70,9 +82,10 @@ Veja `.env.example`.
 
 - `REQUEST_BODY_LIMIT`: limite de payload para requests JSON/urlencoded (recomendado `10mb` para upload Base64 de certificado).
 - `STORAGE_ROOT_PATH`: raiz do storage local (padrao `storage`; em Docker usa `/app/storage`).
-- `NFSE_ADN_CLIENT_MODE`: `mock` (padrao) ou `real`.
+- `NFSE_ADN_CLIENT_MODE`: `real` (recomendado/obrigatorio em producao) ou `mock` (somente desenvolvimento).
 - `NFSE_API_BASE_URL_PRODUCAO` e `NFSE_API_BASE_URL_RESTRITA`: hosts do ADN.
 - `NFSE_ADN_PATH_PREFIX`: prefixo da API (padrao `contribuintes`).
+- `ENABLE_SWAGGER`: habilita docs em `/api/docs` (`false` recomendado em producao).
 - `SYNC_AUTO_RUN_ENABLED`: habilita ciclo automatico de sync em background (padrao `true`).
 - `SYNC_AUTO_RUN_INTERVAL_MS`: intervalo entre ciclos automaticos (padrao `30000`).
 - `SYNC_AUTO_RUN_STARTUP_DELAY_MS`: atraso inicial apos boot para primeiro ciclo automatico (padrao `3000`).
@@ -87,6 +100,14 @@ Veja `.env.example`.
 - `SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES`: offset de fuso em minutos para agendamento noturno (padrao `-180`, UTC-3).
 - `SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS`: intervalo de verificacao do agendamento noturno (padrao `60000`).
 - `CERT_MASTER_KEY`: obrigatoria e deve ser configurada com segredo proprio (a API recusa iniciar com valor placeholder `CHANGE_ME...`).
+
+### Regras de bootstrap em producao
+
+- `NODE_ENV=production` exige:
+  - `NFSE_ADN_CLIENT_MODE=real`
+  - `NFSE_ADN_REJECT_UNAUTHORIZED=true`
+- `DATABASE_URL`, `STORAGE_ROOT_PATH` e `CERT_MASTER_KEY` sao obrigatorias em qualquer ambiente.
+- Em falha de carregamento da API, o frontend nao cai para dados mockados.
 
 ## Acesso interno
 
@@ -116,7 +137,7 @@ npm run job:limpar-temporarios
 
 ## Sincronizacao manual
 
-O endpoint `POST /sync/rodar-agora` dispara uma execucao manual do ciclo de sincronizacao (por padrao com adapter mock).
+O endpoint `POST /sync/rodar-agora` dispara uma execucao manual do ciclo de sincronizacao.
 Para teste real, defina `NFSE_ADN_CLIENT_MODE=real` e use certificado A1 valido no cadastro.
 Para consultar logs de sync por cliente, use `GET /sync/logs?clienteId=UUID`.
 

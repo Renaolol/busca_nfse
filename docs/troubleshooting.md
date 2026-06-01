@@ -47,4 +47,8 @@
 ## Erro ao iniciar a API
 
 - Se a API falhar no bootstrap com mensagem sobre `CERT_MASTER_KEY`, configure valor seguro em `.env`.
+- Se estiver em `NODE_ENV=production`, confirme:
+  - `NFSE_ADN_CLIENT_MODE=real`
+  - `NFSE_ADN_REJECT_UNAUTHORIZED=true`
+- Se `/api/docs` nao abrir, verificar `ENABLE_SWAGGER` (em producao, o recomendado e `false`).
 - Valores placeholder iniciando com `CHANGE_ME` sao recusados por seguranca.

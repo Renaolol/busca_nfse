@@ -9,10 +9,13 @@
 - Acesso da aplicacao restrito a rede interna do escritorio.
 - Controle de acesso por cliente com validacao de escopo (`clienteId`).
 - `CERT_MASTER_KEY` obrigatoria no bootstrap (valor placeholder `CHANGE_ME...` nao e aceito).
+- Em `NODE_ENV=production`, o bootstrap exige `NFSE_ADN_CLIENT_MODE=real`.
+- Em `NODE_ENV=production`, `NFSE_ADN_REJECT_UNAUTHORIZED=false` e bloqueado.
 - Endpoints por `id` de certificado/NFS-e exigem `clienteId` (UUID) para validacao de escopo.
 - Endpoint `GET /sync/logs` exige `clienteId` (UUID) para isolamento de logs por cliente.
 - `POST /nfse/download-lote` respeita escopo por `clienteId`.
 - Rotas de escrita (`POST/PATCH/DELETE`) geram auditoria automatica (`auditoria_usuario`) com acao, entidade, escopo de cliente, IP e user-agent.
+- `ENABLE_SWAGGER=false` e recomendado em producao.
 
 ## Variaveis sensiveis
 
