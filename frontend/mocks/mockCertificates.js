@@ -1,0 +1,74 @@
+export const mockCertificates = [
+  {
+    id: 'cert-001',
+    clientId: '8da97d8d-1e20-44b2-8c16-c16fc4435d81',
+    cliente: 'Comercial Sao Miguel LTDA',
+    cnpj: '03456789000190',
+    tipo: 'A1',
+    apelido: 'Matriz-SP',
+    validade: '2027-03-22',
+    diasRestantes: 294,
+    status: 'Valido',
+    ultimaValidacao: '2026-06-01T02:05:00.000Z'
+  },
+  {
+    id: 'cert-002',
+    clientId: '11c50faa-1fd8-44fb-8f9e-a12a5ef2c101',
+    cliente: 'Clinica Santa Beatriz SS',
+    cnpj: '12456789000174',
+    tipo: 'A1',
+    apelido: 'Filial-Campinas',
+    validade: '2026-06-09',
+    diasRestantes: 8,
+    status: 'A vencer',
+    ultimaValidacao: '2026-06-01T02:04:00.000Z'
+  },
+  {
+    id: 'cert-003',
+    clientId: '6bb4a856-cf7f-4e21-8c6a-772631f8b1f3',
+    cliente: 'Translog Sul Transportes EIRELI',
+    cnpj: '89567890000102',
+    tipo: 'A1',
+    apelido: 'Translog-Matriz',
+    validade: '2026-12-18',
+    diasRestantes: 200,
+    status: 'Erro de senha',
+    ultimaValidacao: '2026-06-01T01:57:00.000Z'
+  },
+  {
+    id: 'cert-004',
+    clientId: 'ef55f1a3-8ae2-44ab-bf51-bf9b6d1f9348',
+    cliente: 'Padaria Estacao do Pao LTDA',
+    cnpj: '22456789000131',
+    tipo: 'A1',
+    apelido: 'Padaria-Centro',
+    validade: '2026-05-20',
+    diasRestantes: -12,
+    status: 'Vencido',
+    ultimaValidacao: '2026-05-29T02:10:00.000Z'
+  },
+  {
+    id: 'cert-005',
+    clientId: '65e42ec6-f287-4ff5-8f2c-65cb743f6f14',
+    cliente: 'Metalurgica Forte Aco SA',
+    cnpj: '99456789000143',
+    tipo: 'A1',
+    apelido: 'ForteAco-Principal',
+    validade: '2028-01-17',
+    diasRestantes: 595,
+    status: 'Valido',
+    ultimaValidacao: '2026-06-01T02:09:00.000Z'
+  },
+  {
+    id: 'cert-006',
+    clientId: null,
+    cliente: 'Sem cliente vinculado',
+    cnpj: '-',
+    tipo: 'A1',
+    apelido: 'Reserva-HML',
+    validade: '2026-11-20',
+    diasRestantes: 172,
+    status: 'Nao validado',
+    ultimaValidacao: null
+  }
+];

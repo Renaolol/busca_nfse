@@ -1,1416 +1,2935 @@
-const state = {
-  apiBase: localStorage.getItem('nfseApiBase') || window.location.origin,
-  authToken: localStorage.getItem('nfseAuthToken') || '',
-  authUser: readStoredJson('nfseAuthUser'),
-  notesRelation: localStorage.getItem('nfseNotesRelation') || 'emitidas',
-  clientId: localStorage.getItem('nfseClientId') || '',
-  establishmentId: localStorage.getItem('nfseEstablishmentId') || '',
-  certificateId: localStorage.getItem('nfseCertificateId') || '',
-  currentMenu: localStorage.getItem('nfseConsoleMenu') || 'menuClientes',
-  clientList: [],
-  selectedClient: null,
-  selectedEstablishment: null,
-  selectedCertificates: [],
-  lastNotes: [],
-  selectedNoteIds: new Set()
+import {
+  mockAlerts,
+  mockCertificates,
+  mockClients,
+  mockRunningExecution,
+  mockSearchRuns,
+  mockUsers,
+  mockXmlFiles
+} from './mocks/index.js';
+
+const appRoot = document.getElementById('app');
+const modalRoot = document.getElementById('modalRoot');
+const drawerRoot = document.getElementById('drawerRoot');
+const toastRoot = document.getElementById('toastRoot');
+
+const navItems = [
+  { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', route: '/dashboard' },
+  { key: 'clientes', label: 'Clientes', icon: 'users', route: '/clientes' },
+  { key: 'certificados', label: 'Certificados', icon: 'shield', route: '/certificados' },
+  { key: 'buscas', label: 'Buscas NFS-e', icon: 'search', route: '/buscas' },
+  { key: 'xmls', label: 'XMLs Armazenados', icon: 'file', route: '/xmls' },
+  { key: 'alertas', label: 'Alertas', icon: 'alert', route: '/alertas' },
+  { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' }
+];
+
+const pageMeta = {
+  dashboard: {
+    title: 'Dashboard',
+    description: 'Visao geral da operacao noturna de busca e armazenamento de NFS-e.'
+  },
+  clientes: {
+    title: 'Clientes',
+    description: 'Gerencie clientes monitorados para busca automatica de NFS-e.'
+  },
+  'client-details': {
+    title: 'Detalhes do cliente',
+    description: 'Acompanhe dados, historico de buscas, XMLs e configuracoes do cliente.'
+  },
+  certificados: {
+    title: 'Certificados',
+    description: 'Acompanhe validade, vinculo e status dos certificados digitais.'
+  },
+  buscas: {
+    title: 'Buscas NFS-e',
+    description: 'Historico das rotinas automaticas e reprocessamentos manuais.'
+  },
+  xmls: {
+    title: 'XMLs Armazenados',
+    description: 'Consulte os arquivos XML de NFS-e salvos no servidor interno.'
+  },
+  alertas: {
+    title: 'Alertas',
+    description: 'Acompanhe pendencias que exigem acao da equipe.'
+  },
+  configuracoes: {
+    title: 'Configuracoes',
+    description: 'Ajuste parametros da rotina de busca e do armazenamento interno.'
+  }
 };
 
-const apiBaseInput = document.getElementById('apiBase');
-const authUsernameInput = document.getElementById('authUsername');
-const authPasswordInput = document.getElementById('authPassword');
-const authStatus = document.getElementById('authStatus');
-const consoleOutput = document.getElementById('consoleOutput');
-const clientSelect = document.getElementById('clientSelect');
-const pendingBox = document.getElementById('pendingBox');
-const certificatesSummary = document.getElementById('certificatesSummary');
-const certificatesList = document.getElementById('certificatesList');
-const menuButtons = Array.from(document.querySelectorAll('button[data-menu-target]'));
-const menuPanels = Array.from(document.querySelectorAll('.menu-panel'));
-
-const ctxClientId = document.getElementById('ctxClientId');
-const ctxEstablishmentId = document.getElementById('ctxEstablishmentId');
-const ctxCertificateId = document.getElementById('ctxCertificateId');
-const summaryRazao = document.getElementById('summaryRazao');
-const summaryCnpj = document.getElementById('summaryCnpj');
-const summaryIm = document.getElementById('summaryIm');
-
-const createClientCard = document.getElementById('createClientCard');
-const editClientCard = document.getElementById('editClientCard');
-const certificateCard = document.getElementById('certificateCard');
-
-const clientForm = document.getElementById('clientForm');
-const clientEditForm = document.getElementById('clientEditForm');
-const certificateForm = document.getElementById('certificateForm');
-const searchForm = document.getElementById('searchForm');
-const nfseRows = document.getElementById('nfseRows');
-const auditForm = document.getElementById('auditForm');
-const auditRows = document.getElementById('auditRows');
-const notesRelationEmitidasBtn = document.getElementById('notesRelationEmitidas');
-const notesRelationRecebidasBtn = document.getElementById('notesRelationRecebidas');
-
-const certClientId = document.getElementById('certClientId');
-const certEstablishmentId = document.getElementById('certEstablishmentId');
-const syncClientId = document.getElementById('syncClientId');
-const auditClienteIdInput = document.getElementById('auditClienteId');
-
-const saveApiBaseBtn = document.getElementById('saveApiBase');
-const authLoginBtn = document.getElementById('authLoginBtn');
-const authLogoutBtn = document.getElementById('authLogoutBtn');
-const refreshClientsBtn = document.getElementById('refreshClientsBtn');
-const newClientBtn = document.getElementById('newClientBtn');
-const editClientBtn = document.getElementById('editClientBtn');
-const editCertificateBtn = document.getElementById('editCertificateBtn');
-const notesSelectAllBtn = document.getElementById('notesSelectAll');
-const notesClearSelectionBtn = document.getElementById('notesClearSelection');
-const notesDownloadXmlSelectedBtn = document.getElementById('notesDownloadXmlSelected');
-const notesDownloadDanfseSelectedBtn = document.getElementById('notesDownloadDanfseSelected');
-
-const syncStartBtn = document.getElementById('syncStart');
-const syncPauseBtn = document.getElementById('syncPause');
-const syncResumeBtn = document.getElementById('syncResume');
-const syncStatusBtn = document.getElementById('syncStatus');
-const syncRunOnceBtn = document.getElementById('syncRunOnce');
-const syncRunFiveBtn = document.getElementById('syncRunFive');
-const syncLogsBtn = document.getElementById('syncLogs');
-const syncReprocessXmlsBtn = document.getElementById('syncReprocessXmls');
-const syncSingleNsuInput = document.getElementById('syncSingleNsuInput');
-const syncSingleNsuEnvSelect = document.getElementById('syncSingleNsuEnv');
-const syncTestSingleNsuBtn = document.getElementById('syncTestSingleNsu');
-const syncModeSelect = document.getElementById('syncMode');
-
-const NFSE_TABLE_COLUMNS = 8;
-const AUDIT_TABLE_COLUMNS = 8;
-
-let selectRequestCounter = 0;
+const state = {
+  route: parseRoute(window.location.hash),
+  mobileSidebarOpen: false,
+  dataReady: false,
+  modal: null,
+  drawer: null,
+  toasts: [],
+  selectedClientIds: new Set(),
+  selectedAlertIds: new Set(),
+  clients: [],
+  certificates: [],
+  searchRuns: [],
+  runningExecution: null,
+  xmlFiles: [],
+  alerts: [],
+  users: [],
+  settings: {
+    tab: 'geral',
+    geral: {
+      nomeAmbiente: 'GCONT - Ambiente Interno',
+      modoOperacao: 'Producao',
+      statusSistema: 'Operacional'
+    },
+    rotina: {
+      ativa: true,
+      horarioInicio: '02:00',
+      limiteClientes: 200,
+      retryFalha: true,
+      maxTentativas: 3,
+      intervaloTentativas: 5
+    },
+    servidor: {
+      caminhoBase: '\\\\servidor\\xmls',
+      porCliente: true,
+      porCnpj: false,
+      porAnoMes: true
+    },
+    notificacoes: {
+      alertarCertificados: true,
+      diasAntecedencia: 30,
+      alertarFalhaBusca: true,
+      alertarXmlNaoArmazenado: true,
+      canal: 'Somente painel'
+    }
+  },
+  filters: {
+    clients: {
+      query: '',
+      statusBusca: 'Todos',
+      certificado: 'Todos',
+      municipio: 'Todos'
+    },
+    runs: {
+      periodo: '30',
+      cliente: 'Todos',
+      municipio: 'Todos',
+      status: 'Todos',
+      tipo: 'Todos'
+    },
+    xmls: {
+      cliente: 'Todos',
+      cnpj: '',
+      numero: '',
+      emissaoInicio: '',
+      emissaoFim: '',
+      downloadInicio: '',
+      downloadFim: '',
+      municipio: 'Todos',
+      tipo: 'Todos',
+      status: 'Todos',
+      caminho: ''
+    },
+    alerts: {
+      severidade: 'Todos',
+      tipo: 'Todos',
+      status: 'Todos',
+      periodo: '30',
+      cliente: 'Todos'
+    }
+  },
+  tableState: {
+    dashboardSearches: 'loading',
+    clients: 'loading',
+    certificates: 'loading',
+    runs: 'loading',
+    xmls: 'loading',
+    alerts: 'loading'
+  }
+};
 
 boot();
 
-async function boot() {
-  apiBaseInput.value = state.apiBase;
-  state.notesRelation = normalizeNotesRelation(state.notesRelation);
-  if (state.authUser?.username) {
-    authUsernameInput.value = state.authUser.username;
+function boot() {
+  if (!window.location.hash) {
+    window.location.hash = '#/dashboard';
+    return;
   }
-  wireEvents();
-  setActiveMenu(state.currentMenu, false);
-  resetAuditView();
-  fillLinkedInputs();
-  renderContext();
-  renderAuthStatus();
-  if (state.authToken) {
-    try {
-      await refreshClientList({ preserveSelection: true, autoSelectFirst: true });
-    } catch (error) {
-      clearAuthState();
-      showPending([`Sessao expirada: ${extractErrorMessage(error)}`], true);
-    }
-  } else {
-    clearClientContext();
-    showPending(['Autentique-se para carregar os dados do cliente.'], true);
-  }
-  writeConsole('Frontend pronto.');
+
+  wireGlobalEvents();
+  render();
+  void initializeData();
 }
 
-function wireEvents() {
-  menuButtons.forEach((button) => {
-    button.addEventListener('click', () => {
-      const menuId = button.getAttribute('data-menu-target');
-      if (!menuId) {
+async function initializeData() {
+  setGlobalLoading(true);
+  render();
+
+  await wait(350);
+
+  state.clients = deepClone(mockClients);
+  state.certificates = deepClone(mockCertificates);
+  state.searchRuns = deepClone(mockSearchRuns);
+  state.runningExecution = deepClone(mockRunningExecution);
+  state.xmlFiles = deepClone(mockXmlFiles);
+  state.alerts = deepClone(mockAlerts);
+  state.users = deepClone(mockUsers);
+
+  setGlobalLoading(false);
+  render();
+}
+
+function wireGlobalEvents() {
+  window.addEventListener('hashchange', () => {
+    state.route = parseRoute(window.location.hash);
+    state.mobileSidebarOpen = false;
+    render();
+  });
+
+  document.addEventListener('click', onDocumentClick);
+  document.addEventListener('submit', onDocumentSubmit);
+  document.addEventListener('change', onDocumentChange);
+}
+
+function onDocumentClick(event) {
+  const actionNode = event.target.closest('[data-action]');
+  if (!actionNode) {
+    return;
+  }
+
+  const action = actionNode.getAttribute('data-action');
+  if (!action) {
+    return;
+  }
+
+  event.preventDefault();
+
+  switch (action) {
+    case 'navigate': {
+      const route = actionNode.getAttribute('data-route');
+      if (route) {
+        navigate(route);
+      }
+      return;
+    }
+    case 'toggle-sidebar': {
+      state.mobileSidebarOpen = !state.mobileSidebarOpen;
+      render();
+      return;
+    }
+    case 'close-modal': {
+      closeModal();
+      return;
+    }
+    case 'close-drawer': {
+      closeDrawer();
+      return;
+    }
+    case 'open-new-client-modal': {
+      openModal({ kind: 'client-form', mode: 'create' });
+      return;
+    }
+    case 'open-import-client-modal': {
+      openModal({ kind: 'import-clients' });
+      return;
+    }
+    case 'client-edit': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      if (!clientId) {
         return;
       }
-      setActiveMenu(menuId);
-    });
-  });
-
-  saveApiBaseBtn.addEventListener('click', async () => {
-    state.apiBase = normalizeBaseUrl(apiBaseInput.value);
-    localStorage.setItem('nfseApiBase', state.apiBase);
-    writeConsole(`API Base URL atualizada: ${state.apiBase}`);
-    if (state.authToken) {
-      await refreshClientList({ preserveSelection: true, autoSelectFirst: true });
-    }
-  });
-
-  authLoginBtn.addEventListener('click', runLogin);
-  authLogoutBtn.addEventListener('click', runLogout);
-
-  refreshClientsBtn.addEventListener('click', async () => {
-    if (!state.authToken) {
-      showPending(['Autentique-se antes de atualizar a lista de clientes.'], true);
+      openModal({ kind: 'client-form', mode: 'edit', clientId });
       return;
     }
-    await refreshClientList({ preserveSelection: true, autoSelectFirst: true });
-  });
-
-  newClientBtn.addEventListener('click', () => {
-    toggleCard(createClientCard);
-    hideCard(editClientCard);
-    hideCard(certificateCard);
-  });
-
-  editClientBtn.addEventListener('click', () => {
-    if (!state.clientId) {
-      showPending(['Selecione um cliente para editar os dados.'], true);
+    case 'client-details': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      if (!clientId) {
+        return;
+      }
+      navigate(`/clientes/${clientId}`);
       return;
     }
-    fillClientEditForm();
-    toggleCard(editClientCard);
-    hideCard(createClientCard);
-  });
-
-  editCertificateBtn.addEventListener('click', () => {
-    if (!state.clientId) {
-      showPending(['Selecione um cliente para gerenciar certificados.'], true);
+    case 'client-reprocess': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      const client = findClientById(clientId);
+      if (!client) {
+        return;
+      }
+      openModal({
+        kind: 'confirm',
+        title: 'Reprocessar busca',
+        subtitle: 'Deseja reprocessar a busca de NFS-e deste cliente na proxima execucao?',
+        confirmLabel: 'Confirmar reprocessamento',
+        intent: 'warning',
+        payload: { type: 'reprocess-client', clientId: client.id }
+      });
       return;
     }
-    updateCertificateSummary(state.selectedCertificates);
-    toggleCard(certificateCard);
-  });
-
-  clientSelect.addEventListener('change', async (event) => {
-    const id = event.target.value;
-    if (!id) {
-      clearClientContext();
+    case 'client-toggle-search': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      if (!clientId) {
+        return;
+      }
+      const client = findClientById(clientId);
+      if (!client) {
+        return;
+      }
+      client.buscaAtiva = !client.buscaAtiva;
+      client.buscaStatus = client.buscaAtiva ? 'Ativo' : 'Inativo';
+      pushToast(
+        `Busca ${client.buscaAtiva ? 'ativada' : 'desativada'} para ${client.razaoSocial}.`,
+        client.buscaAtiva ? 'success' : 'info'
+      );
+      render();
       return;
     }
-    await selectClient(id);
-  });
-
-  clientForm.addEventListener('submit', onCreateClient);
-  clientEditForm.addEventListener('submit', onEditClient);
-  certificateForm.addEventListener('submit', onCreateCertificate);
-  searchForm.addEventListener('submit', onSearchNfse);
-  auditForm.addEventListener('submit', onSearchAudit);
-  notesRelationEmitidasBtn.addEventListener('click', () => onChangeNotesRelation('emitidas'));
-  notesRelationRecebidasBtn.addEventListener('click', () => onChangeNotesRelation('tomadas'));
-  notesSelectAllBtn.addEventListener('click', () => setVisibleNoteSelection(true));
-  notesClearSelectionBtn.addEventListener('click', () => setVisibleNoteSelection(false));
-  notesDownloadXmlSelectedBtn.addEventListener('click', () => downloadSelectedNotes('xml'));
-  notesDownloadDanfseSelectedBtn.addEventListener('click', () => downloadSelectedNotes('danfse'));
-
-  syncStartBtn.addEventListener('click', () => runSyncAction('iniciar'));
-  syncPauseBtn.addEventListener('click', () => runSyncAction('pausar'));
-  syncResumeBtn.addEventListener('click', () => runSyncAction('retomar'));
-  syncStatusBtn.addEventListener('click', runSyncStatus);
-  syncRunOnceBtn.addEventListener('click', () => runSyncNow(1));
-  syncRunFiveBtn.addEventListener('click', () => runSyncNow(5));
-  syncLogsBtn.addEventListener('click', runSyncLogs);
-  syncReprocessXmlsBtn.addEventListener('click', runReprocessXmls);
-  syncTestSingleNsuBtn.addEventListener('click', runSingleNsuTest);
+    case 'clients-toggle-all': {
+      const checked = actionNode.checked;
+      const filtered = getFilteredClients();
+      state.selectedClientIds = checked ? new Set(filtered.map((item) => item.id)) : new Set();
+      render();
+      return;
+    }
+    case 'client-select': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      if (!clientId) {
+        return;
+      }
+      if (actionNode.checked) {
+        state.selectedClientIds.add(clientId);
+      } else {
+        state.selectedClientIds.delete(clientId);
+      }
+      render();
+      return;
+    }
+    case 'clients-bulk-activate': {
+      bulkUpdateClientSearch(true);
+      return;
+    }
+    case 'clients-bulk-deactivate': {
+      bulkUpdateClientSearch(false);
+      return;
+    }
+    case 'clients-bulk-reprocess': {
+      if (state.selectedClientIds.size === 0) {
+        pushToast('Selecione ao menos um cliente para reprocessar.', 'error');
+        return;
+      }
+      openModal({
+        kind: 'confirm',
+        title: 'Reprocessar clientes selecionados',
+        subtitle: `Confirmar reprocessamento de ${state.selectedClientIds.size} cliente(s)?`,
+        confirmLabel: 'Reprocessar selecionados',
+        intent: 'warning',
+        payload: { type: 'reprocess-selected' }
+      });
+      return;
+    }
+    case 'certificate-open-create': {
+      openModal({ kind: 'certificate-form' });
+      return;
+    }
+    case 'certificate-test': {
+      const certificateId = actionNode.getAttribute('data-cert-id');
+      if (!certificateId) {
+        return;
+      }
+      simulateCertificateTest(certificateId);
+      return;
+    }
+    case 'certificate-view-client': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      if (!clientId) {
+        return;
+      }
+      navigate(`/clientes/${clientId}`);
+      return;
+    }
+    case 'certificate-replace': {
+      const certId = actionNode.getAttribute('data-cert-id');
+      openModal({
+        kind: 'confirm',
+        title: 'Substituir certificado',
+        subtitle: 'Enviar novo arquivo para substituir o atual?',
+        confirmLabel: 'Substituir',
+        payload: { type: 'replace-certificate', certId }
+      });
+      return;
+    }
+    case 'certificate-unlink': {
+      const certId = actionNode.getAttribute('data-cert-id');
+      openModal({
+        kind: 'confirm',
+        title: 'Remover vinculo de certificado',
+        subtitle: 'Deseja remover o vinculo deste certificado com o cliente atual?',
+        confirmLabel: 'Remover vinculo',
+        payload: { type: 'unlink-certificate', certId }
+      });
+      return;
+    }
+    case 'open-run-details': {
+      const runId = actionNode.getAttribute('data-run-id');
+      if (!runId) {
+        return;
+      }
+      openDrawer({ kind: 'run-details', runId });
+      return;
+    }
+    case 'run-export': {
+      pushToast('Relatorio da execucao exportado (mock).', 'success');
+      return;
+    }
+    case 'run-reprocess-failures': {
+      const runId = actionNode.getAttribute('data-run-id');
+      openModal({
+        kind: 'confirm',
+        title: 'Reprocessar falhas',
+        subtitle: 'Deseja reprocessar os clientes com falha desta execucao?',
+        confirmLabel: 'Reprocessar falhas',
+        payload: { type: 'reprocess-run-failures', runId }
+      });
+      return;
+    }
+    case 'execution-refresh': {
+      refreshRunningExecution();
+      return;
+    }
+    case 'execution-reprocess-client': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      const client = findClientById(clientId);
+      if (client) {
+        pushToast(`Cliente ${client.razaoSocial} enviado para fila de reprocessamento.`, 'success');
+      }
+      return;
+    }
+    case 'xml-export-list': {
+      pushToast('Listagem exportada para CSV (mock).', 'success');
+      return;
+    }
+    case 'xml-details': {
+      const xmlId = actionNode.getAttribute('data-xml-id');
+      if (!xmlId) {
+        return;
+      }
+      openModal({ kind: 'xml-details', xmlId });
+      return;
+    }
+    case 'xml-view': {
+      const xmlId = actionNode.getAttribute('data-xml-id');
+      if (!xmlId) {
+        return;
+      }
+      openModal({ kind: 'xml-view', xmlId });
+      return;
+    }
+    case 'xml-download': {
+      const xmlId = actionNode.getAttribute('data-xml-id');
+      if (!xmlId) {
+        return;
+      }
+      downloadXmlById(xmlId);
+      return;
+    }
+    case 'xml-copy-path': {
+      const xmlId = actionNode.getAttribute('data-xml-id');
+      const xmlFile = findXmlById(xmlId);
+      if (!xmlFile) {
+        return;
+      }
+      void copyToClipboard(xmlFile.caminhoServidor);
+      return;
+    }
+    case 'xml-open-folder': {
+      pushToast('Abertura de pasta delegada para o agente local (mock).', 'info');
+      return;
+    }
+    case 'alerts-mark-selected': {
+      markSelectedAlertsResolved();
+      return;
+    }
+    case 'alert-select': {
+      const alertId = actionNode.getAttribute('data-alert-id');
+      if (!alertId) {
+        return;
+      }
+      if (actionNode.checked) {
+        state.selectedAlertIds.add(alertId);
+      } else {
+        state.selectedAlertIds.delete(alertId);
+      }
+      render();
+      return;
+    }
+    case 'alert-details': {
+      const alertId = actionNode.getAttribute('data-alert-id');
+      if (!alertId) {
+        return;
+      }
+      openDrawer({ kind: 'alert-details', alertId });
+      return;
+    }
+    case 'alert-resolve': {
+      const alertId = actionNode.getAttribute('data-alert-id');
+      resolveAlert(alertId);
+      return;
+    }
+    case 'alert-reprocess': {
+      const alertId = actionNode.getAttribute('data-alert-id');
+      openModal({
+        kind: 'confirm',
+        title: 'Reprocessar alerta',
+        subtitle: 'Confirmar reprocessamento do item relacionado a este alerta?',
+        confirmLabel: 'Reprocessar',
+        payload: { type: 'reprocess-alert', alertId }
+      });
+      return;
+    }
+    case 'settings-switch-tab': {
+      const tab = actionNode.getAttribute('data-tab');
+      if (!tab) {
+        return;
+      }
+      state.settings.tab = tab;
+      render();
+      return;
+    }
+    case 'settings-new-user': {
+      openModal({ kind: 'user-form' });
+      return;
+    }
+    case 'drawer-close':
+    case 'overlay-close': {
+      closeDrawer();
+      closeModal();
+      return;
+    }
+    case 'confirm-modal': {
+      if (!state.modal || state.modal.kind !== 'confirm') {
+        return;
+      }
+      executeConfirmAction(state.modal.payload);
+      closeModal();
+      return;
+    }
+    default:
+      return;
+  }
 }
 
-async function runLogin() {
-  const username = String(authUsernameInput.value || '').trim();
-  const password = String(authPasswordInput.value || '');
-
-  if (!username || !password) {
-    showPending(['Informe usuario e senha para autenticar.'], true);
+function onDocumentSubmit(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLFormElement)) {
     return;
   }
 
-  try {
-    const response = await apiCall('/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-      skipAuth: true
-    });
-
-    state.authToken = response.accessToken || '';
-    state.authUser = response.user || null;
-    authPasswordInput.value = '';
-    persistState();
-    renderAuthStatus();
-    await refreshClientList({ preserveSelection: true, autoSelectFirst: true });
-
-    writeConsole('Login realizado', {
-      user: response.user,
-      expiresIn: response.expiresIn
-    });
-  } catch (error) {
-    showPending([`Falha no login: ${extractErrorMessage(error)}`], true);
+  switch (target.id) {
+    case 'clientsFilterForm': {
+      event.preventDefault();
+      applyClientsFilters(target);
+      return;
+    }
+    case 'clientForm': {
+      event.preventDefault();
+      submitClientForm(target);
+      return;
+    }
+    case 'certificatesModalForm': {
+      event.preventDefault();
+      submitCertificateForm(target);
+      return;
+    }
+    case 'runsFilterForm': {
+      event.preventDefault();
+      applyRunsFilters(target);
+      return;
+    }
+    case 'xmlsFilterForm': {
+      event.preventDefault();
+      applyXmlFilters(target);
+      return;
+    }
+    case 'alertsFilterForm': {
+      event.preventDefault();
+      applyAlertsFilters(target);
+      return;
+    }
+    case 'clientSearchConfigForm': {
+      event.preventDefault();
+      pushToast('Configuracao de busca salva.', 'success');
+      return;
+    }
+    case 'settingsGeralForm':
+    case 'settingsRotinaForm':
+    case 'settingsServidorForm':
+    case 'settingsNotificacoesForm': {
+      event.preventDefault();
+      pushToast('Configuracoes salvas com sucesso.', 'success');
+      return;
+    }
+    case 'settingsUserForm': {
+      event.preventDefault();
+      submitUserForm(target);
+      return;
+    }
+    default:
+      return;
   }
 }
 
-function runLogout() {
-  clearAuthState();
-  clearClientContext();
-  resetAuditView();
-  showPending(['Sessao finalizada.'], true);
-  writeConsole('Logout executado');
-}
-
-function renderAuthStatus() {
-  if (!state.authToken || !state.authUser) {
-    authStatus.className = 'status-box warn';
-    authStatus.textContent = 'Nao autenticado.';
+function onDocumentChange(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
     return;
   }
 
-  authStatus.className = 'status-box ok';
-  const role = state.authUser.role === 'admin' ? 'admin' : 'cliente';
-  const scope = state.authUser.clienteId ? ` | clienteId=${state.authUser.clienteId}` : '';
-  authStatus.textContent = `Autenticado como ${state.authUser.username} (${role})${scope}`;
-}
-
-function clearAuthState() {
-  state.authToken = '';
-  state.authUser = null;
-  persistState();
-  renderAuthStatus();
-  updateAuditClienteFilter();
-}
-
-async function refreshClientList({ preserveSelection, autoSelectFirst }) {
-  const clients = await apiCall('/clientes');
-  state.clientList = Array.isArray(clients) ? clients : [];
-
-  renderClientSelectOptions(state.clientList);
-
-  if (state.clientList.length === 0) {
-    clearClientContext();
-    showPending(['Nenhum cliente cadastrado. Clique em "Novo cliente" para iniciar.'], true);
-    return;
+  if (target.id === 'clientsFilterStatusBusca') {
+    state.filters.clients.statusBusca = target.value;
   }
 
-  const currentClientStillExists = state.clientList.some((item) => item.id === state.clientId);
-  const preferredId = preserveSelection && currentClientStillExists ? state.clientId : '';
-  const targetId = preferredId || (autoSelectFirst ? state.clientList[0].id : '');
+  if (target.id === 'clientsFilterCertificado') {
+    state.filters.clients.certificado = target.value;
+  }
 
-  if (targetId) {
-    clientSelect.value = targetId;
-    await selectClient(targetId);
+  if (target.id === 'clientsFilterMunicipio') {
+    state.filters.clients.municipio = target.value;
+  }
+
+  if (target.id === 'clientsFilterQuery') {
+    state.filters.clients.query = target.value;
   }
 }
 
-function renderClientSelectOptions(clients) {
-  if (clients.length === 0) {
-    clientSelect.innerHTML = '<option value="">Nenhum cliente encontrado</option>';
-    return;
-  }
+function render() {
+  const page = renderCurrentPage();
+  const meta = resolvePageMeta();
 
-  clientSelect.innerHTML = clients
-    .map((client) => {
-      const cnpj = formatCnpj(client.cnpj || '');
-      return `<option value="${escapeHtml(client.id)}">${escapeHtml(client.razaoSocial)} (${escapeHtml(cnpj)})</option>`;
+  appRoot.innerHTML = `
+    <div class="app-shell">
+      ${renderSidebar()}
+      <div class="main-shell">
+        ${renderHeader(meta)}
+        <main class="content">${page}</main>
+      </div>
+    </div>
+    ${renderSidebarBackdrop()}
+  `;
+
+  modalRoot.innerHTML = renderModal();
+  drawerRoot.innerHTML = renderDrawer();
+  toastRoot.innerHTML = renderToasts();
+}
+
+function renderSidebar() {
+  const activeKey = resolveNavKeyByRoute(state.route.name);
+  const itemsHtml = navItems
+    .map((item) => {
+      return `<button class="nav-item ${item.key === activeKey ? 'active' : ''}" data-action="navigate" data-route="${item.route}" aria-label="${escapeHtml(item.label)}">${icon(item.icon)}<span>${escapeHtml(item.label)}</span></button>`;
     })
     .join('');
+
+  return `
+    <aside class="sidebar ${state.mobileSidebarOpen ? 'mobile-open' : ''}">
+      <div>
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <div>
+            <h1 class="brand-title">NotaSync</h1>
+            <p class="brand-subtitle">GCONT Gestao Contabil</p>
+          </div>
+        </div>
+      </div>
+      <nav class="sidebar-nav" aria-label="Menu principal">
+        ${itemsHtml}
+      </nav>
+      <footer class="sidebar-footer">
+        <div>Ambiente interno</div>
+        <div>Servidor local</div>
+        <div style="margin-top:8px;"><span class="online-dot"></span>Sistema online</div>
+      </footer>
+    </aside>
+  `;
 }
 
-async function selectClient(clientId) {
-  if (!clientId) {
-    clearClientContext();
-    return;
+function renderSidebarBackdrop() {
+  if (!state.mobileSidebarOpen) {
+    return '';
   }
 
-  const previousClientId = state.clientId;
-  const requestId = ++selectRequestCounter;
-
-  const [client, establishments, certificates, syncStatus] = await Promise.all([
-    apiCall(`/clientes/${clientId}`),
-    apiCall(`/clientes/${clientId}/estabelecimentos`),
-    apiCall(`/clientes/${clientId}/certificados`),
-    apiCall(`/clientes/${clientId}/sync/status`)
-  ]);
-
-  if (requestId !== selectRequestCounter) {
-    return;
-  }
-
-  const establishmentList = Array.isArray(establishments) ? establishments : [];
-  const certificateList = Array.isArray(certificates) ? certificates : [];
-
-  const selectedEstablishment =
-    establishmentList.find((item) => item.ativo) || establishmentList[0] || null;
-
-  const selectedCertificate =
-    certificateList.find((item) => item.ativo) || certificateList[0] || null;
-
-  state.clientId = clientId;
-  state.selectedClient = client;
-  state.selectedEstablishment = selectedEstablishment;
-  state.selectedCertificates = certificateList;
-  state.establishmentId = selectedEstablishment?.id || '';
-  state.certificateId = selectedCertificate?.id || '';
-
-  if (previousClientId !== clientId) {
-    searchForm.elements.competencia.value = getPreviousMonthCompetencia();
-  }
-
-  persistState();
-  fillLinkedInputs();
-  fillClientEditForm();
-  renderContext();
-  renderClientSummary();
-  updateCertificateSummary(certificateList);
-
-  const notes = await searchClientNotes();
-  evaluatePending({
-    establishments: establishmentList,
-    certificates: certificateList,
-    syncStatus,
-    notes
-  });
-
-  writeConsole('Cliente selecionado', {
-    clienteId: clientId,
-    estabelecimentoId: state.establishmentId || null,
-    certificadoId: state.certificateId || null,
-    notas: notes.length
-  });
+  return '<div class="overlay" data-action="overlay-close" aria-hidden="true"></div>';
 }
 
-async function onChangeNotesRelation(relation) {
-  setNotesRelation(relation);
-  if (!state.clientId) {
-    return;
+function renderHeader(meta) {
+  const latestRun = state.searchRuns[0];
+  const lastRoutineText = latestRun ? `${formatRelativeDate(latestRun.inicio)} as ${formatHour(latestRun.inicio)}` : 'Sem execucao';
+  const healthStatus = getSystemHealthStatus();
+
+  return `
+    <header class="header">
+      <div style="display:flex; gap:10px; align-items:center;">
+        <button class="mobile-toggle" type="button" data-action="toggle-sidebar" aria-label="Abrir menu">${icon('menu')}</button>
+        <div class="header-left">
+          <h1>${escapeHtml(meta.title)}</h1>
+          <p>${escapeHtml(meta.description)}</p>
+        </div>
+      </div>
+      <div class="header-right">
+        <div class="header-meta">
+          <div>Ultima rotina: ${escapeHtml(lastRoutineText)}</div>
+          <div>${escapeHtml(healthStatus.description)}</div>
+        </div>
+        ${statusBadge(healthStatus.label, healthStatus.tone)}
+        <div class="avatar" aria-label="Usuario GC">GC</div>
+      </div>
+    </header>
+  `;
+}
+
+function renderCurrentPage() {
+  if (!state.dataReady) {
+    return renderLoadingPage();
   }
 
-  await runNotesSearch();
+  switch (state.route.name) {
+    case 'dashboard':
+      return renderDashboardPage();
+    case 'clientes':
+      return renderClientsPage();
+    case 'client-details':
+      return renderClientDetailsPage(state.route.params.id);
+    case 'certificados':
+      return renderCertificatesPage();
+    case 'buscas':
+      return renderSearchRunsPage();
+    case 'xmls':
+      return renderXmlsPage();
+    case 'alertas':
+      return renderAlertsPage();
+    case 'configuracoes':
+      return renderSettingsPage();
+    default:
+      return renderNotFoundPage();
+  }
 }
 
-function renderClientSummary() {
-  const client = state.selectedClient;
-  const establishment = state.selectedEstablishment;
-
-  summaryRazao.textContent = client?.razaoSocial || '-';
-  summaryCnpj.textContent = formatCnpj(client?.cnpj || '');
-  summaryIm.textContent = establishment?.inscricaoMunicipal || '-';
-
-  const cnpjConsulta = onlyDigits(client?.cnpj || '');
-  searchForm.elements.cnpjConsulta.value = cnpjConsulta;
+function renderLoadingPage() {
+  return `
+    <section class="page-section">
+      <article class="card">
+        <h2 class="card-title">Carregando NotaSync GCONT</h2>
+        <p class="card-subtitle">Inicializando estrutura de dashboard, clientes, certificados e monitoramento.</p>
+      </article>
+      <article class="card table-state loading">Carregando dados...</article>
+    </section>
+  `;
 }
 
-function fillClientEditForm() {
-  const client = state.selectedClient;
-  const establishment = state.selectedEstablishment;
+function renderNotFoundPage() {
+  return `
+    <section class="page-section">
+      <article class="card table-state error">
+        Pagina nao encontrada.
+        <div style="margin-top:10px;"><button class="btn secondary" data-action="navigate" data-route="/dashboard">Voltar ao dashboard</button></div>
+      </article>
+    </section>
+  `;
+}
 
+function renderDashboardPage() {
+  const lastRun = state.searchRuns[0] || null;
+  const summaryTone = lastRun?.resumoStatus === 'Erro' ? 'danger' : lastRun?.resumoStatus === 'Aviso' ? 'warning' : 'success';
+  const activeClientsCount = state.clients.filter((client) => client.buscaAtiva).length;
+  const certsExpiring = state.certificates.filter((cert) => cert.status === 'A vencer').length;
+  const latestSearchRows = state.clients.slice(0, 8);
+  const priorityAlerts = getPriorityAlerts().slice(0, 4);
+
+  return `
+    <section class="page-section">
+      <article class="card summary-bar">
+        <div>
+          <h2 class="card-title">Resumo da rotina noturna</h2>
+          <p class="card-subtitle">${lastRun ? `Execucao iniciada as ${formatHour(lastRun.inicio)} e finalizada as ${formatHour(lastRun.fim)}.` : 'Sem execucoes recentes.'}</p>
+        </div>
+        ${statusBadge(lastRun?.status || 'Sem status', summaryTone, 'summary-status')}
+      </article>
+
+      <section class="stats-grid">
+        ${statCard('users', 'Clientes monitorados', lastRun ? String(lastRun.clientesProcessados) : String(activeClientsCount), 'clientes com busca ativa', 'neutral')}
+        ${statCard('file', 'NFS-e encontradas', lastRun ? String(lastRun.xmlsEncontrados) : '0', 'na ultima execucao', 'neutral')}
+        ${statCard('folder', 'XMLs armazenados', lastRun ? String(lastRun.xmlsArmazenados) : '0', 'salvos no servidor interno', 'success')}
+        ${statCard('alert', 'Falhas', lastRun ? String(lastRun.falhas) : '0', 'clientes com erro', 'danger')}
+        ${statCard('shield', 'Certificados a vencer', String(certsExpiring), 'nos proximos 30 dias', 'warning')}
+      </section>
+
+      <section class="split-grid">
+        <article class="card">
+          <h3 class="card-title">Ultimas buscas por cliente</h3>
+          <p class="card-subtitle">Clique em uma linha para abrir os detalhes do cliente.</p>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Cliente</th>
+                  <th>CNPJ</th>
+                  <th>Municipio</th>
+                  <th>Ultima busca</th>
+                  <th>XMLs</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${renderTableRowsOrState({
+                  key: 'dashboardSearches',
+                  colSpan: 6,
+                  rowsHtml: latestSearchRows
+                    .map((client) => {
+                      return `<tr data-action="client-details" data-client-id="${client.id}" style="cursor:pointer;">
+                        <td>${escapeHtml(client.razaoSocial)}</td>
+                        <td>${escapeHtml(formatCnpj(client.cnpj))}</td>
+                        <td>${escapeHtml(client.municipio)}</td>
+                        <td>${escapeHtml(formatDateTime(client.ultimaBusca))}</td>
+                        <td>${escapeHtml(String(client.xmlsEncontrados))}</td>
+                        <td>${statusBadge(client.statusOperacional, toneFromStatus(client.statusOperacional))}</td>
+                      </tr>`;
+                    })
+                    .join(''),
+                  emptyMessage: 'Sem clientes com busca registrada.'
+                })}
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <article class="card">
+          <h3 class="card-title">Alertas prioritarios</h3>
+          <p class="card-subtitle">Pendencias com maior impacto operacional.</p>
+          <div class="alert-list">
+            ${priorityAlerts.length
+              ? priorityAlerts
+                  .map((alert) => {
+                    return `<article class="alert-row ${alert.severity.toLowerCase()}">
+                      <div class="alert-row-header">
+                        <p class="alert-row-title">${escapeHtml(alert.titulo)}</p>
+                        ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
+                      </div>
+                      <p class="alert-row-sub">${escapeHtml(alert.cliente)} • ${escapeHtml(formatDateTime(alert.dataHora))}</p>
+                    </article>`;
+                  })
+                  .join('')
+              : '<div class="table-state">Sem alertas prioritarios.</div>'}
+          </div>
+        </article>
+      </section>
+
+      <article class="card timeline-table">
+        <h3 class="card-title">Execucoes recentes</h3>
+        <p class="card-subtitle">Ultimas rotinas automaticas e manuais.</p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Data</th>
+                <th>Inicio</th>
+                <th>Fim</th>
+                <th>Clientes processados</th>
+                <th>XMLs encontrados</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${state.searchRuns
+                .slice(0, 5)
+                .map((run) => {
+                  return `<tr>
+                    <td>${escapeHtml(formatDate(run.inicio))}</td>
+                    <td>${escapeHtml(formatHour(run.inicio))}</td>
+                    <td>${escapeHtml(formatHour(run.fim))}</td>
+                    <td>${escapeHtml(String(run.clientesProcessados))}</td>
+                    <td>${escapeHtml(String(run.xmlsEncontrados))}</td>
+                    <td>${statusBadge(run.status, toneFromRunStatus(run.status))}</td>
+                  </tr>`;
+                })
+                .join('')}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderClientsPage() {
+  const clients = getFilteredClients();
+  const municipios = uniqueValues(state.clients.map((client) => client.municipio));
+
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'Clientes',
+        description: 'Gerencie clientes monitorados para busca automatica de NFS-e.',
+        actions: [
+          actionButton('Novo cliente', 'open-new-client-modal', 'primary'),
+          actionButton('Importar clientes', 'open-import-client-modal', 'secondary')
+        ]
+      })}
+
+      <article class="card filter-card">
+        <h3 class="card-title">Filtros</h3>
+        <form id="clientsFilterForm" class="form-grid">
+          <label class="field" style="grid-column: span 2;">
+            Buscar por razao social, CNPJ ou municipio
+            <input id="clientsFilterQuery" name="query" value="${escapeHtml(state.filters.clients.query)}" placeholder="Digite para buscar" />
+          </label>
+          <label class="field">
+            Status da busca
+            <select id="clientsFilterStatusBusca" name="statusBusca">
+              ${renderOptions(['Todos', 'Ativo', 'Inativo', 'Pendente', 'Erro'], state.filters.clients.statusBusca)}
+            </select>
+          </label>
+          <label class="field">
+            Certificado
+            <select id="clientsFilterCertificado" name="certificado">
+              ${renderOptions(['Todos', 'Valido', 'A vencer', 'Vencido', 'Nao cadastrado'], state.filters.clients.certificado)}
+            </select>
+          </label>
+          <label class="field">
+            Municipio
+            <select id="clientsFilterMunicipio" name="municipio">
+              ${renderOptions(['Todos', ...municipios], state.filters.clients.municipio)}
+            </select>
+          </label>
+          <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
+            <button class="btn primary" type="submit">Filtrar</button>
+            <button class="btn secondary" type="button" data-action="clients-clear-filters">Limpar</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="card">
+        <div style="display:flex; justify-content:space-between; gap:10px; flex-wrap:wrap; margin-bottom:12px;">
+          <div>
+            <h3 class="card-title">Clientes cadastrados</h3>
+            <p class="card-subtitle">${clients.length} cliente(s) na visao atual.</p>
+          </div>
+          <div class="table-actions">
+            <button class="btn secondary" type="button" data-action="clients-bulk-activate">Ativar busca</button>
+            <button class="btn secondary" type="button" data-action="clients-bulk-deactivate">Desativar busca</button>
+            <button class="btn primary" type="button" data-action="clients-bulk-reprocess">Reprocessar selecionados</button>
+          </div>
+        </div>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th><input type="checkbox" data-action="clients-toggle-all" ${isAllFilteredClientsSelected(clients) ? 'checked' : ''} aria-label="Selecionar todos" /></th>
+                <th>Cliente</th>
+                <th>Municipio</th>
+                <th>Certificado</th>
+                <th>Busca NFS-e</th>
+                <th>Ultima busca</th>
+                <th>XMLs encontrados</th>
+                <th>Status</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderTableRowsOrState({
+                key: 'clients',
+                colSpan: 9,
+                rowsHtml: clients
+                  .map((client) => {
+                    return `
+                      <tr>
+                        <td><input type="checkbox" data-action="client-select" data-client-id="${client.id}" ${state.selectedClientIds.has(client.id) ? 'checked' : ''} aria-label="Selecionar ${escapeHtml(client.razaoSocial)}" /></td>
+                        <td>
+                          <span class="row-title">${escapeHtml(client.razaoSocial)}</span>
+                          <span class="row-sub">${escapeHtml(formatCnpj(client.cnpj))}</span>
+                        </td>
+                        <td>${escapeHtml(client.municipio)} / ${escapeHtml(client.uf)}</td>
+                        <td>
+                          ${statusBadge(client.certificadoStatus, toneFromCertificateStatus(client.certificadoStatus))}
+                          <span class="row-sub">${client.certificadoValidade ? `Validade: ${escapeHtml(formatDate(client.certificadoValidade))}` : 'Sem certificado'}</span>
+                        </td>
+                        <td>${statusBadge(client.buscaAtiva ? 'Ativa' : 'Inativa', client.buscaAtiva ? 'success' : 'neutral')}</td>
+                        <td>${escapeHtml(formatDateTime(client.ultimaBusca))}</td>
+                        <td>${escapeHtml(String(client.xmlsEncontrados))}</td>
+                        <td>${statusBadge(client.statusOperacional, toneFromStatus(client.statusOperacional))}</td>
+                        <td>
+                          <div class="table-actions">
+                            <button class="icon-btn" data-action="client-details" data-client-id="${client.id}">Ver detalhes</button>
+                            <button class="icon-btn" data-action="client-edit" data-client-id="${client.id}">Editar</button>
+                            <button class="icon-btn" data-action="client-reprocess" data-client-id="${client.id}">Reprocessar busca</button>
+                            <button class="icon-btn" data-action="client-toggle-search" data-client-id="${client.id}">${client.buscaAtiva ? 'Desativar busca' : 'Ativar busca'}</button>
+                          </div>
+                        </td>
+                      </tr>
+                    `;
+                  })
+                  .join(''),
+                emptyMessage: 'Nenhum cliente encontrado para os filtros informados.'
+              })}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderClientDetailsPage(clientId) {
+  const client = findClientById(clientId);
   if (!client) {
-    return;
+    return `
+      <section class="page-section">
+        <article class="card table-state error">
+          Cliente nao encontrado.
+          <div style="margin-top:10px;"><button class="btn secondary" data-action="navigate" data-route="/clientes">Voltar para clientes</button></div>
+        </article>
+      </section>
+    `;
   }
 
-  clientEditForm.razaoSocial.value = client.razaoSocial || '';
-  clientEditForm.cnpj.value = onlyDigits(client.cnpj || '');
-  clientEditForm.inscricaoMunicipal.value = establishment?.inscricaoMunicipal || '';
+  const clientCertificate = state.certificates.find((cert) => cert.clientId === client.id) || null;
+  const historyRows = getRunHistoryByClient(client.id);
+  const clientXmls = state.xmlFiles.filter((xml) => xml.clientId === client.id).slice(0, 6);
+  const clientAlerts = state.alerts.filter((alert) => alert.clientId === client.id).slice(0, 5);
+
+  return `
+    <section class="page-section">
+      <div class="page-header">
+        <div>
+          <button class="btn ghost" type="button" data-action="navigate" data-route="/clientes">${icon('arrow-left')} Voltar</button>
+          <h2 class="page-title" style="margin-top:8px;">${escapeHtml(client.razaoSocial)}</h2>
+          <p class="page-description">${escapeHtml(formatCnpj(client.cnpj))}</p>
+        </div>
+        <div class="page-actions">
+          ${statusBadge(client.buscaAtiva ? 'Busca ativa' : 'Busca inativa', client.buscaAtiva ? 'success' : 'neutral')}
+          ${statusBadge(client.certificadoStatus === 'Valido' ? 'Certificado valido' : `Certificado ${client.certificadoStatus.toLowerCase()}`, toneFromCertificateStatus(client.certificadoStatus))}
+          ${statusBadge(`Ultima busca: ${formatRelativeDate(client.ultimaBusca)} as ${formatHour(client.ultimaBusca)}`, 'info')}
+        </div>
+      </div>
+
+      <section class="dual-grid">
+        <div class="page-section">
+          <article class="card">
+            <h3 class="card-title">Dados cadastrais</h3>
+            <div class="form-grid two" style="margin-top:12px; gap:10px;">
+              ${detailItem('Razao social', client.razaoSocial)}
+              ${detailItem('Nome fantasia', client.nomeFantasia || '-')}
+              ${detailItem('CNPJ', formatCnpj(client.cnpj))}
+              ${detailItem('Inscricao municipal', client.inscricaoMunicipal || '-')}
+              ${detailItem('Municipio', `${client.municipio} / ${client.uf}`)}
+              ${detailItem('Responsavel interno', client.responsavelInterno)}
+              ${detailItem('Status do cliente', client.buscaStatus)}
+            </div>
+          </article>
+
+          <article class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px;">
+              <h3 class="card-title">Historico de buscas</h3>
+              <button class="btn secondary" type="button" data-action="navigate" data-route="/buscas">Ver todas as execucoes</button>
+            </div>
+            <div class="table-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Data</th>
+                    <th>Inicio</th>
+                    <th>Fim</th>
+                    <th>XMLs encontrados</th>
+                    <th>Status</th>
+                    <th>Mensagem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${historyRows.length
+                    ? historyRows
+                        .map((row) => {
+                          return `<tr>
+                            <td>${escapeHtml(formatDate(row.data))}</td>
+                            <td>${escapeHtml(formatHour(row.inicio))}</td>
+                            <td>${escapeHtml(formatHour(row.fim))}</td>
+                            <td>${escapeHtml(String(row.xmlsEncontrados))}</td>
+                            <td>${statusBadge(row.status, toneFromStatus(row.status))}</td>
+                            <td>${escapeHtml(row.mensagem)}</td>
+                          </tr>`;
+                        })
+                        .join('')
+                    : '<tr><td colspan="6" class="table-state">Nenhum historico disponivel.</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="card">
+            <h3 class="card-title">Ultimos XMLs encontrados</h3>
+            <div class="table-wrap" style="margin-top:10px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Numero NFS-e</th>
+                    <th>Data emissao</th>
+                    <th>Prestador/Tomador</th>
+                    <th>Valor</th>
+                    <th>Caminho no servidor</th>
+                    <th>Acoes</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${clientXmls.length
+                    ? clientXmls
+                        .map((xml) => {
+                          return `<tr>
+                            <td>${escapeHtml(xml.numeroNfse)}</td>
+                            <td>${escapeHtml(formatDate(xml.dataEmissao))}</td>
+                            <td>${escapeHtml(`${xml.prestador} / ${xml.tomador}`)}</td>
+                            <td>${escapeHtml(formatCurrency(xml.valor))}</td>
+                            <td><code>${escapeHtml(xml.caminhoServidor)}</code></td>
+                            <td>
+                              <div class="table-actions">
+                                <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar</button>
+                                <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
+                                <button class="icon-btn" data-action="xml-open-folder" data-xml-id="${xml.id}">Abrir localizacao</button>
+                              </div>
+                            </td>
+                          </tr>`;
+                        })
+                        .join('')
+                    : '<tr><td colspan="6" class="table-state">Nenhum XML encontrado.</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+
+        <div class="page-section">
+          <article class="card">
+            <h3 class="card-title">Certificado digital</h3>
+            <div class="form-grid" style="grid-template-columns:1fr; margin-top:12px;">
+              ${detailItem('Tipo', clientCertificate?.tipo || 'Nao cadastrado')}
+              ${detailItem('Apelido', clientCertificate?.apelido || '-')}
+              ${detailItem('Data de validade', clientCertificate?.validade ? formatDate(clientCertificate.validade) : '-')}
+              ${detailItem('Status', clientCertificate?.status || 'Nao cadastrado')}
+              ${detailItem('Ultima validacao', clientCertificate?.ultimaValidacao ? formatDateTime(clientCertificate.ultimaValidacao) : '-')}
+            </div>
+            <div class="table-actions" style="margin-top:12px;">
+              <button class="btn primary" type="button" data-action="certificate-open-create">Atualizar certificado</button>
+              <button class="btn secondary" type="button" data-action="certificate-test" data-cert-id="${escapeHtml(clientCertificate?.id || '')}" ${clientCertificate ? '' : 'disabled'}>Testar certificado</button>
+            </div>
+          </article>
+
+          <article class="card">
+            <h3 class="card-title">Configuracao da busca</h3>
+            <form id="clientSearchConfigForm" class="form-grid" style="grid-template-columns:1fr; margin-top:12px;">
+              <label class="field-inline">
+                <input name="buscaAtiva" type="checkbox" ${client.buscaAtiva ? 'checked' : ''} />
+                <span>Busca automatica ativa</span>
+              </label>
+              <label class="field">
+                Horario preferencial
+                <input name="horario" type="time" value="${escapeHtml(client.horarioPreferencial || '02:00')}" />
+              </label>
+              <label class="field">
+                Tipo de busca
+                <select name="tipoBusca">
+                  ${renderOptions(['Emitidas', 'Tomadas', 'Ambas'], client.tipoBusca || 'Ambas')}
+                </select>
+              </label>
+              <label class="field-inline">
+                <input name="municipioIntegrado" type="checkbox" ${client.municipioIntegrado ? 'checked' : ''} />
+                <span>Municipio integrado</span>
+              </label>
+              <div class="stack-actions" style="justify-content:flex-start;">
+                <button class="btn primary" type="submit">Salvar configuracao</button>
+              </div>
+            </form>
+          </article>
+
+          <article class="card">
+            <h3 class="card-title">Alertas do cliente</h3>
+            <div class="alert-list" style="margin-top:10px;">
+              ${clientAlerts.length
+                ? clientAlerts
+                    .map((alert) => {
+                      return `<article class="alert-row ${alert.severity.toLowerCase()}">
+                        <div class="alert-row-header">
+                          <p class="alert-row-title">${escapeHtml(alert.titulo)}</p>
+                          ${statusBadge(alert.status, toneFromAlertStatus(alert.status))}
+                        </div>
+                        <p class="alert-row-sub">${escapeHtml(formatDateTime(alert.dataHora))}</p>
+                      </article>`;
+                    })
+                    .join('')
+                : '<div class="table-state">Sem alertas recentes para este cliente.</div>'}
+            </div>
+          </article>
+        </div>
+      </section>
+    </section>
+  `;
 }
 
-function updateCertificateSummary(certificates) {
-  if (!certificates || certificates.length === 0) {
-    certificatesSummary.className = 'status-box warn';
-    certificatesSummary.textContent = 'Sem certificado cadastrado para este cliente.';
-    certificatesList.innerHTML = '';
-    return;
+function renderCertificatesPage() {
+  const certificates = getFilteredCertificates();
+  const counts = {
+    validos: state.certificates.filter((cert) => cert.status === 'Valido').length,
+    vencer: state.certificates.filter((cert) => cert.status === 'A vencer').length,
+    vencidos: state.certificates.filter((cert) => cert.status === 'Vencido').length,
+    semVinculo: state.certificates.filter((cert) => !cert.clientId).length
+  };
+
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'Certificados',
+        description: 'Acompanhe validade, vinculo e status dos certificados digitais.',
+        actions: [actionButton('Cadastrar certificado', 'certificate-open-create', 'primary')]
+      })}
+
+      <section class="stats-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
+        ${statCard('shield', 'Certificados validos', String(counts.validos), 'status regular', 'success')}
+        ${statCard('clock', 'A vencer em 30 dias', String(counts.vencer), 'exigem renovacao', 'warning')}
+        ${statCard('alert', 'Vencidos', String(counts.vencidos), 'risco imediato', 'danger')}
+        ${statCard('users', 'Sem cliente vinculado', String(counts.semVinculo), 'pendente de associacao', 'neutral')}
+      </section>
+
+      <article class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>CNPJ</th>
+                <th>Tipo</th>
+                <th>Apelido</th>
+                <th>Validade</th>
+                <th>Dias restantes</th>
+                <th>Status</th>
+                <th>Ultima validacao</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderTableRowsOrState({
+                key: 'certificates',
+                colSpan: 9,
+                rowsHtml: certificates
+                  .map((cert) => {
+                    const rowClass = cert.status === 'Vencido' ? ' style="background:#fff5f5;"' : cert.status === 'A vencer' ? ' style="background:#fffbf0;"' : '';
+                    return `<tr${rowClass}>
+                      <td>${escapeHtml(cert.cliente)}</td>
+                      <td>${escapeHtml(formatCnpj(cert.cnpj))}</td>
+                      <td>${escapeHtml(cert.tipo)}</td>
+                      <td>${escapeHtml(cert.apelido)}</td>
+                      <td>${escapeHtml(formatDate(cert.validade))}</td>
+                      <td>${escapeHtml(String(cert.diasRestantes))}</td>
+                      <td>${statusBadge(cert.status, toneFromCertificateStatus(cert.status))}</td>
+                      <td>${escapeHtml(cert.ultimaValidacao ? formatDateTime(cert.ultimaValidacao) : '-')}</td>
+                      <td>
+                        <div class="table-actions">
+                          <button class="icon-btn" data-action="certificate-view-client" data-client-id="${escapeHtml(cert.clientId || '')}" ${cert.clientId ? '' : 'disabled'}>Ver cliente</button>
+                          <button class="icon-btn" data-action="certificate-test" data-cert-id="${escapeHtml(cert.id)}">Testar certificado</button>
+                          <button class="icon-btn" data-action="certificate-replace" data-cert-id="${escapeHtml(cert.id)}">Substituir</button>
+                          <button class="icon-btn" data-action="certificate-unlink" data-cert-id="${escapeHtml(cert.id)}">Remover vinculo</button>
+                        </div>
+                      </td>
+                    </tr>`;
+                  })
+                  .join(''),
+                emptyMessage: 'Nenhum certificado para exibir.'
+              })}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderSearchRunsPage() {
+  const runs = getFilteredRuns();
+
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'Buscas NFS-e',
+        description: 'Historico das rotinas automaticas e reprocessamentos manuais.',
+        actions: [
+          actionButton('Nova busca manual', 'open-new-manual-run', 'primary'),
+          actionButton('Agendar reprocessamento', 'open-schedule-reprocess', 'secondary')
+        ]
+      })}
+
+      <article class="card filter-card">
+        <h3 class="card-title">Filtros</h3>
+        <form id="runsFilterForm" class="form-grid">
+          <label class="field">
+            Periodo
+            <select name="periodo">${renderOptions(['7', '15', '30', '90'], state.filters.runs.periodo, {
+              '7': 'Ultimos 7 dias',
+              '15': 'Ultimos 15 dias',
+              '30': 'Ultimos 30 dias',
+              '90': 'Ultimos 90 dias'
+            })}</select>
+          </label>
+          <label class="field">
+            Cliente
+            <select name="cliente">${renderOptions(['Todos', ...state.clients.map((client) => client.id)], state.filters.runs.cliente, mapClientOptions())}</select>
+          </label>
+          <label class="field">
+            Municipio
+            <select name="municipio">${renderOptions(['Todos', ...uniqueValues(state.clients.map((client) => client.municipio))], state.filters.runs.municipio)}</select>
+          </label>
+          <label class="field">
+            Status
+            <select name="status">${renderOptions(['Todos', 'Concluida', 'Concluida com avisos', 'Falha critica', 'Em execucao'], state.filters.runs.status)}</select>
+          </label>
+          <label class="field">
+            Tipo de execucao
+            <select name="tipo">${renderOptions(['Todos', 'Automatica', 'Manual', 'Reprocessamento'], state.filters.runs.tipo)}</select>
+          </label>
+          <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
+            <button class="btn primary" type="submit">Filtrar</button>
+            <button class="btn secondary" type="button" data-action="runs-clear-filters">Limpar</button>
+          </div>
+        </form>
+      </article>
+
+      ${renderRunningExecutionCard()}
+
+      <article class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Codigo</th>
+                <th>Tipo</th>
+                <th>Data</th>
+                <th>Inicio</th>
+                <th>Fim</th>
+                <th>Clientes processados</th>
+                <th>XMLs encontrados</th>
+                <th>XMLs armazenados</th>
+                <th>Falhas</th>
+                <th>Status</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderTableRowsOrState({
+                key: 'runs',
+                colSpan: 11,
+                rowsHtml: runs
+                  .map((run) => {
+                    return `<tr>
+                      <td><strong>${escapeHtml(run.codigo)}</strong></td>
+                      <td>${escapeHtml(run.tipo)}</td>
+                      <td>${escapeHtml(formatDate(run.inicio))}</td>
+                      <td>${escapeHtml(formatHour(run.inicio))}</td>
+                      <td>${escapeHtml(formatHour(run.fim))}</td>
+                      <td>${escapeHtml(String(run.clientesProcessados))}</td>
+                      <td>${escapeHtml(String(run.xmlsEncontrados))}</td>
+                      <td>${escapeHtml(String(run.xmlsArmazenados))}</td>
+                      <td>${escapeHtml(String(run.falhas))}</td>
+                      <td>${statusBadge(run.status, toneFromRunStatus(run.status))}</td>
+                      <td>
+                        <div class="table-actions">
+                          <button class="icon-btn" data-action="open-run-details" data-run-id="${run.id}">Ver detalhes</button>
+                          <button class="icon-btn" data-action="run-export" data-run-id="${run.id}">Exportar relatorio</button>
+                          <button class="icon-btn" data-action="run-reprocess-failures" data-run-id="${run.id}">Reprocessar falhas</button>
+                        </div>
+                      </td>
+                    </tr>`;
+                  })
+                  .join(''),
+                emptyMessage: 'Nenhuma execucao encontrada para os filtros aplicados.'
+              })}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderRunningExecutionCard() {
+  const run = state.runningExecution;
+  if (!run || run.status !== 'Em execucao') {
+    return '';
   }
 
-  const ativos = certificates.filter((item) => item.ativo);
-  certificatesSummary.className = 'status-box ok';
-  certificatesSummary.textContent = `Total: ${certificates.length} certificado(s). Ativo(s): ${ativos.length}.`;
-  renderCertificatesList(certificates);
+  return `
+    <article class="card progress-card">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <h3 class="card-title">Busca em execucao</h3>
+        ${statusBadge('Em execucao', 'info')}
+      </div>
+      <div class="progress-track" aria-label="Progresso da execucao">
+        <div class="progress-fill" style="width:${run.progressoPercentual}%;"></div>
+      </div>
+      <div class="progress-meta">
+        <span>Cliente atual: <strong>${escapeHtml(run.clienteAtual)}</strong></span>
+        <span>Processados: <strong>${run.processados}/${run.totalClientes}</strong></span>
+        <span>Tempo estimado: <strong>${run.tempoEstimadoMin} min</strong></span>
+      </div>
+      <div>
+        <button class="btn secondary" data-action="execution-refresh">Atualizar status</button>
+      </div>
+    </article>
+  `;
 }
 
-function renderCertificatesList(certificates) {
-  certificatesList.innerHTML = certificates
-    .map((item) => {
-      const validadeFim = item.validadeFim ? new Date(item.validadeFim).toLocaleDateString('pt-BR') : '-';
-      const status = item.ativo ? 'ativo' : 'inativo';
-      const deleteButton = item.ativo
-        ? ''
-        : `<button class="btn ghost" type="button" data-cert-action="excluir" data-cert-id="${item.id}">Excluir</button>`;
+function renderXmlsPage() {
+  const xmls = getFilteredXmls();
 
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'XMLs Armazenados',
+        description: 'Consulte os arquivos XML de NFS-e salvos no servidor interno.',
+        actions: [actionButton('Exportar listagem', 'xml-export-list', 'secondary')]
+      })}
+
+      <article class="card filter-card">
+        <h3 class="card-title">Filtros</h3>
+        <form id="xmlsFilterForm" class="form-grid">
+          <label class="field">
+            Cliente
+            <select name="cliente">${renderOptions(['Todos', ...state.clients.map((client) => client.id)], state.filters.xmls.cliente, mapClientOptions())}</select>
+          </label>
+          <label class="field">
+            CNPJ
+            <input name="cnpj" value="${escapeHtml(state.filters.xmls.cnpj)}" />
+          </label>
+          <label class="field">
+            Numero da NFS-e
+            <input name="numero" value="${escapeHtml(state.filters.xmls.numero)}" />
+          </label>
+          <label class="field">
+            Municipio
+            <select name="municipio">${renderOptions(['Todos', ...uniqueValues(state.xmlFiles.map((xml) => xml.municipio))], state.filters.xmls.municipio)}</select>
+          </label>
+          <label class="field">
+            Emissao inicio
+            <input name="emissaoInicio" type="date" value="${escapeHtml(state.filters.xmls.emissaoInicio)}" />
+          </label>
+          <label class="field">
+            Emissao fim
+            <input name="emissaoFim" type="date" value="${escapeHtml(state.filters.xmls.emissaoFim)}" />
+          </label>
+          <label class="field">
+            Download inicio
+            <input name="downloadInicio" type="date" value="${escapeHtml(state.filters.xmls.downloadInicio)}" />
+          </label>
+          <label class="field">
+            Download fim
+            <input name="downloadFim" type="date" value="${escapeHtml(state.filters.xmls.downloadFim)}" />
+          </label>
+          <label class="field">
+            Tipo
+            <select name="tipo">${renderOptions(['Todos', 'Emitida', 'Tomada'], state.filters.xmls.tipo)}</select>
+          </label>
+          <label class="field">
+            Status do armazenamento
+            <select name="status">${renderOptions(['Todos', 'Armazenado', 'Pendente', 'Erro'], state.filters.xmls.status)}</select>
+          </label>
+          <label class="field" style="grid-column: span 2;">
+            Caminho no servidor
+            <input name="caminho" value="${escapeHtml(state.filters.xmls.caminho)}" />
+          </label>
+          <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
+            <button class="btn primary" type="submit">Filtrar</button>
+            <button class="btn secondary" type="button" data-action="xmls-clear-filters">Limpar</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Numero NFS-e</th>
+                <th>Cliente</th>
+                <th>CNPJ</th>
+                <th>Municipio</th>
+                <th>Data emissao</th>
+                <th>Data download</th>
+                <th>Valor</th>
+                <th>Tipo</th>
+                <th>Status</th>
+                <th>Caminho no servidor</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderTableRowsOrState({
+                key: 'xmls',
+                colSpan: 11,
+                rowsHtml: xmls
+                  .map((xml) => {
+                    return `<tr>
+                      <td>${escapeHtml(xml.numeroNfse)}</td>
+                      <td>${escapeHtml(xml.cliente)}</td>
+                      <td>${escapeHtml(formatCnpj(xml.cnpj))}</td>
+                      <td>${escapeHtml(xml.municipio)}</td>
+                      <td>${escapeHtml(formatDate(xml.dataEmissao))}</td>
+                      <td>${escapeHtml(formatDateTime(xml.dataDownload))}</td>
+                      <td>${escapeHtml(formatCurrency(xml.valor))}</td>
+                      <td>${escapeHtml(xml.tipo)}</td>
+                      <td>${statusBadge(xml.statusArmazenamento, toneFromStorageStatus(xml.statusArmazenamento))}</td>
+                      <td><code>${escapeHtml(xml.caminhoServidor)}</code></td>
+                      <td>
+                        <div class="table-actions">
+                          <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar detalhes</button>
+                          <button class="icon-btn" data-action="xml-view" data-xml-id="${xml.id}">Ver XML</button>
+                          <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
+                          <button class="icon-btn" data-action="xml-copy-path" data-xml-id="${xml.id}">Copiar caminho</button>
+                          <button class="icon-btn" data-action="xml-open-folder" data-xml-id="${xml.id}">Abrir pasta</button>
+                        </div>
+                      </td>
+                    </tr>`;
+                  })
+                  .join(''),
+                emptyMessage: 'Nenhum XML encontrado para os filtros aplicados.'
+              })}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderAlertsPage() {
+  const filteredAlerts = getFilteredAlerts();
+
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'Alertas',
+        description: 'Acompanhe pendencias que exigem acao da equipe.',
+        actions: [actionButton('Marcar selecionados como resolvidos', 'alerts-mark-selected', 'secondary')]
+      })}
+
+      <section class="stats-grid" style="grid-template-columns: repeat(4, minmax(0, 1fr));">
+        ${statCard('alert', 'Criticos', String(state.alerts.filter((alert) => alert.severity === 'Critico' && alert.status !== 'Resolvido').length), 'pendentes de acao', 'danger')}
+        ${statCard('clock', 'Atencao', String(state.alerts.filter((alert) => alert.severity === 'Atencao' && alert.status !== 'Resolvido').length), 'em acompanhamento', 'warning')}
+        ${statCard('info', 'Informativos', String(state.alerts.filter((alert) => alert.severity === 'Informativo' && alert.status !== 'Resolvido').length), 'baixo impacto', 'neutral')}
+        ${statCard('check', 'Resolvidos hoje', String(state.alerts.filter((alert) => alert.status === 'Resolvido').length), 'encerrados no dia', 'success')}
+      </section>
+
+      <section class="layout-with-side">
+        <article class="card">
+          <h3 class="card-title">Filtros</h3>
+          <form id="alertsFilterForm" class="form-grid" style="grid-template-columns:1fr; margin-top:10px;">
+            <label class="field">
+              Severidade
+              <select name="severidade">${renderOptions(['Todos', 'Critico', 'Atencao', 'Informativo'], state.filters.alerts.severidade)}</select>
+            </label>
+            <label class="field">
+              Tipo
+              <select name="tipo">${renderOptions(['Todos', 'Certificado', 'Prefeitura', 'XML', 'Cliente', 'Servidor', 'Busca'], state.filters.alerts.tipo)}</select>
+            </label>
+            <label class="field">
+              Status
+              <select name="status">${renderOptions(['Todos', 'Aberto', 'Em analise', 'Resolvido'], state.filters.alerts.status)}</select>
+            </label>
+            <label class="field">
+              Periodo
+              <select name="periodo">${renderOptions(['7', '15', '30', '90'], state.filters.alerts.periodo, {
+                '7': 'Ultimos 7 dias',
+                '15': 'Ultimos 15 dias',
+                '30': 'Ultimos 30 dias',
+                '90': 'Ultimos 90 dias'
+              })}</select>
+            </label>
+            <label class="field">
+              Cliente
+              <select name="cliente">${renderOptions(['Todos', ...state.clients.map((client) => client.id)], state.filters.alerts.cliente, mapClientOptions())}</select>
+            </label>
+            <div class="stack-actions" style="justify-content:flex-start;">
+              <button class="btn primary" type="submit">Filtrar</button>
+              <button class="btn secondary" type="button" data-action="alerts-clear-filters">Limpar</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="alert-main-list">
+          ${renderAlertCards(filteredAlerts)}
+        </article>
+      </section>
+    </section>
+  `;
+}
+
+function renderAlertCards(alerts) {
+  if (state.tableState.alerts === 'loading') {
+    return '<article class="card table-state loading">Carregando alertas...</article>';
+  }
+
+  if (state.tableState.alerts === 'error') {
+    return '<article class="card table-state error">Falha ao carregar alertas. Tente novamente.</article>';
+  }
+
+  if (!alerts.length) {
+    return '<article class="card table-state">Nenhum alerta encontrado para os filtros selecionados.</article>';
+  }
+
+  return alerts
+    .map((alert) => {
       return `
-        <article class="cert-card">
-          <h4>${escapeHtml(item.nome || 'Sem nome')} <small>(${escapeHtml(status)})</small></h4>
-          <p class="cert-meta">ID: <code>${escapeHtml(item.id)}</code></p>
-          <p class="cert-meta">CNPJ titular: ${escapeHtml(formatCnpj(item.cnpjTitular || ''))}</p>
-          <p class="cert-meta">Validade fim: ${escapeHtml(validadeFim)}</p>
-          <div class="btn-row">
-            <button class="btn ghost" type="button" data-cert-action="validar" data-cert-id="${item.id}">Validar</button>
-            <button class="btn ghost" type="button" data-cert-action="ativar" data-cert-id="${item.id}">Ativar</button>
-            <button class="btn ghost" type="button" data-cert-action="desativar" data-cert-id="${item.id}">Desativar</button>
-            ${deleteButton}
+        <article class="alert-main-card">
+          <div class="alert-row-header">
+            <div style="display:flex; align-items:center; gap:8px;">
+              <input type="checkbox" data-action="alert-select" data-alert-id="${alert.id}" ${state.selectedAlertIds.has(alert.id) ? 'checked' : ''} aria-label="Selecionar alerta ${escapeHtml(alert.titulo)}" />
+              <p class="alert-row-title">${escapeHtml(alert.titulo)}</p>
+            </div>
+            ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
+          </div>
+          <p class="alert-row-sub">${escapeHtml(alert.descricao)}</p>
+          <p class="alert-row-sub">Cliente: ${escapeHtml(alert.cliente)} • ${escapeHtml(formatDateTime(alert.dataHora))} • ${statusBadge(alert.status, toneFromAlertStatus(alert.status))}</p>
+          <div class="table-actions">
+            <button class="icon-btn" data-action="alert-details" data-alert-id="${alert.id}">Ver detalhes</button>
+            <button class="icon-btn" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>
+            ${alert.allowsReprocess ? `<button class="icon-btn" data-action="alert-reprocess" data-alert-id="${alert.id}">Reprocessar</button>` : ''}
           </div>
         </article>
       `;
     })
     .join('');
-
-  certificatesList
-    .querySelectorAll('button[data-cert-action]')
-    .forEach((button) => button.addEventListener('click', onCertificateActionClick));
 }
 
-async function onCertificateActionClick(event) {
-  const button = event.currentTarget;
-  const action = button.getAttribute('data-cert-action');
-  const certificateId = button.getAttribute('data-cert-id');
+function renderSettingsPage() {
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'Configuracoes',
+        description: 'Ajuste parametros da rotina de busca e do armazenamento interno.',
+        actions: []
+      })}
 
-  if (!action || !certificateId) {
-    return;
-  }
-
-  let endpoint = '';
-  let method = 'POST';
-  if (action === 'validar') {
-    endpoint = `/certificados/${certificateId}/validar`;
-  } else if (action === 'ativar') {
-    endpoint = `/certificados/${certificateId}/ativar`;
-  } else if (action === 'desativar') {
-    endpoint = `/certificados/${certificateId}/desativar`;
-  } else if (action === 'excluir') {
-    if (!window.confirm('Deseja excluir este certificado inativo?')) {
-      return;
-    }
-    endpoint = `/certificados/${certificateId}`;
-    method = 'DELETE';
-  }
-
-  if (!endpoint) {
-    return;
-  }
-
-  if (!state.clientId) {
-    showPending(['Selecione um cliente antes de operar certificados.'], true);
-    return;
-  }
-
-  const result = await apiCall(withClientScope(endpoint), { method });
-  if (state.clientId) {
-    await selectClient(state.clientId);
-  }
-  writeConsole(`Acao de certificado: ${action}`, result);
+      <article class="card">
+        <div class="tabs">
+          ${renderTabButton('geral', 'Geral')}
+          ${renderTabButton('rotina', 'Rotina noturna')}
+          ${renderTabButton('servidor', 'Servidor de XMLs')}
+          ${renderTabButton('notificacoes', 'Notificacoes')}
+          ${renderTabButton('usuarios', 'Usuarios e permissoes')}
+        </div>
+        ${renderSettingsTabPanel()}
+      </article>
+    </section>
+  `;
 }
 
-function evaluatePending({ establishments, certificates, syncStatus, notes }) {
-  const issues = [];
-
-  if (!establishments.length) {
-    issues.push('Cliente sem estabelecimento principal.');
-  }
-
-  if (!certificates.length) {
-    issues.push('Cliente sem certificado cadastrado. Use "Editar certificados" para adicionar.');
-  }
-
-  if (!syncStatus?.controles || syncStatus.controles.length === 0) {
-    issues.push('Sincronizacao ainda nao iniciada para este cliente.');
-  }
-
-  if (!notes.length) {
-    issues.push('Cliente sem notas no banco local. Rode a sincronizacao para popular as NFS-e.');
-  }
-
-  if (issues.length === 0) {
-    showPending(['Cliente pronto: dados, certificado, sync e notas disponiveis.'], false, true);
-  } else {
-    showPending(issues, true);
-  }
-}
-
-function showPending(messages, isWarning, isSuccess = false) {
-  pendingBox.className = 'status-box';
-  if (isWarning) {
-    pendingBox.classList.add('warn');
-  }
-  if (isSuccess) {
-    pendingBox.classList.add('ok');
-  }
-
-  pendingBox.innerHTML = messages
-    .map((message) => `<div>${escapeHtml(message)}</div>`)
-    .join('');
-}
-
-function clearClientContext() {
-  state.clientId = '';
-  state.establishmentId = '';
-  state.certificateId = '';
-  state.selectedClient = null;
-  state.selectedEstablishment = null;
-  state.selectedCertificates = [];
-  state.lastNotes = [];
-  state.selectedNoteIds = new Set();
-
-  persistState();
-  fillLinkedInputs();
-  renderContext();
-
-  summaryRazao.textContent = '-';
-  summaryCnpj.textContent = '-';
-  summaryIm.textContent = '-';
-  certificatesSummary.className = 'status-box muted';
-  certificatesSummary.textContent = 'Sem leitura de certificados ainda.';
-  nfseRows.innerHTML = `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhum resultado ainda.</td></tr>`;
-}
-
-async function onCreateClient(event) {
-  event.preventDefault();
-  const form = event.currentTarget;
-
-  const payload = {
-    razaoSocial: form.razaoSocial.value.trim(),
-    cnpj: onlyDigits(form.cnpj.value),
-    inscricaoMunicipal: form.inscricaoMunicipal.value.trim() || undefined
-  };
-
-  const result = await apiCall('/clientes', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-
-  hideCard(createClientCard);
-  await refreshClientList({ preserveSelection: false, autoSelectFirst: false });
-  if (result?.id) {
-    clientSelect.value = result.id;
-    await selectClient(result.id);
-  }
-
-  writeConsole('Cliente criado', result);
-}
-
-async function onEditClient(event) {
-  event.preventDefault();
-
-  if (!state.clientId) {
-    showPending(['Selecione um cliente antes de editar.'], true);
-    return;
-  }
-
-  const payload = {
-    razaoSocial: clientEditForm.razaoSocial.value.trim(),
-    cnpj: onlyDigits(clientEditForm.cnpj.value),
-    inscricaoMunicipal: clientEditForm.inscricaoMunicipal.value.trim() || undefined
-  };
-
-  const result = await apiCall(`/clientes/${state.clientId}`, {
-    method: 'PATCH',
-    body: JSON.stringify(payload)
-  });
-
-  await refreshClientList({ preserveSelection: true, autoSelectFirst: true });
-  writeConsole('Cliente atualizado', result);
-}
-
-async function onCreateCertificate(event) {
-  event.preventDefault();
-
-  if (!state.clientId || !state.establishmentId) {
-    showPending(['Selecione um cliente com estabelecimento antes de cadastrar certificado.'], true);
-    return;
-  }
-
-  const fileInput = document.getElementById('certFile');
-  const file = fileInput.files?.[0];
-  if (!file) {
-    showPending(['Selecione um arquivo .pfx/.p12 para cadastrar certificado.'], true);
-    return;
-  }
-
-  try {
-    const arquivoBase64 = await fileToBase64(file);
-    const payload = {
-      nome: certificateForm.nome.value.trim(),
-      cnpjTitular: onlyDigits(certificateForm.cnpjTitular.value),
-      estabelecimentoId: state.establishmentId,
-      arquivoBase64,
-      senha: certificateForm.senha.value
-    };
-
-    const result = await apiCall(`/clientes/${state.clientId}/certificados`, {
-      method: 'POST',
-      body: JSON.stringify(payload)
-    });
-
-    await selectClient(state.clientId);
-    showPending(['Certificado salvo com sucesso.'], false, true);
-    writeConsole('Certificado cadastrado', result);
-  } catch (error) {
-    showPending([`Falha ao salvar certificado: ${extractErrorMessage(error)}`], true);
+function renderSettingsTabPanel() {
+  switch (state.settings.tab) {
+    case 'geral':
+      return `
+        <form id="settingsGeralForm" class="form-grid three">
+          <label class="field">
+            Nome do ambiente
+            <input name="nomeAmbiente" value="${escapeHtml(state.settings.geral.nomeAmbiente)}" />
+          </label>
+          <label class="field">
+            Modo de operacao
+            <select name="modoOperacao">${renderOptions(['Producao', 'Homologacao'], state.settings.geral.modoOperacao)}</select>
+          </label>
+          <label class="field">
+            Status do sistema
+            <input name="statusSistema" value="${escapeHtml(state.settings.geral.statusSistema)}" />
+          </label>
+          <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start;">
+            <button class="btn primary" type="submit">Salvar alteracoes</button>
+          </div>
+        </form>
+      `;
+    case 'rotina':
+      return `
+        <form id="settingsRotinaForm" class="form-grid three">
+          <label class="field-inline" style="grid-column: span 3;">
+            <input name="ativa" type="checkbox" ${state.settings.rotina.ativa ? 'checked' : ''} />
+            <span>Ativar busca automatica</span>
+          </label>
+          <label class="field">
+            Horario de inicio
+            <input name="horarioInicio" type="time" value="${escapeHtml(state.settings.rotina.horarioInicio)}" />
+          </label>
+          <label class="field">
+            Limite de clientes por execucao
+            <input name="limiteClientes" type="number" min="1" value="${escapeHtml(String(state.settings.rotina.limiteClientes))}" />
+          </label>
+          <label class="field-inline" style="align-self:end;">
+            <input name="retryFalha" type="checkbox" ${state.settings.rotina.retryFalha ? 'checked' : ''} />
+            <span>Tentar novamente em caso de falha</span>
+          </label>
+          <label class="field">
+            Numero maximo de tentativas
+            <input name="maxTentativas" type="number" min="1" value="${escapeHtml(String(state.settings.rotina.maxTentativas))}" />
+          </label>
+          <label class="field">
+            Intervalo entre tentativas (min)
+            <input name="intervaloTentativas" type="number" min="1" value="${escapeHtml(String(state.settings.rotina.intervaloTentativas))}" />
+          </label>
+          <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start;">
+            <button class="btn primary" type="submit">Salvar rotina</button>
+            <button class="btn secondary" type="button" data-action="settings-test-run">Executar teste agora</button>
+          </div>
+        </form>
+      `;
+    case 'servidor':
+      return `
+        <form id="settingsServidorForm" class="form-grid two">
+          <label class="field" style="grid-column: span 2;">
+            Caminho base do servidor
+            <input name="caminhoBase" value="${escapeHtml(state.settings.servidor.caminhoBase)}" />
+          </label>
+          <label class="field-inline">
+            <input name="porCliente" type="checkbox" ${state.settings.servidor.porCliente ? 'checked' : ''} />
+            <span>Organizar por cliente</span>
+          </label>
+          <label class="field-inline">
+            <input name="porCnpj" type="checkbox" ${state.settings.servidor.porCnpj ? 'checked' : ''} />
+            <span>Organizar por CNPJ</span>
+          </label>
+          <label class="field-inline" style="grid-column: span 2;">
+            <input name="porAnoMes" type="checkbox" ${state.settings.servidor.porAnoMes ? 'checked' : ''} />
+            <span>Organizar por ano/mes</span>
+          </label>
+          <div class="path-preview" style="grid-column: span 2;">\\servidor\\xmls\\CLIENTE\\2026\\06\\nfse-123.xml</div>
+          <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start;">
+            <button class="btn secondary" type="button" data-action="settings-test-storage">Testar acesso</button>
+            <button class="btn primary" type="submit">Salvar configuracao</button>
+          </div>
+        </form>
+      `;
+    case 'notificacoes':
+      return `
+        <form id="settingsNotificacoesForm" class="form-grid two">
+          <label class="field-inline">
+            <input name="alertarCertificados" type="checkbox" ${state.settings.notificacoes.alertarCertificados ? 'checked' : ''} />
+            <span>Alertar certificados vencendo</span>
+          </label>
+          <label class="field">
+            Dias antes do vencimento
+            <input name="diasAntecedencia" type="number" min="1" value="${escapeHtml(String(state.settings.notificacoes.diasAntecedencia))}" />
+          </label>
+          <label class="field-inline">
+            <input name="alertarFalhaBusca" type="checkbox" ${state.settings.notificacoes.alertarFalhaBusca ? 'checked' : ''} />
+            <span>Alertar falha de busca</span>
+          </label>
+          <label class="field-inline">
+            <input name="alertarXmlNaoArmazenado" type="checkbox" ${state.settings.notificacoes.alertarXmlNaoArmazenado ? 'checked' : ''} />
+            <span>Alertar XML nao armazenado</span>
+          </label>
+          <label class="field" style="grid-column: span 2;">
+            Canal de notificacao
+            <select name="canal">${renderOptions(['Somente painel', 'E-mail', 'Outro canal futuro'], state.settings.notificacoes.canal)}</select>
+          </label>
+          <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start;">
+            <button class="btn primary" type="submit">Salvar notificacoes</button>
+          </div>
+        </form>
+      `;
+    case 'usuarios':
+      return `
+        <div class="page-section">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+            <h3 class="card-title">Usuarios e permissoes</h3>
+            <button class="btn primary" data-action="settings-new-user">Novo usuario</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Nome</th>
+                  <th>E-mail</th>
+                  <th>Perfil</th>
+                  <th>Status</th>
+                  <th>Acoes</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${state.users
+                  .map((user) => {
+                    return `<tr>
+                      <td>${escapeHtml(user.nome)}</td>
+                      <td>${escapeHtml(user.email)}</td>
+                      <td>${statusBadge(user.perfil, 'neutral')}</td>
+                      <td>${statusBadge(user.status, user.status === 'Ativo' ? 'success' : 'neutral')}</td>
+                      <td><button class="icon-btn" data-action="settings-user-edit" data-user-id="${user.id}">Editar</button></td>
+                    </tr>`;
+                  })
+                  .join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    default:
+      return '';
   }
 }
 
-async function runSyncAction(action) {
-  if (!state.clientId) {
-    showPending(['Selecione um cliente para executar sincronizacao.'], true);
-    return;
-  }
-
-  let body;
-  if (action === 'iniciar') {
-    body = JSON.stringify({
-      modo: syncModeSelect?.value === 'diario' ? 'diario' : 'historico'
-    });
-  }
-
-  const result = await apiCall(`/clientes/${state.clientId}/sync/${action}`, {
-    method: 'POST',
-    body
-  });
-
-  await selectClient(state.clientId);
-  writeConsole(`Sync ${action} executado`, result);
-}
-
-async function runSyncStatus() {
-  if (!state.clientId) {
-    showPending(['Selecione um cliente para consultar status de sync.'], true);
-    return;
-  }
-
-  const result = await apiCall(`/clientes/${state.clientId}/sync/status`);
-  writeConsole('Status de sync', result);
-}
-
-async function runSyncNow(times) {
-  if (!state.clientId) {
-    showPending(['Selecione um cliente antes de rodar sync manual.'], true);
-    return;
-  }
-
-  const results = [];
-  for (let i = 0; i < times; i += 1) {
-    const res = await apiCall('/sync/rodar-agora', { method: 'POST' });
-    results.push({ ciclo: i + 1, ...res });
-  }
-
-  await selectClient(state.clientId);
-  writeConsole(`Sync manual executado ${times}x`, results);
-}
-
-async function runSyncLogs() {
-  if (!state.clientId) {
-    showPending(['Selecione um cliente para consultar os logs de sync.'], true);
-    return;
-  }
-
-  const result = await apiCall(withClientScope('/sync/logs'));
-  writeConsole('Logs de sync', result);
-}
-
-async function runReprocessXmls() {
-  if (!state.clientId) {
-    showPending(['Selecione um cliente antes de reprocessar XMLs.'], true);
-    return;
-  }
-
-  const payload = {
-    clienteId: state.clientId,
-    ambiente: 'producao',
-    limit: 1000,
-    somenteIncompletos: false,
-    regenerarDanfse: true
-  };
-
-  const result = await apiCall('/nfse/reprocessar-xmls', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-
-  await selectClient(state.clientId);
-  writeConsole('Reprocessamento de XMLs finalizado', result);
-}
-
-async function runSingleNsuTest() {
-  if (!state.clientId || !state.establishmentId) {
-    showPending(['Selecione um cliente com estabelecimento para testar um NSU.'], true);
-    return;
-  }
-
-  const nsu = String(syncSingleNsuInput.value || '').trim();
-  if (!/^\d+$/.test(nsu)) {
-    showPending(['Informe um NSU numerico valido para o teste.'], true);
-    return;
-  }
-  const ambiente = syncSingleNsuEnvSelect?.value === 'producao' ? 'producao' : 'producao_restrita';
-
-  try {
-    const result = await apiCall('/sync/testar-nsu', {
-      method: 'POST',
-      body: JSON.stringify({
-        clienteId: state.clientId,
-        estabelecimentoId: state.establishmentId,
-        nsu,
-        ambiente
-      })
-    });
-
-    if (result?.hasDocument) {
-      showPending([`Teste NSU ${nsu} (${ambiente}): documento encontrado.`], false, true);
-    } else {
-      showPending([`Teste NSU ${nsu} (${ambiente}): sem documento para este NSU.`], false);
-    }
-
-    writeConsole(`Teste de NSU ${nsu} (${ambiente})`, result);
-  } catch (error) {
-    showPending([`Falha ao testar NSU: ${extractErrorMessage(error)}`], true);
-  }
-}
-
-async function onSearchNfse(event) {
-  event.preventDefault();
-  if (!state.clientId) {
-    showPending(['Selecione um cliente para pesquisar notas.'], true);
-    return;
-  }
-
-  await runNotesSearch();
-}
-
-async function runNotesSearch() {
-  const query = buildSearchQueryString();
-  const result = await apiCall(`/nfse${query ? `?${query}` : ''}`);
-  state.lastNotes = Array.isArray(result) ? result : [];
-  renderNfseRows(state.lastNotes);
-  writeConsole('Resultado da pesquisa NFS-e', result);
-  return state.lastNotes;
-}
-
-async function onSearchAudit(event) {
-  event.preventDefault();
-  if (!state.authToken) {
-    showPending(['Autentique-se antes de consultar auditoria.'], true);
-    return;
-  }
-
-  const params = new URLSearchParams();
-  const clienteId = String(auditForm.elements.clienteId.value || '').trim();
-  const acao = String(auditForm.elements.acao.value || '').trim();
-
-  if (clienteId) {
-    params.set('cliente_id', clienteId);
-  }
-  if (acao) {
-    params.set('acao', acao);
-  }
-
-  const query = params.toString();
-  const result = await apiCall(`/auditoria${query ? `?${query}` : ''}`);
-  const rows = Array.isArray(result) ? result : [];
-  renderAuditRows(rows);
-
-  showPending([`Consulta de auditoria concluida: ${rows.length} registro(s).`], false, true);
-  writeConsole('Resultado da auditoria', rows);
-}
-
-async function searchClientNotes() {
-  if (!state.clientId) {
-    state.lastNotes = [];
-    return [];
-  }
-
-  ensureNotesCompetenciaDefault();
-  return runNotesSearch();
-}
-
-function buildSearchQueryString() {
-  const params = new URLSearchParams();
-  const fields = [
-    'clienteId',
-    'cnpjPrestador',
-    'cnpjTomador',
-    'cnpjConsulta',
-    'status',
-    'competencia',
-    'dataInicio',
-    'dataFim',
-    'valorMin',
-    'valorMax'
-  ];
-
-  fields.forEach((key) => {
-    const raw = searchForm.elements[key].value?.trim();
-    if (raw) {
-      params.set(key, key.includes('cnpj') ? onlyDigits(raw) : raw);
-    }
-  });
-
-  if (!params.get('clienteId') && state.clientId) {
-    params.set('clienteId', state.clientId);
-  }
-
-  params.set('tipoRelacao', normalizeNotesRelation(state.notesRelation));
-
-  return params.toString();
-}
-
-function renderNfseRows(items) {
-  if (!Array.isArray(items) || items.length === 0) {
-    state.selectedNoteIds = new Set();
-    nfseRows.innerHTML = `<tr><td colspan="${NFSE_TABLE_COLUMNS}">Nenhum resultado encontrado.</td></tr>`;
-    return;
-  }
-
-  keepSelectedIdsVisible(items.map((item) => item.id));
-  nfseRows.innerHTML = items
-    .map((item) => {
-      const checked = state.selectedNoteIds.has(item.id) ? 'checked' : '';
-      return `<tr>
-        <td><input type="checkbox" class="note-select" data-note-id="${item.id}" ${checked} /></td>
-        <td>${escapeHtml(item.numeroNfse ?? '-')}</td>
-        <td>${escapeHtml(formatEmissionDate(item.dataEmissao))}</td>
-        <td>${escapeHtml(item.status ?? '-')}</td>
-        <td>${escapeHtml(formatParty(item.razaoSocialPrestador, item.cnpjPrestador))}</td>
-        <td>${escapeHtml(formatParty(item.razaoSocialTomador, item.cnpjTomador))}</td>
-        <td>${escapeHtml(formatCurrencyValue(item.valorServico))}</td>
-        <td>
-          <button class="btn ghost" type="button" data-action="xml" data-id="${item.id}">XML</button>
-          <button class="btn ghost" type="button" data-action="danfse" data-id="${item.id}">DANFSE</button>
-        </td>
-      </tr>`;
-    })
-    .join('');
-
-  wireSelectionCheckboxes();
-  wireDownloadButtons();
-}
-
-function renderAuditRows(items) {
-  if (!Array.isArray(items) || items.length === 0) {
-    auditRows.innerHTML = `<tr><td colspan="${AUDIT_TABLE_COLUMNS}">Nenhum registro encontrado.</td></tr>`;
-    return;
-  }
-
-  auditRows.innerHTML = items
-    .map((item) => {
-      return `<tr>
-        <td>${escapeHtml(formatEmissionDate(item.createdAt))}</td>
-        <td><code>${escapeHtml(item.acao || '-')}</code></td>
-        <td>${escapeHtml(item.entidade || '-')}</td>
-        <td><code>${escapeHtml(item.entidadeId || '-')}</code></td>
-        <td><code>${escapeHtml(item.clienteId || '-')}</code></td>
-        <td><code>${escapeHtml(item.usuarioId || '-')}</code></td>
-        <td>${escapeHtml(item.ip || '-')}</td>
-        <td>${escapeHtml(item.userAgent || '-')}</td>
-      </tr>`;
-    })
-    .join('');
-}
-
-function wireDownloadButtons() {
-  nfseRows.querySelectorAll('button[data-action]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const id = btn.getAttribute('data-id');
-      const action = btn.getAttribute('data-action');
-      if (!id) {
-        return;
-      }
-      try {
-        if (action === 'xml') {
-          const xml = await apiCall(withClientScope(`/nfse/${id}/xml`));
-          downloadFromPayload(xml, `NFSE-${id}.xml`);
-          writeConsole(`XML da NFS-e ${id}`, xml);
-          return;
-        }
-
-        if (action === 'danfse') {
-          const danfse = await apiCall(withClientScope(`/nfse/${id}/danfse`));
-          downloadFromPayload(danfse, `DANFSE-${id}.pdf`);
-          writeConsole(`DANFSE da NFS-e ${id}`, danfse);
-        }
-      } catch (error) {
-        showPending([`Falha ao baixar arquivo da NFS-e ${id}: ${extractErrorMessage(error)}`], true);
-      }
-    });
-  });
-}
-
-function wireSelectionCheckboxes() {
-  nfseRows.querySelectorAll('input.note-select[data-note-id]').forEach((input) => {
-    input.addEventListener('change', () => {
-      const noteId = input.getAttribute('data-note-id');
-      if (!noteId) {
-        return;
-      }
-      if (input.checked) {
-        state.selectedNoteIds.add(noteId);
-      } else {
-        state.selectedNoteIds.delete(noteId);
-      }
-    });
-  });
-}
-
-function keepSelectedIdsVisible(visibleIds) {
-  const visibleSet = new Set((visibleIds || []).filter(Boolean));
-  const nextSelection = new Set();
-  state.selectedNoteIds.forEach((id) => {
-    if (visibleSet.has(id)) {
-      nextSelection.add(id);
-    }
-  });
-  state.selectedNoteIds = nextSelection;
-}
-
-function setVisibleNoteSelection(checked) {
-  const visibleInputs = Array.from(nfseRows.querySelectorAll('input.note-select[data-note-id]'));
-  if (visibleInputs.length === 0) {
-    return;
-  }
-
-  visibleInputs.forEach((input) => {
-    const noteId = input.getAttribute('data-note-id');
-    if (!noteId) {
-      return;
-    }
-    input.checked = checked;
-    if (checked) {
-      state.selectedNoteIds.add(noteId);
-    } else {
-      state.selectedNoteIds.delete(noteId);
-    }
-  });
-}
-
-async function downloadSelectedNotes(type) {
-  const selectedIds = Array.from(state.selectedNoteIds);
-  if (selectedIds.length === 0) {
-    showPending(['Selecione ao menos uma nota para baixar em lote.'], true);
-    return;
-  }
-
-  const actionLabel = type === 'xml' ? 'XML' : 'DANFSE';
-  const tipoArquivo = type === 'xml' ? 'xml' : 'danfse';
-
-  const payload = {
-    ids: selectedIds,
-    tipoArquivo,
-    clienteId: state.clientId || undefined
-  };
-
-  const result = await apiCall('/nfse/download-lote', {
-    method: 'POST',
-    body: JSON.stringify(payload)
-  });
-
-  downloadFromPayload(result, `NFSE-LOTE-${actionLabel}.zip`);
-
-  const totalAlertas = (result?.idsNaoEncontrados?.length || 0) + (result?.erros?.length || 0);
-  if (totalAlertas > 0) {
-    showPending(
-      [
-        `ZIP gerado com alertas: ${result.totalArquivosIncluidos} arquivo(s) incluido(s), ${totalAlertas} pendencia(s).`
-      ],
-      true
-    );
-  } else {
-    showPending(
-      [`ZIP gerado com sucesso: ${result.totalArquivosIncluidos} arquivo(s) incluido(s).`],
-      false,
-      true
-    );
-  }
-
-  writeConsole(`Download em lote (${actionLabel})`, result);
-}
-
-function resolveRelacao(item) {
-  const cnpjConsulta = onlyDigits(searchForm.elements.cnpjConsulta.value);
-  if (!cnpjConsulta) {
-    return '-';
-  }
-
-  const prestador = onlyDigits(item.cnpjPrestador);
-  const tomador = onlyDigits(item.cnpjTomador);
-
-  if (prestador === cnpjConsulta && tomador === cnpjConsulta) {
-    return 'emitida/tomada';
-  }
-  if (prestador === cnpjConsulta) {
-    return 'emitida';
-  }
-  if (tomador === cnpjConsulta) {
-    return 'tomada';
-  }
-
-  return '-';
-}
-
-async function apiCall(path, options = {}) {
-  const url = `${state.apiBase}${path}`;
-
-  const headers = {
-    'Content-Type': 'application/json',
-    ...(state.authToken && !options.skipAuth ? { Authorization: `Bearer ${state.authToken}` } : {}),
-    ...(options.headers || {})
-  };
-
-  const response = await fetch(url, {
-    method: options.method || 'GET',
-    headers,
-    body: options.body
-  });
-
-  const text = await response.text();
-  const data = tryParseJson(text);
-
-  if (!response.ok) {
-    const payload = data || { statusCode: response.status, message: text };
-    const message = extractApiMessage(payload) || `Erro ${response.status} em ${path}`;
-    writeConsole(`Erro ${response.status} em ${path}`, payload, true);
-    if (response.status === 401 && !options.skipAuth) {
-      clearAuthState();
-    }
-    const error = new Error(message);
-    error.statusCode = response.status;
-    error.payload = payload;
-    throw error;
-  }
-
-  return data ?? text;
-}
-
-function withClientScope(path) {
-  if (!state.clientId) {
-    return path;
-  }
-
-  const separator = path.includes('?') ? '&' : '?';
-  return `${path}${separator}clienteId=${encodeURIComponent(state.clientId)}`;
-}
-
-function downloadFromPayload(payload, fallbackName) {
-  if (!payload?.contentBase64) {
-    throw new Error('Resposta sem conteudo para download.');
-  }
-
-  const fileName = payload.fileName || fallbackName || 'download.bin';
-  const contentType = payload.contentType || 'application/octet-stream';
-  const blob = base64ToBlob(payload.contentBase64, contentType);
-  triggerBrowserDownload(fileName, blob);
-}
-
-function base64ToBlob(base64, contentType) {
-  const binary = atob(base64);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i += 1) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return new Blob([bytes], { type: contentType });
-}
-
-function triggerBrowserDownload(fileName, blob) {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.style.display = 'none';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-function extractApiMessage(payload) {
-  if (!payload) {
+function renderModal() {
+  if (!state.modal) {
     return '';
   }
 
-  if (Array.isArray(payload.message)) {
-    return payload.message.join('; ');
+  switch (state.modal.kind) {
+    case 'confirm':
+      return `
+        <div class="overlay" data-action="overlay-close">
+          <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+            <div class="modal-header">
+              <h3 class="modal-title">${escapeHtml(state.modal.title)}</h3>
+              <p class="modal-subtitle">${escapeHtml(state.modal.subtitle)}</p>
+            </div>
+            <div class="modal-footer">
+              <button class="btn secondary" data-action="close-modal">Cancelar</button>
+              <button class="btn primary" data-action="confirm-modal">${escapeHtml(state.modal.confirmLabel || 'Confirmar')}</button>
+            </div>
+          </div>
+        </div>
+      `;
+    case 'import-clients':
+      return `
+        <div class="overlay" data-action="overlay-close">
+          <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+            <div class="modal-header">
+              <h3 class="modal-title">Importar clientes</h3>
+              <p class="modal-subtitle">Este fluxo ainda sera integrado ao backend. No momento, a acao e simulada.</p>
+            </div>
+            <div class="modal-body">
+              <p>Formato esperado futuro: planilha CSV com razao social, CNPJ, municipio, UF e responsavel.</p>
+            </div>
+            <div class="modal-footer">
+              <button class="btn secondary" data-action="close-modal">Fechar</button>
+            </div>
+          </div>
+        </div>
+      `;
+    case 'client-form':
+      return renderClientFormModal();
+    case 'certificate-form':
+      return renderCertificateFormModal();
+    case 'xml-details':
+      return renderXmlDetailsModal(state.modal.xmlId);
+    case 'xml-view':
+      return renderXmlViewerModal(state.modal.xmlId);
+    case 'user-form':
+      return renderUserFormModal();
+    default:
+      return '';
+  }
+}
+
+function renderClientFormModal() {
+  const client = state.modal.mode === 'edit' ? findClientById(state.modal.clientId) : null;
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3 class="modal-title">${state.modal.mode === 'edit' ? 'Editar cliente' : 'Novo cliente'}</h3>
+          <p class="modal-subtitle">Preencha os dados cadastrais e o status de busca automatica.</p>
+        </div>
+        <form id="clientForm">
+          <div class="modal-body">
+            <input type="hidden" name="mode" value="${escapeHtml(state.modal.mode)}" />
+            <input type="hidden" name="clientId" value="${escapeHtml(client?.id || '')}" />
+            <div class="form-grid two">
+              <label class="field">
+                Razao social
+                <input name="razaoSocial" required value="${escapeHtml(client?.razaoSocial || '')}" />
+              </label>
+              <label class="field">
+                Nome fantasia
+                <input name="nomeFantasia" value="${escapeHtml(client?.nomeFantasia || '')}" />
+              </label>
+              <label class="field">
+                CNPJ
+                <input name="cnpj" required value="${escapeHtml(client?.cnpj || '')}" />
+              </label>
+              <label class="field">
+                Inscricao municipal
+                <input name="inscricaoMunicipal" value="${escapeHtml(client?.inscricaoMunicipal || '')}" />
+              </label>
+              <label class="field">
+                Municipio
+                <input name="municipio" required value="${escapeHtml(client?.municipio || '')}" />
+              </label>
+              <label class="field">
+                UF
+                <input name="uf" maxlength="2" required value="${escapeHtml(client?.uf || '')}" />
+              </label>
+              <label class="field" style="grid-column: span 2;">
+                Responsavel interno
+                <input name="responsavelInterno" value="${escapeHtml(client?.responsavelInterno || '')}" />
+              </label>
+              <label class="field-inline" style="grid-column: span 2;">
+                <input name="buscaAtiva" type="checkbox" ${client?.buscaAtiva ?? true ? 'checked' : ''} />
+                <span>Busca automatica ativa</span>
+              </label>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn secondary" type="button" data-action="close-modal">Cancelar</button>
+            <button class="btn primary" type="submit">${state.modal.mode === 'edit' ? 'Salvar alteracoes' : 'Cadastrar cliente'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderCertificateFormModal() {
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3 class="modal-title">Cadastrar certificado</h3>
+          <p class="modal-subtitle">Formulario preparado para integracao com backend de certificados.</p>
+        </div>
+        <form id="certificatesModalForm">
+          <div class="modal-body">
+            <div class="form-grid two">
+              <label class="field">
+                Cliente
+                <select name="clientId" required>${renderOptions(state.clients.map((client) => client.id), '', mapClientOptions(), 'Selecione')}</select>
+              </label>
+              <label class="field">
+                Apelido
+                <input name="apelido" required />
+              </label>
+              <label class="field">
+                Arquivo do certificado
+                <input name="arquivo" type="file" accept=".pfx,.p12" required />
+              </label>
+              <label class="field">
+                Senha
+                <input name="senha" type="password" required />
+              </label>
+              <label class="field">
+                Tipo
+                <input name="tipo" value="A1" required />
+              </label>
+              <label class="field">
+                Data de validade
+                <input name="validade" type="date" required />
+              </label>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn secondary" type="button" data-action="close-modal">Cancelar</button>
+            <button class="btn primary" type="submit">Salvar certificado</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderXmlDetailsModal(xmlId) {
+  const xml = findXmlById(xmlId);
+  if (!xml) {
+    return '';
   }
 
-  if (typeof payload.message === 'string' && payload.message.trim()) {
-    return payload.message.trim();
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3 class="modal-title">Detalhes da NFS-e ${escapeHtml(xml.numeroNfse)}</h3>
+          <p class="modal-subtitle">Informacoes de armazenamento do XML no servidor interno.</p>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid two">
+            ${detailItem('Numero NFS-e', xml.numeroNfse)}
+            ${detailItem('Codigo verificacao', xml.codigoVerificacao)}
+            ${detailItem('Data de emissao', formatDateTime(xml.dataEmissao))}
+            ${detailItem('Prestador', xml.prestador)}
+            ${detailItem('Tomador', xml.tomador)}
+            ${detailItem('Valor dos servicos', formatCurrency(xml.valor))}
+            ${detailItem('ISS', formatCurrency(xml.iss))}
+            ${detailItem('Municipio', xml.municipio)}
+            ${detailItem('Status de armazenamento', xml.statusArmazenamento)}
+            <div style="grid-column: span 2;">
+              <small style="color:#606062; display:block; margin-bottom:4px;">Caminho completo</small>
+              <code>${escapeHtml(xml.caminhoServidor)}</code>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="xml-view" data-xml-id="${xml.id}">Ver conteudo XML</button>
+          <button class="btn primary" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderXmlViewerModal(xmlId) {
+  const xml = findXmlById(xmlId);
+  if (!xml) {
+    return '';
   }
 
-  if (typeof payload.error === 'string' && payload.error.trim()) {
-    return payload.error.trim();
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3 class="modal-title">Visualizador XML - NFS-e ${escapeHtml(xml.numeroNfse)}</h3>
+          <p class="modal-subtitle">Visualizacao formatada (mock) para leitura interna.</p>
+        </div>
+        <div class="modal-body">
+          <pre class="xml-viewer">${escapeHtml(formatXml(xml.conteudoXml))}</pre>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="close-modal">Fechar</button>
+          <button class="btn primary" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderUserFormModal() {
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" onclick="event.stopPropagation()">
+        <div class="modal-header">
+          <h3 class="modal-title">Novo usuario</h3>
+          <p class="modal-subtitle">Cadastro interno de usuario e perfil de acesso.</p>
+        </div>
+        <form id="settingsUserForm">
+          <div class="modal-body">
+            <div class="form-grid two">
+              <label class="field">
+                Nome
+                <input name="nome" required />
+              </label>
+              <label class="field">
+                E-mail
+                <input name="email" type="email" required />
+              </label>
+              <label class="field">
+                Perfil
+                <select name="perfil">${renderOptions(['Administrador', 'Operador fiscal', 'Consulta'], 'Operador fiscal')}</select>
+              </label>
+              <label class="field">
+                Status
+                <select name="status">${renderOptions(['Ativo', 'Inativo'], 'Ativo')}</select>
+              </label>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn secondary" type="button" data-action="close-modal">Cancelar</button>
+            <button class="btn primary" type="submit">Salvar usuario</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderDrawer() {
+  if (!state.drawer) {
+    return '';
+  }
+
+  if (state.drawer.kind === 'run-details') {
+    const run = state.searchRuns.find((item) => item.id === state.drawer.runId);
+    if (!run) {
+      return '';
+    }
+
+    const detalhes = Array.isArray(run.detalhes) ? run.detalhes : [];
+
+    return `
+      <div class="drawer-shell">
+        <div class="drawer-backdrop" data-action="close-drawer"></div>
+        <aside class="drawer-panel" role="dialog" aria-modal="true">
+          <header class="drawer-header">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+              <div>
+                <h3 class="drawer-title">${escapeHtml(run.codigo)}</h3>
+                <p class="card-subtitle">Detalhes da execucao ${escapeHtml(run.tipo.toLowerCase())}</p>
+              </div>
+              ${statusBadge(run.status, toneFromRunStatus(run.status))}
+            </div>
+          </header>
+          <div class="drawer-body">
+            <section class="kpi-grid">
+              ${kpiItem('Clientes processados', run.clientesProcessados)}
+              ${kpiItem('Sucessos', Math.max(run.clientesProcessados - run.falhas, 0))}
+              ${kpiItem('Avisos/Erros', run.falhas)}
+              ${kpiItem('Tempo total', `${diffMinutes(run.inicio, run.fim)} min`)}
+            </section>
+
+            <section class="card" style="padding:0;">
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Cliente</th>
+                      <th>CNPJ</th>
+                      <th>Municipio</th>
+                      <th>XMLs encontrados</th>
+                      <th>Status</th>
+                      <th>Mensagem</th>
+                      <th>Acao</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    ${detalhes.length
+                      ? detalhes
+                          .map((item) => {
+                            return `<tr>
+                              <td>${escapeHtml(item.cliente)}</td>
+                              <td>${escapeHtml(formatCnpj(item.cnpj))}</td>
+                              <td>${escapeHtml(item.municipio)}</td>
+                              <td>${escapeHtml(String(item.xmlsEncontrados))}</td>
+                              <td>${statusBadge(item.status, toneFromStatus(item.status))}</td>
+                              <td>${escapeHtml(item.mensagem)}</td>
+                              <td><button class="icon-btn" data-action="execution-reprocess-client" data-client-id="${escapeHtml(item.clientId || '')}">Reprocessar cliente</button></td>
+                            </tr>`;
+                          })
+                          .join('')
+                      : '<tr><td colspan="7" class="table-state">Sem detalhamento por cliente.</td></tr>'}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </aside>
+      </div>
+    `;
+  }
+
+  if (state.drawer.kind === 'alert-details') {
+    const alert = state.alerts.find((item) => item.id === state.drawer.alertId);
+    if (!alert) {
+      return '';
+    }
+
+    return `
+      <div class="drawer-shell">
+        <div class="drawer-backdrop" data-action="close-drawer"></div>
+        <aside class="drawer-panel" role="dialog" aria-modal="true">
+          <header class="drawer-header">
+            <div style="display:flex; justify-content:space-between; gap:10px; align-items:center;">
+              <h3 class="drawer-title">${escapeHtml(alert.titulo)}</h3>
+              ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
+            </div>
+          </header>
+          <div class="drawer-body">
+            <article class="card">
+              <div class="form-grid two">
+                ${detailItem('Severidade', alert.severity)}
+                ${detailItem('Cliente', alert.cliente)}
+                ${detailItem('Origem', alert.origem)}
+                ${detailItem('Status', alert.status)}
+                <div style="grid-column: span 2;">${detailItem('Mensagem tecnica', alert.mensagemTecnica)}</div>
+                <div style="grid-column: span 2;">${detailItem('Sugestao de acao', alert.sugestaoAcao)}</div>
+              </div>
+            </article>
+            <article class="card">
+              <h4 class="card-title">Historico de tentativas</h4>
+              <ul>
+                ${alert.historicoTentativas.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}
+              </ul>
+              <div class="table-actions" style="margin-top:10px;">
+                <button class="btn secondary" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>
+                ${alert.allowsReprocess ? `<button class="btn primary" data-action="alert-reprocess" data-alert-id="${alert.id}">Reprocessar</button>` : ''}
+              </div>
+            </article>
+          </div>
+        </aside>
+      </div>
+    `;
   }
 
   return '';
 }
 
-function extractErrorMessage(error) {
-  if (!error) {
-    return 'Erro inesperado.';
+function renderToasts() {
+  if (!state.toasts.length) {
+    return '';
   }
 
-  if (typeof error === 'string') {
-    return error;
-  }
-
-  if (typeof error.message === 'string' && error.message.trim()) {
-    return error.message.trim();
-  }
-
-  const payloadMessage = extractApiMessage(error.payload);
-  if (payloadMessage) {
-    return payloadMessage;
-  }
-
-  return 'Erro inesperado.';
+  return `
+    <div class="toast-stack">
+      ${state.toasts
+        .map((toast) => {
+          return `<article class="toast ${toast.tone}">${escapeHtml(toast.message)}</article>`;
+        })
+        .join('')}
+    </div>
+  `;
 }
 
-function fillLinkedInputs() {
-  certClientId.value = state.clientId;
-  certEstablishmentId.value = state.establishmentId;
-  syncClientId.value = state.clientId;
-  searchForm.elements.clienteId.value = state.clientId;
-  ensureNotesCompetenciaDefault();
-  syncNotesRelationControls();
-  updateAuditClienteFilter();
+function renderPageHeader({ title, description, actions }) {
+  return `
+    <div class="page-header">
+      <div>
+        <h2 class="page-title">${escapeHtml(title)}</h2>
+        <p class="page-description">${escapeHtml(description)}</p>
+      </div>
+      <div class="page-actions">${actions.join('')}</div>
+    </div>
+  `;
+}
 
-  if (state.selectedClient?.cnpj) {
-    certificateForm.cnpjTitular.value = onlyDigits(state.selectedClient.cnpj);
+function actionButton(label, action, variant) {
+  return `<button class="btn ${variant}" type="button" data-action="${action}">${escapeHtml(label)}</button>`;
+}
+
+function statCard(iconKey, label, value, caption, tone) {
+  const cardToneClass = tone === 'danger' ? 'danger' : tone === 'success' ? 'success' : '';
+  return `
+    <article class="card stat-card ${cardToneClass}">
+      <div class="stat-icon">${icon(iconKey)}</div>
+      <p class="stat-value">${escapeHtml(value)}</p>
+      <p class="stat-label"><strong>${escapeHtml(label)}</strong><br />${escapeHtml(caption)}</p>
+    </article>
+  `;
+}
+
+function statusBadge(text, tone, extraClass = '') {
+  const normalizedTone = ['success', 'warning', 'danger', 'info', 'neutral'].includes(tone) ? tone : 'neutral';
+  return `<span class="chip ${normalizedTone} ${extraClass}">${escapeHtml(text)}</span>`;
+}
+
+function renderTableRowsOrState({ key, colSpan, rowsHtml, emptyMessage }) {
+  const tableState = state.tableState[key];
+  if (tableState === 'loading') {
+    return `<tr><td colspan="${colSpan}" class="table-state loading">Carregando...</td></tr>`;
   }
+  if (tableState === 'error') {
+    return `<tr><td colspan="${colSpan}" class="table-state error">Falha ao carregar dados. Tente novamente.</td></tr>`;
+  }
+  if (!rowsHtml) {
+    return `<tr><td colspan="${colSpan}" class="table-state">${escapeHtml(emptyMessage)}</td></tr>`;
+  }
+  return rowsHtml;
 }
 
-function setNotesRelation(relation) {
-  state.notesRelation = normalizeNotesRelation(relation);
-  persistState();
-  syncNotesRelationControls();
+function renderTabButton(tabKey, label) {
+  return `<button class="tab-btn ${state.settings.tab === tabKey ? 'active' : ''}" data-action="settings-switch-tab" data-tab="${tabKey}">${escapeHtml(label)}</button>`;
 }
 
-function syncNotesRelationControls() {
-  const relation = normalizeNotesRelation(state.notesRelation);
-  state.notesRelation = relation;
-  if (searchForm?.elements?.tipoRelacao) {
-    searchForm.elements.tipoRelacao.value = relation;
+function detailItem(label, value) {
+  return `<div><small style="color:#606062; display:block; margin-bottom:4px;">${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
+}
+
+function kpiItem(label, value) {
+  return `<article class="kpi-item"><small>${escapeHtml(label)}</small><strong>${escapeHtml(String(value))}</strong></article>`;
+}
+
+function setGlobalLoading(value) {
+  state.dataReady = !value;
+  Object.keys(state.tableState).forEach((key) => {
+    state.tableState[key] = value ? 'loading' : 'data';
+  });
+}
+
+function parseRoute(hash) {
+  const raw = (hash || '#/dashboard').replace(/^#/, '') || '/dashboard';
+  const clientMatch = raw.match(/^\/clientes\/([^/]+)$/);
+  if (clientMatch) {
+    return { name: 'client-details', params: { id: clientMatch[1] } };
   }
 
-  const isEmitidas = relation === 'emitidas';
-  notesRelationEmitidasBtn.classList.toggle('active', isEmitidas);
-  notesRelationRecebidasBtn.classList.toggle('active', !isEmitidas);
-  notesRelationEmitidasBtn.setAttribute('aria-pressed', isEmitidas ? 'true' : 'false');
-  notesRelationRecebidasBtn.setAttribute('aria-pressed', !isEmitidas ? 'true' : 'false');
+  const map = {
+    '/dashboard': 'dashboard',
+    '/clientes': 'clientes',
+    '/certificados': 'certificados',
+    '/buscas': 'buscas',
+    '/xmls': 'xmls',
+    '/alertas': 'alertas',
+    '/configuracoes': 'configuracoes'
+  };
+
+  return { name: map[raw] || 'dashboard', params: {} };
 }
 
-function normalizeNotesRelation(value) {
-  return value === 'tomadas' ? 'tomadas' : 'emitidas';
+function navigate(path) {
+  window.location.hash = `#${path}`;
 }
 
-function ensureNotesCompetenciaDefault() {
-  const currentCompetencia = String(searchForm?.elements?.competencia?.value || '').trim();
-  if (currentCompetencia) {
-    return;
+function resolvePageMeta() {
+  if (state.route.name === 'client-details') {
+    const client = findClientById(state.route.params.id);
+    if (client) {
+      return {
+        title: client.razaoSocial,
+        description: `Detalhes operacionais do cliente ${formatCnpj(client.cnpj)}.`
+      };
+    }
   }
 
-  searchForm.elements.competencia.value = getPreviousMonthCompetencia();
+  return pageMeta[state.route.name] || pageMeta.dashboard;
 }
 
-function getPreviousMonthCompetencia(referenceDate = new Date()) {
-  const year = referenceDate.getFullYear();
-  const month = referenceDate.getMonth();
-  const previousMonthDate = new Date(year, month - 1, 1);
-  const previousMonth = String(previousMonthDate.getMonth() + 1).padStart(2, '0');
-  return `${previousMonthDate.getFullYear()}-${previousMonth}`;
+function resolveNavKeyByRoute(routeName) {
+  if (routeName === 'client-details') {
+    return 'clientes';
+  }
+  return routeName;
 }
 
-function updateAuditClienteFilter() {
-  if (!auditClienteIdInput) {
-    return;
-  }
+function applyClientsFilters(form) {
+  const formData = new FormData(form);
+  state.filters.clients = {
+    query: String(formData.get('query') || '').trim(),
+    statusBusca: String(formData.get('statusBusca') || 'Todos'),
+    certificado: String(formData.get('certificado') || 'Todos'),
+    municipio: String(formData.get('municipio') || 'Todos')
+  };
+  state.selectedClientIds = new Set();
 
-  const tokenRole = state.authUser?.role;
-  const tokenClienteId = state.authUser?.clienteId || '';
-  if (tokenRole === 'cliente' && tokenClienteId) {
-    auditClienteIdInput.value = tokenClienteId;
-    auditClienteIdInput.readOnly = true;
-    return;
-  }
-
-  auditClienteIdInput.readOnly = false;
-  if (state.clientId) {
-    auditClienteIdInput.value = state.clientId;
-  } else if (state.authUser?.role !== 'cliente') {
-    auditClienteIdInput.value = '';
-  }
-}
-
-function resetAuditView() {
-  if (auditForm?.elements?.acao) {
-    auditForm.elements.acao.value = '';
-  }
-  if (auditRows) {
-    auditRows.innerHTML = `<tr><td colspan="${AUDIT_TABLE_COLUMNS}">Nenhuma consulta de auditoria executada ainda.</td></tr>`;
-  }
-}
-
-function renderContext() {
-  ctxClientId.textContent = state.clientId || '-';
-  ctxEstablishmentId.textContent = state.establishmentId || '-';
-  ctxCertificateId.textContent = state.certificateId || '-';
-}
-
-function persistState() {
-  localStorage.setItem('nfseAuthToken', state.authToken || '');
-  if (state.authUser) {
-    localStorage.setItem('nfseAuthUser', JSON.stringify(state.authUser));
+  if (state.filters.clients.query.toLowerCase() === '__erro__') {
+    state.tableState.clients = 'error';
   } else {
-    localStorage.removeItem('nfseAuthUser');
+    state.tableState.clients = 'data';
   }
-  localStorage.setItem('nfseNotesRelation', normalizeNotesRelation(state.notesRelation));
-  localStorage.setItem('nfseClientId', state.clientId);
-  localStorage.setItem('nfseEstablishmentId', state.establishmentId);
-  localStorage.setItem('nfseCertificateId', state.certificateId);
+
+  render();
 }
 
-function setActiveMenu(menuId, persist = true) {
-  const hasPanel = menuPanels.some((panel) => panel.id === menuId);
-  const targetMenuId = hasPanel ? menuId : 'menuClientes';
+function getFilteredClients() {
+  const { query, statusBusca, certificado, municipio } = state.filters.clients;
 
-  menuPanels.forEach((panel) => {
-    panel.classList.toggle('hidden', panel.id !== targetMenuId);
+  return state.clients.filter((client) => {
+    const matchesQuery =
+      !query ||
+      `${client.razaoSocial} ${client.cnpj} ${client.municipio}`.toLowerCase().includes(query.toLowerCase());
+
+    const matchesStatus = statusBusca === 'Todos' || client.buscaStatus === statusBusca;
+    const matchesCertificate = certificado === 'Todos' || client.certificadoStatus === certificado;
+    const matchesMunicipio = municipio === 'Todos' || client.municipio === municipio;
+
+    return matchesQuery && matchesStatus && matchesCertificate && matchesMunicipio;
+  });
+}
+
+function isAllFilteredClientsSelected(filteredClients) {
+  if (!filteredClients.length) {
+    return false;
+  }
+
+  return filteredClients.every((client) => state.selectedClientIds.has(client.id));
+}
+
+function bulkUpdateClientSearch(active) {
+  if (state.selectedClientIds.size === 0) {
+    pushToast('Selecione clientes para aplicacao em massa.', 'error');
+    return;
+  }
+
+  state.clients.forEach((client) => {
+    if (state.selectedClientIds.has(client.id)) {
+      client.buscaAtiva = active;
+      client.buscaStatus = active ? 'Ativo' : 'Inativo';
+    }
   });
 
-  menuButtons.forEach((button) => {
-    const isActive = button.getAttribute('data-menu-target') === targetMenuId;
-    button.classList.toggle('active', isActive);
+  pushToast(
+    `${state.selectedClientIds.size} cliente(s) atualizado(s): busca ${active ? 'ativa' : 'inativa'}.`,
+    'success'
+  );
+  render();
+}
+
+function submitClientForm(form) {
+  const formData = new FormData(form);
+  const mode = String(formData.get('mode') || 'create');
+  const clientId = String(formData.get('clientId') || '');
+  const payload = {
+    razaoSocial: String(formData.get('razaoSocial') || '').trim(),
+    nomeFantasia: String(formData.get('nomeFantasia') || '').trim(),
+    cnpj: normalizeDigits(String(formData.get('cnpj') || '')),
+    inscricaoMunicipal: String(formData.get('inscricaoMunicipal') || '').trim(),
+    municipio: String(formData.get('municipio') || '').trim(),
+    uf: String(formData.get('uf') || '').trim().toUpperCase(),
+    responsavelInterno: String(formData.get('responsavelInterno') || '').trim(),
+    buscaAtiva: formData.get('buscaAtiva') === 'on'
+  };
+
+  if (payload.cnpj.length !== 14) {
+    pushToast('Informe um CNPJ com 14 digitos.', 'error');
+    return;
+  }
+
+  if (mode === 'edit') {
+    const client = findClientById(clientId);
+    if (!client) {
+      pushToast('Cliente nao encontrado para edicao.', 'error');
+      return;
+    }
+
+    Object.assign(client, {
+      ...payload,
+      buscaStatus: payload.buscaAtiva ? 'Ativo' : 'Inativo'
+    });
+    pushToast('Cliente atualizado com sucesso.', 'success');
+  } else {
+    const newClient = {
+      id: crypto.randomUUID(),
+      ...payload,
+      buscaStatus: payload.buscaAtiva ? 'Ativo' : 'Inativo',
+      ultimaBusca: new Date().toISOString(),
+      xmlsEncontrados: 0,
+      certificadoStatus: 'Nao cadastrado',
+      certificadoValidade: null,
+      statusOperacional: 'Pendente',
+      horarioPreferencial: '02:00',
+      tipoBusca: 'Ambas',
+      municipioIntegrado: false
+    };
+
+    state.clients.unshift(newClient);
+    pushToast('Cliente criado com sucesso.', 'success');
+  }
+
+  closeModal();
+  render();
+}
+
+function getFilteredCertificates() {
+  return [...state.certificates].sort((a, b) => a.diasRestantes - b.diasRestantes);
+}
+
+function simulateCertificateTest(certificateId) {
+  const cert = state.certificates.find((item) => item.id === certificateId);
+  if (!cert) {
+    pushToast('Certificado nao encontrado.', 'error');
+    return;
+  }
+
+  pushToast(`Testando certificado ${cert.apelido}...`, 'info');
+  setTimeout(() => {
+    const success = cert.status !== 'Vencido' && cert.status !== 'Erro de senha';
+    pushToast(
+      success
+        ? `Certificado ${cert.apelido} validado com sucesso.`
+        : `Falha na validacao do certificado ${cert.apelido}.`,
+      success ? 'success' : 'error'
+    );
+  }, 1200);
+}
+
+function submitCertificateForm(form) {
+  const formData = new FormData(form);
+  const clientId = String(formData.get('clientId') || '');
+  const client = findClientById(clientId);
+  if (!client) {
+    pushToast('Selecione um cliente valido para vincular o certificado.', 'error');
+    return;
+  }
+
+  const validade = String(formData.get('validade') || '');
+  const dias = daysUntil(validade);
+  const status = dias < 0 ? 'Vencido' : dias <= 30 ? 'A vencer' : 'Valido';
+
+  state.certificates.unshift({
+    id: `cert-${Math.random().toString(16).slice(2, 8)}`,
+    clientId,
+    cliente: client.razaoSocial,
+    cnpj: client.cnpj,
+    tipo: String(formData.get('tipo') || 'A1'),
+    apelido: String(formData.get('apelido') || 'Sem apelido'),
+    validade,
+    diasRestantes: dias,
+    status,
+    ultimaValidacao: new Date().toISOString()
   });
 
-  state.currentMenu = targetMenuId;
-  if (persist) {
-    localStorage.setItem('nfseConsoleMenu', targetMenuId);
+  client.certificadoStatus = status === 'Valido' ? 'Valido' : status === 'A vencer' ? 'A vencer' : 'Vencido';
+  client.certificadoValidade = validade;
+
+  closeModal();
+  pushToast('Certificado cadastrado com sucesso (mock).', 'success');
+  render();
+}
+
+function applyRunsFilters(form) {
+  const data = new FormData(form);
+  state.filters.runs = {
+    periodo: String(data.get('periodo') || '30'),
+    cliente: String(data.get('cliente') || 'Todos'),
+    municipio: String(data.get('municipio') || 'Todos'),
+    status: String(data.get('status') || 'Todos'),
+    tipo: String(data.get('tipo') || 'Todos')
+  };
+  state.tableState.runs = 'data';
+  render();
+}
+
+function getFilteredRuns() {
+  const { periodo, cliente, municipio, status, tipo } = state.filters.runs;
+  const now = Date.now();
+  const days = Number(periodo || '30');
+
+  return state.searchRuns.filter((run) => {
+    const runDate = Date.parse(run.inicio);
+    const withinPeriod = Number.isFinite(days) ? now - runDate <= days * 24 * 60 * 60 * 1000 : true;
+    const matchesTipo = tipo === 'Todos' || run.tipo === tipo;
+    const matchesStatus = status === 'Todos' || run.status === status;
+
+    let matchesClient = true;
+    if (cliente !== 'Todos') {
+      matchesClient = run.detalhes.some((detail) => detail.clientId === cliente);
+    }
+
+    let matchesMunicipio = true;
+    if (municipio !== 'Todos') {
+      matchesMunicipio = run.detalhes.some((detail) => detail.municipio === municipio);
+    }
+
+    return withinPeriod && matchesTipo && matchesStatus && matchesClient && matchesMunicipio;
+  });
+}
+
+function refreshRunningExecution() {
+  if (!state.runningExecution) {
+    return;
+  }
+
+  if (state.runningExecution.status !== 'Em execucao') {
+    pushToast('Nao existe execucao em andamento.', 'info');
+    return;
+  }
+
+  const next = Math.min(100, state.runningExecution.progressoPercentual + Math.floor(Math.random() * 18 + 6));
+  state.runningExecution.progressoPercentual = next;
+  state.runningExecution.processados = Math.min(
+    state.runningExecution.totalClientes,
+    Math.round((next / 100) * state.runningExecution.totalClientes)
+  );
+  state.runningExecution.tempoEstimadoMin = Math.max(2, state.runningExecution.tempoEstimadoMin - 2);
+
+  if (next >= 100) {
+    state.runningExecution.status = 'Concluida';
+    pushToast('Busca manual concluida com sucesso.', 'success');
+  } else {
+    pushToast('Status da execucao atualizado.', 'info');
+  }
+
+  render();
+}
+
+function applyXmlFilters(form) {
+  const data = new FormData(form);
+  state.filters.xmls = {
+    cliente: String(data.get('cliente') || 'Todos'),
+    cnpj: normalizeDigits(String(data.get('cnpj') || '')),
+    numero: String(data.get('numero') || '').trim(),
+    emissaoInicio: String(data.get('emissaoInicio') || ''),
+    emissaoFim: String(data.get('emissaoFim') || ''),
+    downloadInicio: String(data.get('downloadInicio') || ''),
+    downloadFim: String(data.get('downloadFim') || ''),
+    municipio: String(data.get('municipio') || 'Todos'),
+    tipo: String(data.get('tipo') || 'Todos'),
+    status: String(data.get('status') || 'Todos'),
+    caminho: String(data.get('caminho') || '').trim().toLowerCase()
+  };
+
+  state.tableState.xmls = 'data';
+  render();
+}
+
+function getFilteredXmls() {
+  const filters = state.filters.xmls;
+
+  return state.xmlFiles.filter((xml) => {
+    const matchesClient = filters.cliente === 'Todos' || xml.clientId === filters.cliente;
+    const matchesCnpj = !filters.cnpj || normalizeDigits(xml.cnpj).includes(filters.cnpj);
+    const matchesNumero = !filters.numero || String(xml.numeroNfse).includes(filters.numero);
+    const matchesMunicipio = filters.municipio === 'Todos' || xml.municipio === filters.municipio;
+    const matchesTipo = filters.tipo === 'Todos' || xml.tipo === filters.tipo;
+    const matchesStatus = filters.status === 'Todos' || xml.statusArmazenamento === filters.status;
+    const matchesPath = !filters.caminho || xml.caminhoServidor.toLowerCase().includes(filters.caminho);
+
+    const emDate = Date.parse(xml.dataEmissao);
+    const dlDate = Date.parse(xml.dataDownload);
+
+    const matchesEmissaoInicio = !filters.emissaoInicio || emDate >= Date.parse(`${filters.emissaoInicio}T00:00:00`);
+    const matchesEmissaoFim = !filters.emissaoFim || emDate <= Date.parse(`${filters.emissaoFim}T23:59:59`);
+    const matchesDownloadInicio = !filters.downloadInicio || dlDate >= Date.parse(`${filters.downloadInicio}T00:00:00`);
+    const matchesDownloadFim = !filters.downloadFim || dlDate <= Date.parse(`${filters.downloadFim}T23:59:59`);
+
+    return (
+      matchesClient &&
+      matchesCnpj &&
+      matchesNumero &&
+      matchesMunicipio &&
+      matchesTipo &&
+      matchesStatus &&
+      matchesPath &&
+      matchesEmissaoInicio &&
+      matchesEmissaoFim &&
+      matchesDownloadInicio &&
+      matchesDownloadFim
+    );
+  });
+}
+
+function applyAlertsFilters(form) {
+  const data = new FormData(form);
+  state.filters.alerts = {
+    severidade: String(data.get('severidade') || 'Todos'),
+    tipo: String(data.get('tipo') || 'Todos'),
+    status: String(data.get('status') || 'Todos'),
+    periodo: String(data.get('periodo') || '30'),
+    cliente: String(data.get('cliente') || 'Todos')
+  };
+
+  state.tableState.alerts = 'data';
+  state.selectedAlertIds = new Set();
+  render();
+}
+
+function getFilteredAlerts() {
+  const { severidade, tipo, status, periodo, cliente } = state.filters.alerts;
+  const now = Date.now();
+  const days = Number(periodo || '30');
+
+  return state.alerts.filter((alert) => {
+    const at = Date.parse(alert.dataHora);
+    const withinPeriod = Number.isFinite(days) ? now - at <= days * 24 * 60 * 60 * 1000 : true;
+    const matchesSeverity = severidade === 'Todos' || alert.severity === severidade;
+    const matchesType = tipo === 'Todos' || alert.tipo === tipo;
+    const matchesStatus = status === 'Todos' || alert.status === status;
+    const matchesClient = cliente === 'Todos' || alert.clientId === cliente;
+
+    return withinPeriod && matchesSeverity && matchesType && matchesStatus && matchesClient;
+  });
+}
+
+function markSelectedAlertsResolved() {
+  if (state.selectedAlertIds.size === 0) {
+    pushToast('Selecione alertas para marcar como resolvidos.', 'error');
+    return;
+  }
+
+  state.alerts.forEach((alert) => {
+    if (state.selectedAlertIds.has(alert.id)) {
+      alert.status = 'Resolvido';
+    }
+  });
+
+  pushToast(`${state.selectedAlertIds.size} alerta(s) marcado(s) como resolvido(s).`, 'success');
+  state.selectedAlertIds = new Set();
+  render();
+}
+
+function resolveAlert(alertId) {
+  const alert = state.alerts.find((item) => item.id === alertId);
+  if (!alert) {
+    return;
+  }
+
+  alert.status = 'Resolvido';
+  pushToast(`Alerta "${alert.titulo}" resolvido.`, 'success');
+  render();
+}
+
+function submitUserForm(form) {
+  const data = new FormData(form);
+  state.users.unshift({
+    id: `usr-${Math.random().toString(16).slice(2, 8)}`,
+    nome: String(data.get('nome') || '').trim(),
+    email: String(data.get('email') || '').trim(),
+    perfil: String(data.get('perfil') || 'Consulta'),
+    status: String(data.get('status') || 'Ativo')
+  });
+
+  closeModal();
+  pushToast('Usuario cadastrado com sucesso.', 'success');
+  render();
+}
+
+function executeConfirmAction(payload) {
+  if (!payload || !payload.type) {
+    return;
+  }
+
+  switch (payload.type) {
+    case 'reprocess-client': {
+      const client = findClientById(payload.clientId);
+      if (client) {
+        pushToast(`Cliente ${client.razaoSocial} marcado para reprocessamento na proxima execucao.`, 'success');
+      }
+      return;
+    }
+    case 'reprocess-selected': {
+      pushToast(`${state.selectedClientIds.size} cliente(s) enviados para reprocessamento.`, 'success');
+      return;
+    }
+    case 'replace-certificate': {
+      pushToast('Fluxo de substituicao iniciado (mock).', 'info');
+      return;
+    }
+    case 'unlink-certificate': {
+      const cert = state.certificates.find((item) => item.id === payload.certId);
+      if (cert) {
+        cert.clientId = null;
+        cert.cliente = 'Sem cliente vinculado';
+        cert.cnpj = '-';
+        pushToast('Vinculo do certificado removido.', 'success');
+        render();
+      }
+      return;
+    }
+    case 'reprocess-run-failures': {
+      pushToast('Falhas da execucao enviadas para reprocessamento.', 'success');
+      return;
+    }
+    case 'reprocess-alert': {
+      pushToast('Reprocessamento solicitado para o alerta selecionado.', 'success');
+      return;
+    }
+    default:
+      return;
   }
 }
 
-function writeConsole(title, payload = null, isError = false) {
-  const stamp = new Date().toISOString();
-  const banner = `${isError ? '[ERROR]' : '[INFO]'} ${stamp} - ${title}`;
-  const body = payload ? `\n${JSON.stringify(payload, null, 2)}` : '';
-  consoleOutput.textContent = `${banner}${body}`;
+function getRunHistoryByClient(clientId) {
+  const rows = [];
+
+  state.searchRuns.forEach((run) => {
+    run.detalhes.forEach((detail) => {
+      if (detail.clientId === clientId) {
+        rows.push({
+          data: run.inicio,
+          inicio: run.inicio,
+          fim: run.fim,
+          xmlsEncontrados: detail.xmlsEncontrados,
+          status: detail.status,
+          mensagem: detail.mensagem
+        });
+      }
+    });
+  });
+
+  return rows.slice(0, 8);
 }
 
-function toggleCard(element) {
-  element.classList.toggle('hidden');
+function getSystemHealthStatus() {
+  const criticalOpen = state.alerts.filter((alert) => alert.severity === 'Critico' && alert.status !== 'Resolvido').length;
+  if (criticalOpen > 0) {
+    return {
+      label: 'Operacional com atencao',
+      tone: 'warning',
+      description: `${criticalOpen} alerta(s) critico(s) em aberto`
+    };
+  }
+
+  return {
+    label: 'Operacional',
+    tone: 'success',
+    description: 'Sem eventos criticos ativos'
+  };
 }
 
-function hideCard(element) {
-  element.classList.add('hidden');
+function getPriorityAlerts() {
+  const severityOrder = { Critico: 1, Atencao: 2, Informativo: 3 };
+  return [...state.alerts]
+    .filter((alert) => alert.status !== 'Resolvido')
+    .sort((a, b) => {
+      const severityDiff = (severityOrder[a.severity] || 99) - (severityOrder[b.severity] || 99);
+      if (severityDiff !== 0) {
+        return severityDiff;
+      }
+      return Date.parse(b.dataHora) - Date.parse(a.dataHora);
+    });
 }
 
-function onlyDigits(value) {
-  return String(value || '').replace(/\D/g, '');
+function openModal(modal) {
+  state.modal = modal;
+  render();
 }
 
-function normalizeBaseUrl(value) {
-  return String(value || '').trim().replace(/\/$/, '') || window.location.origin;
+function closeModal() {
+  if (!state.modal) {
+    return;
+  }
+  state.modal = null;
+  render();
 }
 
-function readStoredJson(key) {
-  const raw = localStorage.getItem(key);
-  if (!raw) {
+function openDrawer(drawer) {
+  state.drawer = drawer;
+  render();
+}
+
+function closeDrawer() {
+  if (!state.drawer) {
+    return;
+  }
+  state.drawer = null;
+  render();
+}
+
+function pushToast(message, tone = 'info') {
+  const toast = {
+    id: crypto.randomUUID(),
+    message,
+    tone: ['success', 'error', 'info'].includes(tone) ? tone : 'info'
+  };
+
+  state.toasts = [...state.toasts, toast].slice(-4);
+  render();
+
+  setTimeout(() => {
+    state.toasts = state.toasts.filter((item) => item.id !== toast.id);
+    render();
+  }, 3200);
+}
+
+function findClientById(clientId) {
+  if (!clientId) {
     return null;
   }
+  return state.clients.find((client) => client.id === clientId) || null;
+}
 
-  try {
-    return JSON.parse(raw);
-  } catch {
+function findXmlById(xmlId) {
+  if (!xmlId) {
     return null;
   }
+  return state.xmlFiles.find((xml) => xml.id === xmlId) || null;
 }
 
-function formatCnpj(value) {
-  const digits = onlyDigits(value);
-  if (digits.length !== 14) {
-    return digits || '-';
-  }
-
-  return digits.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+function mapClientOptions() {
+  return state.clients.reduce((acc, client) => {
+    acc[client.id] = `${client.razaoSocial} (${formatCnpj(client.cnpj)})`;
+    return acc;
+  }, {});
 }
 
-function formatParty(nome, cnpj) {
-  const nomeLimpo = String(nome || '').trim();
-  const cnpjFormatado = formatCnpj(cnpj || '');
-
-  if (!nomeLimpo && cnpjFormatado === '-') {
-    return '-';
+function renderOptions(values, selectedValue, labels = {}, placeholder = '') {
+  const options = [];
+  if (placeholder) {
+    options.push(`<option value="">${escapeHtml(placeholder)}</option>`);
   }
 
-  if (!nomeLimpo) {
-    return cnpjFormatado;
-  }
+  values.forEach((value) => {
+    const selected = String(value) === String(selectedValue) ? 'selected' : '';
+    const label = labels[value] || value;
+    options.push(`<option value="${escapeHtml(String(value))}" ${selected}>${escapeHtml(String(label))}</option>`);
+  });
 
-  if (cnpjFormatado === '-') {
-    return nomeLimpo;
-  }
-
-  return `${nomeLimpo} (${cnpjFormatado})`;
+  return options.join('');
 }
 
-function formatCurrencyValue(value) {
-  if (value === null || value === undefined || value === '') {
-    return '-';
+function toneFromStatus(status) {
+  if (status === 'Sucesso') {
+    return 'success';
   }
-
-  const numeric = toNumericValue(value);
-  if (numeric === null || Number.isNaN(numeric)) {
-    return '-';
+  if (status === 'Aviso') {
+    return 'warning';
   }
-
-  return new Intl.NumberFormat('pt-BR', {
-    style: 'currency',
-    currency: 'BRL'
-  }).format(numeric);
+  if (status === 'Erro') {
+    return 'danger';
+  }
+  if (status === 'Pendente') {
+    return 'neutral';
+  }
+  return 'neutral';
 }
 
-function toNumericValue(value) {
-  if (typeof value === 'number') {
-    return Number.isFinite(value) ? value : null;
+function toneFromRunStatus(status) {
+  if (status === 'Concluida') {
+    return 'success';
   }
-
-  if (typeof value === 'string') {
-    return parseLocalizedNumber(value);
+  if (status === 'Concluida com avisos') {
+    return 'warning';
   }
-
-  if (typeof value === 'object') {
-    if (typeof value.$numberDecimal === 'string') {
-      return parseLocalizedNumber(value.$numberDecimal);
-    }
-
-    if (typeof value.value === 'number' || typeof value.value === 'string') {
-      return toNumericValue(value.value);
-    }
-
-    if (typeof value.toString === 'function' && value.toString !== Object.prototype.toString) {
-      return parseLocalizedNumber(value.toString());
-    }
-
-    const serialized = JSON.stringify(value);
-    if (!serialized) {
-      return null;
-    }
-
-    const match = serialized.match(/-?\d+(?:[.,]\d+)?/);
-    return match ? parseLocalizedNumber(match[0]) : null;
+  if (status === 'Falha critica') {
+    return 'danger';
   }
-
-  return null;
+  if (status === 'Em execucao') {
+    return 'info';
+  }
+  return 'neutral';
 }
 
-function parseLocalizedNumber(raw) {
-  const normalized = String(raw || '').trim();
-  if (!normalized) {
-    return null;
+function toneFromCertificateStatus(status) {
+  if (status === 'Valido') {
+    return 'success';
   }
-
-  let sanitized = normalized.replace(/\s/g, '').replace(/[^\d,.\-+eE]/g, '');
-  if (!sanitized) {
-    return null;
+  if (status === 'A vencer') {
+    return 'warning';
   }
-
-  const hasComma = sanitized.includes(',');
-  const hasDot = sanitized.includes('.');
-
-  if (hasComma && hasDot) {
-    if (sanitized.lastIndexOf(',') > sanitized.lastIndexOf('.')) {
-      sanitized = sanitized.replace(/\./g, '').replace(/,/g, '.');
-    } else {
-      sanitized = sanitized.replace(/,/g, '');
-    }
-  } else if (hasComma) {
-    sanitized = sanitized.replace(/,/g, '.');
+  if (status === 'Vencido' || status === 'Erro de senha') {
+    return 'danger';
   }
-
-  const parsed = Number(sanitized);
-  return Number.isFinite(parsed) ? parsed : null;
+  return 'neutral';
 }
 
-function formatEmissionDate(value) {
+function toneFromStorageStatus(status) {
+  if (status === 'Armazenado') {
+    return 'success';
+  }
+  if (status === 'Pendente') {
+    return 'warning';
+  }
+  if (status === 'Erro') {
+    return 'danger';
+  }
+  return 'neutral';
+}
+
+function toneFromSeverity(severity) {
+  if (severity === 'Critico') {
+    return 'danger';
+  }
+  if (severity === 'Atencao') {
+    return 'warning';
+  }
+  return 'info';
+}
+
+function toneFromAlertStatus(status) {
+  if (status === 'Resolvido') {
+    return 'success';
+  }
+  if (status === 'Em analise') {
+    return 'warning';
+  }
+  if (status === 'Aberto') {
+    return 'danger';
+  }
+  return 'neutral';
+}
+
+function formatDate(value) {
   if (!value) {
     return '-';
   }
 
-  const date = value instanceof Date ? value : new Date(String(value));
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '-';
+  }
+
+  return new Intl.DateTimeFormat('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric'
+  }).format(date);
+}
+
+function formatDateTime(value) {
+  if (!value) {
+    return '-';
+  }
+
+  const date = new Date(value);
   if (Number.isNaN(date.getTime())) {
     return '-';
   }
@@ -1424,33 +2943,87 @@ function formatEmissionDate(value) {
   }).format(date);
 }
 
-function tryParseJson(text) {
-  if (!text) {
-    return null;
+function formatRelativeDate(value) {
+  const date = new Date(value);
+  const today = new Date();
+  if (
+    date.getFullYear() === today.getFullYear() &&
+    date.getMonth() === today.getMonth() &&
+    date.getDate() === today.getDate()
+  ) {
+    return 'Hoje';
   }
 
-  try {
-    return JSON.parse(text);
-  } catch {
-    return null;
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  if (
+    date.getFullYear() === yesterday.getFullYear() &&
+    date.getMonth() === yesterday.getMonth() &&
+    date.getDate() === yesterday.getDate()
+  ) {
+    return 'Ontem';
   }
+
+  return formatDate(date);
 }
 
-function fileToBase64(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result !== 'string') {
-        reject(new Error('Falha ao ler certificado.'));
-        return;
-      }
-      const base64 = result.includes(',') ? result.split(',')[1] : result;
-      resolve(base64);
-    };
-    reader.onerror = () => reject(new Error('Falha ao converter certificado para Base64.'));
-    reader.readAsDataURL(file);
-  });
+function formatHour(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '--:--';
+  }
+
+  return new Intl.DateTimeFormat('pt-BR', {
+    hour: '2-digit',
+    minute: '2-digit'
+  }).format(date);
+}
+
+function formatCurrency(value) {
+  const numeric = Number(value || 0);
+  return new Intl.NumberFormat('pt-BR', {
+    style: 'currency',
+    currency: 'BRL'
+  }).format(Number.isFinite(numeric) ? numeric : 0);
+}
+
+function formatCnpj(value) {
+  const digits = normalizeDigits(String(value || ''));
+  if (digits.length !== 14) {
+    return value || '-';
+  }
+
+  return digits.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+}
+
+function normalizeDigits(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
+function diffMinutes(start, end) {
+  const diff = Date.parse(end) - Date.parse(start);
+  if (!Number.isFinite(diff) || diff <= 0) {
+    return 0;
+  }
+  return Math.round(diff / 60000);
+}
+
+function uniqueValues(values) {
+  return Array.from(new Set(values.filter(Boolean))).sort((a, b) => String(a).localeCompare(String(b), 'pt-BR'));
+}
+
+function wait(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function daysUntil(dateString) {
+  const target = Date.parse(dateString);
+  if (!Number.isFinite(target)) {
+    return 0;
+  }
+
+  const diff = target - Date.now();
+  return Math.ceil(diff / (24 * 60 * 60 * 1000));
 }
 
 function escapeHtml(value) {
@@ -1461,3 +3034,204 @@ function escapeHtml(value) {
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#39;');
 }
+
+function deepClone(input) {
+  return JSON.parse(JSON.stringify(input));
+}
+
+function downloadXmlById(xmlId) {
+  const xml = findXmlById(xmlId);
+  if (!xml) {
+    pushToast('XML nao encontrado.', 'error');
+    return;
+  }
+
+  const blob = new Blob([xml.conteudoXml], { type: 'application/xml' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `nfse-${xml.numeroNfse}.xml`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  pushToast(`Download do XML ${xml.numeroNfse} iniciado.`, 'success');
+}
+
+async function copyToClipboard(text) {
+  if (!text) {
+    return;
+  }
+
+  try {
+    await navigator.clipboard.writeText(text);
+    pushToast('Caminho copiado para a area de transferencia.', 'success');
+  } catch {
+    pushToast('Nao foi possivel copiar automaticamente. Copie manualmente.', 'error');
+  }
+}
+
+function formatXml(xml) {
+  if (!xml) {
+    return '';
+  }
+
+  const sanitized = xml.replace(/>\s*</g, '><').trim();
+  const parts = sanitized.split(/(?=<)/g);
+  let depth = 0;
+
+  return parts
+    .map((part) => {
+      const trimmed = part.trim();
+      if (!trimmed) {
+        return '';
+      }
+
+      if (trimmed.startsWith('</')) {
+        depth = Math.max(depth - 1, 0);
+      }
+
+      const line = `${'  '.repeat(depth)}${trimmed}`;
+
+      if (trimmed.startsWith('<') && !trimmed.startsWith('</') && !trimmed.endsWith('/>') && !trimmed.includes('</')) {
+        depth += 1;
+      }
+
+      return line;
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+function icon(name) {
+  const icons = {
+    dashboard:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="8" height="8" rx="2"></rect><rect x="13" y="3" width="8" height="5" rx="2"></rect><rect x="13" y="10" width="8" height="11" rx="2"></rect><rect x="3" y="13" width="8" height="8" rx="2"></rect></svg>',
+    users:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><path d="M20 8v6"></path><path d="M23 11h-6"></path></svg>',
+    shield:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3l8 4v5c0 5-3.5 8.7-8 10-4.5-1.3-8-5-8-10V7l8-4z"></path></svg>',
+    search:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg>',
+    file:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"></path><path d="M14 3v6h6"></path></svg>',
+    alert:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><circle cx="12" cy="17" r="1"></circle></svg>',
+    settings:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1z"></path></svg>',
+    menu:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18"></path><path d="M3 12h18"></path><path d="M3 18h18"></path></svg>',
+    'arrow-left':
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>',
+    folder:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6a2 2 0 0 1 2-2h5l2 2h7a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6z"></path></svg>',
+    clock:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 3"></path></svg>',
+    info:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><circle cx="12" cy="8" r="1"></circle></svg>',
+    check:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6L9 17l-5-5"></path></svg>'
+  };
+
+  return icons[name] || icons.info;
+}
+
+document.addEventListener('click', (event) => {
+  const node = event.target.closest('[data-action="clients-clear-filters"]');
+  if (!node) {
+    return;
+  }
+  state.filters.clients = { query: '', statusBusca: 'Todos', certificado: 'Todos', municipio: 'Todos' };
+  state.selectedClientIds = new Set();
+  state.tableState.clients = 'data';
+  render();
+});
+
+document.addEventListener('click', (event) => {
+  const node = event.target.closest('[data-action="runs-clear-filters"]');
+  if (!node) {
+    return;
+  }
+  state.filters.runs = { periodo: '30', cliente: 'Todos', municipio: 'Todos', status: 'Todos', tipo: 'Todos' };
+  state.tableState.runs = 'data';
+  render();
+});
+
+document.addEventListener('click', (event) => {
+  const node = event.target.closest('[data-action="xmls-clear-filters"]');
+  if (!node) {
+    return;
+  }
+  state.filters.xmls = {
+    cliente: 'Todos',
+    cnpj: '',
+    numero: '',
+    emissaoInicio: '',
+    emissaoFim: '',
+    downloadInicio: '',
+    downloadFim: '',
+    municipio: 'Todos',
+    tipo: 'Todos',
+    status: 'Todos',
+    caminho: ''
+  };
+  state.tableState.xmls = 'data';
+  render();
+});
+
+document.addEventListener('click', (event) => {
+  const node = event.target.closest('[data-action="alerts-clear-filters"]');
+  if (!node) {
+    return;
+  }
+  state.filters.alerts = {
+    severidade: 'Todos',
+    tipo: 'Todos',
+    status: 'Todos',
+    periodo: '30',
+    cliente: 'Todos'
+  };
+  state.selectedAlertIds = new Set();
+  state.tableState.alerts = 'data';
+  render();
+});
+
+document.addEventListener('click', (event) => {
+  const node = event.target.closest('[data-action="open-new-manual-run"]');
+  if (!node) {
+    return;
+  }
+  pushToast('Nova busca manual agendada (mock).', 'success');
+});
+
+document.addEventListener('click', (event) => {
+  const node = event.target.closest('[data-action="open-schedule-reprocess"]');
+  if (!node) {
+    return;
+  }
+  pushToast('Reprocessamento agendado para a proxima janela noturna (mock).', 'success');
+});
+
+document.addEventListener('click', (event) => {
+  const node = event.target.closest('[data-action="settings-test-run"]');
+  if (!node) {
+    return;
+  }
+  pushToast('Teste da rotina noturna iniciado (mock).', 'info');
+});
+
+document.addEventListener('click', (event) => {
+  const node = event.target.closest('[data-action="settings-test-storage"]');
+  if (!node) {
+    return;
+  }
+  pushToast('Conexao com servidor validada com sucesso (mock).', 'success');
+});
+
+document.addEventListener('click', (event) => {
+  const node = event.target.closest('[data-action="settings-user-edit"]');
+  if (!node) {
+    return;
+  }
+  pushToast('Edicao de usuario sera integrada em fluxo dedicado.', 'info');
+});
