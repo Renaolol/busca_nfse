@@ -42,7 +42,8 @@ Os jobs podem ser disparados manualmente pelos scripts `npm run job:*` para oper
 - `diario`: cria/reativa controles no modo `somente_novas`.
   - Se nao houver documentos novos no ciclo, agenda proxima execucao para `SYNC_DAILY_INTERVAL_MS`.
   - Se houver documentos e `SYNC_DAILY_STOP_ON_FIRST_DOCUMENT=true`, encerra o ciclo apos o primeiro documento e agenda nova tentativa curta (`SYNC_DAILY_SUCCESS_COOLDOWN_MS`) para reduzir `HTTP 429`.
-  - Se `SYNC_DAILY_STOP_ON_FIRST_DOCUMENT=false`, segue buscando ate o limite `SYNC_DAILY_MAX_NSU_PER_RUN` por ciclo.
+  - Se `SYNC_DAILY_STOP_ON_FIRST_DOCUMENT=false` (padrao atual), segue buscando ate o limite `SYNC_DAILY_MAX_NSU_PER_RUN` por ciclo.
+  - Quando o lote termina no limite com documentos encontrados, agenda uma nova tentativa curta usando `SYNC_DAILY_SUCCESS_COOLDOWN_MS` antes de continuar do ultimo NSU salvo.
 
 ## Busca noturna global
 

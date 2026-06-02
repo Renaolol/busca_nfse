@@ -2253,6 +2253,7 @@ function statCard(iconKey, label, value, caption, tone) {
 function renderSchedulerStatusStrip() {
   const nightly = getNightlyScheduleInfo();
   const autoSync = getAutoSyncInfo();
+  const dailySync = getDailySyncInfo();
 
   return `
     <article class="card scheduler-strip">
@@ -2276,6 +2277,15 @@ function renderSchedulerStatusStrip() {
       </div>
       <div class="scheduler-item">
         <div class="scheduler-heading">
+          <span class="scheduler-dot ${dailySync.tone}"></span>
+          <strong>Lote de busca</strong>
+        </div>
+        ${statusBadge(dailySync.badgeLabel, dailySync.tone)}
+        <p>${escapeHtml(dailySync.description)}</p>
+        <small>${escapeHtml(dailySync.detailText)}</small>
+      </div>
+      <div class="scheduler-item">
+        <div class="scheduler-heading">
           <span class="scheduler-dot ${state.executionMonitor.active ? 'info' : 'neutral'}"></span>
           <strong>Execucao agora</strong>
         </div>
@@ -2290,6 +2300,7 @@ function renderSchedulerStatusStrip() {
 function renderSchedulerSettingsPanel() {
   const nightly = getNightlyScheduleInfo();
   const autoSync = getAutoSyncInfo();
+  const dailySync = getDailySyncInfo();
 
   return `
     <div class="scheduler-settings">
@@ -2302,6 +2313,11 @@ function renderSchedulerSettingsPanel() {
         <span class="row-sub">Ciclo automatico</span>
         <div class="scheduler-settings-title">${statusBadge(autoSync.badgeLabel, autoSync.tone)} <strong>${escapeHtml(autoSync.intervalText)}</strong></div>
         <p>${escapeHtml(autoSync.description)}</p>
+      </div>
+      <div>
+        <span class="row-sub">Lote de busca</span>
+        <div class="scheduler-settings-title">${statusBadge(dailySync.badgeLabel, dailySync.tone)} <strong>${escapeHtml(dailySync.detailText)}</strong></div>
+        <p>${escapeHtml(dailySync.description)}</p>
       </div>
     </div>
   `;
@@ -3453,6 +3469,41 @@ function getAutoSyncInfo() {
     badgeLabel: 'Inativo',
     description: 'Ciclo automatico desativado nas variaveis de ambiente.',
     intervalText: formatDurationMs(autoSync.intervalMs)
+  };
+}
+
+function getDailySyncInfo() {
+  const dailySync = state.schedulerStatus?.dailySync;
+  if (!dailySync) {
+    return {
+      tone: 'neutral',
+      badgeLabel: 'Status nao carregado',
+      description: 'Configuracao de lote ainda nao foi carregada pelo backend.',
+      detailText: '-'
+    };
+  }
+
+  const maxNsu = Math.max(1, Number(dailySync.maxNsuPerRun || 1));
+  const requestIntervalText = formatDurationMs(dailySync.requestIntervalMs);
+  const cooldownText = formatDurationMs(dailySync.successCooldownMs);
+  const rateLimitText = dailySync.rateLimitCooldownUntil
+    ? `Rate limit ativo ate ${formatDateTime(dailySync.rateLimitCooldownUntil)}`
+    : `Cooldown anti-429: ${formatDurationMs(dailySync.rateLimitCooldownMs)}`;
+
+  if (dailySync.stopOnFirstDocument) {
+    return {
+      tone: 'warning',
+      badgeLabel: '1 XML por ciclo',
+      description: 'Modo conservador ativo: para apos o primeiro XML encontrado.',
+      detailText: `Consulta a cada ${requestIntervalText}; retomada em ${cooldownText}`
+    };
+  }
+
+  return {
+    tone: 'success',
+    badgeLabel: `Ate ${maxNsu} NSUs`,
+    description: `Processa varios NSUs por lote e agenda um respiro apos sincronizar documentos.`,
+    detailText: `Consulta a cada ${requestIntervalText}; ${rateLimitText}`
   };
 }
 

@@ -20,14 +20,14 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   private readonly autoSyncEnabled = process.env.SYNC_AUTO_RUN_ENABLED !== 'false';
   private readonly autoSyncIntervalMs = this.parsePositiveNumberEnv('SYNC_AUTO_RUN_INTERVAL_MS', 30000);
   private readonly autoSyncStartupDelayMs = this.parsePositiveNumberEnv('SYNC_AUTO_RUN_STARTUP_DELAY_MS', 3000);
-  private readonly apiRetryDelayMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_DELAY_MS', 60000);
+  private readonly apiRetryDelayMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_DELAY_MS', 120000);
   private readonly dailySyncIntervalMs = this.parsePositiveNumberEnv('SYNC_DAILY_INTERVAL_MS', 24 * 60 * 60 * 1000);
   private readonly dailySyncMaxNsuPerRun = this.parsePositiveNumberEnv('SYNC_DAILY_MAX_NSU_PER_RUN', 10);
-  private readonly dailySyncStopOnFirstDocument = process.env.SYNC_DAILY_STOP_ON_FIRST_DOCUMENT !== 'false';
-  private readonly dailySyncSuccessCooldownMs = this.parsePositiveNumberEnv('SYNC_DAILY_SUCCESS_COOLDOWN_MS', 60000);
-  private readonly adnRequestIntervalMs = this.parsePositiveNumberEnv('SYNC_ADN_REQUEST_INTERVAL_MS', 1200);
-  private readonly apiRetryJitterMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_JITTER_MS', 30000);
-  private readonly rateLimitGlobalCooldownMs = this.parsePositiveNumberEnv('SYNC_ADN_RATE_LIMIT_COOLDOWN_MS', 180000);
+  private readonly dailySyncStopOnFirstDocument = process.env.SYNC_DAILY_STOP_ON_FIRST_DOCUMENT === 'true';
+  private readonly dailySyncSuccessCooldownMs = this.parsePositiveNumberEnv('SYNC_DAILY_SUCCESS_COOLDOWN_MS', 120000);
+  private readonly adnRequestIntervalMs = this.parsePositiveNumberEnv('SYNC_ADN_REQUEST_INTERVAL_MS', 5000);
+  private readonly apiRetryJitterMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_JITTER_MS', 60000);
+  private readonly rateLimitGlobalCooldownMs = this.parsePositiveNumberEnv('SYNC_ADN_RATE_LIMIT_COOLDOWN_MS', 300000);
   private readonly nightlySweepEnabled = process.env.SYNC_NIGHTLY_SWEEP_ENABLED !== 'false';
   private readonly nightlySweepCheckIntervalMs = this.parsePositiveNumberEnv('SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS', 60000);
   private readonly nightlySweepHour = this.parseBoundedIntegerEnv('SYNC_NIGHTLY_SWEEP_HOUR', 2, 0, 23);
@@ -163,6 +163,17 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       lastRunDateKey: string | null;
       nextRunAt: string | null;
     };
+    dailySync: {
+      intervalMs: number;
+      maxNsuPerRun: number;
+      stopOnFirstDocument: boolean;
+      successCooldownMs: number;
+      requestIntervalMs: number;
+      retryDelayMs: number;
+      retryJitterMs: number;
+      rateLimitCooldownMs: number;
+      rateLimitCooldownUntil: string | null;
+    };
   } {
     return {
       autoSync: {
@@ -180,6 +191,17 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         checkIntervalMs: this.nightlySweepCheckIntervalMs,
         lastRunDateKey: this.lastNightlySweepDateKey,
         nextRunAt: this.nightlySweepEnabled ? this.resolveNextNightlySweepAt(new Date()).toISOString() : null
+      },
+      dailySync: {
+        intervalMs: this.dailySyncIntervalMs,
+        maxNsuPerRun: this.dailySyncMaxNsuPerRun,
+        stopOnFirstDocument: this.dailySyncStopOnFirstDocument,
+        successCooldownMs: this.dailySyncSuccessCooldownMs,
+        requestIntervalMs: this.adnRequestIntervalMs,
+        retryDelayMs: this.apiRetryDelayMs,
+        retryJitterMs: this.apiRetryJitterMs,
+        rateLimitCooldownMs: this.rateLimitGlobalCooldownMs,
+        rateLimitCooldownUntil: this.rateLimitCooldownUntil?.toISOString() ?? null
       }
     };
   }
@@ -465,6 +487,16 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         if (isDailyMode && this.dailySyncStopOnFirstDocument) {
           shouldStop = true;
         }
+      }
+
+      if (isDailyMode && !this.dailySyncStopOnFirstDocument && !shouldStop && documentsSavedForControl > 0) {
+        await this.prisma.nfseSyncControle.update({
+          where: { id: control.id },
+          data: {
+            proximaExecucao: new Date(Date.now() + this.dailySyncSuccessCooldownMs),
+            ultimaMensagem: `Lote diario sincronizado com ${documentsSavedForControl} documento(s); proxima busca agendada`
+          }
+        });
       }
     }
 

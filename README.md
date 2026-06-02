@@ -89,11 +89,14 @@ Veja `.env.example`.
 - `SYNC_AUTO_RUN_ENABLED`: habilita ciclo automatico de sync em background (padrao `true`).
 - `SYNC_AUTO_RUN_INTERVAL_MS`: intervalo entre ciclos automaticos (padrao `30000`).
 - `SYNC_AUTO_RUN_STARTUP_DELAY_MS`: atraso inicial apos boot para primeiro ciclo automatico (padrao `3000`).
-- `SYNC_API_RETRY_DELAY_MS`: espera antes de tentar novamente quando ocorrer erro temporario de API (ex.: HTTP 429) (padrao `60000`).
+- `SYNC_API_RETRY_DELAY_MS`: espera antes de tentar novamente quando ocorrer erro temporario de API (ex.: HTTP 429) (padrao `120000`).
+- `SYNC_API_RETRY_JITTER_MS`: jitter adicional aleatorio aplicado ao retry de rate limit (padrao `60000`).
 - `SYNC_DAILY_INTERVAL_MS`: intervalo da rotina diaria quando o controle esta no modo `somente_novas` (padrao `86400000` = 24h).
 - `SYNC_DAILY_MAX_NSU_PER_RUN`: quantidade maxima de NSUs processados por ciclo para controles no modo diario (padrao `10`).
-- `SYNC_DAILY_STOP_ON_FIRST_DOCUMENT`: quando `true`, no modo diario encerra o ciclo apos sincronizar 1 documento e agenda a proxima tentativa (padrao `true`).
-- `SYNC_DAILY_SUCCESS_COOLDOWN_MS`: espera minima entre ciclos diarios apos sucesso de documento (padrao `60000`).
+- `SYNC_DAILY_STOP_ON_FIRST_DOCUMENT`: quando `true`, no modo diario encerra o ciclo apos sincronizar 1 documento e agenda a proxima tentativa; por padrao fica `false` para buscar mais XMLs por lote.
+- `SYNC_DAILY_SUCCESS_COOLDOWN_MS`: espera minima entre lotes diarios apos sucesso de documento (padrao `120000`).
+- `SYNC_ADN_REQUEST_INTERVAL_MS`: intervalo minimo entre chamadas ao ADN (padrao `5000`).
+- `SYNC_ADN_RATE_LIMIT_COOLDOWN_MS`: cooldown global apos `HTTP 429` (padrao `300000`).
 - `SYNC_NIGHTLY_SWEEP_ENABLED`: habilita busca noturna automatica para todos os clientes cadastrados (padrao `true`).
 - `SYNC_NIGHTLY_SWEEP_HOUR`: hora da execucao noturna (0-23, padrao `2`).
 - `SYNC_NIGHTLY_SWEEP_MINUTE`: minuto da execucao noturna (0-59, padrao `0`).
@@ -166,7 +169,7 @@ Valores aceitos:
 - No painel, `Busca habilitada` significa que o cliente pode entrar nas rotinas elegiveis; `Executando agora` aparece separadamente no monitor quando ha consulta em andamento.
 - Em erro temporario da API (ex.: `HTTP 429`, timeout, `5xx`), o sistema **nao avanca o NSU** para evitar pulo de documentos.
 - Nesses casos, a proxima tentativa e agendada com base em `SYNC_API_RETRY_DELAY_MS`.
-- No modo diario, por padrao o ciclo para apos o primeiro documento sincronizado e agenda nova execucao curta (`SYNC_DAILY_SUCCESS_COOLDOWN_MS`) para reduzir `HTTP 429`.
+- No modo diario, por padrao o ciclo processa ate `SYNC_DAILY_MAX_NSU_PER_RUN` NSUs por lote. Se todos os NSUs consultados tiverem documento, agenda nova execucao curta (`SYNC_DAILY_SUCCESS_COOLDOWN_MS`) antes de continuar.
 - A busca noturna (`SYNC_NIGHTLY_SWEEP_*`) ativa modo diario para todos os clientes cadastrados e dispara varredura incremental a partir do ultimo NSU salvo.
 
 ## Importacao de XML

@@ -55,6 +55,24 @@ describe('SyncService', () => {
 
   let service: SyncService;
 
+  const buildService = () =>
+    new SyncService(
+      prisma as unknown as PrismaService,
+      storage as unknown as LocalStorageService,
+      danfse as unknown as NfseDanfseService,
+      parser as unknown as NfseXmlParserService,
+      adnClient as NfseAdnClient
+    );
+
+  const restoreEnv = (name: string, value: string | undefined) => {
+    if (value === undefined) {
+      delete process.env[name];
+      return;
+    }
+
+    process.env[name] = value;
+  };
+
   beforeEach(() => {
     jest.clearAllMocks();
     parser.parse.mockReset();
@@ -89,13 +107,7 @@ describe('SyncService', () => {
     prisma.nfseDocumento.findFirst.mockResolvedValue(null);
     storage.putObject.mockResolvedValue(undefined);
 
-    service = new SyncService(
-      prisma as unknown as PrismaService,
-      storage as unknown as LocalStorageService,
-      danfse as unknown as NfseDanfseService,
-      parser as unknown as NfseXmlParserService,
-      adnClient as NfseAdnClient
-    );
+    service = buildService();
   });
 
   it('consulta um NSU especifico sem persistir nota', async () => {
@@ -290,58 +302,165 @@ describe('SyncService', () => {
   });
 
   it('em modo diario interrompe o ciclo apos primeiro documento e agenda cooldown de sucesso', async () => {
-    prisma.nfseSyncControle.findMany.mockResolvedValue([
-      {
-        id: 'ctrl-1',
-        clienteId: 'cliente-1',
-        estabelecimentoId: 'estab-1',
-        cnpjConsulta: '12345678000199',
-        ambiente: Ambiente.producao,
-        modoSync: 'somente_novas',
-        ultimoNsuConsultado: 8n
-      }
-    ]);
+    const previousStop = process.env.SYNC_DAILY_STOP_ON_FIRST_DOCUMENT;
+    process.env.SYNC_DAILY_STOP_ON_FIRST_DOCUMENT = 'true';
+    service = buildService();
 
-    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
-      nsu: 9n,
-      hasDocument: true,
-      chaveAcesso: '42110092206960810000176000000000000226015757529368',
-      xml: '<NFSe>ok</NFSe>',
-      statusCode: 200,
-      message: null,
-      rawResponse: {}
-    });
+    try {
+      prisma.nfseSyncControle.findMany.mockResolvedValue([
+        {
+          id: 'ctrl-1',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          cnpjConsulta: '12345678000199',
+          ambiente: Ambiente.producao,
+          modoSync: 'somente_novas',
+          ultimoNsuConsultado: 8n
+        }
+      ]);
 
-    parser.parse.mockReturnValue({
-      chaveAcesso: '42110092206960810000176000000000000226015757529368',
-      numeroNfse: '2',
-      serie: '900',
-      dataEmissao: new Date('2024-08-01T14:08:50.000Z'),
-      competencia: new Date('2024-08-01T00:00:00.000Z'),
-      status: '100',
-      cnpjPrestador: '44454248000106',
-      razaoSocialPrestador: 'Prestador',
-      cnpjTomador: '06960810000176',
-      razaoSocialTomador: 'Tomador',
-      municipioPrestacaoCodigo: '4211009',
-      municipioPrestacaoNome: 'Mondai',
-      valorServico: '1720.00',
-      codigoServicoNacional: '170101',
-      descricaoServico: 'consultoria'
-    });
+      (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+        nsu: 9n,
+        hasDocument: true,
+        chaveAcesso: '42110092206960810000176000000000000226015757529368',
+        xml: '<NFSe>ok</NFSe>',
+        statusCode: 200,
+        message: null,
+        rawResponse: {}
+      });
 
-    await service.runNow();
+      parser.parse.mockReturnValue({
+        chaveAcesso: '42110092206960810000176000000000000226015757529368',
+        numeroNfse: '2',
+        serie: '900',
+        dataEmissao: new Date('2024-08-01T14:08:50.000Z'),
+        competencia: new Date('2024-08-01T00:00:00.000Z'),
+        status: '100',
+        cnpjPrestador: '44454248000106',
+        razaoSocialPrestador: 'Prestador',
+        cnpjTomador: '06960810000176',
+        razaoSocialTomador: 'Tomador',
+        municipioPrestacaoCodigo: '4211009',
+        municipioPrestacaoNome: 'Mondai',
+        valorServico: '1720.00',
+        codigoServicoNacional: '170101',
+        descricaoServico: 'consultoria'
+      });
 
-    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
-    expect(prisma.nfseSyncControle.update).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: { id: 'ctrl-1' },
-        data: expect.objectContaining({
-          proximaExecucao: expect.any(Date),
-          ultimaMensagem: 'Documento sincronizado com sucesso'
+      await service.runNow();
+
+      expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
+      expect(prisma.nfseSyncControle.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'ctrl-1' },
+          data: expect.objectContaining({
+            proximaExecucao: expect.any(Date),
+            ultimaMensagem: 'Documento sincronizado com sucesso'
+          })
         })
-      })
-    );
+      );
+    } finally {
+      restoreEnv('SYNC_DAILY_STOP_ON_FIRST_DOCUMENT', previousStop);
+    }
+  });
+
+  it('em modo diario sem parada no primeiro documento processa lote de NSUs', async () => {
+    const previousStop = process.env.SYNC_DAILY_STOP_ON_FIRST_DOCUMENT;
+    const previousMax = process.env.SYNC_DAILY_MAX_NSU_PER_RUN;
+    const previousRequestInterval = process.env.SYNC_ADN_REQUEST_INTERVAL_MS;
+    const previousCooldown = process.env.SYNC_DAILY_SUCCESS_COOLDOWN_MS;
+    process.env.SYNC_DAILY_STOP_ON_FIRST_DOCUMENT = 'false';
+    process.env.SYNC_DAILY_MAX_NSU_PER_RUN = '2';
+    process.env.SYNC_ADN_REQUEST_INTERVAL_MS = '1';
+    process.env.SYNC_DAILY_SUCCESS_COOLDOWN_MS = '10';
+    service = buildService();
+
+    try {
+      prisma.nfseSyncControle.findMany.mockResolvedValue([
+        {
+          id: 'ctrl-1',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          cnpjConsulta: '12345678000199',
+          ambiente: Ambiente.producao,
+          modoSync: 'somente_novas',
+          ultimoNsuConsultado: 8n
+        }
+      ]);
+
+      (adnClient.getDFeByNsu as jest.Mock)
+        .mockResolvedValueOnce({
+          nsu: 9n,
+          hasDocument: true,
+          chaveAcesso: '42110092206960810000176000000000000226015757529368',
+          xml: '<NFSe>ok-9</NFSe>',
+          statusCode: 200,
+          message: null,
+          rawResponse: {}
+        })
+        .mockResolvedValueOnce({
+          nsu: 10n,
+          hasDocument: true,
+          chaveAcesso: '42110092206960810000176000000000000326015757529369',
+          xml: '<NFSe>ok-10</NFSe>',
+          statusCode: 200,
+          message: null,
+          rawResponse: {}
+        });
+
+      parser.parse.mockReturnValue({
+        chaveAcesso: '42110092206960810000176000000000000226015757529368',
+        numeroNfse: '2',
+        serie: '900',
+        dataEmissao: new Date('2024-08-01T14:08:50.000Z'),
+        competencia: new Date('2024-08-01T00:00:00.000Z'),
+        status: '100',
+        cnpjPrestador: '44454248000106',
+        razaoSocialPrestador: 'Prestador',
+        cnpjTomador: '06960810000176',
+        razaoSocialTomador: 'Tomador',
+        municipioPrestacaoCodigo: '4211009',
+        municipioPrestacaoNome: 'Mondai',
+        valorServico: '1720.00',
+        codigoServicoNacional: '170101',
+        descricaoServico: 'consultoria'
+      });
+
+      const result = await service.runNow();
+
+      expect(result).toEqual({
+        processed: 1,
+        documentsSaved: 2
+      });
+      expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(2);
+      expect(adnClient.getDFeByNsu).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          nsu: 9n
+        })
+      );
+      expect(adnClient.getDFeByNsu).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          nsu: 10n
+        })
+      );
+      expect(prisma.nfseDocumento.upsert).toHaveBeenCalledTimes(2);
+      expect(prisma.nfseSyncControle.update).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          where: { id: 'ctrl-1' },
+          data: expect.objectContaining({
+            proximaExecucao: expect.any(Date),
+            ultimaMensagem: 'Lote diario sincronizado com 2 documento(s); proxima busca agendada'
+          })
+        })
+      );
+    } finally {
+      restoreEnv('SYNC_DAILY_STOP_ON_FIRST_DOCUMENT', previousStop);
+      restoreEnv('SYNC_DAILY_MAX_NSU_PER_RUN', previousMax);
+      restoreEnv('SYNC_ADN_REQUEST_INTERVAL_MS', previousRequestInterval);
+      restoreEnv('SYNC_DAILY_SUCCESS_COOLDOWN_MS', previousCooldown);
+    }
   });
 
   it('iniciarSync dispara execucao imediata do ciclo', async () => {

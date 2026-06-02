@@ -21,8 +21,12 @@
 - Se aparecer `HTTP 429`, reduzir frequencia de consulta e ajustar:
   - `SYNC_AUTO_RUN_INTERVAL_MS`
   - `SYNC_API_RETRY_DELAY_MS`
-  - `SYNC_DAILY_STOP_ON_FIRST_DOCUMENT=true`
+  - `SYNC_API_RETRY_JITTER_MS`
+  - `SYNC_DAILY_MAX_NSU_PER_RUN`
+  - `SYNC_DAILY_STOP_ON_FIRST_DOCUMENT`
   - `SYNC_DAILY_SUCCESS_COOLDOWN_MS`
+  - `SYNC_ADN_REQUEST_INTERVAL_MS`
+  - `SYNC_ADN_RATE_LIMIT_COOLDOWN_MS`
 - Em `429/timeout/5xx`, o sistema nao avanca NSU (evita pulo de documento) e agenda nova tentativa.
 - Se a busca noturna nao estiver rodando, conferir:
   - `SYNC_NIGHTLY_SWEEP_ENABLED=true`
