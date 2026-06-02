@@ -49,6 +49,12 @@ NFSE_ADN_CLIENT_MODE=mock
 ENABLE_SWAGGER=true
 ```
 
+## Deploy em Windows Server
+
+Para rodar como servico Windows e acessar pela rede interna com hostname, consulte:
+
+- `docs/windows-service.md`
+
 ## Desenvolvimento sem container da API
 
 1. Suba apenas a infraestrutura:
