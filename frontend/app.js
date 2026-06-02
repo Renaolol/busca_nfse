@@ -86,6 +86,7 @@ const state = {
   alerts: [],
   establishmentsByClient: {},
   syncByClient: {},
+  schedulerStatus: null,
   settings: {
     tab: 'geral',
     geral: {
@@ -208,12 +209,13 @@ async function hydrateFromApi() {
   }));
   const clientIds = apiClients.map((client) => client.id);
 
-  const [establishmentsByClient, certificatesByClient, syncByClient, nfseDocs, auditRows] = await Promise.all([
+  const [establishmentsByClient, certificatesByClient, syncByClient, nfseDocs, auditRows, schedulerStatus] = await Promise.all([
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/estabelecimentos`, []),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/certificados`, []),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/sync/status`, { controles: [], logs: [] }),
     apiRequest('/nfse').catch(() => []),
-    apiRequest('/auditoria').catch(() => [])
+    apiRequest('/auditoria').catch(() => []),
+    apiRequest('/sync/scheduler-status').catch(() => null)
   ]);
 
   const clients = buildClientsFromApi(apiClients, establishmentsByClient, certificatesByClient, syncByClient, nfseDocs);
@@ -230,6 +232,8 @@ async function hydrateFromApi() {
   state.alerts = alerts;
   state.establishmentsByClient = establishmentsByClient;
   state.syncByClient = syncByClient;
+  state.schedulerStatus = schedulerStatus;
+  applySchedulerStatusToSettings(schedulerStatus);
   syncExecutionMonitorWithData();
 }
 
@@ -732,6 +736,7 @@ function renderHeader(meta) {
   const latestRun = state.searchRuns[0];
   const lastRoutineText = latestRun ? `${formatRelativeDate(latestRun.inicio)} as ${formatHour(latestRun.inicio)}` : 'Sem execucao';
   const healthStatus = getSystemHealthStatus();
+  const nightlyInfo = getNightlyScheduleInfo();
 
   return `
     <header class="header">
@@ -745,9 +750,11 @@ function renderHeader(meta) {
       <div class="header-right">
         <div class="header-meta">
           <div>Ultima rotina: ${escapeHtml(lastRoutineText)}</div>
+          <div>Rotina noturna: ${escapeHtml(nightlyInfo.shortLabel)}</div>
           <div>${escapeHtml(healthStatus.description)}</div>
-          <div>Fonte: ${state.dataSource === 'api' ? 'Banco local' : 'Dados mockados'}</div>
+          <div>Fonte: Banco local</div>
         </div>
+        ${statusBadge(nightlyInfo.badgeLabel, nightlyInfo.tone)}
         ${statusBadge(healthStatus.label, healthStatus.tone)}
         <div class="avatar" aria-label="Usuario GC">GC</div>
       </div>
@@ -823,8 +830,10 @@ function renderDashboardPage() {
         ${statusBadge(lastRun?.status || 'Sem status', summaryTone, 'summary-status')}
       </article>
 
+      ${renderSchedulerStatusStrip()}
+
       <section class="stats-grid">
-        ${statCard('users', 'Clientes monitorados', lastRun ? String(lastRun.clientesProcessados) : String(activeClientsCount), 'clientes com busca ativa', 'neutral')}
+        ${statCard('users', 'Clientes monitorados', lastRun ? String(lastRun.clientesProcessados) : String(activeClientsCount), 'clientes com busca habilitada', 'neutral')}
         ${statCard('file', 'NFS-e encontradas', lastRun ? String(lastRun.xmlsEncontrados) : '0', 'na ultima execucao', 'neutral')}
         ${statCard('folder', 'XMLs armazenados', lastRun ? String(lastRun.xmlsArmazenados) : '0', 'salvos no servidor interno', 'success')}
         ${statCard('alert', 'Falhas', lastRun ? String(lastRun.falhas) : '0', 'clientes com erro', 'danger')}
@@ -982,8 +991,8 @@ function renderClientsPage() {
             <p class="card-subtitle">${clients.length} cliente(s) na visao atual.</p>
           </div>
           <div class="table-actions">
-            <button class="btn secondary" type="button" data-action="clients-bulk-activate">Ativar busca</button>
-            <button class="btn secondary" type="button" data-action="clients-bulk-deactivate">Desativar busca</button>
+            <button class="btn secondary" type="button" data-action="clients-bulk-activate">Habilitar busca</button>
+            <button class="btn secondary" type="button" data-action="clients-bulk-deactivate">Pausar busca</button>
             <button class="btn primary" type="button" data-action="clients-bulk-reprocess">Reprocessar selecionados</button>
           </div>
         </div>
@@ -1021,7 +1030,7 @@ function renderClientsPage() {
                           ${statusBadge(client.certificadoStatus, toneFromCertificateStatus(client.certificadoStatus))}
                           <span class="row-sub">${client.certificadoValidade ? `Validade: ${escapeHtml(formatDate(client.certificadoValidade))}` : 'Sem certificado'}</span>
                         </td>
-                        <td>${statusBadge(client.buscaAtiva ? 'Ativa' : 'Inativa', client.buscaAtiva ? 'success' : 'neutral')}</td>
+                        <td>${renderClientSearchActivation(client)}</td>
                         <td>${escapeHtml(formatDateTime(client.ultimaBusca))}</td>
                         <td>${escapeHtml(String(client.xmlsEncontrados))}</td>
                         <td>${statusBadge(client.statusOperacional, toneFromStatus(client.statusOperacional))}</td>
@@ -1030,7 +1039,7 @@ function renderClientsPage() {
                             <button class="icon-btn" data-action="client-details" data-client-id="${client.id}">Ver detalhes</button>
                             <button class="icon-btn" data-action="client-edit" data-client-id="${client.id}">Editar</button>
                             <button class="icon-btn" data-action="client-reprocess" data-client-id="${client.id}">Reprocessar busca</button>
-                            <button class="icon-btn" data-action="client-toggle-search" data-client-id="${client.id}">${client.buscaAtiva ? 'Desativar busca' : 'Ativar busca'}</button>
+                            <button class="icon-btn" data-action="client-toggle-search" data-client-id="${client.id}">${client.buscaAtiva ? 'Pausar busca' : 'Habilitar busca'}</button>
                           </div>
                         </td>
                       </tr>
@@ -1074,7 +1083,7 @@ function renderClientDetailsPage(clientId) {
           <p class="page-description">${escapeHtml(formatCnpj(client.cnpj))}</p>
         </div>
         <div class="page-actions">
-          ${statusBadge(client.buscaAtiva ? 'Busca ativa' : 'Busca inativa', client.buscaAtiva ? 'success' : 'neutral')}
+          ${statusBadge(client.buscaAtiva ? 'Busca habilitada' : 'Busca pausada', client.buscaAtiva ? 'success' : 'neutral')}
           ${statusBadge(client.certificadoStatus === 'Valido' ? 'Certificado valido' : `Certificado ${client.certificadoStatus.toLowerCase()}`, toneFromCertificateStatus(client.certificadoStatus))}
           ${statusBadge(`Ultima busca: ${formatRelativeDate(client.ultimaBusca)} as ${formatHour(client.ultimaBusca)}`, 'info')}
         </div>
@@ -1192,7 +1201,7 @@ function renderClientDetailsPage(clientId) {
             <form id="clientSearchConfigForm" class="form-grid" style="grid-template-columns:1fr; margin-top:12px;">
               <label class="field-inline">
                 <input name="buscaAtiva" type="checkbox" ${client.buscaAtiva ? 'checked' : ''} />
-                <span>Busca automatica ativa</span>
+                <span>Cliente habilitado para rotina</span>
               </label>
               <label class="field">
                 Horario preferencial
@@ -1332,6 +1341,7 @@ function renderSearchRunsPage() {
         ]
       })}
 
+      ${renderSchedulerStatusStrip()}
       ${renderExecutionMonitorCard()}
 
       <article class="card filter-card">
@@ -1759,10 +1769,11 @@ function renderSettingsTabPanel() {
       `;
     case 'rotina':
       return `
+        ${renderSchedulerSettingsPanel()}
         <form id="settingsRotinaForm" class="form-grid three">
           <label class="field-inline" style="grid-column: span 3;">
             <input name="ativa" type="checkbox" ${state.settings.rotina.ativa ? 'checked' : ''} />
-            <span>Ativar busca automatica</span>
+            <span>Ativar rotina noturna</span>
           </label>
           <label class="field">
             Horario de inicio
@@ -1944,7 +1955,7 @@ function renderClientFormModal() {
               </label>
               <label class="field-inline" style="grid-column: span 2;">
                 <input name="buscaAtiva" type="checkbox" ${client?.buscaAtiva ?? true ? 'checked' : ''} />
-                <span>Busca automatica ativa</span>
+                <span>Cliente habilitado para rotina</span>
               </label>
             </div>
           </div>
@@ -2239,6 +2250,76 @@ function statCard(iconKey, label, value, caption, tone) {
   `;
 }
 
+function renderSchedulerStatusStrip() {
+  const nightly = getNightlyScheduleInfo();
+  const autoSync = getAutoSyncInfo();
+
+  return `
+    <article class="card scheduler-strip">
+      <div class="scheduler-item">
+        <div class="scheduler-heading">
+          <span class="scheduler-dot ${nightly.tone}"></span>
+          <strong>Rotina noturna</strong>
+        </div>
+        ${statusBadge(nightly.badgeLabel, nightly.tone)}
+        <p>${escapeHtml(nightly.description)}</p>
+        <small>Proxima execucao: ${escapeHtml(nightly.nextRunText)}</small>
+      </div>
+      <div class="scheduler-item">
+        <div class="scheduler-heading">
+          <span class="scheduler-dot ${autoSync.tone}"></span>
+          <strong>Ciclo automatico</strong>
+        </div>
+        ${statusBadge(autoSync.badgeLabel, autoSync.tone)}
+        <p>${escapeHtml(autoSync.description)}</p>
+        <small>Intervalo: ${escapeHtml(autoSync.intervalText)}</small>
+      </div>
+      <div class="scheduler-item">
+        <div class="scheduler-heading">
+          <span class="scheduler-dot ${state.executionMonitor.active ? 'info' : 'neutral'}"></span>
+          <strong>Execucao agora</strong>
+        </div>
+        ${statusBadge(state.executionMonitor.active ? 'Executando agora' : 'Nada em execucao', state.executionMonitor.active ? 'info' : 'neutral')}
+        <p>${escapeHtml(state.executionMonitor.currentClientName ? `Empresa atual: ${state.executionMonitor.currentClientName}` : 'Nenhum cliente sendo consultado neste momento.')}</p>
+        <small>${escapeHtml(state.executionMonitor.message || 'Aguardando proxima execucao.')}</small>
+      </div>
+    </article>
+  `;
+}
+
+function renderSchedulerSettingsPanel() {
+  const nightly = getNightlyScheduleInfo();
+  const autoSync = getAutoSyncInfo();
+
+  return `
+    <div class="scheduler-settings">
+      <div>
+        <span class="row-sub">Rotina noturna</span>
+        <div class="scheduler-settings-title">${statusBadge(nightly.badgeLabel, nightly.tone)} <strong>${escapeHtml(nightly.shortLabel)}</strong></div>
+        <p>${escapeHtml(nightly.description)}</p>
+      </div>
+      <div>
+        <span class="row-sub">Ciclo automatico</span>
+        <div class="scheduler-settings-title">${statusBadge(autoSync.badgeLabel, autoSync.tone)} <strong>${escapeHtml(autoSync.intervalText)}</strong></div>
+        <p>${escapeHtml(autoSync.description)}</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderClientSearchActivation(client) {
+  const label = client.buscaAtiva ? 'Habilitada' : 'Pausada';
+  const tone = client.buscaAtiva ? 'success' : 'neutral';
+  const detail = client.buscaAtiva ? 'entra nas rotinas elegiveis' : 'nao entra nas rotinas';
+
+  return `
+    <div class="stack-mini">
+      ${statusBadge(label, tone)}
+      <span class="row-sub">${escapeHtml(detail)}</span>
+    </div>
+  `;
+}
+
 function statusBadge(text, tone, extraClass = '') {
   const normalizedTone = ['success', 'warning', 'danger', 'info', 'neutral'].includes(tone) ? tone : 'neutral';
   return `<span class="chip ${normalizedTone} ${extraClass}">${escapeHtml(text)}</span>`;
@@ -2377,7 +2458,7 @@ async function toggleClientSearchStatus(clientId) {
       await apiRequest(`/clientes/${clientId}/${active ? 'ativar' : 'pausar'}`, {
         method: 'POST'
       });
-      pushToast(`Busca ${active ? 'ativada' : 'desativada'} para ${client.razaoSocial}.`, active ? 'success' : 'info');
+      pushToast(`Busca ${active ? 'habilitada' : 'pausada'} para ${client.razaoSocial}.`, active ? 'success' : 'info');
       await refreshApiData();
     } catch (error) {
       pushToast(`Falha ao atualizar status de busca: ${toErrorMessage(error)}`, 'error');
@@ -2387,7 +2468,7 @@ async function toggleClientSearchStatus(clientId) {
 
   client.buscaAtiva = !client.buscaAtiva;
   client.buscaStatus = client.buscaAtiva ? 'Ativo' : 'Inativo';
-  pushToast(`Busca ${client.buscaAtiva ? 'ativada' : 'desativada'} para ${client.razaoSocial}.`, client.buscaAtiva ? 'success' : 'info');
+  pushToast(`Busca ${client.buscaAtiva ? 'habilitada' : 'pausada'} para ${client.razaoSocial}.`, client.buscaAtiva ? 'success' : 'info');
   render();
 }
 
@@ -3273,6 +3354,108 @@ async function mapWithConcurrency(items, limit, worker) {
   return result;
 }
 
+function applySchedulerStatusToSettings(schedulerStatus) {
+  const nightly = schedulerStatus?.nightlySweep;
+  if (!nightly) {
+    return;
+  }
+
+  state.settings.rotina.ativa = Boolean(nightly.enabled);
+  state.settings.rotina.horarioInicio = formatTimeFromHourMinute(nightly.hour, nightly.minute);
+}
+
+function getNightlyScheduleInfo() {
+  const nightly = state.schedulerStatus?.nightlySweep;
+  if (!nightly) {
+    return {
+      enabled: false,
+      running: false,
+      tone: 'neutral',
+      badgeLabel: 'Status nao carregado',
+      shortLabel: 'Nao carregada',
+      description: 'Status da rotina noturna ainda nao foi carregado pelo backend.',
+      nextRunText: '-'
+    };
+  }
+
+  const enabled = Boolean(nightly.enabled);
+  const running = Boolean(nightly.running);
+  const time = formatTimeFromHourMinute(nightly.hour, nightly.minute);
+  const timezone = formatTimezoneOffset(nightly.timezoneOffsetMinutes);
+  const nextRunText = nightly.nextRunAt ? formatDateTime(nightly.nextRunAt) : '-';
+
+  if (running) {
+    return {
+      enabled,
+      running,
+      tone: 'info',
+      badgeLabel: 'Executando agora',
+      shortLabel: `Executando desde ${time}`,
+      description: `Rotina noturna em execucao. Agendamento base: ${time} (${timezone}).`,
+      nextRunText
+    };
+  }
+
+  if (enabled) {
+    return {
+      enabled,
+      running,
+      tone: 'success',
+      badgeLabel: 'Ativa',
+      shortLabel: `${time} ${timezone}`,
+      description: `Agendada para todos os dias as ${time} (${timezone}).`,
+      nextRunText
+    };
+  }
+
+  return {
+    enabled,
+    running,
+    tone: 'neutral',
+    badgeLabel: 'Inativa',
+    shortLabel: 'Inativa',
+    description: 'Rotina noturna desativada nas variaveis de ambiente.',
+    nextRunText: '-'
+  };
+}
+
+function getAutoSyncInfo() {
+  const autoSync = state.schedulerStatus?.autoSync;
+  if (!autoSync) {
+    return {
+      tone: 'neutral',
+      badgeLabel: 'Status nao carregado',
+      description: 'Status do ciclo automatico ainda nao foi carregado pelo backend.',
+      intervalText: '-'
+    };
+  }
+
+  if (autoSync.running) {
+    return {
+      tone: 'info',
+      badgeLabel: 'Executando agora',
+      description: 'Processando controles ativos que estao elegiveis neste momento.',
+      intervalText: formatDurationMs(autoSync.intervalMs)
+    };
+  }
+
+  if (autoSync.enabled) {
+    return {
+      tone: 'success',
+      badgeLabel: 'Ativo',
+      description: 'Verifica periodicamente clientes com busca habilitada e proxima execucao vencida.',
+      intervalText: formatDurationMs(autoSync.intervalMs)
+    };
+  }
+
+  return {
+    tone: 'neutral',
+    badgeLabel: 'Inativo',
+    description: 'Ciclo automatico desativado nas variaveis de ambiente.',
+    intervalText: formatDurationMs(autoSync.intervalMs)
+  };
+}
+
 function buildClientsFromApi(apiClients, establishmentsByClient, certificatesByClient, syncByClient, nfseDocs) {
   const totalNfseByClient = (Array.isArray(nfseDocs) ? nfseDocs : []).reduce((acc, doc) => {
     const clientId = doc?.clienteId;
@@ -3976,6 +4159,41 @@ function formatHour(value) {
   }).format(date);
 }
 
+function formatTimeFromHourMinute(hour, minute) {
+  const normalizedHour = Number.isInteger(Number(hour)) ? Number(hour) : 0;
+  const normalizedMinute = Number.isInteger(Number(minute)) ? Number(minute) : 0;
+  return `${String(Math.max(0, Math.min(23, normalizedHour))).padStart(2, '0')}:${String(Math.max(0, Math.min(59, normalizedMinute))).padStart(2, '0')}`;
+}
+
+function formatTimezoneOffset(offsetMinutes) {
+  const value = Number(offsetMinutes || 0);
+  const sign = value >= 0 ? '+' : '-';
+  const abs = Math.abs(value);
+  const hours = Math.floor(abs / 60);
+  const minutes = abs % 60;
+  return minutes === 0 ? `UTC${sign}${hours}` : `UTC${sign}${hours}:${String(minutes).padStart(2, '0')}`;
+}
+
+function formatDurationMs(value) {
+  const ms = Number(value || 0);
+  if (!Number.isFinite(ms) || ms <= 0) {
+    return '-';
+  }
+
+  if (ms < 60000) {
+    return `${Math.round(ms / 1000)}s`;
+  }
+
+  const minutes = Math.round(ms / 60000);
+  if (minutes < 60) {
+    return `${minutes} min`;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return remainingMinutes ? `${hours}h ${remainingMinutes}min` : `${hours}h`;
+}
+
 function formatCurrency(value) {
   const numeric = Number(value || 0);
   return new Intl.NumberFormat('pt-BR', {
@@ -4289,7 +4507,7 @@ document.addEventListener('click', (event) => {
     state.executionMonitor.currentClientName = state.clients[0]?.razaoSocial || 'Cliente exemplo';
     state.executionMonitor.lastXml = getLastXmlSummary();
     finishExecutionMonitor('Busca automatica mock finalizada.');
-    pushToast('Busca automatica ativada (mock).', 'success');
+    pushToast('Busca automatica habilitada (mock).', 'success');
     return;
   }
 

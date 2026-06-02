@@ -376,6 +376,30 @@ describe('SyncService', () => {
     });
   });
 
+  it('retorna status operacional do agendador de sync', () => {
+    const result = service.schedulerStatus();
+
+    expect(result.autoSync).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        running: false,
+        intervalMs: expect.any(Number),
+        startupDelayMs: expect.any(Number)
+      })
+    );
+    expect(result.nightlySweep).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        running: false,
+        hour: expect.any(Number),
+        minute: expect.any(Number),
+        timezoneOffsetMinutes: expect.any(Number),
+        checkIntervalMs: expect.any(Number),
+        nextRunAt: expect.any(String)
+      })
+    );
+  });
+
   it('filtra logs por cliente', async () => {
     prisma.nfseSyncLog.findMany.mockResolvedValue([{ id: 'log-1' }]);
 

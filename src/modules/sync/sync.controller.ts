@@ -36,6 +36,11 @@ export class SyncController {
     return this.syncService.statusSync(clienteId);
   }
 
+  @Get('sync/scheduler-status')
+  schedulerStatus() {
+    return this.syncService.schedulerStatus();
+  }
+
   @Post('sync/rodar-agora')
   @Roles('admin')
   runNow() {

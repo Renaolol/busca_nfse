@@ -146,6 +146,44 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     return { controles, logs };
   }
 
+  schedulerStatus(): {
+    autoSync: {
+      enabled: boolean;
+      running: boolean;
+      intervalMs: number;
+      startupDelayMs: number;
+    };
+    nightlySweep: {
+      enabled: boolean;
+      running: boolean;
+      hour: number;
+      minute: number;
+      timezoneOffsetMinutes: number;
+      checkIntervalMs: number;
+      lastRunDateKey: string | null;
+      nextRunAt: string | null;
+    };
+  } {
+    return {
+      autoSync: {
+        enabled: this.autoSyncEnabled,
+        running: this.autoSyncRunning,
+        intervalMs: this.autoSyncIntervalMs,
+        startupDelayMs: this.autoSyncStartupDelayMs
+      },
+      nightlySweep: {
+        enabled: this.nightlySweepEnabled,
+        running: this.nightlySweepRunning,
+        hour: this.nightlySweepHour,
+        minute: this.nightlySweepMinute,
+        timezoneOffsetMinutes: this.nightlySweepTimezoneOffsetMinutes,
+        checkIntervalMs: this.nightlySweepCheckIntervalMs,
+        lastRunDateKey: this.lastNightlySweepDateKey,
+        nextRunAt: this.nightlySweepEnabled ? this.resolveNextNightlySweepAt(new Date()).toISOString() : null
+      }
+    };
+  }
+
   async runNow(): Promise<{ processed: number; documentsSaved: number }> {
     if (this.isRateLimitCooldownActive()) {
       const until = this.rateLimitCooldownUntil;
@@ -854,6 +892,27 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     const month = String(referenceDate.getUTCMonth() + 1).padStart(2, '0');
     const day = String(referenceDate.getUTCDate()).padStart(2, '0');
     return `${year}-${month}-${day}`;
+  }
+
+  private resolveNextNightlySweepAt(now: Date): Date {
+    const localReference = this.getNightlyReferenceDate(now);
+    let targetLocalUtcMs = Date.UTC(
+      localReference.getUTCFullYear(),
+      localReference.getUTCMonth(),
+      localReference.getUTCDate(),
+      this.nightlySweepHour,
+      this.nightlySweepMinute,
+      0,
+      0
+    );
+    let targetActualMs = targetLocalUtcMs - this.nightlySweepTimezoneOffsetMinutes * 60 * 1000;
+
+    if (targetActualMs <= now.getTime()) {
+      targetLocalUtcMs += 24 * 60 * 60 * 1000;
+      targetActualMs = targetLocalUtcMs - this.nightlySweepTimezoneOffsetMinutes * 60 * 1000;
+    }
+
+    return new Date(targetActualMs);
   }
 
   private sleep(ms: number): Promise<void> {

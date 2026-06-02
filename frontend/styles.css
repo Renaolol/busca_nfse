@@ -395,6 +395,86 @@ textarea:focus-visible,
   padding: 9px 14px;
 }
 
+.scheduler-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  border-left: 4px solid var(--accent);
+}
+
+.scheduler-item {
+  min-width: 0;
+  display: grid;
+  gap: 8px;
+  align-content: start;
+}
+
+.scheduler-item p,
+.scheduler-item small,
+.scheduler-settings p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.scheduler-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.scheduler-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex: 0 0 auto;
+}
+
+.scheduler-dot.success {
+  background: var(--success);
+}
+
+.scheduler-dot.warning {
+  background: var(--warning);
+}
+
+.scheduler-dot.danger {
+  background: var(--danger);
+}
+
+.scheduler-dot.info {
+  background: var(--info);
+}
+
+.scheduler-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  grid-column: 1 / -1;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fdfdfd;
+  margin-bottom: 14px;
+}
+
+.scheduler-settings-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 5px 0 6px;
+  flex-wrap: wrap;
+}
+
+.stack-mini {
+  display: grid;
+  gap: 5px;
+  align-items: start;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -924,6 +1004,10 @@ textarea {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 
+  .scheduler-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .split-grid,
   .dual-grid {
     grid-template-columns: 1fr;
@@ -936,6 +1020,10 @@ textarea {
 
 @media (max-width: 1024px) {
   .layout-with-side {
+    grid-template-columns: 1fr;
+  }
+
+  .scheduler-settings {
     grid-template-columns: 1fr;
   }
 
@@ -998,6 +1086,7 @@ textarea {
 @media (max-width: 640px) {
   .stats-grid,
   .kpi-grid,
+  .scheduler-strip,
   .form-grid,
   .form-grid.two,
   .form-grid.three {

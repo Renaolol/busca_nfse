@@ -140,6 +140,7 @@ npm run job:limpar-temporarios
 O endpoint `POST /sync/rodar-agora` dispara uma execucao manual do ciclo de sincronizacao.
 Para teste real, defina `NFSE_ADN_CLIENT_MODE=real` e use certificado A1 valido no cadastro.
 Para consultar logs de sync por cliente, use `GET /sync/logs?clienteId=UUID`.
+Para consultar o status do agendador, use `GET /sync/scheduler-status`.
 
 ### Iniciar sync com modo
 
@@ -162,6 +163,7 @@ Valores aceitos:
 
 - Ao iniciar/retomar sync, os controles ficam `ativo` e entram no ciclo automatico em background.
 - O ciclo automatico consulta apenas controles ativos e respeita `proximaExecucao` quando houver backoff.
+- No painel, `Busca habilitada` significa que o cliente pode entrar nas rotinas elegiveis; `Executando agora` aparece separadamente no monitor quando ha consulta em andamento.
 - Em erro temporario da API (ex.: `HTTP 429`, timeout, `5xx`), o sistema **nao avanca o NSU** para evitar pulo de documentos.
 - Nesses casos, a proxima tentativa e agendada com base em `SYNC_API_RETRY_DELAY_MS`.
 - No modo diario, por padrao o ciclo para apos o primeiro documento sincronizado e agenda nova execucao curta (`SYNC_DAILY_SUCCESS_COOLDOWN_MS`) para reduzir `HTTP 429`.
