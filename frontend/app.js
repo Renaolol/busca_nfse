@@ -165,7 +165,7 @@ boot();
 function boot() {
   if (!window.location.hash) {
     window.location.hash = '#/dashboard';
-    return;
+    state.route = parseRoute(window.location.hash);
   }
 
   wireGlobalEvents();
@@ -2601,7 +2601,7 @@ async function submitClientForm(form) {
     pushToast('Cliente atualizado com sucesso.', 'success');
   } else {
     const newClient = {
-      id: crypto.randomUUID(),
+      id: createBrowserId(),
       ...payload,
       buscaStatus: payload.buscaAtiva ? 'Ativo' : 'Inativo',
       ultimaBusca: new Date().toISOString(),
@@ -3149,7 +3149,7 @@ function closeDrawer() {
 
 function pushToast(message, tone = 'info') {
   const toast = {
-    id: crypto.randomUUID(),
+    id: createBrowserId(),
     message,
     tone: ['success', 'error', 'info'].includes(tone) ? tone : 'info'
   };
@@ -3161,6 +3161,25 @@ function pushToast(message, tone = 'info') {
     state.toasts = state.toasts.filter((item) => item.id !== toast.id);
     render();
   }, 3200);
+}
+
+function createBrowserId() {
+  if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+
+  const randomValues = globalThis.crypto?.getRandomValues
+    ? globalThis.crypto.getRandomValues(new Uint8Array(16))
+    : null;
+
+  if (randomValues) {
+    randomValues[6] = (randomValues[6] & 0x0f) | 0x40;
+    randomValues[8] = (randomValues[8] & 0x3f) | 0x80;
+    const hex = Array.from(randomValues, (value) => value.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+
+  return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
 async function refreshApiData() {

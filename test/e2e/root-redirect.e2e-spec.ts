@@ -19,7 +19,7 @@ describe('Root Redirect (e2e)', () => {
     await app.close();
   });
 
-  it('/ (GET) redireciona para /app', async () => {
-    await request(app.getHttpServer()).get('/').expect(302).expect('Location', '/app');
+  it('/ (GET) redireciona para /app/', async () => {
+    await request(app.getHttpServer()).get('/').expect(302).expect('Location', '/app/');
   });
 });
