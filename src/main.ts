@@ -2,7 +2,6 @@ import { ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
-import type { Request, Response } from 'express';
 import { join } from 'node:path';
 import { AppModule } from './app.module';
 import { BigIntSerializerInterceptor } from './common/interceptors/bigint-serializer.interceptor';
@@ -38,9 +37,6 @@ async function bootstrap(): Promise<void> {
   }
 
   app.useStaticAssets(join(process.cwd(), 'frontend'), { prefix: '/app' });
-  app.getHttpAdapter()
-    .getInstance()
-    .get('/', (_request: Request, response: Response) => response.redirect('/app'));
 
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);

@@ -1,6 +1,16 @@
 # Windows Server como servico
 
-Este guia descreve como rodar o NotaSync GCONT como um servico do Windows Server e acessar pela rede interna com um nome como `http://notasync.lan/`.
+Este guia descreve como rodar o NotaSync GCONT como um servico do Windows Server e acessar pela rede interna usando IP e porta:
+
+```text
+http://IP_DO_SERVIDOR:3000/app
+```
+
+No servidor atual, o IP identificado foi:
+
+```text
+http://10.0.0.10:3000/app
+```
 
 ## Pre-requisitos
 
@@ -10,6 +20,7 @@ Este guia descreve como rodar o NotaSync GCONT como um servico do Windows Server
 - Projeto copiado/clonado no servidor.
 - Arquivo `.env` configurado.
 - PowerShell executado como Administrador.
+- WinSW baixado e colocado na raiz do projeto.
 
 ## Variaveis principais
 
@@ -17,7 +28,7 @@ O `.env` deve conter, no minimo:
 
 ```env
 NODE_ENV=production
-PORT=80
+PORT=3000
 DATABASE_URL=postgresql://postgres:SENHA@localhost:5432/nfse_collector?schema=public
 CERT_MASTER_KEY=SEGREDO_FORTE
 STORAGE_ROOT_PATH=C:\NotaSync\storage
@@ -43,16 +54,17 @@ npm run prisma:deploy
 Teste manual:
 
 ```powershell
-npm run start:prod
+$env:NODE_ENV="production"
+$env:PORT="3000"
+$env:STORAGE_ROOT_PATH="C:\Users\Administrador\Documents\GitHub\busca_nfse\storage"
+node dist\main.js
 ```
 
-Com `PORT=80`, o app deve abrir em:
+Abra:
 
 ```text
-http://localhost/
+http://localhost:3000/app
 ```
-
-A raiz `/` redireciona para `/app`.
 
 ## Instalar WinSW
 
@@ -82,13 +94,13 @@ No PowerShell como Administrador:
 
 ```powershell
 cd C:\Users\Administrador\Documents\GitHub\busca_nfse
-.\deploy\windows\install-notasync-service.ps1 -Port 80 -HostName notasync.lan
+.\deploy\windows\install-notasync-service.ps1 -Port 3000 -SkipBuild
 ```
 
-Se o build/migration ja foi feito e voce quer apenas instalar/reiniciar o servico:
+Se quiser que o script tambem rode `npm ci`, build e migrations, remova `-SkipBuild`:
 
 ```powershell
-.\deploy\windows\install-notasync-service.ps1 -Port 80 -HostName notasync.lan -SkipBuild
+.\deploy\windows\install-notasync-service.ps1 -Port 3000
 ```
 
 O script cria:
@@ -96,8 +108,38 @@ O script cria:
 - `NotaSyncGCONT.xml`
 - pasta `logs`
 - pasta `storage`
-- regra de firewall para a porta definida
+- regra de firewall para a porta `3000`
 - servico Windows `NotaSyncGCONT`
+
+## Acesso
+
+No proprio servidor:
+
+```text
+http://localhost:3000/app
+```
+
+Na rede interna:
+
+```text
+http://10.0.0.10:3000/app
+```
+
+Tambem funciona abrir a raiz:
+
+```text
+http://10.0.0.10:3000
+```
+
+O backend redireciona automaticamente para `/app`.
+
+Se o IP do servidor mudar, confirme com:
+
+```powershell
+ipconfig
+```
+
+Use o IPv4 da placa de rede principal, nao o IP de adaptadores auxiliares como Easypanel.
 
 ## Comandos uteis
 
@@ -121,76 +163,16 @@ logs\
 .\deploy\windows\uninstall-notasync-service.ps1
 ```
 
-## Acesso por notasync.lan
+## Firewall
 
-Para acessar sem IP e sem porta:
-
-```text
-http://notasync.lan/
-```
-
-voce precisa de duas coisas:
-
-1. O app rodando na porta `80`.
-2. `notasync.lan` resolvendo para o IP do servidor.
-
-### Opcao recomendada: DNS interno
-
-No servidor DNS da rede, crie um registro `A`:
-
-```text
-notasync.lan -> IP_DO_SERVIDOR
-```
-
-Se o Windows Server tambem for o DNS e existir a zona `lan`, use:
+O instalador cria a regra automaticamente. Se precisar criar manualmente:
 
 ```powershell
-Add-DnsServerResourceRecordA -ZoneName "lan" -Name "notasync" -IPv4Address "IP_DO_SERVIDOR"
+New-NetFirewallRule -DisplayName "NotaSync GCONT" -Direction Inbound -Protocol TCP -LocalPort 3000 -Action Allow
 ```
 
-Teste:
+Teste de conectividade:
 
 ```powershell
-Resolve-DnsName notasync.lan
-Test-NetConnection notasync.lan -Port 80
-```
-
-### Opcao rapida: arquivo hosts
-
-Em cada computador que vai acessar, edite como Administrador:
-
-```text
-C:\Windows\System32\drivers\etc\hosts
-```
-
-Adicione:
-
-```text
-IP_DO_SERVIDOR notasync.lan
-```
-
-Exemplo:
-
-```text
-192.168.0.10 notasync.lan
-```
-
-## Se a porta 80 estiver ocupada
-
-Verifique:
-
-```powershell
-netstat -ano | findstr ":80"
-```
-
-Se IIS ou outro servico estiver usando a porta 80, escolha uma das opcoes:
-
-- parar/remover o servico que usa a porta 80;
-- rodar o NotaSync em `3000` e configurar IIS/Caddy/Nginx como reverse proxy;
-- acessar temporariamente `http://notasync.lan:3000/`.
-
-Para instalar na porta 3000:
-
-```powershell
-.\deploy\windows\install-notasync-service.ps1 -Port 3000 -HostName notasync.lan
+Test-NetConnection 10.0.0.10 -Port 3000
 ```

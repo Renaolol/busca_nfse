@@ -3,8 +3,7 @@ param(
   [string]$DisplayName = "NotaSync GCONT",
   [string]$Description = "Servico interno NotaSync GCONT para busca e consulta de NFS-e.",
   [string]$ProjectPath = "",
-  [int]$Port = 80,
-  [string]$HostName = "notasync.lan",
+  [int]$Port = 3000,
   [switch]$SkipBuild
 )
 
@@ -102,5 +101,5 @@ if (-not $firewallRule) {
 Write-Host ""
 Write-Host "Servico instalado/iniciado: $ServiceName"
 Write-Host "Porta configurada: $Port"
-Write-Host "Teste local: http://localhost/"
-Write-Host "Para usar http://$HostName/, crie um registro DNS/hosts apontando para este servidor."
+Write-Host "Teste local: http://localhost:$Port/app"
+Write-Host "Acesso pela rede: http://IP_DO_SERVIDOR:$Port/app"
