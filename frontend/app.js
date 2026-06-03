@@ -1913,6 +1913,10 @@ function renderModal() {
 
 function renderClientFormModal() {
   const client = state.modal.mode === 'edit' ? findClientById(state.modal.clientId) : null;
+  const municipioValue = getEditableValue(client?.municipio);
+  const ufValue = getEditableValue(client?.uf);
+  const responsavelInternoValue = getEditableValue(client?.responsavelInterno);
+
   return `
     <div class="overlay" data-action="overlay-close">
       <div class="modal" role="dialog" aria-modal="true">
@@ -1943,15 +1947,15 @@ function renderClientFormModal() {
               </label>
               <label class="field">
                 Municipio
-                <input name="municipio" required value="${escapeHtml(client?.municipio || '')}" />
+                <input name="municipio" required value="${escapeHtml(municipioValue)}" />
               </label>
               <label class="field">
                 UF
-                <input name="uf" maxlength="2" required value="${escapeHtml(client?.uf || '')}" />
+                <input name="uf" maxlength="2" required value="${escapeHtml(ufValue)}" />
               </label>
               <label class="field" style="grid-column: span 2;">
                 Responsavel interno
-                <input name="responsavelInterno" value="${escapeHtml(client?.responsavelInterno || '')}" />
+                <input name="responsavelInterno" value="${escapeHtml(responsavelInternoValue)}" />
               </label>
               <label class="field-inline" style="grid-column: span 2;">
                 <input name="buscaAtiva" type="checkbox" ${client?.buscaAtiva ?? true ? 'checked' : ''} />
@@ -2555,6 +2559,8 @@ async function submitClientForm(form) {
       nomeFantasia: payload.nomeFantasia || undefined,
       cnpj: payload.cnpj,
       inscricaoMunicipal: payload.inscricaoMunicipal || undefined,
+      municipioNome: payload.municipio || undefined,
+      responsavelInterno: payload.responsavelInterno || undefined,
       ativo: payload.buscaAtiva
     };
 
@@ -3555,7 +3561,7 @@ function buildClientsFromApi(apiClients, establishmentsByClient, certificatesByC
       inscricaoMunicipal: primaryEstablishment?.inscricaoMunicipal || '',
       municipio: primaryEstablishment?.municipioNome || '-',
       uf: '-',
-      responsavelInterno: client.emailResponsavel || '-',
+      responsavelInterno: client.responsavelInterno || client.emailResponsavel || '-',
       buscaAtiva: buscaStatus === 'Ativo',
       buscaStatus,
       ultimaBusca: latestLog?.createdAt || latestControl?.ultimaExecucao || client.updatedAt || client.createdAt,
@@ -3993,6 +3999,11 @@ function sanitizeEmail(value) {
   }
 
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : undefined;
+}
+
+function getEditableValue(value) {
+  const normalized = String(value || '').trim();
+  return normalized === '-' ? '' : normalized;
 }
 
 function toNumber(value) {

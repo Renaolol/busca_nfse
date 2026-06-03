@@ -18,6 +18,21 @@ export class UpdateClientDto {
   @IsString()
   inscricaoMunicipal?: string;
 
+  @ApiPropertyOptional({ description: 'Codigo IBGE do municipio do estabelecimento principal' })
+  @IsOptional()
+  @IsString()
+  municipioCodigoIbge?: string;
+
+  @ApiPropertyOptional({ description: 'Municipio do estabelecimento principal' })
+  @IsOptional()
+  @IsString()
+  municipioNome?: string;
+
+  @ApiPropertyOptional({ description: 'Responsavel interno pelo cliente' })
+  @IsOptional()
+  @IsString()
+  responsavelInterno?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()

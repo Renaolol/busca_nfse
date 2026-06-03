@@ -237,7 +237,8 @@ Use a lista suspensa de clientes para selecionar o contexto ativo; ao selecionar
 Ao abrir/selecionar cliente, a listagem inicia com competencia do mes anterior ao atual.
 No cabecalho da aba `Notas`, use o switcher `Emitidas/Recebidas` para alternar rapidamente a relacao consultada.
 Edicao de dados e certificados fica disponivel via botoes \"Editar dados\" e \"Editar certificados\".
-Ao criar cliente, o backend ja cria automaticamente o estabelecimento principal com o mesmo CNPJ.
+Ao criar cliente, o backend ja cria automaticamente o estabelecimento principal com o mesmo CNPJ, inscricao municipal e municipio informados.
+O campo `responsavelInterno` fica salvo no cadastro do cliente para acompanhamento operacional interno.
 No cadastro de certificado, a API extrai automaticamente validade, thumbprint, serial, emissor e subject do arquivo `.pfx/.p12`.
 Certificados inativos podem ser excluidos por `DELETE /certificados/:id` (ativos exigem desativacao antes).
 Nos endpoints por `id` de certificado (`GET/POST/DELETE /certificados/:id...`), informe `?clienteId=...` para validar escopo.

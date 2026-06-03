@@ -19,6 +19,7 @@ export class ClientsService {
           razaoSocial: dto.razaoSocial,
           nomeFantasia: dto.nomeFantasia,
           cnpj,
+          responsavelInterno: dto.responsavelInterno,
           emailResponsavel: dto.emailResponsavel,
           telefone: dto.telefone,
           ativo: dto.ativo ?? true
@@ -31,6 +32,8 @@ export class ClientsService {
           cnpj,
           razaoSocial: dto.razaoSocial,
           inscricaoMunicipal: dto.inscricaoMunicipal,
+          municipioCodigoIbge: dto.municipioCodigoIbge,
+          municipioNome: dto.municipioNome,
           ativo: true
         }
       });
@@ -73,6 +76,7 @@ export class ClientsService {
           razaoSocial: dto.razaoSocial,
           cnpj: cnpjNormalizado,
           nomeFantasia: dto.nomeFantasia,
+          responsavelInterno: dto.responsavelInterno,
           emailResponsavel: dto.emailResponsavel,
           telefone: dto.telefone,
           ativo: dto.ativo
@@ -90,7 +94,9 @@ export class ClientsService {
           data: {
             cnpj: cnpjNormalizado,
             razaoSocial: dto.razaoSocial,
-            inscricaoMunicipal: dto.inscricaoMunicipal
+            inscricaoMunicipal: dto.inscricaoMunicipal,
+            municipioCodigoIbge: dto.municipioCodigoIbge,
+            municipioNome: dto.municipioNome
           }
         });
       }
