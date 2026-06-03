@@ -497,7 +497,7 @@ function onDocumentClick(event) {
       return;
     }
     case 'xml-export-list': {
-      pushToast('Listagem exportada para CSV (mock).', 'success');
+      exportXmlListToCsv();
       return;
     }
     case 'xml-details': {
@@ -4546,6 +4546,75 @@ async function downloadDanfseByXmlId(xmlId) {
   } catch (error) {
     pushToast(`Falha ao baixar DANFSE: ${toErrorMessage(error)}`, 'error');
   }
+}
+
+function exportXmlListToCsv() {
+  if (!state.xmlSearch.hasSearched) {
+    pushToast('Busque os XMLs antes de exportar a listagem.', 'error');
+    return;
+  }
+
+  const xmls = getFilteredXmls();
+  if (!xmls.length) {
+    pushToast('Nao ha XMLs na listagem atual para exportar.', 'error');
+    return;
+  }
+
+  const header = [
+    'Numero NFS-e',
+    'Cliente',
+    'CNPJ',
+    'Municipio',
+    'Data emissao',
+    'Data download',
+    'Valor',
+    'Tipo',
+    'Status armazenamento',
+    'Prestador',
+    'Tomador',
+    'ISS',
+    'Codigo verificacao'
+  ];
+  const rows = xmls.map((xml) => [
+    xml.numeroNfse,
+    xml.cliente,
+    formatCnpj(xml.cnpj),
+    xml.municipio,
+    formatDate(xml.dataEmissao),
+    formatDateTime(xml.dataDownload),
+    formatCurrency(xml.valor),
+    xml.tipo,
+    xml.statusArmazenamento,
+    xml.prestador,
+    xml.tomador,
+    formatCurrency(xml.iss),
+    xml.codigoVerificacao
+  ]);
+  const csv = [header, ...rows].map((row) => row.map(escapeCsvCell).join(';')).join('\r\n');
+  const client = findClientById(state.xmlSearch.lastQuery?.cliente);
+  const start = state.xmlSearch.lastQuery?.emissaoInicio || 'inicio';
+  const end = state.xmlSearch.lastQuery?.emissaoFim || 'fim';
+  const clientName = toSafeFileName(client?.razaoSocial || 'cliente');
+  const fileName = `xmls-${clientName}-${start}-${end}.csv`;
+  const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' });
+
+  triggerBrowserDownload(fileName, blob);
+  pushToast(`${xmls.length} XML(s) exportado(s) para CSV.`, 'success');
+}
+
+function escapeCsvCell(value) {
+  const normalized = String(value ?? '').replaceAll('"', '""');
+  return `"${normalized}"`;
+}
+
+function toSafeFileName(value) {
+  return String(value || 'arquivo')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80)
+    .toLowerCase() || 'arquivo';
 }
 
 async function ensureXmlContentLoaded(xml) {
