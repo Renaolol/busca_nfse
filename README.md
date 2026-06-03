@@ -245,6 +245,7 @@ Nos endpoints por `id` de certificado (`GET/POST/DELETE /certificados/:id...`), 
   - `clienteId` deve ser UUID valido.
 Tambem permite consultar por CNPJ base e alternar entre NFS-e emitidas e recebidas.
 Na tabela de resultados, os botoes `XML` e `DANFSE` fazem download direto dos arquivos.
+Na tela `XMLs Armazenados`, a listagem inicia vazia; selecione empresa e periodo de emissao e clique em `Buscar XMLs` para consultar os documentos no banco.
 As operacoes por ID em certificado e NFS-e usam `clienteId` como escopo (query string) para evitar acesso cruzado entre clientes.
 Quando houver pendencias (sem certificado, sem sync ou sem notas), o painel exibe mensagens explicativas.
 

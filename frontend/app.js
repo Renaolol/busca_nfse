@@ -83,6 +83,12 @@ const state = {
     disabling: false
   },
   xmlFiles: [],
+  xmlSearch: {
+    hasSearched: false,
+    results: [],
+    lastQuery: null,
+    lastSearchedAt: null
+  },
   alerts: [],
   establishmentsByClient: {},
   syncByClient: {},
@@ -624,7 +630,7 @@ function onDocumentSubmit(event) {
     }
     case 'xmlsFilterForm': {
       event.preventDefault();
-      applyXmlFilters(target);
+      void applyXmlFilters(target);
       return;
     }
     case 'alertsFilterForm': {
@@ -1511,6 +1517,10 @@ function renderRunningExecutionCard() {
 
 function renderXmlsPage() {
   const xmls = getFilteredXmls();
+  const xmlSearchCanShowTable =
+    state.xmlSearch.hasSearched || state.tableState.xmls === 'loading' || state.tableState.xmls === 'error';
+  const xmlSearchSummary =
+    state.xmlSearch.hasSearched && state.tableState.xmls !== 'loading' ? renderXmlSearchSummary() : '';
 
   return `
     <section class="page-section">
@@ -1521,11 +1531,24 @@ function renderXmlsPage() {
       })}
 
       <article class="card filter-card">
-        <h3 class="card-title">Filtros</h3>
+        <h3 class="card-title">Consulta de XMLs</h3>
+        <p class="card-subtitle">Selecione uma empresa e um periodo de emissao antes de carregar a listagem.</p>
         <form id="xmlsFilterForm" class="form-grid">
           <label class="field">
-            Cliente
-            <select name="cliente">${renderOptions(['Todos', ...state.clients.map((client) => client.id)], state.filters.xmls.cliente, mapClientOptions())}</select>
+            Empresa
+            <select name="cliente" required>${renderOptions(state.clients.map((client) => client.id), state.filters.xmls.cliente === 'Todos' ? '' : state.filters.xmls.cliente, mapClientOptions(), 'Selecione uma empresa')}</select>
+          </label>
+          <label class="field">
+            Emissao inicio
+            <input name="emissaoInicio" type="date" required value="${escapeHtml(state.filters.xmls.emissaoInicio)}" />
+          </label>
+          <label class="field">
+            Emissao fim
+            <input name="emissaoFim" type="date" required value="${escapeHtml(state.filters.xmls.emissaoFim)}" />
+          </label>
+          <label class="field">
+            Tipo
+            <select name="tipo">${renderOptions(['Todos', 'Emitida', 'Tomada'], state.filters.xmls.tipo)}</select>
           </label>
           <label class="field">
             CNPJ
@@ -1540,14 +1563,6 @@ function renderXmlsPage() {
             <select name="municipio">${renderOptions(['Todos', ...uniqueValues(state.xmlFiles.map((xml) => xml.municipio))], state.filters.xmls.municipio)}</select>
           </label>
           <label class="field">
-            Emissao inicio
-            <input name="emissaoInicio" type="date" value="${escapeHtml(state.filters.xmls.emissaoInicio)}" />
-          </label>
-          <label class="field">
-            Emissao fim
-            <input name="emissaoFim" type="date" value="${escapeHtml(state.filters.xmls.emissaoFim)}" />
-          </label>
-          <label class="field">
             Download inicio
             <input name="downloadInicio" type="date" value="${escapeHtml(state.filters.xmls.downloadInicio)}" />
           </label>
@@ -1556,71 +1571,106 @@ function renderXmlsPage() {
             <input name="downloadFim" type="date" value="${escapeHtml(state.filters.xmls.downloadFim)}" />
           </label>
           <label class="field">
-            Tipo
-            <select name="tipo">${renderOptions(['Todos', 'Emitida', 'Tomada'], state.filters.xmls.tipo)}</select>
-          </label>
-          <label class="field">
             Status do armazenamento
             <select name="status">${renderOptions(['Todos', 'Armazenado', 'Pendente', 'Erro'], state.filters.xmls.status)}</select>
           </label>
           <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
-            <button class="btn primary" type="submit">Filtrar</button>
+            <button class="btn primary" type="submit">Buscar XMLs</button>
             <button class="btn secondary" type="button" data-action="xmls-clear-filters">Limpar</button>
           </div>
         </form>
       </article>
 
-      <article class="card">
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Numero NFS-e</th>
-                <th>Cliente</th>
-                <th>CNPJ</th>
-                <th>Municipio</th>
-                <th>Data emissao</th>
-                <th>Data download</th>
-                <th>Valor</th>
-                <th>Tipo</th>
-                <th>Status</th>
-                <th>Acoes</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${renderTableRowsOrState({
-                key: 'xmls',
-                colSpan: 10,
-                rowsHtml: xmls
-                  .map((xml) => {
-                    return `<tr>
-                      <td>${escapeHtml(xml.numeroNfse)}</td>
-                      <td>${escapeHtml(xml.cliente)}</td>
-                      <td>${escapeHtml(formatCnpj(xml.cnpj))}</td>
-                      <td>${escapeHtml(xml.municipio)}</td>
-                      <td>${escapeHtml(formatDate(xml.dataEmissao))}</td>
-                      <td>${escapeHtml(formatDateTime(xml.dataDownload))}</td>
-                      <td>${escapeHtml(formatCurrency(xml.valor))}</td>
-                      <td>${escapeHtml(xml.tipo)}</td>
-                      <td>${statusBadge(xml.statusArmazenamento, toneFromStorageStatus(xml.statusArmazenamento))}</td>
-                      <td>
-                        <div class="table-actions">
-                          <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar detalhes</button>
-                          <button class="icon-btn" data-action="xml-view" data-xml-id="${xml.id}">Ver XML</button>
-                          <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
-                          <button class="icon-btn" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
-                        </div>
-                      </td>
-                    </tr>`;
-                  })
-                  .join(''),
-                emptyMessage: 'Nenhum XML encontrado para os filtros aplicados.'
-              })}
-            </tbody>
-          </table>
-        </div>
-      </article>
+      ${
+        xmlSearchCanShowTable
+          ? `${xmlSearchSummary}${renderXmlsTableCard(xmls)}`
+          : renderXmlSearchEmptyState()
+      }
     </section>
+  `;
+}
+
+function renderXmlSearchEmptyState() {
+  return `
+    <article class="card">
+      <div class="table-state">
+        Selecione a empresa e o periodo de emissao desejado, depois clique em <strong>Buscar XMLs</strong>.
+      </div>
+    </article>
+  `;
+}
+
+function renderXmlSearchSummary() {
+  const query = state.xmlSearch.lastQuery;
+  if (!query) {
+    return '';
+  }
+
+  const client = findClientById(query.cliente);
+  return `
+    <article class="card" style="box-shadow:none; border-style:dashed;">
+      <div class="progress-meta">
+        <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
+        <span>Periodo: <strong>${escapeHtml(formatDate(query.emissaoInicio))} ate ${escapeHtml(formatDate(query.emissaoFim))}</strong></span>
+        <span>Resultado: <strong>${escapeHtml(String(state.xmlSearch.results.length))} XML(s)</strong></span>
+        <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.xmlSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
+      </div>
+    </article>
+  `;
+}
+
+function renderXmlsTableCard(xmls) {
+  return `
+    <article class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Numero NFS-e</th>
+              <th>Cliente</th>
+              <th>CNPJ</th>
+              <th>Municipio</th>
+              <th>Data emissao</th>
+              <th>Data download</th>
+              <th>Valor</th>
+              <th>Tipo</th>
+              <th>Status</th>
+              <th>Acoes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderTableRowsOrState({
+              key: 'xmls',
+              colSpan: 10,
+              rowsHtml: xmls
+                .map((xml) => {
+                  return `<tr>
+                    <td>${escapeHtml(xml.numeroNfse)}</td>
+                    <td>${escapeHtml(xml.cliente)}</td>
+                    <td>${escapeHtml(formatCnpj(xml.cnpj))}</td>
+                    <td>${escapeHtml(xml.municipio)}</td>
+                    <td>${escapeHtml(formatDate(xml.dataEmissao))}</td>
+                    <td>${escapeHtml(formatDateTime(xml.dataDownload))}</td>
+                    <td>${escapeHtml(formatCurrency(xml.valor))}</td>
+                    <td>${escapeHtml(xml.tipo)}</td>
+                    <td>${statusBadge(xml.statusArmazenamento, toneFromStorageStatus(xml.statusArmazenamento))}</td>
+                    <td>
+                      <div class="table-actions">
+                        <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar detalhes</button>
+                        <button class="icon-btn" data-action="xml-view" data-xml-id="${xml.id}">Ver XML</button>
+                        <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
+                        <button class="icon-btn" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
+                      </div>
+                    </td>
+                  </tr>`;
+                })
+                .join(''),
+              emptyMessage: 'Nenhum XML encontrado para a empresa e periodo selecionados.'
+            })}
+          </tbody>
+        </table>
+      </div>
+    </article>
   `;
 }
 
@@ -2809,10 +2859,10 @@ function refreshRunningExecution() {
   render();
 }
 
-function applyXmlFilters(form) {
+async function applyXmlFilters(form) {
   const data = new FormData(form);
   state.filters.xmls = {
-    cliente: String(data.get('cliente') || 'Todos'),
+    cliente: String(data.get('cliente') || ''),
     cnpj: normalizeDigits(String(data.get('cnpj') || '')),
     numero: String(data.get('numero') || '').trim(),
     emissaoInicio: String(data.get('emissaoInicio') || ''),
@@ -2824,15 +2874,96 @@ function applyXmlFilters(form) {
     status: String(data.get('status') || 'Todos')
   };
 
-  state.tableState.xmls = 'data';
+  if (!state.filters.xmls.cliente || !state.filters.xmls.emissaoInicio || !state.filters.xmls.emissaoFim) {
+    state.xmlSearch.hasSearched = false;
+    state.xmlSearch.results = [];
+    state.xmlSearch.lastQuery = null;
+    state.tableState.xmls = 'data';
+    pushToast('Selecione empresa, emissao inicio e emissao fim para buscar XMLs.', 'error');
+    render();
+    return;
+  }
+
+  if (Date.parse(state.filters.xmls.emissaoInicio) > Date.parse(state.filters.xmls.emissaoFim)) {
+    state.xmlSearch.hasSearched = false;
+    state.xmlSearch.results = [];
+    state.xmlSearch.lastQuery = null;
+    state.tableState.xmls = 'data';
+    pushToast('A data inicial nao pode ser maior que a data final.', 'error');
+    render();
+    return;
+  }
+
+  state.xmlSearch.hasSearched = true;
+  state.xmlSearch.results = [];
+  state.xmlSearch.lastQuery = { ...state.filters.xmls };
+  state.tableState.xmls = 'loading';
+  render();
+
+  if (state.dataSource !== 'api') {
+    state.xmlSearch.results = getFilteredXmlsFromSource(state.xmlFiles);
+    state.xmlSearch.lastSearchedAt = new Date().toISOString();
+    state.tableState.xmls = 'data';
+    render();
+    return;
+  }
+
+  try {
+    const query = buildXmlSearchQuery(state.filters.xmls);
+    const docs = await apiRequest(`/nfse?${query.toString()}`);
+    const xmls = buildXmlFilesFromApi(Array.isArray(docs) ? docs : [], state.clients);
+    state.xmlFiles = mergeXmlFilesById(state.xmlFiles, xmls);
+    state.xmlSearch.results = getFilteredXmlsFromSource(xmls);
+    state.xmlSearch.lastSearchedAt = new Date().toISOString();
+    state.tableState.xmls = 'data';
+  } catch (error) {
+    state.xmlSearch.results = [];
+    state.tableState.xmls = 'error';
+    pushToast(`Falha ao buscar XMLs: ${toErrorMessage(error)}`, 'error');
+  }
+
   render();
 }
 
-function getFilteredXmls() {
-  const filters = state.filters.xmls;
+function buildXmlSearchQuery(filters) {
+  const query = new URLSearchParams();
+  query.set('clienteId', filters.cliente);
+  query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
+  query.set('dataFim', `${filters.emissaoFim}T23:59:59.999Z`);
 
-  return state.xmlFiles.filter((xml) => {
-    const matchesClient = filters.cliente === 'Todos' || xml.clientId === filters.cliente;
+  const client = findClientById(filters.cliente);
+  if (client?.cnpj && filters.tipo !== 'Todos') {
+    query.set('cnpjConsulta', normalizeDigits(client.cnpj));
+    query.set('tipoRelacao', filters.tipo === 'Emitida' ? 'emitidas' : 'tomadas');
+  }
+
+  return query;
+}
+
+function mergeXmlFilesById(existing, incoming) {
+  const byId = new Map();
+  [...existing, ...incoming].forEach((xml) => {
+    if (xml?.id) {
+      byId.set(xml.id, xml);
+    }
+  });
+  return Array.from(byId.values()).sort((a, b) => Date.parse(b.dataDownload || 0) - Date.parse(a.dataDownload || 0));
+}
+
+function getFilteredXmls() {
+  if (!state.xmlSearch.hasSearched) {
+    return [];
+  }
+
+  return getFilteredXmlsFromSource(state.xmlSearch.results);
+}
+
+function getFilteredXmlsFromSource(source) {
+  const filters = state.filters.xmls;
+  const xmlSource = Array.isArray(source) ? source : [];
+
+  return xmlSource.filter((xml) => {
+    const matchesClient = filters.cliente === 'Todos' || !filters.cliente || xml.clientId === filters.cliente;
     const matchesCnpj = !filters.cnpj || normalizeDigits(xml.cnpj).includes(filters.cnpj);
     const matchesNumero = !filters.numero || String(xml.numeroNfse).includes(filters.numero);
     const matchesMunicipio = filters.municipio === 'Todos' || xml.municipio === filters.municipio;
@@ -2860,6 +2991,26 @@ function getFilteredXmls() {
       matchesDownloadFim
     );
   });
+}
+
+function resetXmlSearch() {
+  state.filters.xmls = {
+    cliente: 'Todos',
+    cnpj: '',
+    numero: '',
+    emissaoInicio: '',
+    emissaoFim: '',
+    downloadInicio: '',
+    downloadFim: '',
+    municipio: 'Todos',
+    tipo: 'Todos',
+    status: 'Todos'
+  };
+  state.xmlSearch.hasSearched = false;
+  state.xmlSearch.results = [];
+  state.xmlSearch.lastQuery = null;
+  state.xmlSearch.lastSearchedAt = null;
+  state.tableState.xmls = 'data';
 }
 
 function applyAlertsFilters(form) {
@@ -4062,7 +4213,7 @@ function findXmlById(xmlId) {
   if (!xmlId) {
     return null;
   }
-  return state.xmlFiles.find((xml) => xml.id === xmlId) || null;
+  return state.xmlSearch.results.find((xml) => xml.id === xmlId) || state.xmlFiles.find((xml) => xml.id === xmlId) || null;
 }
 
 function mapClientOptions() {
@@ -4539,19 +4690,7 @@ document.addEventListener('click', (event) => {
   if (!node) {
     return;
   }
-  state.filters.xmls = {
-    cliente: 'Todos',
-    cnpj: '',
-    numero: '',
-    emissaoInicio: '',
-    emissaoFim: '',
-    downloadInicio: '',
-    downloadFim: '',
-    municipio: 'Todos',
-    tipo: 'Todos',
-    status: 'Todos'
-  };
-  state.tableState.xmls = 'data';
+  resetXmlSearch();
   render();
 });
 
