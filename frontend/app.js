@@ -821,9 +821,11 @@ function renderNotFoundPage() {
 function renderDashboardPage() {
   const lastRun = state.searchRuns[0] || null;
   const summaryTone = lastRun?.resumoStatus === 'Erro' ? 'danger' : lastRun?.resumoStatus === 'Aviso' ? 'warning' : 'success';
-  const activeClientsCount = state.clients.filter((client) => client.buscaAtiva).length;
+  const dashboardStats = getDashboardStats();
   const certsExpiring = state.certificates.filter((cert) => cert.status === 'A vencer').length;
-  const latestSearchRows = state.clients.slice(0, 8);
+  const latestSearchRows = [...state.clients]
+    .sort((a, b) => Date.parse(b.ultimaBusca || 0) - Date.parse(a.ultimaBusca || 0))
+    .slice(0, 8);
   const priorityAlerts = getPriorityAlerts().slice(0, 4);
 
   return `
@@ -839,10 +841,10 @@ function renderDashboardPage() {
       ${renderSchedulerStatusStrip()}
 
       <section class="stats-grid">
-        ${statCard('users', 'Clientes monitorados', lastRun ? String(lastRun.clientesProcessados) : String(activeClientsCount), 'clientes com busca habilitada', 'neutral')}
-        ${statCard('file', 'NFS-e encontradas', lastRun ? String(lastRun.xmlsEncontrados) : '0', 'na ultima execucao', 'neutral')}
-        ${statCard('folder', 'XMLs armazenados', lastRun ? String(lastRun.xmlsArmazenados) : '0', 'salvos no servidor interno', 'success')}
-        ${statCard('alert', 'Falhas', lastRun ? String(lastRun.falhas) : '0', 'clientes com erro', 'danger')}
+        ${statCard('users', 'Clientes monitorados', String(dashboardStats.totalClients), `${dashboardStats.activeClients} com busca habilitada`, 'neutral')}
+        ${statCard('file', 'NFS-e encontradas', String(dashboardStats.totalNfse), 'total no banco local', 'neutral')}
+        ${statCard('folder', 'XMLs armazenados', String(dashboardStats.storedXmls), 'salvos no servidor interno', 'success')}
+        ${statCard('alert', 'Falhas', String(dashboardStats.clientsWithErrors), 'clientes com erro', 'danger')}
         ${statCard('shield', 'Certificados a vencer', String(certsExpiring), 'nos proximos 30 dias', 'warning')}
       </section>
 
@@ -941,6 +943,23 @@ function renderDashboardPage() {
       </article>
     </section>
   `;
+}
+
+function getDashboardStats() {
+  const totalClients = state.clients.length;
+  const activeClients = state.clients.filter((client) => client.buscaAtiva).length;
+  const totalNfseByClient = state.clients.reduce((sum, client) => sum + Number(client.xmlsEncontrados || 0), 0);
+  const totalNfse = Math.max(totalNfseByClient, state.xmlFiles.length);
+  const storedXmls = state.xmlFiles.filter((xml) => xml.statusArmazenamento === 'Armazenado').length;
+  const clientsWithErrors = state.clients.filter((client) => client.buscaStatus === 'Erro' || client.statusOperacional === 'Erro').length;
+
+  return {
+    totalClients,
+    activeClients,
+    totalNfse,
+    storedXmls,
+    clientsWithErrors
+  };
 }
 
 function renderClientsPage() {
