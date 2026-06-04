@@ -18,3 +18,5 @@ Regras principais:
 - Historico de certificados e vinculo de substituicao.
 - Cadastro do responsavel interno em `clientes.responsavel_interno`.
 - Dados fiscais do estabelecimento principal em `cliente_estabelecimentos`, incluindo inscricao municipal e municipio.
+- Eventos de NFS-e sao vinculados em `nfse_eventos.nfse_documento_id` pela chave da NFS-e referenciada no XML (`chNFSe`).
+- Evento de cancelamento (`e101101`) atualiza a nota relacionada com `status = cancelada` e `data_cancelamento`.

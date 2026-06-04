@@ -35,6 +35,9 @@ describe('SyncService', () => {
     nfseDocumento: {
       upsert: jest.fn(),
       findFirst: jest.fn()
+    },
+    nfseEvento: {
+      upsert: jest.fn()
     }
   };
 
@@ -50,6 +53,7 @@ describe('SyncService', () => {
   };
   const parser = {
     parse: jest.fn(),
+    parseAny: jest.fn(),
     getHash: jest.fn().mockReturnValue('hash')
   };
 
@@ -76,7 +80,12 @@ describe('SyncService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     parser.parse.mockReset();
+    parser.parseAny.mockReset();
     parser.getHash.mockReturnValue('hash');
+    parser.parseAny.mockImplementation((xml: string) => ({
+      kind: 'nfse',
+      nfse: parser.parse(xml)
+    }));
     prisma.cliente.findUnique.mockResolvedValue({ id: 'cliente-1' });
     prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
       id: 'estab-1',
@@ -105,6 +114,7 @@ describe('SyncService', () => {
     prisma.nfseSyncLog.create.mockResolvedValue({});
     prisma.nfseDocumento.upsert.mockResolvedValue({});
     prisma.nfseDocumento.findFirst.mockResolvedValue(null);
+    prisma.nfseEvento.upsert.mockResolvedValue({});
     storage.putObject.mockResolvedValue(undefined);
 
     service = buildService();
@@ -296,6 +306,100 @@ describe('SyncService', () => {
           cnpjTomador: '06960810000176',
           codigoServicoNacional: '170101',
           descricaoServico: 'consultoria'
+        })
+      })
+    );
+  });
+
+  it('salva evento de cancelamento por NSU e marca a NFS-e relacionada como cancelada', async () => {
+    const eventXml = `<?xml version="1.0" encoding="utf-8"?>
+<evento versao="1.01" xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infEvento>
+    <pedRegEvento>
+      <infPedReg>
+        <dhEvento>2026-06-03T15:43:08-03:00</dhEvento>
+        <CNPJAutor>06960810000176</CNPJAutor>
+        <chNFSe>42110092206960810000176000000000033326062205552016</chNFSe>
+        <e101101><xDesc>Cancelamento de NFS-e</xDesc></e101101>
+      </infPedReg>
+    </pedRegEvento>
+  </infEvento>
+</evento>`;
+
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 8n
+      }
+    ]);
+
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 9n,
+      hasDocument: true,
+      chaveAcesso: '42110092206960810000176000000000033326062205552016',
+      xml: eventXml,
+      statusCode: 200,
+      message: null,
+      rawResponse: {}
+    });
+
+    parser.parseAny.mockReturnValue({
+      kind: 'evento',
+      evento: {
+        chaveAcesso: '42110092206960810000176000000000033326062205552016',
+        tipoEvento: 'e101101',
+        dataEvento: new Date('2026-06-03T18:43:08.000Z'),
+        descricao: 'Cancelamento de NFS-e',
+        cnpjAutor: '06960810000176',
+        isCancelamento: true
+      }
+    });
+    prisma.nfseDocumento.upsert.mockResolvedValue({
+      id: 'doc-cancelada',
+      chaveAcesso: '42110092206960810000176000000000033326062205552016'
+    });
+
+    const result = await service.runNow();
+
+    expect(result).toEqual({
+      processed: 1,
+      documentsSaved: 1
+    });
+    expect(danfse.generateFromXml).not.toHaveBeenCalled();
+    expect(storage.putObject).toHaveBeenCalledTimes(1);
+    expect(storage.putObject).toHaveBeenCalledWith(
+      expect.stringContaining('/eventos/42110092206960810000176000000000033326062205552016_e101101.xml'),
+      eventXml
+    );
+    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          status: 'cancelada',
+          dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
+          danfsePath: null
+        })
+      })
+    );
+    expect(prisma.nfseEvento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          nfseDocumentoId: 'doc-cancelada',
+          chaveAcesso: '42110092206960810000176000000000033326062205552016',
+          tipoEvento: 'e101101'
+        })
+      })
+    );
+    expect(prisma.nfseSyncControle.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ctrl-1' },
+        data: expect.objectContaining({
+          ultimoNsuConsultado: 9n,
+          ultimoNsuComDocumento: 9n,
+          ultimaMensagem: 'Evento sincronizado com sucesso'
         })
       })
     );

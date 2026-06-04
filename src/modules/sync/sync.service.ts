@@ -4,7 +4,7 @@ import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdnDFeResult, NFSE_ADN_CLIENT, NfseAdnClient } from '../../integrations/nfse-adn/nfse-adn.types';
 import { NfseDanfseService } from '../nfse/nfse-danfse.service';
-import { NfseXmlParserService } from '../nfse/nfse-xml-parser.service';
+import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from '../nfse/nfse-xml-parser.service';
 import { LocalStorageService } from '../storage/storage.service';
 import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
 import { StartSyncDto } from './dto/start-sync.dto';
@@ -338,7 +338,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        if (!result.hasDocument || !result.xml || !result.chaveAcesso) {
+        if (!result.hasDocument || !result.xml) {
           const nextExecution = isDailyMode ? new Date(Date.now() + this.dailySyncIntervalMs) : null;
           const message =
             result.message ??
@@ -360,12 +360,74 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        const chave = result.chaveAcesso;
-        let parsedXml: ReturnType<NfseXmlParserService['parse']> | null = null;
+        let chave = result.chaveAcesso;
+        let parsedXml: ParsedNfse | null = null;
+        let parsedEvento: ParsedNfseEvento | null = null;
         try {
-          parsedXml = this.parser.parse(result.xml);
+          const parsedAny = this.parser.parseAny(result.xml);
+          if (parsedAny.kind === 'evento') {
+            parsedEvento = parsedAny.evento;
+            chave = parsedEvento.chaveAcesso;
+          } else {
+            parsedXml = parsedAny.nfse;
+            chave = parsedXml.chaveAcesso;
+          }
         } catch (error) {
-          this.logger.warn(`Falha ao parsear XML da chave ${chave}: ${this.toErrorMessage(error)}`);
+          this.logger.warn(`Falha ao parsear XML da chave ${chave ?? 'desconhecida'}: ${this.toErrorMessage(error)}`);
+        }
+
+        if (!chave) {
+          const message = 'Nao foi possivel localizar chave de acesso no XML retornado pelo ADN';
+          await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'erro_api', message);
+          await this.prisma.nfseSyncControle.update({
+            where: { id: control.id },
+            data: {
+              ultimaExecucao: new Date(),
+              proximaExecucao: this.computeRetryDate(false),
+              ultimaMensagem: message
+            }
+          });
+          shouldStop = true;
+          continue;
+        }
+
+        if (parsedEvento) {
+          const hash = this.parser.getHash(result.xml);
+          await this.persistEventoFromNsu({
+            control,
+            nsu: nextNsu,
+            xml: result.xml,
+            evento: parsedEvento,
+            hash
+          });
+
+          await this.prisma.nfseSyncControle.update({
+            where: { id: control.id },
+            data: {
+              ultimoNsuConsultado: nextNsu,
+              ultimoNsuComDocumento: nextNsu,
+              totalDocumentosBaixados: {
+                increment: 1
+              },
+              ultimaExecucao: new Date(),
+              proximaExecucao:
+                isDailyMode && this.dailySyncStopOnFirstDocument
+                  ? new Date(Date.now() + this.dailySyncSuccessCooldownMs)
+                  : null,
+              ultimaMensagem: 'Evento sincronizado com sucesso'
+            }
+          });
+
+          await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'sucesso', 'Evento sincronizado');
+          documentsSaved += 1;
+          documentsSavedForControl += 1;
+          currentNsu = nextNsu;
+
+          if (isDailyMode && this.dailySyncStopOnFirstDocument) {
+            shouldStop = true;
+          }
+
+          continue;
         }
 
         const dataReferencia = parsedXml?.dataEmissao ?? new Date();
@@ -812,6 +874,110 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async persistEventoFromNsu(params: {
+    control: {
+      clienteId: string;
+      estabelecimentoId: string;
+      cnpjConsulta: string;
+      ambiente: Ambiente;
+    };
+    nsu: bigint;
+    xml: string;
+    evento: ParsedNfseEvento;
+    hash: string;
+  }): Promise<void> {
+    const dataReferencia = params.evento.dataEvento ?? new Date();
+    const year = dataReferencia.getUTCFullYear();
+    const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
+    const cnpjPasta = this.normalizeCnpj(params.evento.cnpjAutor) ?? params.control.cnpjConsulta;
+    const xmlKey = `nfse/${params.control.ambiente}/${cnpjPasta}/${year}/${month}/eventos/${this.toSafeFileName(
+      params.evento.chaveAcesso
+    )}_${this.toSafeFileName(params.evento.tipoEvento)}.xml`;
+
+    await this.storage.putObject(xmlKey, params.xml);
+
+    const cancelamentoData = this.buildCancelamentoDocumentoData(params.evento);
+    const nfse = await this.prisma.nfseDocumento.upsert({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente: params.control.ambiente,
+          chaveAcesso: params.evento.chaveAcesso
+        }
+      },
+      update: {
+        clienteId: params.control.clienteId,
+        estabelecimentoId: params.control.estabelecimentoId,
+        ...cancelamentoData
+      },
+      create: {
+        clienteId: params.control.clienteId,
+        estabelecimentoId: params.control.estabelecimentoId,
+        ambiente: params.control.ambiente,
+        nsu: params.nsu,
+        chaveAcesso: params.evento.chaveAcesso,
+        ...cancelamentoData,
+        origem: DocumentoOrigem.adn_nsu
+      }
+    });
+
+    const tipoEvento = params.evento.tipoEvento || 'evento';
+    const dataEvento = params.evento.dataEvento ?? new Date(0);
+    await this.prisma.nfseEvento.upsert({
+      where: {
+        chaveAcesso_tipoEvento_dataEvento_hashXml: {
+          chaveAcesso: params.evento.chaveAcesso,
+          tipoEvento,
+          dataEvento,
+          hashXml: params.hash
+        }
+      },
+      update: {
+        nfseDocumentoId: nfse.id,
+        descricao: params.evento.descricao,
+        xmlPath: xmlKey
+      },
+      create: {
+        nfseDocumentoId: nfse.id,
+        chaveAcesso: params.evento.chaveAcesso,
+        tipoEvento,
+        dataEvento,
+        descricao: params.evento.descricao,
+        xmlPath: xmlKey,
+        hashXml: params.hash
+      }
+    });
+  }
+
+  private buildCancelamentoDocumentoData(
+    evento: ParsedNfseEvento
+  ): { status?: string; dataCancelamento?: Date; danfsePath?: string | null } {
+    if (!this.isEventoCancelamento(evento)) {
+      return {};
+    }
+
+    return {
+      status: 'cancelada',
+      dataCancelamento: evento.dataEvento ?? new Date(),
+      danfsePath: null
+    };
+  }
+
+  private isEventoCancelamento(evento: {
+    tipoEvento?: string | null;
+    descricao?: string | null;
+    isCancelamento?: boolean;
+  }): boolean {
+    const tipoEvento = (evento.tipoEvento ?? '').trim().toLowerCase();
+    const descricao = this.normalizeSearchText(evento.descricao ?? undefined);
+
+    return (
+      Boolean(evento.isCancelamento) ||
+      tipoEvento === 'e101101' ||
+      descricao.includes('cancelamento') ||
+      descricao.includes('cancelada')
+    );
+  }
+
   private async waitForAdnRequestSlot(): Promise<void> {
     if (this.adnRequestIntervalMs <= 0) {
       return;
@@ -1007,6 +1173,17 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     const digits = value.replace(/\D/g, '');
     return digits || undefined;
+  }
+
+  private normalizeSearchText(value?: string): string {
+    return (value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+  }
+
+  private toSafeFileName(value: string): string {
+    return value.replace(/[^a-zA-Z0-9._-]/g, '_');
   }
 
   private async logSync(

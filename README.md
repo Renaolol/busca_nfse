@@ -180,8 +180,9 @@ Valores aceitos:
 
 ## Importacao de XML
 
-Use `POST /nfse/importar-xml` para carregar XMLs legados, aplicando deduplicacao por `ambiente + chave_acesso`.
-No momento da importacao, o sistema tambem gera e salva o DANFSE em PDF.
+Use `POST /nfse/importar-xml` para carregar XMLs legados de NFS-e ou XMLs de evento.
+Notas aplicam deduplicacao por `ambiente + chave_acesso` e geram/salvam o DANFSE em PDF.
+Eventos sao vinculados pela chave da NFS-e referenciada (`chNFSe`) e salvos em `nfse_eventos`; evento de cancelamento (`e101101`) marca a nota relacionada como `cancelada`, preenche `data_cancelamento` e forca regeneracao futura do DANFSE.
 
 ## Download de XML e DANFSE
 
@@ -189,6 +190,7 @@ No momento da importacao, o sistema tambem gera e salva o DANFSE em PDF.
 - `GET /nfse/:id/danfse`: retorna DANFSE em PDF com `fileName`, `contentType` e `contentBase64`.
 - `POST /nfse/download-lote`: gera um arquivo ZIP em Base64 para baixar XML/DANFSE em lote.
 - `POST /nfse/reprocessar-xmls`: reprocessa XMLs ja salvos para preencher campos faltantes e (opcionalmente) regenerar DANFSE.
+- `GET /nfse`, `GET /nfse/separadas` e `GET /nfse/:id` retornam tambem `eventos` vinculados a cada nota.
 - Os endpoints `GET /nfse/:id`, `GET /nfse/:id/xml` e `GET /nfse/:id/danfse` exigem `?clienteId=...` para garantir escopo de acesso por cliente.
   - `clienteId` deve ser UUID valido.
 

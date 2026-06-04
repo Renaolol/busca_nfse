@@ -8,7 +8,7 @@ import { NfseDanfseService } from './nfse-danfse.service';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
-import { NfseXmlParserService } from './nfse-xml-parser.service';
+import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from './nfse-xml-parser.service';
 
 @Injectable()
 export class NfseService {
@@ -38,7 +38,8 @@ export class NfseService {
     return this.prisma.nfseDocumento.findMany({
       where,
       orderBy: { dataEmissao: 'desc' },
-      take: 500
+      take: 500,
+      include: this.nfseDocumentoInclude()
     });
   }
 
@@ -60,7 +61,8 @@ export class NfseService {
           cnpjPrestador: cnpjConsulta
         },
         orderBy: { dataEmissao: 'desc' },
-        take: 500
+        take: 500,
+        include: this.nfseDocumentoInclude()
       }),
       this.prisma.nfseDocumento.findMany({
         where: {
@@ -68,7 +70,8 @@ export class NfseService {
           cnpjTomador: cnpjConsulta
         },
         orderBy: { dataEmissao: 'desc' },
-        take: 500
+        take: 500,
+        include: this.nfseDocumentoInclude()
       })
     ]);
 
@@ -80,6 +83,14 @@ export class NfseService {
       },
       emitidas,
       tomadas
+    };
+  }
+
+  private nfseDocumentoInclude(): Prisma.NfseDocumentoInclude {
+    return {
+      eventos: {
+        orderBy: [{ dataEvento: 'desc' }, { createdAt: 'desc' }]
+      }
     };
   }
 
@@ -137,8 +148,18 @@ export class NfseService {
     return digits || undefined;
   }
 
+  private normalizeSearchText(value?: string): string {
+    return (value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+  }
+
   async findOne(id: string, clienteId: string) {
-    const found = await this.prisma.nfseDocumento.findUnique({ where: { id } });
+    const found = await this.prisma.nfseDocumento.findUnique({
+      where: { id },
+      include: this.nfseDocumentoInclude()
+    });
     if (!found) {
       throw new NotFoundException('NFS-e nao encontrada');
     }
@@ -182,14 +203,37 @@ export class NfseService {
   }
 
   async importXml(dto: ImportXmlDto) {
-    const parsed = this.parser.parse(dto.xml);
+    const parsedXml = this.parser.parseAny(dto.xml);
+
+    if (parsedXml.kind === 'evento') {
+      return this.importEventoXml(dto, parsedXml.evento);
+    }
+
+    return this.importNfseXml(dto, parsedXml.nfse);
+  }
+
+  private async importNfseXml(dto: ImportXmlDto, parsed: ParsedNfse) {
     const hash = this.parser.getHash(dto.xml);
+    const ambiente = dto.ambiente === 'producao_restrita' ? Ambiente.producao_restrita : Ambiente.producao;
+    const existing = await this.prisma.nfseDocumento.findUnique({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente,
+          chaveAcesso: parsed.chaveAcesso
+        }
+      },
+      include: {
+        eventos: true
+      }
+    });
+    const cancelamentoDate = this.resolveCancelamentoDate(existing);
+    const hasCancelamento = this.hasCancelamento(existing);
 
     const date = parsed.dataEmissao ?? new Date();
     const year = date.getUTCFullYear();
     const month = String(date.getUTCMonth() + 1).padStart(2, '0');
     const cnpj = parsed.cnpjPrestador ?? parsed.cnpjTomador ?? 'desconhecido';
-    const ambiente = dto.ambiente === 'producao_restrita' ? Ambiente.producao_restrita : Ambiente.producao;
+    const status = hasCancelamento ? 'cancelada' : this.normalizeStatus(parsed.status) ?? 'autorizada';
 
     const xmlKey = `nfse/${ambiente}/${cnpj}/${year}/${month}/xml/${parsed.chaveAcesso}.xml`;
     await this.storage.putObject(xmlKey, dto.xml);
@@ -198,7 +242,7 @@ export class NfseService {
       chaveAcesso: parsed.chaveAcesso,
       numeroNfse: parsed.numeroNfse,
       dataEmissao: parsed.dataEmissao,
-      status: this.normalizeStatus(parsed.status),
+      status,
       cnpjPrestador: parsed.cnpjPrestador,
       razaoSocialPrestador: parsed.razaoSocialPrestador,
       cnpjTomador: parsed.cnpjTomador,
@@ -209,7 +253,6 @@ export class NfseService {
     await this.storage.putObject(danfseKey, danfsePdf);
 
     const competencia = parsed.competencia ?? new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
-    const status = this.normalizeStatus(parsed.status) ?? 'autorizada';
 
     const nfse = await this.prisma.nfseDocumento.upsert({
       where: {
@@ -225,6 +268,7 @@ export class NfseService {
         serie: parsed.serie,
         dataEmissao: parsed.dataEmissao,
         status,
+        dataCancelamento: cancelamentoDate ?? undefined,
         cnpjPrestador: parsed.cnpjPrestador,
         razaoSocialPrestador: parsed.razaoSocialPrestador,
         cnpjTomador: parsed.cnpjTomador,
@@ -253,6 +297,7 @@ export class NfseService {
         serie: parsed.serie,
         dataEmissao: parsed.dataEmissao,
         status,
+        dataCancelamento: cancelamentoDate ?? undefined,
         cnpjPrestador: parsed.cnpjPrestador,
         razaoSocialPrestador: parsed.razaoSocialPrestador,
         cnpjTomador: parsed.cnpjTomador,
@@ -277,7 +322,191 @@ export class NfseService {
     return {
       id: nfse.id,
       chaveAcesso: nfse.chaveAcesso,
+      tipo: 'nfse',
       origem: nfse.origem,
+      xmlPath: nfse.xmlPath,
+      danfsePath: nfse.danfsePath
+    };
+  }
+
+  private async upsertDocumentoForEvento(params: {
+    clienteId: string;
+    estabelecimentoId: string;
+    ambiente: Ambiente;
+    evento: ParsedNfseEvento;
+    origem: DocumentoOrigem;
+  }) {
+    const cancelamentoData = this.buildCancelamentoDocumentoData(params.evento);
+
+    return this.prisma.nfseDocumento.upsert({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente: params.ambiente,
+          chaveAcesso: params.evento.chaveAcesso
+        }
+      },
+      update: {
+        clienteId: params.clienteId,
+        estabelecimentoId: params.estabelecimentoId,
+        ...cancelamentoData
+      },
+      create: {
+        clienteId: params.clienteId,
+        estabelecimentoId: params.estabelecimentoId,
+        ambiente: params.ambiente,
+        chaveAcesso: params.evento.chaveAcesso,
+        ...cancelamentoData,
+        origem: params.origem
+      }
+    });
+  }
+
+  private async upsertEvento(
+    nfseDocumentoId: string,
+    evento: ParsedNfseEvento,
+    xmlPath: string,
+    hashXml: string
+  ) {
+    const tipoEvento = evento.tipoEvento || 'evento';
+    const dataEvento = evento.dataEvento ?? new Date(0);
+
+    return this.prisma.nfseEvento.upsert({
+      where: {
+        chaveAcesso_tipoEvento_dataEvento_hashXml: {
+          chaveAcesso: evento.chaveAcesso,
+          tipoEvento,
+          dataEvento,
+          hashXml
+        }
+      },
+      update: {
+        nfseDocumentoId,
+        descricao: evento.descricao,
+        xmlPath
+      },
+      create: {
+        nfseDocumentoId,
+        chaveAcesso: evento.chaveAcesso,
+        tipoEvento,
+        dataEvento,
+        descricao: evento.descricao,
+        xmlPath,
+        hashXml
+      }
+    });
+  }
+
+  private buildCancelamentoDocumentoData(
+    evento: ParsedNfseEvento
+  ): { status?: string; dataCancelamento?: Date; danfsePath?: string | null } {
+    if (!this.isEventoCancelamento(evento)) {
+      return {};
+    }
+
+    return {
+      status: 'cancelada',
+      dataCancelamento: evento.dataEvento ?? new Date(),
+      danfsePath: null
+    };
+  }
+
+  private hasCancelamento(
+    doc:
+      | {
+          status?: string | null;
+          dataCancelamento?: Date | null;
+          eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
+        }
+      | null
+      | undefined
+  ): boolean {
+    if (!doc) {
+      return false;
+    }
+
+    return (
+      this.normalizeStatus(doc.status ?? undefined) === 'cancelada' ||
+      Boolean(doc.dataCancelamento) ||
+      (doc.eventos ?? []).some((evento) => this.isEventoCancelamento(evento))
+    );
+  }
+
+  private resolveCancelamentoDate(
+    doc:
+      | {
+          dataCancelamento?: Date | null;
+          eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
+        }
+      | null
+      | undefined
+  ): Date | undefined {
+    return (
+      doc?.dataCancelamento ??
+      (doc?.eventos ?? []).find((evento) => this.isEventoCancelamento(evento))?.dataEvento ??
+      undefined
+    );
+  }
+
+  private isEventoCancelamento(evento: {
+    tipoEvento?: string | null;
+    descricao?: string | null;
+    isCancelamento?: boolean;
+  }): boolean {
+    const tipoEvento = (evento.tipoEvento ?? '').trim().toLowerCase();
+    const descricao = this.normalizeSearchText(evento.descricao ?? undefined);
+
+    return (
+      Boolean(evento.isCancelamento) ||
+      tipoEvento === 'e101101' ||
+      descricao.includes('cancelamento') ||
+      descricao.includes('cancelada')
+    );
+  }
+
+  private async importEventoXml(dto: ImportXmlDto, evento: ParsedNfseEvento) {
+    const ambiente = dto.ambiente === 'producao_restrita' ? Ambiente.producao_restrita : Ambiente.producao;
+    const hash = this.parser.getHash(dto.xml);
+    const dataReferencia = evento.dataEvento ?? new Date();
+    const year = dataReferencia.getUTCFullYear();
+    const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
+    const existing = await this.prisma.nfseDocumento.findUnique({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente,
+          chaveAcesso: evento.chaveAcesso
+        }
+      }
+    });
+    const cnpj =
+      this.normalizeCnpj(evento.cnpjAutor) ??
+      this.normalizeCnpj(existing?.cnpjPrestador) ??
+      this.normalizeCnpj(existing?.cnpjTomador) ??
+      'desconhecido';
+    const xmlKey = `nfse/${ambiente}/${cnpj}/${year}/${month}/eventos/${this.toSafeFileName(
+      evento.chaveAcesso
+    )}_${this.toSafeFileName(evento.tipoEvento)}.xml`;
+
+    await this.storage.putObject(xmlKey, dto.xml);
+
+    const nfse = await this.upsertDocumentoForEvento({
+      clienteId: dto.clienteId,
+      estabelecimentoId: dto.estabelecimentoId,
+      ambiente,
+      evento,
+      origem: DocumentoOrigem.importacao_xml
+    });
+    const eventoSalvo = await this.upsertEvento(nfse.id, evento, xmlKey, hash);
+
+    return {
+      id: nfse.id,
+      chaveAcesso: nfse.chaveAcesso,
+      tipo: 'evento',
+      origem: nfse.origem,
+      status: nfse.status,
+      dataCancelamento: nfse.dataCancelamento,
+      eventoId: eventoSalvo.id,
+      tipoEvento: eventoSalvo.tipoEvento,
+      eventoXmlPath: eventoSalvo.xmlPath,
       xmlPath: nfse.xmlPath,
       danfsePath: nfse.danfsePath
     };
@@ -335,7 +564,8 @@ export class NfseService {
     const docs = await this.prisma.nfseDocumento.findMany({
       where,
       orderBy: [{ updatedAt: 'asc' }, { createdAt: 'asc' }],
-      take: limit
+      take: limit,
+      include: this.nfseDocumentoInclude()
     });
 
     let processados = 0;
@@ -354,6 +584,9 @@ export class NfseService {
         const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
         const parsed = this.parser.parse(xml);
         const hash = this.parser.getHash(xml);
+        const hasCancelamento = this.hasCancelamento(doc);
+        const cancelamentoDate = this.resolveCancelamentoDate(doc);
+        const status = hasCancelamento ? 'cancelada' : this.normalizeStatus(parsed.status) ?? doc.status;
         const dataReferencia = parsed.dataEmissao ?? doc.dataEmissao ?? doc.createdAt ?? new Date();
         const competencia =
           parsed.competencia ??
@@ -373,7 +606,7 @@ export class NfseService {
             chaveAcesso: doc.chaveAcesso,
             numeroNfse: parsed.numeroNfse ?? doc.numeroNfse,
             dataEmissao: parsed.dataEmissao ?? doc.dataEmissao,
-            status: this.normalizeStatus(parsed.status) ?? doc.status,
+            status,
             cnpjPrestador: parsed.cnpjPrestador ?? doc.cnpjPrestador,
             razaoSocialPrestador: parsed.razaoSocialPrestador ?? doc.razaoSocialPrestador,
             cnpjTomador: parsed.cnpjTomador ?? doc.cnpjTomador,
@@ -391,7 +624,8 @@ export class NfseService {
             serie: parsed.serie ?? doc.serie,
             dataEmissao: parsed.dataEmissao ?? doc.dataEmissao,
             competencia: competencia ?? doc.competencia,
-            status: this.normalizeStatus(parsed.status) ?? doc.status,
+            status,
+            dataCancelamento: cancelamentoDate ?? doc.dataCancelamento,
             cnpjPrestador: parsed.cnpjPrestador ?? doc.cnpjPrestador,
             razaoSocialPrestador: parsed.razaoSocialPrestador ?? doc.razaoSocialPrestador,
             cnpjTomador: parsed.cnpjTomador ?? doc.cnpjTomador,

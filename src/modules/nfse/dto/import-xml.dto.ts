@@ -10,7 +10,10 @@ export class ImportXmlDto {
   @IsUUID()
   estabelecimentoId!: string;
 
-  @ApiProperty({ description: 'XML da NFS-e em texto' })
+  @ApiProperty({
+    description:
+      'XML da NFS-e ou XML de evento da NFS-e em texto. Eventos sao vinculados pela chave da NFS-e referenciada.'
+  })
   @IsString()
   xml!: string;
 

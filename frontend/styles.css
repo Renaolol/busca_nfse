@@ -727,6 +727,34 @@ textarea {
   color: #444;
 }
 
+.xml-row-cancelled {
+  background: #fff5f5;
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.nfse-number-cell {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.nfse-number-cell strong {
+  min-width: 0;
+}
+
+.nfse-cancel-chip {
+  border-color: #df9a9a;
+}
+
+.status-stack {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

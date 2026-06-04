@@ -23,8 +23,44 @@ export interface ParsedNfse {
   descricaoServico?: string;
 }
 
+export interface ParsedNfseEvento {
+  chaveAcesso: string;
+  tipoEvento: string;
+  dataEvento?: Date;
+  descricao?: string;
+  cnpjAutor?: string;
+  motivo?: string;
+  idEvento?: string;
+  numeroSequencial?: string;
+  isCancelamento: boolean;
+}
+
+export type ParsedNfseXml =
+  | {
+      kind: 'nfse';
+      nfse: ParsedNfse;
+    }
+  | {
+      kind: 'evento';
+      evento: ParsedNfseEvento;
+    };
+
 @Injectable()
 export class NfseXmlParserService {
+  parseAny(xml: string): ParsedNfseXml {
+    if (this.isEventoXml(xml)) {
+      return {
+        kind: 'evento',
+        evento: this.parseEvento(xml)
+      };
+    }
+
+    return {
+      kind: 'nfse',
+      nfse: this.parse(xml)
+    };
+  }
+
   parse(xml: string): ParsedNfse {
     const chaveAcesso = this.extractChaveAcesso(xml);
 
@@ -71,6 +107,42 @@ export class NfseXmlParserService {
     };
   }
 
+  parseEvento(xml: string): ParsedNfseEvento {
+    const chaveAcesso =
+      this.normalizeChaveAcesso(this.extract(xml, ['chNFSe', 'chaveAcesso', 'ChaveAcesso'])) ??
+      this.extractChaveAcesso(xml);
+
+    if (!chaveAcesso) {
+      throw new Error('Nao foi possivel localizar chave de acesso da NFS-e no XML de evento');
+    }
+
+    const tipoEvento = this.extractTipoEvento(xml) ?? 'evento';
+    const descricao = this.extract(xml, ['xDesc', 'descricao', 'Descricao']);
+    const motivo = this.extract(xml, ['xMotivo', 'motivo', 'Motivo']);
+    const descricaoCompleta = [descricao, motivo].filter(Boolean).join(' - ') || undefined;
+
+    return {
+      chaveAcesso,
+      tipoEvento,
+      dataEvento: this.parseDate(this.extract(xml, ['dhEvento', 'dhProc', 'dataEvento'])),
+      descricao: descricaoCompleta,
+      cnpjAutor: this.normalizeCnpj(this.extract(xml, ['CNPJAutor', 'CnpjAutor', 'cnpjAutor'])),
+      motivo,
+      idEvento: this.extractAttribute(xml, 'infEvento', 'Id'),
+      numeroSequencial: this.extract(xml, ['nSeqEvento']),
+      isCancelamento: this.isCancelamentoEvento(tipoEvento, descricaoCompleta)
+    };
+  }
+
+  isEventoXml(xml: string): boolean {
+    return (
+      /<(?:\w+:)?(?:evento|procEvento)\b/i.test(xml) &&
+      (/<(?:\w+:)?infEvento\b/i.test(xml) ||
+        /<(?:\w+:)?infPedReg\b/i.test(xml) ||
+        /<(?:\w+:)?chNFSe\b/i.test(xml))
+    );
+  }
+
   private extractChaveAcesso(xml: string): string | undefined {
     const candidates: Array<string | undefined> = [
       this.extract(xml, ['chaveAcesso', 'ChaveAcesso']),
@@ -109,6 +181,22 @@ export class NfseXmlParserService {
     }
 
     return undefined;
+  }
+
+  private extractTipoEvento(xml: string): string | undefined {
+    const eventTag = xml.match(/<(?:\w+:)?(e\d{6})\b/i);
+    if (eventTag?.[1]) {
+      return eventTag[1].toLowerCase();
+    }
+
+    return this.extract(xml, ['tpEvento', 'tipoEvento', 'cEvento']);
+  }
+
+  private isCancelamentoEvento(tipoEvento?: string, descricao?: string): boolean {
+    const tipo = this.normalizeSearchText(tipoEvento);
+    const texto = this.normalizeSearchText(descricao);
+
+    return tipo === 'e101101' || texto.includes('cancelamento') || texto.includes('cancelada');
   }
 
   getHash(xml: string): string {
@@ -184,6 +272,13 @@ export class NfseXmlParserService {
       .replace(/&gt;/gi, '>')
       .replace(/&quot;/gi, '"')
       .replace(/&apos;/gi, "'");
+  }
+
+  private normalizeSearchText(value?: string): string {
+    return (value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
   }
 
   private normalizeChaveAcesso(value?: string): string | undefined {

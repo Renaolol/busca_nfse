@@ -13,6 +13,9 @@ describe('NfseService', () => {
       update: jest.fn(),
       upsert: jest.fn(),
       findMany: jest.fn()
+    },
+    nfseEvento: {
+      upsert: jest.fn()
     }
   };
 
@@ -192,6 +195,89 @@ describe('NfseService', () => {
     );
     expect(result.contentType).toBe('application/pdf');
     expect(result.contentBase64.length).toBeGreaterThan(20);
+  });
+
+  it('importa XML de evento de cancelamento e vincula a NFS-e relacionada', async () => {
+    const eventXml = `<?xml version="1.0" encoding="utf-8"?>
+<evento versao="1.01" xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infEvento Id="EVT42110092206960810000176000000000033326062205552016101101001">
+    <dhProc>2026-06-03T15:43:08-03:00</dhProc>
+    <pedRegEvento versao="1.01">
+      <infPedReg Id="PRE42110092206960810000176000000000033326062205552016101101">
+        <dhEvento>2026-06-03T15:43:08-03:00</dhEvento>
+        <CNPJAutor>06960810000176</CNPJAutor>
+        <chNFSe>42110092206960810000176000000000033326062205552016</chNFSe>
+        <e101101>
+          <xDesc>Cancelamento de NFS-e</xDesc>
+          <xMotivo>erro de digitacao</xMotivo>
+        </e101101>
+      </infPedReg>
+    </pedRegEvento>
+  </infEvento>
+</evento>`;
+
+    prisma.nfseDocumento.findUnique.mockResolvedValue({
+      id: 'doc-cancelada',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: Ambiente.producao,
+      chaveAcesso: '42110092206960810000176000000000033326062205552016',
+      cnpjPrestador: '06960810000176',
+      cnpjTomador: null
+    });
+    prisma.nfseDocumento.upsert.mockResolvedValue({
+      id: 'doc-cancelada',
+      chaveAcesso: '42110092206960810000176000000000033326062205552016',
+      origem: 'importacao_xml',
+      status: 'cancelada',
+      dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
+      xmlPath: 'nfse/producao/06960810000176/2026/06/xml/42110092206960810000176000000000033326062205552016.xml',
+      danfsePath: null
+    });
+    prisma.nfseEvento.upsert.mockResolvedValue({
+      id: 'evento-1',
+      tipoEvento: 'e101101',
+      xmlPath: 'nfse/producao/06960810000176/2026/06/eventos/42110092206960810000176000000000033326062205552016_e101101.xml'
+    });
+
+    const result = await service.importXml({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      xml: eventXml,
+      ambiente: 'producao'
+    });
+
+    expect(storage.putObject).toHaveBeenCalledTimes(1);
+    expect(storage.putObject).toHaveBeenCalledWith(
+      expect.stringContaining('/eventos/42110092206960810000176000000000033326062205552016_e101101.xml'),
+      eventXml
+    );
+    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          status: 'cancelada',
+          dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
+          danfsePath: null
+        })
+      })
+    );
+    expect(prisma.nfseEvento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          nfseDocumentoId: 'doc-cancelada',
+          chaveAcesso: '42110092206960810000176000000000033326062205552016',
+          tipoEvento: 'e101101'
+        })
+      })
+    );
+    expect(result).toMatchObject({
+      id: 'doc-cancelada',
+      chaveAcesso: '42110092206960810000176000000000033326062205552016',
+      tipo: 'evento',
+      eventoId: 'evento-1',
+      tipoEvento: 'e101101',
+      status: 'cancelada'
+    });
   });
 
   it('bloqueia leitura quando NFS-e nao pertence ao cliente informado', async () => {

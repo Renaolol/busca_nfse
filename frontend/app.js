@@ -1183,8 +1183,8 @@ function renderClientDetailsPage(clientId) {
                   ${clientXmls.length
                     ? clientXmls
                         .map((xml) => {
-                          return `<tr>
-                            <td>${escapeHtml(xml.numeroNfse)}</td>
+                          return `<tr class="${xml.cancelada ? 'xml-row-cancelled' : ''}">
+                            <td>${renderNfseNumber(xml)}</td>
                             <td>${escapeHtml(formatDate(xml.dataEmissao))}</td>
                             <td>${escapeHtml(`${xml.prestador} / ${xml.tomador}`)}</td>
                             <td>${escapeHtml(formatCurrency(xml.valor))}</td>
@@ -1663,8 +1663,8 @@ function renderXmlsTableCard(xmls) {
               colSpan: 10,
               rowsHtml: xmls
                 .map((xml) => {
-                  return `<tr>
-                    <td>${escapeHtml(xml.numeroNfse)}</td>
+                  return `<tr class="${xml.cancelada ? 'xml-row-cancelled' : ''}">
+                    <td>${renderNfseNumber(xml)}</td>
                     <td>${escapeHtml(xml.cliente)}</td>
                     <td>${escapeHtml(formatCnpj(xml.cnpj))}</td>
                     <td>${escapeHtml(xml.municipio)}</td>
@@ -1672,7 +1672,7 @@ function renderXmlsTableCard(xmls) {
                     <td>${escapeHtml(formatDateTime(xml.dataDownload))}</td>
                     <td>${escapeHtml(formatCurrency(xml.valor))}</td>
                     <td>${escapeHtml(xml.tipo)}</td>
-                    <td>${statusBadge(xml.statusArmazenamento, toneFromStorageStatus(xml.statusArmazenamento))}</td>
+                    <td>${renderXmlStatusBadges(xml)}</td>
                     <td>
                       <div class="table-actions">
                         <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar detalhes</button>
@@ -2122,6 +2122,9 @@ function renderXmlDetailsModal(xmlId) {
             ${detailItem('ISS', formatCurrency(xml.iss))}
             ${detailItem('Municipio', xml.municipio)}
             ${detailItem('Status de armazenamento', xml.statusArmazenamento)}
+            ${detailItem('Situacao fiscal', xml.statusFiscal || '-')}
+            ${detailItem('Data de cancelamento', xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '-')}
+            ${detailItem('Eventos vinculados', xml.eventosResumo || '-')}
           </div>
         </div>
         <div class="modal-footer">
@@ -2412,6 +2415,23 @@ function renderClientSearchActivation(client) {
 function statusBadge(text, tone, extraClass = '') {
   const normalizedTone = ['success', 'warning', 'danger', 'info', 'neutral'].includes(tone) ? tone : 'neutral';
   return `<span class="chip ${normalizedTone} ${extraClass}">${escapeHtml(text)}</span>`;
+}
+
+function renderNfseNumber(xml) {
+  const numero = escapeHtml(xml.numeroNfse || '-');
+  const cancelBadge = xml.cancelada ? statusBadge('Cancelada', 'danger', 'nfse-cancel-chip') : '';
+  return `<div class="nfse-number-cell"><strong>${numero}</strong>${cancelBadge}</div>`;
+}
+
+function renderXmlStatusBadges(xml) {
+  const badges = [statusBadge(xml.statusArmazenamento, toneFromStorageStatus(xml.statusArmazenamento))];
+  if (xml.cancelada) {
+    badges.push(statusBadge('Cancelada', 'danger', 'nfse-cancel-chip'));
+  } else if (xml.statusFiscal && xml.statusFiscal !== '-') {
+    badges.push(statusBadge(xml.statusFiscal, toneFromFiscalStatus(xml.statusFiscal)));
+  }
+
+  return `<div class="status-stack">${badges.join('')}</div>`;
 }
 
 function renderTableRowsOrState({ key, colSpan, rowsHtml, emptyMessage }) {
@@ -3788,6 +3808,11 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
       const clientCnpj = normalizeDigits(client?.cnpj || '');
       const cnpjPrestador = normalizeDigits(doc.cnpjPrestador || '');
       const cnpjTomador = normalizeDigits(doc.cnpjTomador || '');
+      const eventos = Array.isArray(doc.eventos) ? doc.eventos : [];
+      const cancelamentoEvento = eventos.find(isCancelamentoEventoApi) || null;
+      const dataCancelamento = doc.dataCancelamento || cancelamentoEvento?.dataEvento || null;
+      const statusFiscal = resolveFiscalStatus(doc.status, dataCancelamento, cancelamentoEvento);
+      const cancelada = normalizeSearchText(statusFiscal).includes('cancel');
 
       let tipo = 'Emitida';
       if (clientCnpj && cnpjTomador === clientCnpj) {
@@ -3812,6 +3837,11 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
         valor: toNumber(doc.valorServico),
         tipo,
         statusArmazenamento: doc.xmlPath ? 'Armazenado' : 'Erro',
+        statusFiscal,
+        cancelada,
+        dataCancelamento,
+        eventos,
+        eventosResumo: buildEventosResumo(eventos),
         caminhoServidor: doc.xmlPath || '-',
         prestador: doc.razaoSocialPrestador || '-',
         tomador: doc.razaoSocialTomador || '-',
@@ -3820,6 +3850,38 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
       };
     })
     .sort((a, b) => Date.parse(b.dataDownload || 0) - Date.parse(a.dataDownload || 0));
+}
+
+function resolveFiscalStatus(status, dataCancelamento, cancelamentoEvento) {
+  const normalized = normalizeSearchText(status);
+  if (dataCancelamento || cancelamentoEvento || normalized.includes('cancel') || normalized === '101') {
+    return 'Cancelada';
+  }
+  if (normalized === '100' || normalized.includes('autoriz')) {
+    return 'Autorizada';
+  }
+  return status ? String(status) : '-';
+}
+
+function isCancelamentoEventoApi(evento) {
+  const tipoEvento = normalizeSearchText(evento?.tipoEvento);
+  const descricao = normalizeSearchText(evento?.descricao);
+  return tipoEvento === 'e101101' || descricao.includes('cancelamento') || descricao.includes('cancelada');
+}
+
+function buildEventosResumo(eventos) {
+  if (!Array.isArray(eventos) || eventos.length === 0) {
+    return '';
+  }
+
+  return eventos
+    .slice(0, 3)
+    .map((evento) => {
+      const descricao = evento.descricao || evento.tipoEvento || 'Evento';
+      const data = evento.dataEvento ? ` em ${formatDateTime(evento.dataEvento)}` : '';
+      return `${descricao}${data}`;
+    })
+    .join(' / ');
 }
 
 function buildSearchRunsFromApi(syncByClient, clients) {
@@ -4315,6 +4377,17 @@ function toneFromStorageStatus(status) {
   return 'neutral';
 }
 
+function toneFromFiscalStatus(status) {
+  const normalized = normalizeSearchText(status);
+  if (normalized.includes('cancel')) {
+    return 'danger';
+  }
+  if (normalized.includes('autoriz')) {
+    return 'success';
+  }
+  return 'neutral';
+}
+
 function toneFromSeverity(severity) {
   if (severity === 'Critico') {
     return 'danger';
@@ -4466,6 +4539,13 @@ function normalizeDigits(value) {
   return String(value || '').replace(/\D/g, '');
 }
 
+function normalizeSearchText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 function diffMinutes(start, end) {
   const diff = Date.parse(end) - Date.parse(start);
   if (!Number.isFinite(diff) || diff <= 0) {
@@ -4589,6 +4669,8 @@ function exportXmlListToCsv() {
     'Valor',
     'Tipo',
     'Status armazenamento',
+    'Situacao fiscal',
+    'Data cancelamento',
     'Prestador',
     'Tomador',
     'ISS',
@@ -4604,6 +4686,8 @@ function exportXmlListToCsv() {
     formatCurrency(xml.valor),
     xml.tipo,
     xml.statusArmazenamento,
+    xml.statusFiscal,
+    xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '',
     xml.prestador,
     xml.tomador,
     formatCurrency(xml.iss),

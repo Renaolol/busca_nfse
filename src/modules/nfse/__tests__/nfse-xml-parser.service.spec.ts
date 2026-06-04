@@ -23,6 +23,39 @@ describe('NfseXmlParserService', () => {
     expect(() => parser.parse('<NFSe></NFSe>')).toThrow('Nao foi possivel localizar chave de acesso no XML');
   });
 
+  it('parseia evento nacional de cancelamento e vincula pela chave da NFS-e', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<evento versao="1.01" xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infEvento Id="EVT42110092206960810000176000000000033326062205552016101101001">
+    <dhProc>2026-06-03T15:43:08-03:00</dhProc>
+    <pedRegEvento versao="1.01">
+      <infPedReg Id="PRE42110092206960810000176000000000033326062205552016101101">
+        <dhEvento>2026-06-03T15:43:08-03:00</dhEvento>
+        <CNPJAutor>06960810000176</CNPJAutor>
+        <chNFSe>42110092206960810000176000000000033326062205552016</chNFSe>
+        <e101101>
+          <xDesc>Cancelamento de NFS-e</xDesc>
+          <xMotivo>erro de digitacao</xMotivo>
+        </e101101>
+      </infPedReg>
+    </pedRegEvento>
+  </infEvento>
+</evento>`;
+
+    const parsed = parser.parseAny(xml);
+
+    expect(parsed.kind).toBe('evento');
+    if (parsed.kind !== 'evento') {
+      throw new Error('Evento esperado');
+    }
+    expect(parsed.evento.chaveAcesso).toBe('42110092206960810000176000000000033326062205552016');
+    expect(parsed.evento.tipoEvento).toBe('e101101');
+    expect(parsed.evento.cnpjAutor).toBe('06960810000176');
+    expect(parsed.evento.isCancelamento).toBe(true);
+    expect(parsed.evento.descricao).toContain('Cancelamento de NFS-e');
+    expect(parsed.evento.dataEvento?.toISOString()).toBe('2026-06-03T18:43:08.000Z');
+  });
+
   it('parseia XML nacional com namespace e campos ampliados', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
