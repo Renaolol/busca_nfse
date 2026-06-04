@@ -108,6 +108,15 @@ describe('Client Scope Validation (e2e)', () => {
     expect(syncService.reprocessPastNsus).toHaveBeenCalledWith({});
   });
 
+  it('aceita clienteId valido em POST /sync/reprocessar-nsus-passados', async () => {
+    const clienteId = '550e8400-e29b-41d4-a716-446655440003';
+    await request(app.getHttpServer())
+      .post('/sync/reprocessar-nsus-passados')
+      .send({ clienteId })
+      .expect(201);
+    expect(syncService.reprocessPastNsus).toHaveBeenCalledWith({ clienteId });
+  });
+
   it('retorna 400 quando clienteId do reprocessamento de NSUs e invalido', async () => {
     await request(app.getHttpServer())
       .post('/sync/reprocessar-nsus-passados')

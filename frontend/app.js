@@ -467,13 +467,7 @@ function onDocumentClick(event) {
     }
     case 'recover-past-nsus': {
       openModal({
-        kind: 'confirm',
-        title: 'Recuperar NSUs passados',
-        subtitle:
-          'A rotina vai varrer NSUs ja consultados, pular notas que ja existem e consultar o ADN apenas para lacunas. A execucao pode demorar.',
-        confirmLabel: 'Iniciar recuperacao',
-        intent: 'warning',
-        payload: { type: 'recover-past-nsus' }
+        kind: 'recover-past-nsus'
       });
       return;
     }
@@ -628,6 +622,17 @@ function onDocumentSubmit(event) {
     case 'clientForm': {
       event.preventDefault();
       void submitClientForm(target);
+      return;
+    }
+    case 'recoverPastNsusForm': {
+      event.preventDefault();
+      const data = new FormData(target);
+      const clientId = String(data.get('clienteId') || '').trim();
+      closeModal();
+      void executeConfirmAction({
+        type: 'recover-past-nsus',
+        clientId: clientId || null
+      });
       return;
     }
     case 'certificatesModalForm': {
@@ -1963,6 +1968,8 @@ function renderModal() {
           </div>
         </div>
       `;
+    case 'recover-past-nsus':
+      return renderRecoverPastNsusModal();
     case 'import-clients':
       return `
         <div class="overlay" data-action="overlay-close">
@@ -1991,6 +1998,43 @@ function renderModal() {
     default:
       return '';
   }
+}
+
+function renderRecoverPastNsusModal() {
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Recuperar NSUs passados</h3>
+          <p class="modal-subtitle">Selecione um cliente para recuperar apenas as lacunas dele ou mantenha todos os clientes.</p>
+        </div>
+        <form id="recoverPastNsusForm">
+          <div class="modal-body">
+            <div class="form-grid">
+              <label class="field" style="grid-column: span 2;">
+                Cliente
+                <select name="clienteId">
+                  <option value="">Todos os clientes</option>
+                  ${state.clients
+                    .map((client) => {
+                      return `<option value="${escapeHtml(client.id)}">${escapeHtml(client.razaoSocial)} - ${escapeHtml(formatCnpj(client.cnpj))}</option>`;
+                    })
+                    .join('')}
+                </select>
+              </label>
+              <p class="card-subtitle" style="grid-column: span 2; margin:0;">
+                A rotina varre NSUs ja consultados, pula notas que ja existem e consulta o ADN apenas para lacunas. A execucao pode demorar.
+              </p>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn secondary" type="button" data-action="close-modal">Cancelar</button>
+            <button class="btn primary" type="submit">Iniciar recuperacao</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
 }
 
 function renderClientFormModal() {
@@ -3180,9 +3224,14 @@ async function executeConfirmAction(payload) {
       return;
     }
     case 'recover-past-nsus': {
+      const selectedClient = payload.clientId ? findClientById(payload.clientId) : null;
       if (state.dataSource !== 'api') {
-        startExecutionMonitor('Recuperacao', state.clients.length || 1, 'Recuperando NSUs passados (mock)...');
-        state.executionMonitor.currentClientName = 'Todos os clientes';
+        startExecutionMonitor(
+          'Recuperacao',
+          selectedClient ? 1 : state.clients.length || 1,
+          'Recuperando NSUs passados (mock)...'
+        );
+        state.executionMonitor.currentClientName = selectedClient?.razaoSocial || 'Todos os clientes';
         finishExecutionMonitor('Recuperacao mock finalizada.');
         pushToast('Recuperacao de NSUs passados iniciada (mock).', 'success');
         return;
@@ -3191,15 +3240,16 @@ async function executeConfirmAction(payload) {
       try {
         startExecutionMonitor(
           'Recuperacao',
-          state.clients.length || 1,
+          selectedClient ? 1 : state.clients.length || 1,
           'Reprocessando NSUs ja consultados. Notas existentes serao ignoradas...'
         );
-        state.executionMonitor.currentClientName = 'Todos os controles';
+        state.executionMonitor.currentClientName = selectedClient?.razaoSocial || 'Todos os controles';
         state.executionMonitor.updatedAt = new Date().toISOString();
         render();
 
         const result = await apiRequest('/sync/reprocessar-nsus-passados', {
           method: 'POST',
+          body: payload.clientId ? { clienteId: payload.clientId } : {},
           timeoutMs: 10 * 60 * 1000
         });
 
