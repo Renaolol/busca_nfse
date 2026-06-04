@@ -4,7 +4,7 @@ A integracao oficial deve ser encapsulada em `src/integrations/nfse-adn`.
 
 ## Interface alvo
 
-- `getDFeByNsu(...)`
+- `getDFeByNsu(...)`: retorna o XML principal em `xml` para compatibilidade e, quando a API responder lote, retorna todos os itens em `documents`.
 - `getEventosByChave(...)`
 
 ## Implementacoes

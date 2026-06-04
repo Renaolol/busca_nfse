@@ -150,6 +150,7 @@ O endpoint `POST /sync/rodar-agora` dispara uma execucao manual do ciclo de sinc
 Para teste real, defina `NFSE_ADN_CLIENT_MODE=real` e use certificado A1 valido no cadastro.
 Para consultar logs de sync por cliente, use `GET /sync/logs?clienteId=UUID`.
 Para consultar o status do agendador, use `GET /sync/scheduler-status`.
+Para recuperar lacunas de notas ja passadas pelo controle de NSU, use `POST /sync/reprocessar-nsus-passados`. A rotina varre do NSU 1 ate `ultimo_nsu_consultado`, pula NSUs com documento fiscal ja salvo, consulta apenas lacunas e nao altera `ultimo_nsu_consultado`.
 
 ### Iniciar sync com modo
 
@@ -175,6 +176,7 @@ Valores aceitos:
 - No painel, `Busca habilitada` significa que o cliente pode entrar nas rotinas elegiveis; `Executando agora` aparece separadamente no monitor quando ha consulta em andamento.
 - Em erro temporario da API (ex.: `HTTP 429`, timeout, `5xx`), o sistema **nao avanca o NSU** para evitar pulo de documentos.
 - Nesses casos, a proxima tentativa e agendada com base em `SYNC_API_RETRY_DELAY_MS`.
+- Quando o ADN responde em lote (`lote=true`), todos os XMLs do retorno sao salvos e o controle avanca ate o maior NSU do lote.
 - No modo diario, por padrao o ciclo processa ate `SYNC_DAILY_MAX_NSU_PER_RUN` NSUs por lote. Se todos os NSUs consultados tiverem documento, agenda nova execucao curta (`SYNC_DAILY_SUCCESS_COOLDOWN_MS`) antes de continuar.
 - A busca noturna (`SYNC_NIGHTLY_SWEEP_*`) ativa modo diario para todos os clientes cadastrados e dispara varredura incremental a partir do ultimo NSU salvo.
 

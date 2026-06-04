@@ -6,6 +6,7 @@ import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { SyncService } from './sync.service';
 import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
 import { StartSyncDto } from './dto/start-sync.dto';
+import { ReprocessPastNsusDto } from './dto/reprocess-past-nsus.dto';
 
 @ApiTags('sync')
 @Controller()
@@ -45,6 +46,12 @@ export class SyncController {
   @Roles('admin')
   runNow() {
     return this.syncService.runNow();
+  }
+
+  @Post('sync/reprocessar-nsus-passados')
+  @Roles('admin')
+  reprocessPastNsus(@Body() dto: ReprocessPastNsusDto) {
+    return this.syncService.reprocessPastNsus(dto);
   }
 
   @Post('sync/testar-nsu')

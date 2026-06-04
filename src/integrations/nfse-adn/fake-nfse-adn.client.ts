@@ -30,6 +30,13 @@ export class FakeNfseAdnClient implements NfseAdnClient {
       hasDocument: true,
       xml,
       chaveAcesso: chave,
+      documents: [
+        {
+          nsu: params.nsu,
+          xml,
+          chaveAcesso: chave
+        }
+      ],
       rawResponse: { mock: true },
       statusCode: 200
     };

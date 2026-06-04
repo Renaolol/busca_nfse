@@ -13,6 +13,7 @@
 ## Operacao no painel
 
 - O menu `Busca API` dispara ciclos continuos de `POST /sync/rodar-agora` ate detectar fim da fila (status `sem_documento`).
+- O botao `Recuperar NSUs passados` chama `POST /sync/reprocessar-nsus-passados` para varrer do NSU 1 ate o `ultimo_nsu_consultado`, pular documentos fiscais existentes e baixar apenas lacunas ainda ausentes no app.
 - Os botoes `Pausar` e `Retomar` atuam no mesmo fluxo continuo e atualizam o estado dos controles do cliente.
 - A interface diferencia `Busca habilitada` (cliente elegivel para rotinas) de `Executando agora` (consulta em andamento no monitor).
 - O endpoint `GET /sync/scheduler-status` informa se o ciclo automatico e a busca noturna estao ligados, rodando e qual a proxima execucao noturna.
@@ -32,9 +33,11 @@ Os jobs podem ser disparados manualmente pelos scripts `npm run job:*` para oper
 ## Regras de avancar NSU
 
 - Retorno com documento valido: avanca NSU e salva NFS-e.
+- Retorno ADN em lote (`lote=true`): salva todos os XMLs retornados, registra cada documento/evento e avanca o controle ate o maior NSU informado no lote.
 - Ao salvar documento via sync, o sistema tambem gera o DANFSE (`.pdf`) e persiste `danfse_path`.
 - Retorno sem documento definitivo (ex.: 404 sem lote): avanca NSU.
 - Erro temporario de API (ex.: 429, timeout, 5xx): **nao avanca NSU** e agenda nova tentativa.
+- Recuperacao de NSUs passados: nao altera `ultimo_nsu_consultado`; atualiza apenas contadores, logs e `ultimo_nsu_com_documento` quando encontra documento fiscal ausente.
 
 ## Modos de inicio de sync
 

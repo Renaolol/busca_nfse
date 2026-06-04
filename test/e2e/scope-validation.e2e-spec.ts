@@ -20,7 +20,8 @@ describe('Client Scope Validation (e2e)', () => {
   };
 
   const syncService = {
-    listLogs: jest.fn().mockResolvedValue([{ id: 'log-1' }])
+    listLogs: jest.fn().mockResolvedValue([{ id: 'log-1' }]),
+    reprocessPastNsus: jest.fn().mockResolvedValue({ documentosSalvos: 0 })
   };
 
   beforeAll(async () => {
@@ -100,5 +101,18 @@ describe('Client Scope Validation (e2e)', () => {
       .query({ clienteId })
       .expect(200);
     expect(syncService.listLogs).toHaveBeenCalledWith(clienteId);
+  });
+
+  it('aceita body vazio em POST /sync/reprocessar-nsus-passados', async () => {
+    await request(app.getHttpServer()).post('/sync/reprocessar-nsus-passados').send({}).expect(201);
+    expect(syncService.reprocessPastNsus).toHaveBeenCalledWith({});
+  });
+
+  it('retorna 400 quando clienteId do reprocessamento de NSUs e invalido', async () => {
+    await request(app.getHttpServer())
+      .post('/sync/reprocessar-nsus-passados')
+      .send({ clienteId: 'invalido' })
+      .expect(400);
+    expect(syncService.reprocessPastNsus).not.toHaveBeenCalled();
   });
 });

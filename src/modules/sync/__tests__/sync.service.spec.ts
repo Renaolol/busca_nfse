@@ -34,6 +34,7 @@ describe('SyncService', () => {
     },
     nfseDocumento: {
       upsert: jest.fn(),
+      findUnique: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn()
     },
@@ -114,6 +115,7 @@ describe('SyncService', () => {
     prisma.nfseSyncControle.updateMany.mockResolvedValue({ count: 1 });
     prisma.nfseSyncLog.create.mockResolvedValue({});
     prisma.nfseDocumento.upsert.mockResolvedValue({});
+    prisma.nfseDocumento.findUnique.mockResolvedValue(null);
     prisma.nfseDocumento.findFirst.mockResolvedValue(null);
     prisma.nfseDocumento.findMany.mockResolvedValue([]);
     prisma.nfseEvento.upsert.mockResolvedValue({});
@@ -313,6 +315,87 @@ describe('SyncService', () => {
     );
   });
 
+  it('salva todos os documentos quando ADN retorna lote para o mesmo NSU consultado', async () => {
+    const buildDocument = (numero: string, nsu: bigint) => {
+      const chave = `421100922069608100001760000000000${numero}26062205552016`;
+      const xml = `<NFSe><chaveAcesso>${chave}</chaveAcesso><numeroNFSe>${numero}</numeroNFSe></NFSe>`;
+
+      return {
+        nsu,
+        chaveAcesso: chave,
+        xml
+      };
+    };
+    const documents = [buildDocument('333', 9n), buildDocument('334', 10n), buildDocument('335', 11n)];
+
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 8n
+      }
+    ]);
+
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 9n,
+      hasDocument: true,
+      chaveAcesso: documents[0].chaveAcesso,
+      xml: documents[0].xml,
+      documents,
+      statusCode: 200,
+      message: null,
+      rawResponse: { lote: true }
+    });
+
+    parser.parse.mockImplementation((xml: string) => {
+      const chaveAcesso = xml.match(/<chaveAcesso>([^<]+)<\/chaveAcesso>/)?.[1] ?? '';
+      const numeroNfse = xml.match(/<numeroNFSe>([^<]+)<\/numeroNFSe>/)?.[1] ?? '';
+
+      return {
+        chaveAcesso,
+        numeroNfse,
+        serie: '900',
+        dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+        competencia: new Date('2026-06-01T00:00:00.000Z'),
+        status: '100',
+        cnpjPrestador: '44454248000106',
+        cnpjTomador: '06960810000176',
+        valorServico: '100.00'
+      };
+    });
+
+    const result = await service.runNow();
+
+    expect(result).toEqual({
+      processed: 1,
+      documentsSaved: 3
+    });
+    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledTimes(3);
+    expect(storage.putObject).toHaveBeenCalledTimes(6);
+    expect(prisma.nfseDocumento.upsert.mock.calls.map((call) => call[0].create.numeroNfse)).toEqual([
+      '333',
+      '334',
+      '335'
+    ]);
+    expect(prisma.nfseDocumento.upsert.mock.calls.map((call) => call[0].create.nsu)).toEqual([9n, 10n, 11n]);
+    expect(prisma.nfseSyncControle.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ctrl-1' },
+        data: expect.objectContaining({
+          ultimoNsuConsultado: 11n,
+          ultimoNsuComDocumento: 11n,
+          totalDocumentosBaixados: {
+            increment: 3
+          },
+          ultimaMensagem: 'Lote ADN sincronizado com 3 documento(s)'
+        })
+      })
+    );
+  });
+
   it('salva evento de cancelamento por NSU e marca a NFS-e relacionada como cancelada', async () => {
     const eventXml = `<?xml version="1.0" encoding="utf-8"?>
 <evento versao="1.01" xmlns="http://www.sped.fazenda.gov.br/nfse">
@@ -429,6 +512,81 @@ describe('SyncService', () => {
         })
       })
     );
+  });
+
+  it('reprocessa NSUs ja consultados pulando documentos existentes', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        nsuInicial: 3n,
+        ultimoNsuConsultado: 3n,
+        ultimoNsuComDocumento: 1n,
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-01T00:00:00.000Z')
+      }
+    ]);
+    prisma.nfseDocumento.findFirst.mockImplementation(({ where }) => {
+      if (where.nsu === 1n || where.nsu === 3n) {
+        return Promise.resolve({
+          xmlPath: `nfse/producao/12345678000199/2026/06/xml/${where.nsu}.xml`,
+          numeroNfse: String(where.nsu),
+          dataEmissao: new Date('2026-06-03T12:00:00.000Z')
+        });
+      }
+
+      return Promise.resolve(null);
+    });
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 2n,
+      hasDocument: true,
+      chaveAcesso: '42110092206960810000176000000000000226062205552016',
+      xml: '<NFSe><chaveAcesso>42110092206960810000176000000000000226062205552016</chaveAcesso><numeroNFSe>2</numeroNFSe></NFSe>',
+      statusCode: 200,
+      rawResponse: {}
+    });
+    parser.parse.mockReturnValue({
+      chaveAcesso: '42110092206960810000176000000000000226062205552016',
+      numeroNfse: '2',
+      dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+      status: '100',
+      cnpjPrestador: '12345678000199'
+    });
+
+    const result = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledWith(
+      expect.objectContaining({
+        nsu: 2n
+      })
+    );
+    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(
+      expect.objectContaining({
+        controlesEncontrados: 1,
+        controlesProcessados: 1,
+        nsusAvaliados: 3,
+        nsusConsultados: 1,
+        nsusIgnoradosComDocumento: 2,
+        documentosSalvos: 1
+      })
+    );
+    expect(prisma.nfseSyncControle.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ctrl-1' },
+        data: expect.objectContaining({
+          totalDocumentosBaixados: {
+            increment: 1
+          },
+          ultimoNsuComDocumento: 2n
+        })
+      })
+    );
+    expect(prisma.nfseSyncControle.update.mock.calls.at(-1)?.[0].data.ultimoNsuConsultado).toBeUndefined();
   });
 
   it('em modo diario interrompe o ciclo apos primeiro documento e agenda cooldown de sucesso', async () => {

@@ -11,9 +11,14 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
 import { LocalStorageService } from '../../modules/storage/storage.service';
 import { CryptoService } from '../../modules/shared/crypto.service';
-import { AdnDFeResult, NfseAdnClient } from './nfse-adn.types';
+import { AdnDFeDocument, AdnDFeResult, NfseAdnClient } from './nfse-adn.types';
 
 type DfeItem = {
+  NSU?: string | number;
+  Nsu?: string | number;
+  nsu?: string | number;
+  NsuRecepcao?: string | number;
+  nsuRecepcao?: string | number;
   ChaveAcesso?: string;
   chaveAcesso?: string;
   ArquivoXml?: string;
@@ -81,8 +86,9 @@ export class RealNfseAdnClient implements NfseAdnClient {
         };
       }
 
-      const firstItem = this.extractFirstDfeItem(data);
-      if (!firstItem) {
+      const documents = this.extractDfeDocuments(data);
+      const firstDocument = documents[0];
+      if (!firstDocument) {
         return {
           nsu: params.nsu,
           hasDocument: false,
@@ -92,18 +98,15 @@ export class RealNfseAdnClient implements NfseAdnClient {
         };
       }
 
-      const chaveAcesso = firstItem.ChaveAcesso ?? firstItem.chaveAcesso;
-      const xml = this.extractXml(firstItem.ArquivoXml ?? firstItem.arquivoXml, firstItem.xml);
-      const itemMessage = firstItem.Mensagem ?? firstItem.mensagem;
-
       return {
         nsu: params.nsu,
-        hasDocument: Boolean(xml && chaveAcesso),
-        xml: xml ?? undefined,
-        chaveAcesso: chaveAcesso ?? undefined,
+        hasDocument: true,
+        xml: firstDocument.xml,
+        chaveAcesso: firstDocument.chaveAcesso,
+        documents,
         rawResponse: data,
         statusCode: 200,
-        message: itemMessage ?? undefined
+        message: firstDocument.message
       };
     } catch (error) {
       const normalizedMessage = this.normalizeAdnQueryErrorMessage(error);
@@ -293,23 +296,57 @@ export class RealNfseAdnClient implements NfseAdnClient {
     }
   }
 
-  private extractFirstDfeItem(
-    payload: Record<string, unknown> | null
-  ): DfeItem | null {
-    if (!payload) {
-      return null;
+  private extractDfeDocuments(payload: Record<string, unknown> | null): AdnDFeDocument[] {
+    const documents: AdnDFeDocument[] = [];
+
+    for (const item of this.extractDfeItems(payload)) {
+      const xml = this.extractXml(item.ArquivoXml ?? item.arquivoXml, item.xml);
+      if (!xml) {
+        continue;
+      }
+
+      const document: AdnDFeDocument = { xml };
+      const nsu = this.parseNsuFromItem(item);
+      const chaveAcesso = item.ChaveAcesso ?? item.chaveAcesso;
+      const message = item.Mensagem ?? item.mensagem;
+
+      if (nsu !== undefined) {
+        document.nsu = nsu;
+      }
+      if (chaveAcesso) {
+        document.chaveAcesso = chaveAcesso;
+      }
+      if (message) {
+        document.message = message;
+      }
+
+      documents.push(document);
     }
 
-    const candidates = [payload.LoteDFe, payload.loteDFe, payload.lotes];
-    const firstArray = candidates.find((item) => Array.isArray(item)) as unknown[] | undefined;
+    return documents;
+  }
 
-    if (
-      Array.isArray(firstArray) &&
-      firstArray.length > 0 &&
-      typeof firstArray[0] === 'object' &&
-      firstArray[0] !== null
-    ) {
-      return firstArray[0] as DfeItem;
+  private extractDfeItems(payload: Record<string, unknown> | null): DfeItem[] {
+    if (!payload) {
+      return [];
+    }
+
+    const candidates = [
+      payload.LoteDFe,
+      payload.loteDFe,
+      payload.lotes,
+      payload.Lotes,
+      payload.documentos,
+      payload.Documentos,
+      payload.DFe,
+      payload.dfe
+    ];
+
+    for (const candidate of candidates) {
+      const items = this.extractDfeItemsFromCandidate(candidate);
+      if (items.length > 0) {
+        return items;
+      }
     }
 
     if (
@@ -319,10 +356,44 @@ export class RealNfseAdnClient implements NfseAdnClient {
       typeof payload.arquivoXml === 'string' ||
       typeof payload.xml === 'string'
     ) {
-      return payload as DfeItem;
+      return [payload as DfeItem];
     }
 
-    return null;
+    return [];
+  }
+
+  private extractDfeItemsFromCandidate(candidate: unknown): DfeItem[] {
+    if (Array.isArray(candidate)) {
+      return candidate.filter((item): item is DfeItem => typeof item === 'object' && item !== null);
+    }
+
+    if (typeof candidate !== 'object' || candidate === null) {
+      return [];
+    }
+
+    const nestedArrays = Object.values(candidate as Record<string, unknown>).filter(Array.isArray);
+    for (const nestedArray of nestedArrays) {
+      const items = nestedArray.filter((item): item is DfeItem => typeof item === 'object' && item !== null);
+      if (items.length > 0) {
+        return items;
+      }
+    }
+
+    return [];
+  }
+
+  private parseNsuFromItem(item: DfeItem): bigint | undefined {
+    const raw = item.NSU ?? item.Nsu ?? item.nsu ?? item.NsuRecepcao ?? item.nsuRecepcao;
+    if (raw === undefined || raw === null) {
+      return undefined;
+    }
+
+    try {
+      const nsu = BigInt(String(raw));
+      return nsu >= 0n ? nsu : undefined;
+    } catch {
+      return undefined;
+    }
   }
 
   private extractXml(compressedB64?: string, plainXml?: string): string | null {

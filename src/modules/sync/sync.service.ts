@@ -5,18 +5,56 @@ import {
   ClienteEstabelecimento,
   DocumentoOrigem,
   NfseDocumento,
+  NfseSyncControle,
   Prisma,
   SyncMode,
   SyncStatus
 } from '@prisma/client';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
 import { PrismaService } from '../../prisma/prisma.service';
-import { AdnDFeResult, NFSE_ADN_CLIENT, NfseAdnClient } from '../../integrations/nfse-adn/nfse-adn.types';
+import {
+  AdnDFeDocument,
+  AdnDFeResult,
+  NFSE_ADN_CLIENT,
+  NfseAdnClient
+} from '../../integrations/nfse-adn/nfse-adn.types';
 import { NfseDanfseService } from '../nfse/nfse-danfse.service';
 import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from '../nfse/nfse-xml-parser.service';
 import { LocalStorageService } from '../storage/storage.service';
 import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
 import { StartSyncDto } from './dto/start-sync.dto';
+import { ReprocessPastNsusDto } from './dto/reprocess-past-nsus.dto';
+
+type ReprocessPastNsusDetail = {
+  controleId: string;
+  clienteId: string;
+  cnpjConsulta: string;
+  ambiente: Ambiente;
+  nsuInicial: string;
+  nsuFinal: string;
+  nsusAvaliados: number;
+  nsusConsultados: number;
+  nsusIgnoradosComDocumento: number;
+  documentosSalvos: number;
+  documentosIgnoradosExistentes: number;
+  semDocumento: number;
+  falhas: number;
+};
+
+type ReprocessPastNsusResult = {
+  controlesEncontrados: number;
+  controlesProcessados: number;
+  nsusAvaliados: number;
+  nsusConsultados: number;
+  nsusIgnoradosComDocumento: number;
+  documentosSalvos: number;
+  documentosIgnoradosExistentes: number;
+  semDocumento: number;
+  falhas: number;
+  interrompidoPorRateLimit: boolean;
+  ultimaMensagem: string | null;
+  detalhes: ReprocessPastNsusDetail[];
+};
 
 @Injectable()
 export class SyncService implements OnModuleInit, OnModuleDestroy {
@@ -347,7 +385,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        if (!result.hasDocument || !result.xml) {
+        const documents = this.getResultDocuments(result, nextNsu);
+        if (!result.hasDocument || documents.length === 0) {
           const nextExecution = isDailyMode ? new Date(Date.now() + this.dailySyncIntervalMs) : null;
           const message =
             result.message ??
@@ -369,24 +408,26 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        let chave = result.chaveAcesso;
-        let parsedXml: ParsedNfse | null = null;
-        let parsedEvento: ParsedNfseEvento | null = null;
+        const persistedDocuments: Array<{ nsu?: bigint; kind: 'evento' | 'nfse' }> = [];
         try {
-          const parsedAny = this.parser.parseAny(result.xml);
-          if (parsedAny.kind === 'evento') {
-            parsedEvento = parsedAny.evento;
-            chave = parsedEvento.chaveAcesso;
-          } else {
-            parsedXml = parsedAny.nfse;
-            chave = parsedXml.chaveAcesso;
+          for (const document of documents) {
+            const persisted = await this.persistDfeDocumentFromNsu({
+              control,
+              document
+            });
+            persistedDocuments.push(persisted);
+            await this.logSync(
+              control.clienteId,
+              control.id,
+              certificate.id,
+              control.ambiente,
+              persisted.nsu ?? nextNsu,
+              'sucesso',
+              persisted.kind === 'evento' ? 'Evento sincronizado' : 'Documento sincronizado'
+            );
           }
         } catch (error) {
-          this.logger.warn(`Falha ao parsear XML da chave ${chave ?? 'desconhecida'}: ${this.toErrorMessage(error)}`);
-        }
-
-        if (!chave) {
-          const message = 'Nao foi possivel localizar chave de acesso no XML retornado pelo ADN';
+          const message = this.toErrorMessage(error);
           await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'erro_api', message);
           await this.prisma.nfseSyncControle.update({
             where: { id: control.id },
@@ -400,160 +441,32 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        if (parsedEvento) {
-          const hash = this.parser.getHash(result.xml);
-          await this.persistEventoFromNsu({
-            control,
-            nsu: nextNsu,
-            xml: result.xml,
-            evento: parsedEvento,
-            hash
-          });
-
-          await this.prisma.nfseSyncControle.update({
-            where: { id: control.id },
-            data: {
-              ultimoNsuConsultado: nextNsu,
-              ultimoNsuComDocumento: nextNsu,
-              totalDocumentosBaixados: {
-                increment: 1
-              },
-              ultimaExecucao: new Date(),
-              proximaExecucao:
-                isDailyMode && this.dailySyncStopOnFirstDocument
-                  ? new Date(Date.now() + this.dailySyncSuccessCooldownMs)
-                  : null,
-              ultimaMensagem: 'Evento sincronizado com sucesso'
-            }
-          });
-
-          await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'sucesso', 'Evento sincronizado');
-          documentsSaved += 1;
-          documentsSavedForControl += 1;
-          currentNsu = nextNsu;
-
-          if (isDailyMode && this.dailySyncStopOnFirstDocument) {
-            shouldStop = true;
-          }
-
-          continue;
-        }
-
-        const dataReferencia = parsedXml?.dataEmissao ?? new Date();
-        const competencia =
-          parsedXml?.competencia ??
-          (parsedXml?.dataEmissao
-            ? new Date(Date.UTC(parsedXml.dataEmissao.getUTCFullYear(), parsedXml.dataEmissao.getUTCMonth(), 1))
-            : undefined);
-        const year = dataReferencia.getUTCFullYear();
-        const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
-        const cnpjPasta =
-          this.normalizeCnpj(parsedXml?.cnpjPrestador) ??
-          this.normalizeCnpj(parsedXml?.cnpjTomador) ??
-          control.cnpjConsulta;
-        const xmlKey = `nfse/${control.ambiente}/${cnpjPasta}/${year}/${month}/xml/${chave}.xml`;
-        await this.storage.putObject(xmlKey, result.xml);
-        const danfseKey = `nfse/${control.ambiente}/${cnpjPasta}/${year}/${month}/danfse/${chave}.pdf`;
-        const danfsePdf = this.danfse.generateFromXml(result.xml, {
-          chaveAcesso: chave,
-          numeroNfse: parsedXml?.numeroNfse,
-          dataEmissao: parsedXml?.dataEmissao,
-          status: this.normalizeStatus(parsedXml?.status),
-          cnpjPrestador: parsedXml?.cnpjPrestador ?? control.cnpjConsulta,
-          razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
-          cnpjTomador: parsedXml?.cnpjTomador,
-          razaoSocialTomador: parsedXml?.razaoSocialTomador,
-          valorServico: parsedXml?.valorServico,
-          descricaoServico: parsedXml?.descricaoServico
-        });
-        await this.storage.putObject(danfseKey, danfsePdf);
-        const hash = this.parser.getHash(result.xml);
-
-        await this.prisma.nfseDocumento.upsert({
-          where: {
-            ambiente_chaveAcesso: {
-              ambiente: control.ambiente,
-              chaveAcesso: chave
-            }
-          },
-          update: {
-            nsu: nextNsu,
-            numeroNfse: parsedXml?.numeroNfse,
-            serie: parsedXml?.serie,
-            dataEmissao: parsedXml?.dataEmissao,
-            competencia,
-            status: this.normalizeStatus(parsedXml?.status) ?? 'autorizada',
-            cnpjPrestador: parsedXml?.cnpjPrestador ?? control.cnpjConsulta,
-            razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
-            cnpjTomador: parsedXml?.cnpjTomador,
-            razaoSocialTomador: parsedXml?.razaoSocialTomador,
-            municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
-            municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
-            valorServico: this.toDecimal(parsedXml?.valorServico),
-            valorDeducoes: this.toDecimal(parsedXml?.valorDeducoes),
-            valorIss: this.toDecimal(parsedXml?.valorIss),
-            aliquotaIss: this.toDecimal(parsedXml?.aliquotaIss),
-            codigoServicoNacional: parsedXml?.codigoServicoNacional,
-            itemListaServico: parsedXml?.itemListaServico,
-            descricaoServico: parsedXml?.descricaoServico,
-            xmlPath: xmlKey,
-            danfsePath: danfseKey,
-            hashXml: hash,
-            origem: DocumentoOrigem.adn_nsu,
-            updatedAt: new Date()
-          },
-          create: {
-            clienteId: control.clienteId,
-            estabelecimentoId: control.estabelecimentoId,
-            ambiente: control.ambiente,
-            nsu: nextNsu,
-            chaveAcesso: chave,
-            numeroNfse: parsedXml?.numeroNfse,
-            serie: parsedXml?.serie,
-            dataEmissao: parsedXml?.dataEmissao,
-            competencia,
-            status: this.normalizeStatus(parsedXml?.status) ?? 'autorizada',
-            cnpjPrestador: parsedXml?.cnpjPrestador ?? control.cnpjConsulta,
-            razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
-            cnpjTomador: parsedXml?.cnpjTomador,
-            razaoSocialTomador: parsedXml?.razaoSocialTomador,
-            municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
-            municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
-            valorServico: this.toDecimal(parsedXml?.valorServico),
-            valorDeducoes: this.toDecimal(parsedXml?.valorDeducoes),
-            valorIss: this.toDecimal(parsedXml?.valorIss),
-            aliquotaIss: this.toDecimal(parsedXml?.aliquotaIss),
-            codigoServicoNacional: parsedXml?.codigoServicoNacional,
-            itemListaServico: parsedXml?.itemListaServico,
-            descricaoServico: parsedXml?.descricaoServico,
-            xmlPath: xmlKey,
-            danfsePath: danfseKey,
-            hashXml: hash,
-            origem: DocumentoOrigem.adn_nsu
-          }
-        });
+        const maxProcessedNsu = persistedDocuments.reduce(
+          (max, document) => (document.nsu && document.nsu > max ? document.nsu : max),
+          nextNsu
+        );
+        const lastKind = persistedDocuments[persistedDocuments.length - 1]?.kind ?? 'nfse';
 
         await this.prisma.nfseSyncControle.update({
           where: { id: control.id },
           data: {
-            ultimoNsuConsultado: nextNsu,
-            ultimoNsuComDocumento: nextNsu,
+            ultimoNsuConsultado: maxProcessedNsu,
+            ultimoNsuComDocumento: maxProcessedNsu,
             totalDocumentosBaixados: {
-              increment: 1
+              increment: persistedDocuments.length
             },
             ultimaExecucao: new Date(),
             proximaExecucao:
               isDailyMode && this.dailySyncStopOnFirstDocument
                 ? new Date(Date.now() + this.dailySyncSuccessCooldownMs)
                 : null,
-            ultimaMensagem: 'Documento sincronizado com sucesso'
+            ultimaMensagem: this.buildSuccessMessage(persistedDocuments.length, lastKind)
           }
         });
 
-        await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nextNsu, 'sucesso', 'Documento sincronizado');
-        documentsSaved += 1;
-        documentsSavedForControl += 1;
-        currentNsu = nextNsu;
+        documentsSaved += persistedDocuments.length;
+        documentsSavedForControl += persistedDocuments.length;
+        currentNsu = maxProcessedNsu;
 
         if (isDailyMode && this.dailySyncStopOnFirstDocument) {
           shouldStop = true;
@@ -575,6 +488,201 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       processed: controls.length,
       documentsSaved
     };
+  }
+
+  async reprocessPastNsus(options: ReprocessPastNsusDto = {}): Promise<ReprocessPastNsusResult> {
+    if (options.clienteId) {
+      await this.ensureClient(options.clienteId);
+    }
+
+    const controls = await this.prisma.nfseSyncControle.findMany({
+      where: options.clienteId ? { clienteId: options.clienteId } : {},
+      orderBy: [{ updatedAt: 'asc' }, { createdAt: 'asc' }]
+    });
+
+    const result: ReprocessPastNsusResult = {
+      controlesEncontrados: controls.length,
+      controlesProcessados: 0,
+      nsusAvaliados: 0,
+      nsusConsultados: 0,
+      nsusIgnoradosComDocumento: 0,
+      documentosSalvos: 0,
+      documentosIgnoradosExistentes: 0,
+      semDocumento: 0,
+      falhas: 0,
+      interrompidoPorRateLimit: false,
+      ultimaMensagem: null,
+      detalhes: []
+    };
+
+    for (const control of controls) {
+      if (this.isRateLimitCooldownActive()) {
+        result.interrompidoPorRateLimit = true;
+        result.ultimaMensagem = 'Recuperacao interrompida por cooldown de rate limit do ADN';
+        break;
+      }
+
+      const startNsu = 1n;
+      const detail = this.createReprocessDetail(control, startNsu);
+      result.detalhes.push(detail);
+
+      if (control.ultimoNsuConsultado < startNsu) {
+        result.controlesProcessados += 1;
+        continue;
+      }
+
+      const certificate = await this.prisma.certificado.findFirst({
+        where: {
+          clienteId: control.clienteId,
+          estabelecimentoId: control.estabelecimentoId,
+          ativo: true
+        },
+        orderBy: { createdAt: 'desc' }
+      });
+
+      if (!certificate || (certificate.validadeFim && certificate.validadeFim.getTime() < Date.now())) {
+        const message = certificate ? 'Certificado vencido' : 'Nenhum certificado ativo para o estabelecimento';
+        detail.falhas += 1;
+        result.falhas += 1;
+        result.ultimaMensagem = message;
+        await this.logSync(
+          control.clienteId,
+          control.id,
+          certificate?.id ?? null,
+          control.ambiente,
+          null,
+          'erro_certificado',
+          message
+        );
+        result.controlesProcessados += 1;
+        continue;
+      }
+
+      let maxRecoveredNsu: bigint | null = null;
+      let shouldStopAll = false;
+
+      for (let nsu = startNsu; nsu <= control.ultimoNsuConsultado; nsu += 1n) {
+        detail.nsusAvaliados += 1;
+        result.nsusAvaliados += 1;
+
+        if (
+          await this.hasFiscalDocumentForNsu({
+            clienteId: control.clienteId,
+            ambiente: control.ambiente,
+            nsu
+          })
+        ) {
+          detail.nsusIgnoradosComDocumento += 1;
+          result.nsusIgnoradosComDocumento += 1;
+          continue;
+        }
+
+        await this.waitForAdnRequestSlot();
+        const dfeResult = await this.adnClient.getDFeByNsu({
+          cnpjConsulta: control.cnpjConsulta,
+          nsu,
+          ambiente: this.toNfseAmbiente(control.ambiente),
+          certificateId: certificate.id
+        });
+        detail.nsusConsultados += 1;
+        result.nsusConsultados += 1;
+
+        if (this.isCertificateDecryptError(dfeResult)) {
+          const message =
+            'Falha ao descriptografar certificado/senha. Verifique CERT_MASTER_KEY e recadastre o certificado.';
+          detail.falhas += 1;
+          result.falhas += 1;
+          result.ultimaMensagem = message;
+          await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nsu, 'erro_certificado', message);
+          break;
+        }
+
+        if (this.mustRetryWithoutAdvancingNsu(dfeResult)) {
+          const isRateLimitError = dfeResult.statusCode === 429;
+          const message =
+            dfeResult.message ??
+            (isRateLimitError ? 'Falha na consulta ADN. HTTP 429.' : 'Falha temporaria ao consultar ADN');
+
+          if (isRateLimitError) {
+            this.activateRateLimitCooldown();
+            result.interrompidoPorRateLimit = true;
+          }
+
+          detail.falhas += 1;
+          result.falhas += 1;
+          result.ultimaMensagem = message;
+          await this.logSync(
+            control.clienteId,
+            control.id,
+            certificate.id,
+            control.ambiente,
+            nsu,
+            isRateLimitError ? 'rate_limit' : 'erro_api',
+            message
+          );
+          shouldStopAll = true;
+          break;
+        }
+
+        const documents = this.getResultDocuments(dfeResult, nsu).filter(
+          (document) => !document.nsu || document.nsu <= control.ultimoNsuConsultado
+        );
+        if (!dfeResult.hasDocument || documents.length === 0) {
+          detail.semDocumento += 1;
+          result.semDocumento += 1;
+          continue;
+        }
+
+        for (const document of documents) {
+          if (
+            document.nsu &&
+            (await this.hasFiscalDocumentForNsu({
+              clienteId: control.clienteId,
+              ambiente: control.ambiente,
+              nsu: document.nsu
+            }))
+          ) {
+            detail.documentosIgnoradosExistentes += 1;
+            result.documentosIgnoradosExistentes += 1;
+            continue;
+          }
+
+          const persisted = await this.persistDfeDocumentFromNsu({
+            control,
+            document
+          });
+          const persistedNsu = persisted.nsu ?? nsu;
+          maxRecoveredNsu =
+            maxRecoveredNsu && maxRecoveredNsu > persistedNsu ? maxRecoveredNsu : persistedNsu;
+          detail.documentosSalvos += 1;
+          result.documentosSalvos += 1;
+          await this.logSync(
+            control.clienteId,
+            control.id,
+            certificate.id,
+            control.ambiente,
+            persistedNsu,
+            'sucesso',
+            persisted.kind === 'evento'
+              ? 'Evento recuperado no reprocessamento de NSUs passados'
+              : 'Documento recuperado no reprocessamento de NSUs passados'
+          );
+        }
+      }
+
+      await this.updateControlAfterPastNsuReprocess(control, detail, maxRecoveredNsu);
+      result.controlesProcessados += 1;
+
+      if (shouldStopAll) {
+        break;
+      }
+    }
+
+    if (!result.ultimaMensagem) {
+      result.ultimaMensagem = `Recuperacao concluida com ${result.documentosSalvos} documento(s) salvo(s)`;
+    }
+
+    return result;
   }
 
   async testSingleNsu(dto: TestSingleNsuDto): Promise<{
@@ -883,6 +991,271 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private createReprocessDetail(control: NfseSyncControle, startNsu: bigint): ReprocessPastNsusDetail {
+    return {
+      controleId: control.id,
+      clienteId: control.clienteId,
+      cnpjConsulta: control.cnpjConsulta,
+      ambiente: control.ambiente,
+      nsuInicial: startNsu.toString(),
+      nsuFinal: control.ultimoNsuConsultado.toString(),
+      nsusAvaliados: 0,
+      nsusConsultados: 0,
+      nsusIgnoradosComDocumento: 0,
+      documentosSalvos: 0,
+      documentosIgnoradosExistentes: 0,
+      semDocumento: 0,
+      falhas: 0
+    };
+  }
+
+  private async hasFiscalDocumentForNsu(params: {
+    clienteId: string;
+    ambiente: Ambiente;
+    nsu: bigint;
+  }): Promise<boolean> {
+    const document = await this.prisma.nfseDocumento.findFirst({
+      where: {
+        clienteId: params.clienteId,
+        ambiente: params.ambiente,
+        nsu: params.nsu
+      },
+      select: {
+        xmlPath: true,
+        numeroNfse: true,
+        dataEmissao: true
+      }
+    });
+
+    return Boolean(document && this.hasDocumentoFiscalData(document));
+  }
+
+  private async updateControlAfterPastNsuReprocess(
+    control: NfseSyncControle,
+    detail: ReprocessPastNsusDetail,
+    maxRecoveredNsu: bigint | null
+  ): Promise<void> {
+    const message = `Recuperacao de NSUs passados: ${detail.documentosSalvos} documento(s) salvo(s), ${detail.nsusIgnoradosComDocumento + detail.documentosIgnoradosExistentes} ja existente(s), ${detail.semDocumento} sem documento.`;
+    const data: Prisma.NfseSyncControleUpdateInput = {
+      ultimaExecucao: new Date(),
+      ultimaMensagem: message
+    };
+
+    if (detail.documentosSalvos > 0) {
+      data.totalDocumentosBaixados = {
+        increment: detail.documentosSalvos
+      };
+    }
+
+    if (maxRecoveredNsu && maxRecoveredNsu > control.ultimoNsuComDocumento) {
+      data.ultimoNsuComDocumento = maxRecoveredNsu;
+    }
+
+    await this.prisma.nfseSyncControle.update({
+      where: { id: control.id },
+      data
+    });
+  }
+
+  private getResultDocuments(result: AdnDFeResult, requestedNsu: bigint): AdnDFeDocument[] {
+    const documents = (result.documents ?? []).filter((document) => document.xml.trim());
+    if (documents.length > 0) {
+      return documents.map((document) => ({
+        ...document,
+        nsu: document.nsu ?? (documents.length === 1 ? requestedNsu : undefined)
+      }));
+    }
+
+    if (!result.xml?.trim()) {
+      return [];
+    }
+
+    return [
+      {
+        nsu: result.nsu ?? requestedNsu,
+        xml: result.xml,
+        chaveAcesso: result.chaveAcesso,
+        message: result.message
+      }
+    ];
+  }
+
+  private async persistDfeDocumentFromNsu(params: {
+    control: {
+      clienteId: string;
+      estabelecimentoId: string;
+      cnpjConsulta: string;
+      ambiente: Ambiente;
+    };
+    document: AdnDFeDocument;
+  }): Promise<{ nsu?: bigint; kind: 'evento' | 'nfse' }> {
+    let chave = params.document.chaveAcesso;
+    let parsedXml: ParsedNfse | null = null;
+    let parsedEvento: ParsedNfseEvento | null = null;
+
+    try {
+      const parsedAny = this.parser.parseAny(params.document.xml);
+      if (parsedAny.kind === 'evento') {
+        parsedEvento = parsedAny.evento;
+        chave = parsedEvento.chaveAcesso;
+      } else {
+        parsedXml = parsedAny.nfse;
+        chave = parsedXml.chaveAcesso;
+      }
+    } catch (error) {
+      this.logger.warn(`Falha ao parsear XML da chave ${chave ?? 'desconhecida'}: ${this.toErrorMessage(error)}`);
+    }
+
+    if (!chave) {
+      throw new Error('Nao foi possivel localizar chave de acesso no XML retornado pelo ADN');
+    }
+
+    if (parsedEvento) {
+      const hash = this.parser.getHash(params.document.xml);
+      await this.persistEventoFromNsu({
+        control: params.control,
+        nsu: params.document.nsu,
+        xml: params.document.xml,
+        evento: parsedEvento,
+        hash
+      });
+
+      return {
+        nsu: params.document.nsu,
+        kind: 'evento'
+      };
+    }
+
+    const existingDocument = await this.prisma.nfseDocumento.findUnique({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente: params.control.ambiente,
+          chaveAcesso: chave
+        }
+      },
+      select: {
+        status: true,
+        dataCancelamento: true
+      }
+    });
+    const normalizedStatus = this.normalizeStatus(parsedXml?.status) ?? 'autorizada';
+    const isCanceledDocument =
+      normalizedStatus === 'cancelada' ||
+      existingDocument?.status === 'cancelada' ||
+      Boolean(existingDocument?.dataCancelamento);
+    const documentStatus = isCanceledDocument ? 'cancelada' : normalizedStatus;
+    const documentCancelamentoDate = existingDocument?.dataCancelamento;
+
+    const dataReferencia = parsedXml?.dataEmissao ?? new Date();
+    const competencia =
+      parsedXml?.competencia ??
+      (parsedXml?.dataEmissao
+        ? new Date(Date.UTC(parsedXml.dataEmissao.getUTCFullYear(), parsedXml.dataEmissao.getUTCMonth(), 1))
+        : undefined);
+    const year = dataReferencia.getUTCFullYear();
+    const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
+    const cnpjPasta =
+      this.normalizeCnpj(parsedXml?.cnpjPrestador) ??
+      this.normalizeCnpj(parsedXml?.cnpjTomador) ??
+      params.control.cnpjConsulta;
+    const xmlKey = `nfse/${params.control.ambiente}/${cnpjPasta}/${year}/${month}/xml/${chave}.xml`;
+    await this.storage.putObject(xmlKey, params.document.xml);
+    const danfseKey = `nfse/${params.control.ambiente}/${cnpjPasta}/${year}/${month}/danfse/${chave}.pdf`;
+    const danfsePdf = this.danfse.generateFromXml(params.document.xml, {
+      chaveAcesso: chave,
+      numeroNfse: parsedXml?.numeroNfse,
+      dataEmissao: parsedXml?.dataEmissao,
+      status: this.normalizeStatus(parsedXml?.status),
+      cnpjPrestador: parsedXml?.cnpjPrestador ?? params.control.cnpjConsulta,
+      razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
+      cnpjTomador: parsedXml?.cnpjTomador,
+      razaoSocialTomador: parsedXml?.razaoSocialTomador,
+      valorServico: parsedXml?.valorServico,
+      descricaoServico: parsedXml?.descricaoServico
+    });
+    await this.storage.putObject(danfseKey, danfsePdf);
+    const hash = this.parser.getHash(params.document.xml);
+
+    await this.prisma.nfseDocumento.upsert({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente: params.control.ambiente,
+          chaveAcesso: chave
+        }
+      },
+      update: {
+        nsu: params.document.nsu,
+        numeroNfse: parsedXml?.numeroNfse,
+        serie: parsedXml?.serie,
+        dataEmissao: parsedXml?.dataEmissao,
+        competencia,
+        dataCancelamento: documentCancelamentoDate,
+        status: documentStatus,
+        cnpjPrestador: parsedXml?.cnpjPrestador ?? params.control.cnpjConsulta,
+        razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
+        cnpjTomador: parsedXml?.cnpjTomador,
+        razaoSocialTomador: parsedXml?.razaoSocialTomador,
+        municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
+        municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
+        valorServico: this.toDecimal(parsedXml?.valorServico),
+        valorDeducoes: this.toDecimal(parsedXml?.valorDeducoes),
+        valorIss: this.toDecimal(parsedXml?.valorIss),
+        aliquotaIss: this.toDecimal(parsedXml?.aliquotaIss),
+        codigoServicoNacional: parsedXml?.codigoServicoNacional,
+        itemListaServico: parsedXml?.itemListaServico,
+        descricaoServico: parsedXml?.descricaoServico,
+        xmlPath: xmlKey,
+        danfsePath: isCanceledDocument ? null : danfseKey,
+        hashXml: hash,
+        origem: DocumentoOrigem.adn_nsu,
+        updatedAt: new Date()
+      },
+      create: {
+        clienteId: params.control.clienteId,
+        estabelecimentoId: params.control.estabelecimentoId,
+        ambiente: params.control.ambiente,
+        nsu: params.document.nsu,
+        chaveAcesso: chave,
+        numeroNfse: parsedXml?.numeroNfse,
+        serie: parsedXml?.serie,
+        dataEmissao: parsedXml?.dataEmissao,
+        competencia,
+        dataCancelamento: documentCancelamentoDate,
+        status: documentStatus,
+        cnpjPrestador: parsedXml?.cnpjPrestador ?? params.control.cnpjConsulta,
+        razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
+        cnpjTomador: parsedXml?.cnpjTomador,
+        razaoSocialTomador: parsedXml?.razaoSocialTomador,
+        municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
+        municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
+        valorServico: this.toDecimal(parsedXml?.valorServico),
+        valorDeducoes: this.toDecimal(parsedXml?.valorDeducoes),
+        valorIss: this.toDecimal(parsedXml?.valorIss),
+        aliquotaIss: this.toDecimal(parsedXml?.aliquotaIss),
+        codigoServicoNacional: parsedXml?.codigoServicoNacional,
+        itemListaServico: parsedXml?.itemListaServico,
+        descricaoServico: parsedXml?.descricaoServico,
+        xmlPath: xmlKey,
+        danfsePath: isCanceledDocument ? null : danfseKey,
+        hashXml: hash,
+        origem: DocumentoOrigem.adn_nsu
+      }
+    });
+
+    return {
+      nsu: params.document.nsu,
+      kind: 'nfse'
+    };
+  }
+
+  private buildSuccessMessage(count: number, kind: 'evento' | 'nfse'): string {
+    if (count === 1) {
+      return kind === 'evento' ? 'Evento sincronizado com sucesso' : 'Documento sincronizado com sucesso';
+    }
+
+    return `Lote ADN sincronizado com ${count} documento(s)`;
+  }
+
   private async persistEventoFromNsu(params: {
     control: {
       clienteId: string;
@@ -890,7 +1263,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       cnpjConsulta: string;
       ambiente: Ambiente;
     };
-    nsu: bigint;
+    nsu?: bigint;
     xml: string;
     evento: ParsedNfseEvento;
     hash: string;

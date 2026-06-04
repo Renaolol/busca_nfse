@@ -1,10 +1,18 @@
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
 
+export interface AdnDFeDocument {
+  nsu?: bigint;
+  xml: string;
+  chaveAcesso?: string;
+  message?: string;
+}
+
 export interface AdnDFeResult {
   nsu: bigint;
   hasDocument: boolean;
   xml?: string;
   chaveAcesso?: string;
+  documents?: AdnDFeDocument[];
   rawResponse: unknown;
   statusCode: number;
   message?: string;

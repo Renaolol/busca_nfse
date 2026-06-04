@@ -465,6 +465,18 @@ function onDocumentClick(event) {
       });
       return;
     }
+    case 'recover-past-nsus': {
+      openModal({
+        kind: 'confirm',
+        title: 'Recuperar NSUs passados',
+        subtitle:
+          'A rotina vai varrer NSUs ja consultados, pular notas que ja existem e consultar o ADN apenas para lacunas. A execucao pode demorar.',
+        confirmLabel: 'Iniciar recuperacao',
+        intent: 'warning',
+        payload: { type: 'recover-past-nsus' }
+      });
+      return;
+    }
     case 'execution-refresh': {
       refreshRunningExecution();
       return;
@@ -1362,7 +1374,8 @@ function renderSearchRunsPage() {
         actions: [
           actionButton('Ligar busca automatica agora', 'enable-auto-search', 'primary'),
           actionButton('Desligar busca manual', 'disable-manual-started-search', 'secondary'),
-          actionButton('Nova busca manual', 'open-new-manual-run', 'secondary')
+          actionButton('Nova busca manual', 'open-new-manual-run', 'secondary'),
+          actionButton('Recuperar NSUs passados', 'recover-past-nsus', 'secondary')
         ]
       })}
 
@@ -3164,6 +3177,53 @@ async function executeConfirmAction(payload) {
       }
 
       pushToast(`${state.selectedClientIds.size} cliente(s) enviados para reprocessamento.`, 'success');
+      return;
+    }
+    case 'recover-past-nsus': {
+      if (state.dataSource !== 'api') {
+        startExecutionMonitor('Recuperacao', state.clients.length || 1, 'Recuperando NSUs passados (mock)...');
+        state.executionMonitor.currentClientName = 'Todos os clientes';
+        finishExecutionMonitor('Recuperacao mock finalizada.');
+        pushToast('Recuperacao de NSUs passados iniciada (mock).', 'success');
+        return;
+      }
+
+      try {
+        startExecutionMonitor(
+          'Recuperacao',
+          state.clients.length || 1,
+          'Reprocessando NSUs ja consultados. Notas existentes serao ignoradas...'
+        );
+        state.executionMonitor.currentClientName = 'Todos os controles';
+        state.executionMonitor.updatedAt = new Date().toISOString();
+        render();
+
+        const result = await apiRequest('/sync/reprocessar-nsus-passados', {
+          method: 'POST',
+          timeoutMs: 10 * 60 * 1000
+        });
+
+        state.executionMonitor.total = Number(result?.controlesEncontrados || state.executionMonitor.total || 0);
+        state.executionMonitor.processed = Number(result?.controlesProcessados || 0);
+        state.executionMonitor.successful = Number(result?.documentosSalvos || 0);
+        state.executionMonitor.failed = Number(result?.falhas || 0);
+        state.executionMonitor.message = 'Recuperacao concluida. Atualizando painel...';
+        state.executionMonitor.updatedAt = new Date().toISOString();
+        render();
+
+        await refreshApiData();
+        finishExecutionMonitor(
+          `Recuperacao finalizada. NSUs consultados: ${Number(result?.nsusConsultados || 0)}. XMLs salvos: ${Number(result?.documentosSalvos || 0)}. Ja existentes: ${Number(result?.nsusIgnoradosComDocumento || 0) + Number(result?.documentosIgnoradosExistentes || 0)}.`
+        );
+        pushToast(
+          `Recuperacao concluida: ${Number(result?.documentosSalvos || 0)} XML(s) salvo(s), ${Number(result?.nsusConsultados || 0)} NSU(s) consultado(s).`,
+          Number(result?.falhas || 0) > 0 ? 'error' : 'success'
+        );
+      } catch (error) {
+        state.executionMonitor.failed += 1;
+        finishExecutionMonitor('Recuperacao de NSUs finalizada com falha.');
+        pushToast(`Falha ao recuperar NSUs passados: ${toErrorMessage(error)}`, 'error');
+      }
       return;
     }
     case 'replace-certificate': {
