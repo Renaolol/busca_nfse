@@ -1,5 +1,14 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
-import { Ambiente, Certificado, ClienteEstabelecimento, DocumentoOrigem, Prisma, SyncMode, SyncStatus } from '@prisma/client';
+import {
+  Ambiente,
+  Certificado,
+  ClienteEstabelecimento,
+  DocumentoOrigem,
+  NfseDocumento,
+  Prisma,
+  SyncMode,
+  SyncStatus
+} from '@prisma/client';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AdnDFeResult, NFSE_ADN_CLIENT, NfseAdnClient } from '../../integrations/nfse-adn/nfse-adn.types';
@@ -886,11 +895,21 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     evento: ParsedNfseEvento;
     hash: string;
   }): Promise<void> {
+    const existing = await this.findDocumentoForEvento({
+      clienteId: params.control.clienteId,
+      chaveAcesso: params.evento.chaveAcesso,
+      ambientePreferencial: params.control.ambiente
+    });
+    const ambiente = existing?.ambiente ?? params.control.ambiente;
     const dataReferencia = params.evento.dataEvento ?? new Date();
     const year = dataReferencia.getUTCFullYear();
     const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
-    const cnpjPasta = this.normalizeCnpj(params.evento.cnpjAutor) ?? params.control.cnpjConsulta;
-    const xmlKey = `nfse/${params.control.ambiente}/${cnpjPasta}/${year}/${month}/eventos/${this.toSafeFileName(
+    const cnpjPasta =
+      this.normalizeCnpj(params.evento.cnpjAutor) ??
+      this.normalizeCnpj(existing?.cnpjPrestador) ??
+      this.normalizeCnpj(existing?.cnpjTomador) ??
+      params.control.cnpjConsulta;
+    const xmlKey = `nfse/${ambiente}/${cnpjPasta}/${year}/${month}/eventos/${this.toSafeFileName(
       params.evento.chaveAcesso
     )}_${this.toSafeFileName(params.evento.tipoEvento)}.xml`;
 
@@ -900,7 +919,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     const nfse = await this.prisma.nfseDocumento.upsert({
       where: {
         ambiente_chaveAcesso: {
-          ambiente: params.control.ambiente,
+          ambiente,
           chaveAcesso: params.evento.chaveAcesso
         }
       },
@@ -912,7 +931,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       create: {
         clienteId: params.control.clienteId,
         estabelecimentoId: params.control.estabelecimentoId,
-        ambiente: params.control.ambiente,
+        ambiente,
         nsu: params.nsu,
         chaveAcesso: params.evento.chaveAcesso,
         ...cancelamentoData,
@@ -946,6 +965,43 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         hashXml: params.hash
       }
     });
+  }
+
+  private async findDocumentoForEvento(params: {
+    clienteId: string;
+    chaveAcesso: string;
+    ambientePreferencial: Ambiente;
+  }): Promise<NfseDocumento | null> {
+    const candidates = await this.prisma.nfseDocumento.findMany({
+      where: {
+        clienteId: params.clienteId,
+        chaveAcesso: params.chaveAcesso
+      },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 10
+    });
+
+    return this.chooseDocumentoForEvento(candidates, params.ambientePreferencial);
+  }
+
+  private chooseDocumentoForEvento(candidates: NfseDocumento[], ambientePreferencial: Ambiente): NfseDocumento | null {
+    const exactWithXml = candidates.find(
+      (doc) => doc.ambiente === ambientePreferencial && this.hasDocumentoFiscalData(doc)
+    );
+    if (exactWithXml) {
+      return exactWithXml;
+    }
+
+    const anyWithXml = candidates.find((doc) => this.hasDocumentoFiscalData(doc));
+    if (anyWithXml) {
+      return anyWithXml;
+    }
+
+    return candidates.find((doc) => doc.ambiente === ambientePreferencial) ?? candidates[0] ?? null;
+  }
+
+  private hasDocumentoFiscalData(doc: Pick<NfseDocumento, 'xmlPath' | 'numeroNfse' | 'dataEmissao'>): boolean {
+    return Boolean(doc.xmlPath || doc.numeroNfse || doc.dataEmissao);
   }
 
   private buildCancelamentoDocumentoData(

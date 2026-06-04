@@ -361,6 +361,43 @@ export class NfseService {
     });
   }
 
+  private async findDocumentoForEvento(params: {
+    clienteId: string;
+    chaveAcesso: string;
+    ambientePreferencial: Ambiente;
+  }): Promise<NfseDocumento | null> {
+    const candidates = await this.prisma.nfseDocumento.findMany({
+      where: {
+        clienteId: params.clienteId,
+        chaveAcesso: params.chaveAcesso
+      },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
+      take: 10
+    });
+
+    return this.chooseDocumentoForEvento(candidates, params.ambientePreferencial);
+  }
+
+  private chooseDocumentoForEvento(candidates: NfseDocumento[], ambientePreferencial: Ambiente): NfseDocumento | null {
+    const exactWithXml = candidates.find(
+      (doc) => doc.ambiente === ambientePreferencial && this.hasDocumentoFiscalData(doc)
+    );
+    if (exactWithXml) {
+      return exactWithXml;
+    }
+
+    const anyWithXml = candidates.find((doc) => this.hasDocumentoFiscalData(doc));
+    if (anyWithXml) {
+      return anyWithXml;
+    }
+
+    return candidates.find((doc) => doc.ambiente === ambientePreferencial) ?? candidates[0] ?? null;
+  }
+
+  private hasDocumentoFiscalData(doc: Pick<NfseDocumento, 'xmlPath' | 'numeroNfse' | 'dataEmissao'>): boolean {
+    return Boolean(doc.xmlPath || doc.numeroNfse || doc.dataEmissao);
+  }
+
   private async upsertEvento(
     nfseDocumentoId: string,
     evento: ParsedNfseEvento,
@@ -464,19 +501,17 @@ export class NfseService {
   }
 
   private async importEventoXml(dto: ImportXmlDto, evento: ParsedNfseEvento) {
-    const ambiente = dto.ambiente === 'producao_restrita' ? Ambiente.producao_restrita : Ambiente.producao;
+    const ambienteDto = dto.ambiente === 'producao_restrita' ? Ambiente.producao_restrita : Ambiente.producao;
     const hash = this.parser.getHash(dto.xml);
     const dataReferencia = evento.dataEvento ?? new Date();
     const year = dataReferencia.getUTCFullYear();
     const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
-    const existing = await this.prisma.nfseDocumento.findUnique({
-      where: {
-        ambiente_chaveAcesso: {
-          ambiente,
-          chaveAcesso: evento.chaveAcesso
-        }
-      }
+    const existing = await this.findDocumentoForEvento({
+      clienteId: dto.clienteId,
+      chaveAcesso: evento.chaveAcesso,
+      ambientePreferencial: ambienteDto
     });
+    const ambiente = existing?.ambiente ?? ambienteDto;
     const cnpj =
       this.normalizeCnpj(evento.cnpjAutor) ??
       this.normalizeCnpj(existing?.cnpjPrestador) ??

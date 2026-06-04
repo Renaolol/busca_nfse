@@ -34,7 +34,8 @@ describe('SyncService', () => {
     },
     nfseDocumento: {
       upsert: jest.fn(),
-      findFirst: jest.fn()
+      findFirst: jest.fn(),
+      findMany: jest.fn()
     },
     nfseEvento: {
       upsert: jest.fn()
@@ -114,6 +115,7 @@ describe('SyncService', () => {
     prisma.nfseSyncLog.create.mockResolvedValue({});
     prisma.nfseDocumento.upsert.mockResolvedValue({});
     prisma.nfseDocumento.findFirst.mockResolvedValue(null);
+    prisma.nfseDocumento.findMany.mockResolvedValue([]);
     prisma.nfseEvento.upsert.mockResolvedValue({});
     storage.putObject.mockResolvedValue(undefined);
 
@@ -358,8 +360,24 @@ describe('SyncService', () => {
         isCancelamento: true
       }
     });
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-original',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao_restrita,
+        chaveAcesso: '42110092206960810000176000000000033326062205552016',
+        cnpjPrestador: '06960810000176',
+        cnpjTomador: null,
+        xmlPath: 'nfse/producao_restrita/06960810000176/2026/06/xml/42110092206960810000176000000000033326062205552016.xml',
+        numeroNfse: '333',
+        dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+        createdAt: new Date('2026-06-03T12:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T12:00:00.000Z')
+      }
+    ]);
     prisma.nfseDocumento.upsert.mockResolvedValue({
-      id: 'doc-cancelada',
+      id: 'doc-original',
       chaveAcesso: '42110092206960810000176000000000033326062205552016'
     });
 
@@ -372,11 +390,19 @@ describe('SyncService', () => {
     expect(danfse.generateFromXml).not.toHaveBeenCalled();
     expect(storage.putObject).toHaveBeenCalledTimes(1);
     expect(storage.putObject).toHaveBeenCalledWith(
-      expect.stringContaining('/eventos/42110092206960810000176000000000033326062205552016_e101101.xml'),
+      expect.stringContaining(
+        'nfse/producao_restrita/06960810000176/2026/06/eventos/42110092206960810000176000000000033326062205552016_e101101.xml'
+      ),
       eventXml
     );
     expect(prisma.nfseDocumento.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: {
+          ambiente_chaveAcesso: {
+            ambiente: Ambiente.producao_restrita,
+            chaveAcesso: '42110092206960810000176000000000033326062205552016'
+          }
+        },
         update: expect.objectContaining({
           status: 'cancelada',
           dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
@@ -387,7 +413,7 @@ describe('SyncService', () => {
     expect(prisma.nfseEvento.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
-          nfseDocumentoId: 'doc-cancelada',
+          nfseDocumentoId: 'doc-original',
           chaveAcesso: '42110092206960810000176000000000033326062205552016',
           tipoEvento: 'e101101'
         })

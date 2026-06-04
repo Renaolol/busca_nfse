@@ -216,28 +216,54 @@ describe('NfseService', () => {
   </infEvento>
 </evento>`;
 
-    prisma.nfseDocumento.findUnique.mockResolvedValue({
-      id: 'doc-cancelada',
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-placeholder',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000033326062205552016',
+        cnpjPrestador: null,
+        cnpjTomador: null,
+        xmlPath: null,
+        numeroNfse: null,
+        dataEmissao: null,
+        createdAt: new Date('2026-06-03T18:43:09.000Z'),
+        updatedAt: new Date('2026-06-03T18:43:09.000Z')
+      },
+      {
+        id: 'doc-original',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao_restrita,
+        chaveAcesso: '42110092206960810000176000000000033326062205552016',
+        cnpjPrestador: '06960810000176',
+        cnpjTomador: null,
+        xmlPath: 'nfse/producao_restrita/06960810000176/2026/06/xml/42110092206960810000176000000000033326062205552016.xml',
+        numeroNfse: '333',
+        dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+        createdAt: new Date('2026-06-03T12:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T12:00:00.000Z')
+      }
+    ]);
+    prisma.nfseDocumento.upsert.mockResolvedValue({
+      id: 'doc-original',
       clienteId: 'cliente-1',
       estabelecimentoId: 'estab-1',
-      ambiente: Ambiente.producao,
-      chaveAcesso: '42110092206960810000176000000000033326062205552016',
-      cnpjPrestador: '06960810000176',
-      cnpjTomador: null
-    });
-    prisma.nfseDocumento.upsert.mockResolvedValue({
-      id: 'doc-cancelada',
+      ambiente: Ambiente.producao_restrita,
       chaveAcesso: '42110092206960810000176000000000033326062205552016',
       origem: 'importacao_xml',
       status: 'cancelada',
       dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
-      xmlPath: 'nfse/producao/06960810000176/2026/06/xml/42110092206960810000176000000000033326062205552016.xml',
-      danfsePath: null
+      xmlPath: 'nfse/producao_restrita/06960810000176/2026/06/xml/42110092206960810000176000000000033326062205552016.xml',
+      danfsePath: null,
+      cnpjPrestador: '06960810000176',
+      cnpjTomador: null
     });
     prisma.nfseEvento.upsert.mockResolvedValue({
       id: 'evento-1',
       tipoEvento: 'e101101',
-      xmlPath: 'nfse/producao/06960810000176/2026/06/eventos/42110092206960810000176000000000033326062205552016_e101101.xml'
+      xmlPath: 'nfse/producao_restrita/06960810000176/2026/06/eventos/42110092206960810000176000000000033326062205552016_e101101.xml'
     });
 
     const result = await service.importXml({
@@ -249,11 +275,19 @@ describe('NfseService', () => {
 
     expect(storage.putObject).toHaveBeenCalledTimes(1);
     expect(storage.putObject).toHaveBeenCalledWith(
-      expect.stringContaining('/eventos/42110092206960810000176000000000033326062205552016_e101101.xml'),
+      expect.stringContaining(
+        'nfse/producao_restrita/06960810000176/2026/06/eventos/42110092206960810000176000000000033326062205552016_e101101.xml'
+      ),
       eventXml
     );
     expect(prisma.nfseDocumento.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
+        where: {
+          ambiente_chaveAcesso: {
+            ambiente: Ambiente.producao_restrita,
+            chaveAcesso: '42110092206960810000176000000000033326062205552016'
+          }
+        },
         update: expect.objectContaining({
           status: 'cancelada',
           dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
@@ -264,14 +298,14 @@ describe('NfseService', () => {
     expect(prisma.nfseEvento.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         create: expect.objectContaining({
-          nfseDocumentoId: 'doc-cancelada',
+          nfseDocumentoId: 'doc-original',
           chaveAcesso: '42110092206960810000176000000000033326062205552016',
           tipoEvento: 'e101101'
         })
       })
     );
     expect(result).toMatchObject({
-      id: 'doc-cancelada',
+      id: 'doc-original',
       chaveAcesso: '42110092206960810000176000000000033326062205552016',
       tipo: 'evento',
       eventoId: 'evento-1',
