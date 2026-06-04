@@ -556,6 +556,35 @@ thead th {
   background: #fbfbfc;
 }
 
+.sort-header {
+  border: 0;
+  background: transparent;
+  color: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  font: inherit;
+  font-weight: 700;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sort-header:hover,
+.sort-header.active {
+  color: var(--accent-strong);
+}
+
+.sort-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 12px;
+  color: currentColor;
+  font-size: 0.66rem;
+}
+
 tbody td {
   padding: 12px;
   border-bottom: 1px solid #efeff2;

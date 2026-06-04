@@ -163,6 +163,12 @@ const state = {
     runs: 'loading',
     xmls: 'loading',
     alerts: 'loading'
+  },
+  sort: {
+    xmls: {
+      key: 'dataDownload',
+      direction: 'desc'
+    }
   }
 };
 
@@ -536,6 +542,14 @@ function onDocumentClick(event) {
         return;
       }
       void downloadDanfseByXmlId(xmlId);
+      return;
+    }
+    case 'xmls-sort': {
+      const key = actionNode.getAttribute('data-sort-key');
+      if (!key) {
+        return;
+      }
+      updateXmlSort(key);
       return;
     }
     case 'alerts-mark-selected': {
@@ -1663,15 +1677,15 @@ function renderXmlsTableCard(xmls) {
         <table>
           <thead>
             <tr>
-              <th>Numero NFS-e</th>
-              <th>Cliente</th>
-              <th>CNPJ</th>
-              <th>Municipio</th>
-              <th>Data emissao</th>
-              <th>Data download</th>
-              <th>Valor</th>
-              <th>Tipo</th>
-              <th>Status</th>
+              ${renderXmlSortHeader('numeroNfse', 'Numero NFS-e')}
+              ${renderXmlSortHeader('cliente', 'Cliente')}
+              ${renderXmlSortHeader('cnpj', 'CNPJ')}
+              ${renderXmlSortHeader('municipio', 'Municipio')}
+              ${renderXmlSortHeader('dataEmissao', 'Data emissao')}
+              ${renderXmlSortHeader('dataDownload', 'Data download')}
+              ${renderXmlSortHeader('valor', 'Valor')}
+              ${renderXmlSortHeader('tipo', 'Tipo')}
+              ${renderXmlSortHeader('status', 'Status')}
               <th>Acoes</th>
             </tr>
           </thead>
@@ -1708,6 +1722,26 @@ function renderXmlsTableCard(xmls) {
         </table>
       </div>
     </article>
+  `;
+}
+
+function renderXmlSortHeader(key, label) {
+  const isActive = state.sort.xmls.key === key;
+  const direction = isActive ? state.sort.xmls.direction : 'none';
+  const sortLabel =
+    direction === 'asc'
+      ? `${label}, ordenado crescente`
+      : direction === 'desc'
+        ? `${label}, ordenado decrescente`
+        : `${label}, ordenar`;
+
+  return `
+    <th>
+      <button class="sort-header ${isActive ? 'active' : ''}" type="button" data-action="xmls-sort" data-sort-key="${escapeHtml(key)}" aria-label="${escapeHtml(sortLabel)}">
+        <span>${escapeHtml(label)}</span>
+        <span class="sort-indicator" aria-hidden="true">${direction === 'asc' ? '▲' : direction === 'desc' ? '▼' : '↕'}</span>
+      </button>
+    </th>
   `;
 }
 
@@ -3051,7 +3085,7 @@ function getFilteredXmls() {
     return [];
   }
 
-  return getFilteredXmlsFromSource(state.xmlSearch.results);
+  return sortXmls(getFilteredXmlsFromSource(state.xmlSearch.results));
 }
 
 function getFilteredXmlsFromSource(source) {
@@ -3087,6 +3121,75 @@ function getFilteredXmlsFromSource(source) {
       matchesDownloadFim
     );
   });
+}
+
+function updateXmlSort(key) {
+  const current = state.sort.xmls;
+  state.sort.xmls = {
+    key,
+    direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
+  };
+  render();
+}
+
+function sortXmls(xmls) {
+  const sort = state.sort.xmls;
+  const directionMultiplier = sort.direction === 'asc' ? 1 : -1;
+
+  return [...xmls].sort((a, b) => {
+    const comparison = compareXmlSortValues(getXmlSortValue(a, sort.key), getXmlSortValue(b, sort.key));
+    if (comparison !== 0) {
+      return comparison * directionMultiplier;
+    }
+
+    return compareXmlSortValues(getXmlSortValue(a, 'numeroNfse'), getXmlSortValue(b, 'numeroNfse'));
+  });
+}
+
+function getXmlSortValue(xml, key) {
+  switch (key) {
+    case 'numeroNfse':
+      return toSortableNumber(xml.numeroNfse);
+    case 'cliente':
+      return xml.cliente || '';
+    case 'cnpj':
+      return normalizeDigits(xml.cnpj || '');
+    case 'municipio':
+      return xml.municipio || '';
+    case 'dataEmissao':
+      return toSortableDate(xml.dataEmissao);
+    case 'dataDownload':
+      return toSortableDate(xml.dataDownload);
+    case 'valor':
+      return Number(xml.valor || 0);
+    case 'tipo':
+      return xml.tipo || '';
+    case 'status':
+      return `${xml.cancelada ? 'cancelada' : 'autorizada'} ${xml.statusArmazenamento || ''}`;
+    default:
+      return '';
+  }
+}
+
+function compareXmlSortValues(a, b) {
+  if (typeof a === 'number' && typeof b === 'number') {
+    return a - b;
+  }
+
+  return String(a).localeCompare(String(b), 'pt-BR', {
+    numeric: true,
+    sensitivity: 'base'
+  });
+}
+
+function toSortableNumber(value) {
+  const parsed = Number(String(value || '').replace(/[^\d.-]/g, ''));
+  return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER;
+}
+
+function toSortableDate(value) {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function resetXmlSearch() {
