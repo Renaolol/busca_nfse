@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { createHash } from 'node:crypto';
+import * as QRCode from 'qrcode';
 
 export interface DanfseRenderInput {
   chaveAcesso: string;
@@ -114,6 +114,31 @@ export interface DanfseRenderInput {
   totaisAproximadosTributos?: string | null;
 }
 
+type PdfFont = '/F1' | '/F2';
+
+interface PdfField {
+  label?: string;
+  value: string;
+  span?: number;
+}
+
+interface PdfSection {
+  title: string;
+  columns: number;
+  fields: PdfField[];
+}
+
+interface PdfPageState {
+  commands: string[];
+  page: { width: number; height: number };
+  margin: number;
+  contentX: number;
+  contentWidth: number;
+  bottomY: number;
+  yTop: number;
+  pageNumber: number;
+}
+
 @Injectable()
 export class NfseDanfseService {
   generateFromXml(xml: string, fallback: DanfseRenderInput): Buffer {
@@ -124,10 +149,614 @@ export class NfseDanfseService {
   }
 
   generatePdf(input: DanfseRenderInput): Buffer {
-    const now = new Date();
-    const lines = this.buildDanfseLines(input, now);
-    const contentStreams = this.buildContentStreams(lines, this.normalizeChaveAcesso(input.chaveAcesso));
+    const normalizedInput = {
+      ...input,
+      chaveAcesso: this.normalizeChaveAcesso(input.chaveAcesso)
+    };
+    const contentStreams = this.buildOfficialDanfseContentStreams(normalizedInput, new Date());
     return this.buildPdf(contentStreams);
+  }
+
+  private buildOfficialDanfseContentStreams(input: DanfseRenderInput, generatedAt: Date): string[] {
+    const streams: string[] = [];
+    const page = { width: 595, height: 842 };
+    const margin = 14;
+    const contentX = margin + 6;
+    const contentWidth = page.width - margin * 2 - 12;
+    const bottomY = margin + 18;
+    const isCancelada = this.isCancelada(input.status);
+
+    const createPage = (pageNumber: number): PdfPageState => {
+      const commands: string[] = [];
+      commands.push('0 G');
+      commands.push('0 g');
+      commands.push('0.65 w');
+      commands.push(`${margin.toFixed(2)} ${margin.toFixed(2)} ${(page.width - margin * 2).toFixed(2)} ${(page.height - margin * 2).toFixed(2)} re S`);
+
+      const state: PdfPageState = {
+        commands,
+        page,
+        margin,
+        contentX,
+        contentWidth,
+        bottomY,
+        yTop: page.height - margin - 8,
+        pageNumber
+      };
+
+      state.yTop =
+        pageNumber === 1
+          ? this.drawOfficialHeader(commands, input, contentX, contentWidth, state.yTop)
+          : this.drawOfficialContinuationHeader(commands, input, contentX, contentWidth, state.yTop, pageNumber);
+
+      return state;
+    };
+
+    const finalizePage = (state: PdfPageState) => {
+      if (isCancelada) {
+        this.drawStatusWatermark(state.commands, 'CANCELADA', state.page);
+      }
+      this.drawOfficialFooter(state.commands, state, generatedAt);
+      streams.push(state.commands.join('\n'));
+    };
+
+    let state = createPage(1);
+    const sections = this.buildOfficialSections(input);
+
+    for (const section of sections) {
+      const sectionHeight = this.measureOfficialSection(section, state.contentWidth);
+      if (state.yTop - sectionHeight < state.bottomY) {
+        finalizePage(state);
+        state = createPage(state.pageNumber + 1);
+      }
+
+      this.drawOfficialSection(state, section);
+    }
+
+    finalizePage(state);
+    return streams;
+  }
+
+  private drawOfficialHeader(
+    commands: string[],
+    input: DanfseRenderInput,
+    contentX: number,
+    contentWidth: number,
+    yTop: number
+  ): number {
+    const hasIbsCbs = this.hasIbsCbsData(input);
+    const chaveAcesso = this.normalizeChaveAcesso(input.chaveAcesso);
+    const qrCodeUrl = `https://www.nfse.gov.br/ConsultaPublica/?tpc=1&chave=${chaveAcesso}`;
+    const municipio = this.formatMunicipioHeader(input.municipioPrestador ?? input.municipioPrestacaoNome);
+    const phone = this.safeValue(this.formatPhone(input.telefonePrestador));
+    const email = this.safeValue(input.emailPrestador);
+    const contact = [phone, email].filter((item) => item !== '-').join(' / ');
+    const headerBottom = yTop - 122;
+    const topSeparatorY = yTop - 33;
+    const qrSize = 56;
+    const qrX = contentX + contentWidth - qrSize - 18;
+    const qrY = yTop - 88;
+    const identWidth = qrX - contentX - 12;
+
+    this.drawOfficialLogo(commands, contentX, yTop);
+    this.drawText(commands, contentX + 205, yTop - 10, '/F2', 9.6, `DANFSe ${hasIbsCbs ? 'v2.0' : 'v1.0'}`);
+    this.drawText(commands, contentX + 180, yTop - 22, '/F2', 8.1, 'Documento Auxiliar da NFS-e');
+    this.drawText(commands, contentX + contentWidth - 142, yTop - 9, '/F2', 8.1, municipio);
+    if (contact) {
+      this.drawText(commands, contentX + contentWidth - 142, yTop - 19, '/F1', 5.8, contact);
+    }
+    if (this.isHomologacao(input.tipoAmbiente ?? input.ambiente)) {
+      this.drawStatusBadge(commands, contentX + 340, yTop - 29, 96, 11, 'SEM VALIDADE JURIDICA');
+    }
+    if (this.isCancelada(input.status)) {
+      this.drawStatusBadge(commands, contentX + 444, yTop - 29, 70, 11, 'CANCELADA');
+    } else if (this.isSubstituida(input.status, input.chaveNfseSubstituida)) {
+      this.drawStatusBadge(commands, contentX + 444, yTop - 29, 70, 11, 'SUBSTITUIDA');
+    }
+
+    this.drawLine(commands, contentX, topSeparatorY, contentX + contentWidth, topSeparatorY);
+
+    this.drawText(commands, contentX, yTop - 46, '/F2', 6.9, 'Chave de Acesso da NFS-e');
+    this.drawText(commands, contentX, yTop - 56, '/F1', 7.1, chaveAcesso);
+
+    this.drawPseudoQr(commands, qrX, qrY, qrSize, qrCodeUrl);
+    const authLines = [
+      'A autenticidade desta NFS-e pode ser verificada',
+      'pela leitura deste codigo QR ou pela consulta da',
+      'chave de acesso no portal nacional da NFS-e'
+    ];
+    let authY = qrY - 7;
+    for (const line of authLines) {
+      this.drawText(commands, qrX - 56, authY, '/F1', 5.1, line);
+      authY -= 6;
+    }
+
+    const cellWidth = identWidth / 3;
+    const rowOneY = yTop - 78;
+    const rowTwoY = yTop - 103;
+    this.drawIdentificationCell(commands, 'Numero da NFS-e', this.safeValue(input.numeroNfse), contentX, rowOneY, cellWidth);
+    this.drawIdentificationCell(
+      commands,
+      'Competencia da NFS-e',
+      this.formatDateOnlyBr(input.competencia),
+      contentX + cellWidth,
+      rowOneY,
+      cellWidth
+    );
+    this.drawIdentificationCell(
+      commands,
+      'Data e Hora da emissao da NFS-e',
+      this.formatDateBr(input.dataEmissao),
+      contentX + cellWidth * 2,
+      rowOneY,
+      cellWidth
+    );
+    this.drawIdentificationCell(commands, 'Numero da DPS', this.safeValue(input.numeroDps), contentX, rowTwoY, cellWidth);
+    this.drawIdentificationCell(
+      commands,
+      'Serie da DPS',
+      this.safeValue(input.serieDps ?? input.serie),
+      contentX + cellWidth,
+      rowTwoY,
+      cellWidth
+    );
+    this.drawIdentificationCell(
+      commands,
+      'Data e Hora da emissao da DPS',
+      this.formatDateBr(input.dataEmissaoDps),
+      contentX + cellWidth * 2,
+      rowTwoY,
+      cellWidth
+    );
+
+    this.drawLine(commands, contentX, headerBottom, contentX + contentWidth, headerBottom);
+    return headerBottom - 5;
+  }
+
+  private drawOfficialContinuationHeader(
+    commands: string[],
+    input: DanfseRenderInput,
+    contentX: number,
+    contentWidth: number,
+    yTop: number,
+    pageNumber: number
+  ): number {
+    const chaveAcesso = this.normalizeChaveAcesso(input.chaveAcesso);
+    this.drawText(commands, contentX, yTop - 8, '/F2', 9, 'DANFSe v1.0');
+    this.drawText(commands, contentX + 80, yTop - 8, '/F1', 7, 'Documento Auxiliar da NFS-e');
+    this.drawText(commands, contentX + contentWidth - 48, yTop - 8, '/F2', 7, `Pagina ${pageNumber}`);
+    this.drawText(commands, contentX, yTop - 21, '/F1', 6.2, `Chave de Acesso da NFS-e: ${chaveAcesso}`);
+    this.drawLine(commands, contentX, yTop - 28, contentX + contentWidth, yTop - 28);
+    return yTop - 34;
+  }
+
+  private buildOfficialSections(input: DanfseRenderInput): PdfSection[] {
+    const field = (label: string, value?: string | number | null, span = 1): PdfField => ({
+      label,
+      value: this.safeValue(value),
+      span
+    });
+    const money = (value?: string | number | null) => this.safeValue(this.formatMoney(value));
+    const municipio = (value?: string | null) => this.safeValue(this.formatMunicipioUfLabel(value));
+    const sectionNotice = (value: string, columns: number): PdfField => ({ value, span: columns });
+    const sections: PdfSection[] = [];
+
+    sections.push({
+      title: 'EMITENTE DA NFS-E',
+      columns: 4,
+      fields: [
+        field('CNPJ / CPF / NIF', this.formatCpfCnpj(input.cnpjPrestador)),
+        field('Inscricao Municipal', input.inscricaoMunicipalPrestador),
+        field('Telefone', this.formatPhone(input.telefonePrestador)),
+        field('Emitente da NFS-e', this.describeEmitente(input.emitenteNfse)),
+        field('Nome / Nome Empresarial', input.razaoSocialPrestador, 2),
+        field('E-mail', input.emailPrestador, 2),
+        field('Endereco', input.enderecoPrestador, 2),
+        field('Municipio', municipio(input.municipioPrestador)),
+        field('CEP', this.formatCep(input.codigoIbgeCepPrestador)),
+        field('Simples Nacional na Data de Competencia', this.describeSimplesNacional(input.simplesNacional), 2),
+        field('Regime de Apuracao Tributaria pelo SN', input.regimeApuracaoSn, 2)
+      ]
+    });
+
+    sections.push({
+      title: 'TOMADOR DO SERVICO',
+      columns: 4,
+      fields: this.hasIdentificacao(input.cnpjTomador, input.razaoSocialTomador, input.enderecoTomador)
+        ? [
+            field('CNPJ / CPF / NIF', this.formatCpfCnpj(input.cnpjTomador)),
+            field('Inscricao Municipal', input.inscricaoMunicipalTomador),
+            field('Telefone', this.formatPhone(input.telefoneTomador)),
+            field('E-mail', input.emailTomador),
+            field('Nome / Nome Empresarial', input.razaoSocialTomador, 2),
+            field('Endereco', input.enderecoTomador, 2),
+            field('Municipio', municipio(input.municipioTomador)),
+            field('CEP', this.formatCep(input.codigoIbgeCepTomador))
+          ]
+        : [sectionNotice('TOMADOR DO SERVICO NAO IDENTIFICADO NA NFS-E', 4)]
+    });
+
+    sections.push({
+      title: 'INTERMEDIARIO DO SERVICO',
+      columns: 4,
+      fields: this.hasIdentificacao(input.cnpjIntermediario, input.razaoSocialIntermediario, input.enderecoIntermediario)
+        ? [
+            field('CNPJ / CPF / NIF', this.formatCpfCnpj(input.cnpjIntermediario)),
+            field('Inscricao Municipal', input.inscricaoMunicipalIntermediario),
+            field('Telefone', this.formatPhone(input.telefoneIntermediario)),
+            field('E-mail', input.emailIntermediario),
+            field('Nome / Nome Empresarial', input.razaoSocialIntermediario, 2),
+            field('Endereco', input.enderecoIntermediario, 2),
+            field('Municipio', municipio(input.municipioIntermediario)),
+            field('CEP', this.formatCep(input.codigoIbgeCepIntermediario))
+          ]
+        : [sectionNotice('INTERMEDIARIO DO SERVICO NAO IDENTIFICADO NA NFS-E', 4)]
+    });
+
+    if (
+      this.hasIdentificacao(input.cnpjDestinatario, input.razaoSocialDestinatario, input.enderecoDestinatario) &&
+      !this.isDestinatarioIgualTomador(input)
+    ) {
+      sections.push({
+        title: 'DESTINATARIO DO SERVICO',
+        columns: 4,
+        fields: [
+          field('CNPJ / CPF / NIF', this.formatCpfCnpj(input.cnpjDestinatario)),
+          field('Telefone', this.formatPhone(input.telefoneDestinatario)),
+          field('E-mail', input.emailDestinatario, 2),
+          field('Nome / Nome Empresarial', input.razaoSocialDestinatario, 2),
+          field('Endereco', input.enderecoDestinatario, 2),
+          field('Municipio', municipio(input.municipioDestinatario)),
+          field('CEP', this.formatCep(input.codigoIbgeCepDestinatario))
+        ]
+      });
+    }
+
+    sections.push({
+      title: 'SERVICO PRESTADO',
+      columns: 4,
+      fields: [
+        field('Codigo de Tributacao Nacional', input.codigoServicoNacional),
+        field('Codigo de Tributacao Municipal', input.codigoServicoMunicipal ?? input.itemListaServico),
+        field('Local da Prestacao', municipio(input.localPrestacao)),
+        field('Pais da Prestacao', this.extractPais(input.localPrestacao)),
+        field('Codigo da NBS', input.codigoNbs),
+        field('Descricao do Codigo de Tributacao', input.descricaoCodigoTributacao, 3),
+        field('Descricao do Servico', input.descricaoServico, 4)
+      ]
+    });
+
+    sections.push({
+      title: 'TRIBUTACAO MUNICIPAL',
+      columns: 4,
+      fields: this.isOperacaoNaoSujeitaIss(input.tipoTributacaoIssqn)
+        ? [sectionNotice('TRIBUTACAO MUNICIPAL (ISSQN) - OPERACAO NAO SUJEITA AO ISSQN', 4)]
+        : [
+            field('Tributacao do ISSQN', this.describeTributacaoIssqn(input.tipoTributacaoIssqn)),
+            field('Pais Resultado da Prestacao do Servico', this.extractPais(input.municipioIncidenciaIssqn)),
+            field('Municipio de Incidencia do ISSQN', municipio(input.municipioIncidenciaIssqn)),
+            field('Regime Especial de Tributacao', input.regimeEspecialTributacaoIssqn),
+            field('Tipo de Imunidade', input.tipoImunidadeIssqn),
+            field('Suspensao da Exigibilidade do ISSQN', this.describeSuspensao(input.suspensaoExigibilidadeIssqn)),
+            field('Numero Processo Suspensao', input.numeroProcessoSuspensaoIssqn),
+            field('Beneficio Municipal', input.beneficioMunicipal),
+            field('Valor do Servico', money(input.valorServico)),
+            field('Desconto Incondicionado', money(input.valorDescontoIncondicionado)),
+            field('Total Deducoes/Reducoes', money(input.valorDeducoes)),
+            field('Calculo do BM', input.calculoBeneficioMunicipal),
+            field('BC ISSQN', money(input.baseCalculoIss)),
+            field('Aliquota Aplicada', this.formatAliquota(input.aliquotaIss)),
+            field('Retencao do ISSQN', this.describeRetencaoIss(input.retencaoIss)),
+            field('ISSQN Apurado', money(input.valorIss))
+          ]
+    });
+
+    sections.push({
+      title: 'TRIBUTACAO FEDERAL',
+      columns: 4,
+      fields: [
+        field('IRRF', money(input.valorIrrf)),
+        field('Contribuicao Previdenciaria - Retida', money(input.valorContribuicaoPrevidenciaria)),
+        field('Contribuicoes Sociais - Retidas', money(input.valorContribuicoesSociais)),
+        field('Descricao Contrib. Sociais - Retidas', input.descricaoContribuicoesSociais),
+        field('PIS - Debito Apuracao Propria', money(input.valorPis)),
+        field('COFINS - Debito Apuracao Propria', money(input.valorCofins))
+      ]
+    });
+
+    if (this.hasIbsCbsData(input)) {
+      sections.push({
+        title: 'TRIBUTACAO IBS/CBS',
+        columns: 4,
+        fields: [
+          field('CST / cClassTrib', input.cstClassTribIbsCbs),
+          field('Indicador de Operacao', input.indicadorOperacaoIbsCbs),
+          field('Municipio de Incidencia IBS/CBS', input.municipioIncidenciaIbsCbs),
+          field('Base de Calculo Apos Exclusoes e Reducoes', input.baseCalculoAposExclusoesIbsCbs),
+          field('Aliquota do IBS Estadual / Municipal', input.aliquotaIbsEstadualMunicipal),
+          field('Valor Total Apurado do IBS', money(input.valorTotalApuradoIbs)),
+          field('Aliquota da CBS', input.aliquotaCbs),
+          field('Valor Total Apurado da CBS', money(input.valorTotalApuradoCbs))
+        ]
+      });
+    }
+
+    sections.push({
+      title: 'VALOR TOTAL DA NFS-E',
+      columns: 4,
+      fields: [
+        field('Valor do Servico', money(input.valorServico)),
+        field('Desconto Condicionado', money(input.valorDescontoCondicionado)),
+        field('Desconto Incondicionado', money(input.valorDescontoIncondicionado)),
+        field('ISSQN Retido', this.describeRetencaoIss(input.retencaoIss)),
+        field('Total das Retencoes Federais', money(this.totalRetencoesFederais(input))),
+        field('PIS/COFINS - Debito Apur. Propria', money(this.sumValues(input.valorPis, input.valorCofins))),
+        field('Total das Retencoes (ISSQN / Federais)', money(input.valorTotalRetencoes), 2),
+        field('Valor Liquido da NFS-e', money(input.valorLiquidoNfse), 2),
+        ...(this.hasIbsCbsData(input)
+          ? [
+              field('Total do IBS/CBS', money(input.valorTotalIbscbs)),
+              field('Valor Liquido da NFS-e + IBS/CBS', money(input.valorLiquidoComIbscbs), 2)
+            ]
+          : [])
+      ]
+    });
+
+    sections.push({
+      title: 'TOTAIS APROXIMADOS DOS TRIBUTOS',
+      columns: 3,
+      fields: this.buildTotaisAproximadosFields(input.totaisAproximadosTributos)
+    });
+
+    sections.push({
+      title: 'INFORMACOES COMPLEMENTARES',
+      columns: 4,
+      fields: [
+        ...(this.safeValue(input.codigoNbs) !== '-' ? [field('NBS', input.codigoNbs, 4)] : []),
+        field('Informacoes Complementares', this.composeOfficialInformacoesComplementares(input), 4)
+      ]
+    });
+
+    return sections;
+  }
+
+  private measureOfficialSection(section: PdfSection, contentWidth: number): number {
+    const rows = this.layoutOfficialSectionRows(section, contentWidth);
+    return (
+      10.2 +
+      rows.reduce((total, row) => total + this.measureOfficialRowHeight(row), 0) +
+      3.4
+    );
+  }
+
+  private drawOfficialSection(state: PdfPageState, section: PdfSection): void {
+    const rows = this.layoutOfficialSectionRows(section, state.contentWidth);
+    const titleHeight = 10.2;
+    const columnWidth = state.contentWidth / section.columns;
+
+    this.drawLine(state.commands, state.contentX, state.yTop, state.contentX + state.contentWidth, state.yTop);
+    this.drawText(state.commands, state.contentX + 1.4, state.yTop - 7.2, '/F2', 8.5, section.title);
+
+    let rowTop = state.yTop - titleHeight;
+    for (const row of rows) {
+      const rowHeight = this.measureOfficialRowHeight(row);
+      let colCursor = 0;
+
+      for (const cell of row) {
+        const cellX = state.contentX + colCursor * columnWidth;
+        const textX = cellX + 1.8;
+        let textY = rowTop - 4.9;
+
+        if (cell.label) {
+          this.drawText(state.commands, textX, textY, '/F2', 5.8, cell.label);
+          textY -= 6.8;
+        }
+
+        for (const line of cell.valueLines) {
+          this.drawText(state.commands, textX, textY, '/F1', 7.0, line);
+          textY -= 6.8;
+        }
+
+        colCursor += cell.span;
+      }
+
+      rowTop -= rowHeight;
+    }
+
+    this.drawLine(state.commands, state.contentX, rowTop - 1.2, state.contentX + state.contentWidth, rowTop - 1.2);
+    state.yTop = rowTop - 5.2;
+  }
+
+  private layoutOfficialSectionRows(
+    section: PdfSection,
+    contentWidth: number
+  ): Array<Array<{ label?: string; valueLines: string[]; span: number }>> {
+    const rows: Array<Array<{ label?: string; valueLines: string[]; span: number }>> = [];
+    let current: Array<{ label?: string; valueLines: string[]; span: number }> = [];
+    let used = 0;
+
+    for (const field of section.fields) {
+      const span = Math.max(1, Math.min(section.columns, field.span ?? 1));
+      if (used + span > section.columns && current.length > 0) {
+        rows.push(current);
+        current = [];
+        used = 0;
+      }
+
+      const avgCharsPerColumn = Math.max(18, Math.floor((contentWidth / section.columns) / 3.15));
+      const valueLines = this.wrapText(field.value, Math.max(12, avgCharsPerColumn * span - 3));
+      current.push({
+        label: field.label,
+        valueLines,
+        span
+      });
+      used += span;
+
+      if (used === section.columns) {
+        rows.push(current);
+        current = [];
+        used = 0;
+      }
+    }
+
+    if (current.length > 0) {
+      rows.push(current);
+    }
+
+    return rows;
+  }
+
+  private measureOfficialRowHeight(row: Array<{ label?: string; valueLines: string[]; span: number }>): number {
+    return row.reduce((maxHeight, cell) => {
+      const labelHeight = cell.label ? 6.8 : 0;
+      const valueHeight = Math.max(1, cell.valueLines.length) * 6.8;
+      const height = 2.8 + labelHeight + valueHeight + 2.4;
+      return Math.max(maxHeight, height);
+    }, 12);
+  }
+
+  private drawOfficialLogo(commands: string[], x: number, yTop: number): void {
+    this.drawColorText(commands, x, yTop - 20, '/F2', 22, 'NFS', 0.12, 0.55, 0.28);
+    this.drawColorText(commands, x + 43, yTop - 20, '/F2', 22, 'e', 0.12, 0.36, 0.70);
+    this.drawColorText(commands, x + 59, yTop - 12, '/F2', 6.1, 'Nota Fiscal de', 0.28, 0.28, 0.28);
+    this.drawColorText(commands, x + 59, yTop - 20, '/F1', 5.8, 'Servico eletronica', 0.28, 0.28, 0.28);
+  }
+
+  private drawIdentificationCell(
+    commands: string[],
+    label: string,
+    value: string,
+    x: number,
+    yTop: number,
+    width: number
+  ): void {
+    this.drawText(commands, x, yTop, '/F2', 6.2, label);
+    this.drawText(commands, x, yTop - 8.4, '/F1', 7.2, this.truncateForCell(value, Math.max(14, Math.floor(width / 3.15))));
+  }
+
+  private drawOfficialFooter(commands: string[], state: PdfPageState, generatedAt: Date): void {
+    this.drawText(commands, state.contentX, state.margin + 5, '/F1', 5.3, `Gerado em ${this.formatDateBr(generatedAt)}`);
+    this.drawText(
+      commands,
+      state.contentX + state.contentWidth - 48,
+      state.margin + 5,
+      '/F1',
+      5.3,
+      `Pagina ${state.pageNumber}`
+    );
+  }
+
+  private drawStatusBadge(
+    commands: string[],
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    text: string
+  ): void {
+    commands.push('1.00 0.93 0.93 rg');
+    commands.push('0.82 0.10 0.10 RG');
+    commands.push(`${x.toFixed(2)} ${y.toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)} re B`);
+    commands.push('0 0 0 rg');
+    commands.push('0 0 0 RG');
+    this.drawColorText(commands, x + 4, y + 3.2, '/F2', 5.8, text, 0.70, 0.02, 0.02);
+  }
+
+  private drawStatusWatermark(commands: string[], text: string, page: { width: number; height: number }): void {
+    commands.push('q');
+    commands.push('0.87 g');
+    commands.push('BT');
+    commands.push('/F2 66 Tf');
+    commands.push(`0.7071 0.7071 -0.7071 0.7071 ${(page.width / 2 - 190).toFixed(2)} ${(page.height / 2 - 235).toFixed(2)} Tm`);
+    commands.push(`(${this.escapePdfText(text)}) Tj`);
+    commands.push('ET');
+    commands.push('0 g');
+    commands.push('Q');
+  }
+
+  private drawColorText(
+    commands: string[],
+    x: number,
+    y: number,
+    font: PdfFont,
+    size: number,
+    text: string,
+    r: number,
+    g: number,
+    b: number
+  ): void {
+    commands.push(`${r.toFixed(2)} ${g.toFixed(2)} ${b.toFixed(2)} rg`);
+    this.drawText(commands, x, y, font, size, text);
+    commands.push('0 0 0 rg');
+  }
+
+  private buildTotaisAproximadosFields(value?: string | null): PdfField[] {
+    return [
+      { label: 'Federais', value: this.extractTotalAproximado(value, 'Federais') },
+      { label: 'Estaduais', value: this.extractTotalAproximado(value, 'Estaduais') },
+      { label: 'Municipais', value: this.extractTotalAproximado(value, 'Municipais') }
+    ];
+  }
+
+  private extractTotalAproximado(value: string | null | undefined, label: string): string {
+    const normalized = this.safeValue(value);
+    if (normalized === '-') {
+      return '-';
+    }
+
+    const match = normalized.match(new RegExp(`${label}:\\s*([^;|]+)`, 'i'));
+    if (!match?.[1]) {
+      return '-';
+    }
+
+    return this.formatPercentSpacing(match[1].trim());
+  }
+
+  private composeOfficialInformacoesComplementares(input: DanfseRenderInput): string {
+    const chunks: string[] = [];
+    const push = (label: string, value?: string | null) => {
+      const normalized = this.safeValue(value);
+      if (normalized !== '-') {
+        chunks.push(`${label}: ${normalized}`);
+      }
+    };
+
+    push('Inf. Cont.', input.infoComplementares);
+    push('NFS-e Subst.', input.chaveNfseSubstituida);
+    push('Doc. Ref.', input.documentoReferencia);
+    push('Cod. Obra', input.codigoObra);
+    push('Insc. Imob.', input.inscricaoImobiliaria);
+    push('Cod. Evt.', input.codigoEvento);
+    push('Doc. Tec.', input.documentoTecnico);
+    push('Num. Ped.', input.numeroPedido);
+    push('Item Ped.', input.itemPedido);
+    push('Inf. A. T. Mun.', input.infoAdministracaoMunicipal);
+    push('Codigo de Verificacao', input.codigoVerificacao);
+    push('Ambiente Gerador', input.ambienteGerador);
+
+    return chunks.join(' | ') || '-';
+  }
+
+  private formatMunicipioHeader(value?: string | null): string {
+    const municipio = this.safeValue(this.formatMunicipioUfLabel(value));
+    if (municipio === '-') {
+      return 'MUNICIPIO';
+    }
+
+    const city = municipio.split(/\s+-\s+/)[0]?.trim() || municipio;
+    return this.normalizePrintable(`MUNICIPIO DE ${city}`).toUpperCase();
+  }
+
+  private truncateForCell(value: string, maxLen: number): string {
+    const normalized = this.safeValue(value);
+    if (normalized.length <= maxLen) {
+      return normalized;
+    }
+    return `${normalized.slice(0, Math.max(1, maxLen - 1))}.`;
+  }
+
+  private formatPercentSpacing(value: string): string {
+    return this.safeValue(value).replace(/\s*%/g, ' %');
   }
 
   private buildDanfseLines(input: DanfseRenderInput, generatedAt: Date): string[] {
@@ -1092,57 +1721,25 @@ export class NfseDanfseService {
 
   private drawPseudoQr(commands: string[], x: number, y: number, size: number, seed: string): void {
     this.drawRect(commands, x, y, size, size, 1);
-    this.drawRect(commands, x, y, size, size);
+    const qr = QRCode.create(seed, { errorCorrectionLevel: 'M' });
+    const quietZone = 4;
+    const modules = qr.modules;
+    const cell = size / (modules.size + quietZone * 2);
 
-    const modules = 21;
-    const cell = size / modules;
-    const hash = createHash('sha256').update(seed).digest();
-    let bitIndex = 0;
-
-    const getBit = (): number => {
-      const byte = hash[Math.floor(bitIndex / 8) % hash.length];
-      const bit = (byte >> (bitIndex % 8)) & 1;
-      bitIndex += 1;
-      return bit;
-    };
-
-    const drawFinder = (fx: number, fy: number) => {
-      for (let yy = 0; yy < 7; yy += 1) {
-        for (let xx = 0; xx < 7; xx += 1) {
-          const isOuter = yy === 0 || yy === 6 || xx === 0 || xx === 6;
-          const isInner = yy >= 2 && yy <= 4 && xx >= 2 && xx <= 4;
-          if (isOuter || isInner) {
-            const px = x + (fx + xx) * cell;
-            const py = y + size - (fy + yy + 1) * cell;
-            commands.push('0 g');
-            commands.push(`${px.toFixed(2)} ${py.toFixed(2)} ${cell.toFixed(2)} ${cell.toFixed(2)} re f`);
-          }
-        }
-      }
-    };
-
-    drawFinder(0, 0);
-    drawFinder(modules - 7, 0);
-    drawFinder(0, modules - 7);
-
-    for (let yy = 0; yy < modules; yy += 1) {
-      for (let xx = 0; xx < modules; xx += 1) {
-        const inFinderTopLeft = xx < 8 && yy < 8;
-        const inFinderTopRight = xx >= modules - 8 && yy < 8;
-        const inFinderBottomLeft = xx < 8 && yy >= modules - 8;
-        if (inFinderTopLeft || inFinderTopRight || inFinderBottomLeft) {
+    for (let row = 0; row < modules.size; row += 1) {
+      for (let col = 0; col < modules.size; col += 1) {
+        if (!modules.get(row, col)) {
           continue;
         }
 
-        if (getBit() === 1) {
-          const px = x + xx * cell;
-          const py = y + size - (yy + 1) * cell;
-          commands.push('0 g');
-          commands.push(`${px.toFixed(2)} ${py.toFixed(2)} ${cell.toFixed(2)} ${cell.toFixed(2)} re f`);
-        }
+        const px = x + (col + quietZone) * cell;
+        const py = y + size - (row + quietZone + 1) * cell;
+        commands.push('0 g');
+        commands.push(`${px.toFixed(2)} ${py.toFixed(2)} ${cell.toFixed(2)} ${cell.toFixed(2)} re f`);
       }
     }
 
+    this.drawRect(commands, x, y, size, size);
     commands.push('0 g');
   }
 
@@ -1356,7 +1953,7 @@ export class NfseDanfseService {
       return `Totais Aproximados dos Tributos cfe. Lei n 12.741/2012: Federais: ${this.safeValue(vFed)} ; Estaduais: ${this.safeValue(vEst)} ; Municipais: ${this.safeValue(vMun)}`;
     }
 
-    return `Totais Aproximados dos Tributos cfe. Lei n 12.741/2012: Federais: ${this.safeValue(pFed)}% ; Estaduais: ${this.safeValue(pEst)}% ; Municipais: ${this.safeValue(pMun)}%`;
+    return `Totais Aproximados dos Tributos cfe. Lei n 12.741/2012: Federais: ${this.formatPercentSpacing(this.safeValue(pFed))} ; Estaduais: ${this.formatPercentSpacing(this.safeValue(pEst))} ; Municipais: ${this.formatPercentSpacing(this.safeValue(pMun))}`;
   }
 
   private composeAddress(xml: string, basePaths: string[][]): string | undefined {
@@ -1581,13 +2178,13 @@ export class NfseDanfseService {
       return undefined;
     }
     if (normalized.includes('%')) {
-      return normalized;
+      return this.formatPercentSpacing(normalized);
     }
     const parsed = this.toNumber(normalized);
     if (parsed === undefined) {
       return normalized;
     }
-    return `${parsed.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}%`;
+    return `${parsed.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} %`;
   }
 
   private describeRetencaoIss(value?: string | null): string | undefined {
@@ -1657,9 +2254,12 @@ export class NfseDanfseService {
     if (normalized === '-') {
       return undefined;
     }
-    const parts = normalized.split('/');
-    if (parts.length > 1) {
-      return parts[parts.length - 1].trim();
+    const parts = normalized.split('/').map((part) => part.trim()).filter(Boolean);
+    if (parts.length > 2) {
+      return parts[parts.length - 1];
+    }
+    if (parts.length === 2 && !/^[A-Z]{2}$/i.test(parts[1])) {
+      return parts[1];
     }
     const hyphenParts = normalized.split('-');
     if (hyphenParts.length > 2) {
