@@ -539,6 +539,15 @@ textarea:focus-visible,
   overflow-x: auto;
 }
 
+.xml-batch-bar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;

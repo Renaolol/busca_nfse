@@ -59,6 +59,7 @@ const state = {
   toasts: [],
   selectedClientIds: new Set(),
   selectedAlertIds: new Set(),
+  selectedXmlIds: new Set(),
   clients: [],
   certificates: [],
   searchRuns: [],
@@ -542,6 +543,39 @@ function onDocumentClick(event) {
         return;
       }
       void downloadDanfseByXmlId(xmlId);
+      return;
+    }
+    case 'xml-select': {
+      const xmlId = actionNode.getAttribute('data-xml-id');
+      if (!xmlId) {
+        return;
+      }
+      if (actionNode.checked) {
+        state.selectedXmlIds.add(xmlId);
+      } else {
+        state.selectedXmlIds.delete(xmlId);
+      }
+      render();
+      return;
+    }
+    case 'xmls-toggle-all': {
+      const checked = actionNode.checked;
+      getFilteredXmls().forEach((xml) => {
+        if (!xml.apiNfseId) {
+          return;
+        }
+        if (checked) {
+          state.selectedXmlIds.add(xml.id);
+        } else {
+          state.selectedXmlIds.delete(xml.id);
+        }
+      });
+      render();
+      return;
+    }
+    case 'xmls-batch-download': {
+      const tipoArquivo = actionNode.getAttribute('data-tipo-arquivo') || 'ambos';
+      void downloadSelectedXmlBatch(tipoArquivo);
       return;
     }
     case 'xmls-sort': {
@@ -1671,12 +1705,31 @@ function renderXmlSearchSummary() {
 }
 
 function renderXmlsTableCard(xmls) {
+  const selectableXmls = xmls.filter((xml) => Boolean(xml.apiNfseId));
+  const selectedVisibleCount = selectableXmls.filter((xml) => state.selectedXmlIds.has(xml.id)).length;
+  const allVisibleSelected = selectableXmls.length > 0 && selectedVisibleCount === selectableXmls.length;
+  const batchDisabled = selectedVisibleCount > 0 ? '' : 'disabled';
+
   return `
     <article class="card">
+      <div class="xml-batch-bar">
+        <div>
+          <h3 class="card-title">Arquivos encontrados</h3>
+          <p class="card-subtitle">${selectedVisibleCount} selecionado(s) nesta listagem.</p>
+        </div>
+        <div class="table-actions">
+          <button class="btn secondary" type="button" data-action="xmls-batch-download" data-tipo-arquivo="xml" ${batchDisabled}>Baixar XMLs</button>
+          <button class="btn secondary" type="button" data-action="xmls-batch-download" data-tipo-arquivo="danfse" ${batchDisabled}>Baixar DANFSEs</button>
+          <button class="btn primary" type="button" data-action="xmls-batch-download" data-tipo-arquivo="ambos" ${batchDisabled}>Baixar XML + DANFSE</button>
+        </div>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
+              <th>
+                <input type="checkbox" data-action="xmls-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableXmls.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs da listagem" />
+              </th>
               ${renderXmlSortHeader('numeroNfse', 'Numero NFS-e')}
               ${renderXmlSortHeader('cliente', 'Cliente')}
               ${renderXmlSortHeader('cnpj', 'CNPJ')}
@@ -1692,10 +1745,11 @@ function renderXmlsTableCard(xmls) {
           <tbody>
             ${renderTableRowsOrState({
               key: 'xmls',
-              colSpan: 10,
+              colSpan: 11,
               rowsHtml: xmls
                 .map((xml) => {
                   return `<tr class="${xml.cancelada ? 'xml-row-cancelled' : ''}">
+                    <td><input type="checkbox" data-action="xml-select" data-xml-id="${escapeHtml(xml.id)}" ${state.selectedXmlIds.has(xml.id) ? 'checked' : ''} ${xml.apiNfseId ? '' : 'disabled'} aria-label="Selecionar NFS-e ${escapeHtml(xml.numeroNfse || '-')}" /></td>
                     <td>${renderNfseNumber(xml)}</td>
                     <td>${escapeHtml(xml.cliente)}</td>
                     <td>${escapeHtml(formatCnpj(xml.cnpj))}</td>
@@ -2991,6 +3045,7 @@ function refreshRunningExecution() {
 
 async function applyXmlFilters(form) {
   const data = new FormData(form);
+  state.selectedXmlIds = new Set();
   state.filters.xmls = {
     cliente: String(data.get('cliente') || ''),
     cnpj: normalizeDigits(String(data.get('cnpj') || '')),
@@ -3193,6 +3248,7 @@ function toSortableDate(value) {
 }
 
 function resetXmlSearch() {
+  state.selectedXmlIds = new Set();
   state.filters.xmls = {
     cliente: 'Todos',
     cnpj: '',
@@ -4857,6 +4913,45 @@ async function downloadDanfseByXmlId(xmlId) {
     pushToast(`Download do DANFSE ${xml.numeroNfse} iniciado.`, 'success');
   } catch (error) {
     pushToast(`Falha ao baixar DANFSE: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function downloadSelectedXmlBatch(tipoArquivo = 'ambos') {
+  const allowedTypes = ['ambos', 'xml', 'danfse'];
+  const normalizedType = allowedTypes.includes(tipoArquivo) ? tipoArquivo : 'ambos';
+  const selectedXmls = getFilteredXmls().filter((xml) => state.selectedXmlIds.has(xml.id) && xml.apiNfseId);
+
+  if (!selectedXmls.length) {
+    pushToast('Selecione ao menos uma NFS-e da listagem atual.', 'error');
+    return;
+  }
+
+  const ids = [...new Set(selectedXmls.map((xml) => xml.apiNfseId))];
+  const clientIds = [...new Set(selectedXmls.map((xml) => xml.clientId).filter(Boolean))];
+  const body = {
+    ids,
+    tipoArquivo: normalizedType
+  };
+
+  if (clientIds.length === 1) {
+    body.clienteId = clientIds[0];
+  }
+
+  try {
+    const payload = await apiRequest('/nfse/download-lote', {
+      method: 'POST',
+      body,
+      timeoutMs: 2 * 60 * 1000
+    });
+    downloadFromPayload(payload, `nfse-lote-${normalizedType}.zip`);
+    const errorsCount = Array.isArray(payload?.erros) ? payload.erros.length : 0;
+    const included = Number(payload?.totalArquivosIncluidos || 0);
+    pushToast(
+      `Download em lote iniciado: ${included} arquivo(s) no ZIP${errorsCount ? `, ${errorsCount} aviso(s)` : ''}.`,
+      errorsCount ? 'info' : 'success'
+    );
+  } catch (error) {
+    pushToast(`Falha ao baixar lote: ${toErrorMessage(error)}`, 'error');
   }
 }
 
