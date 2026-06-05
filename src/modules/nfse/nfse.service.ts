@@ -7,6 +7,7 @@ import { DownloadLoteDto } from './dto/download-lote.dto';
 import { NfseDanfseService } from './nfse-danfse.service';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
+import { ReprocessarDanfsesDto } from './dto/reprocessar-danfses.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
 import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from './nfse-xml-parser.service';
 
@@ -708,6 +709,83 @@ export class NfseService {
     };
   }
 
+  async reprocessarDanfses(dto: ReprocessarDanfsesDto) {
+    const lote = dto.lote ?? 100;
+    const somenteLegadas = dto.somenteLegadas ?? true;
+    const limit = dto.limit;
+    const where = this.buildReprocessarDanfsesWhere(dto);
+
+    let lastId: string | undefined;
+    let remaining = limit ?? Number.POSITIVE_INFINITY;
+    let processados = 0;
+    let regeneradas = 0;
+    let ignoradas = 0;
+    let falhas = 0;
+    const erros: Array<{ id: string; chaveAcesso: string; erro: string }> = [];
+
+    while (remaining > 0) {
+      const take = Math.min(lote, remaining);
+      const docs = await this.prisma.nfseDocumento.findMany({
+        where: lastId
+          ? {
+              AND: [where, { id: { gt: lastId } }]
+            }
+          : where,
+        orderBy: { id: 'asc' },
+        take,
+        include: this.nfseDocumentoInclude()
+      });
+
+      if (!docs.length) {
+        break;
+      }
+
+      for (const doc of docs) {
+        lastId = doc.id;
+        processados += 1;
+        remaining -= 1;
+
+        try {
+          const shouldRegenerate = await this.shouldRegenerateDanfse(doc, somenteLegadas);
+          if (!shouldRegenerate) {
+            ignoradas += 1;
+            continue;
+          }
+
+          await this.regenerateDanfseFile(doc);
+          regeneradas += 1;
+        } catch (error) {
+          falhas += 1;
+          erros.push({
+            id: doc.id,
+            chaveAcesso: doc.chaveAcesso,
+            erro: this.toErrorMessage(error)
+          });
+        }
+      }
+
+      if (docs.length < take) {
+        break;
+      }
+    }
+
+    return {
+      filtros: {
+        clienteId: dto.clienteId ?? null,
+        estabelecimentoId: dto.estabelecimentoId ?? null,
+        ambiente: dto.ambiente ?? null,
+        somenteLegadas,
+        limit: limit ?? null,
+        lote
+      },
+      processados,
+      regeneradas,
+      ignoradas,
+      falhas,
+      erros
+    };
+  }
+
   async downloadLote(dto: DownloadLoteDto) {
     const uniqueIds = [...new Set(dto.ids)];
     const tipoArquivo = dto.tipoArquivo ?? 'ambos';
@@ -798,6 +876,30 @@ export class NfseService {
     };
   }
 
+  private buildReprocessarDanfsesWhere(dto: ReprocessarDanfsesDto): Prisma.NfseDocumentoWhereInput {
+    const conditions: Prisma.NfseDocumentoWhereInput[] = [
+      {
+        xmlPath: {
+          not: null
+        }
+      }
+    ];
+
+    if (dto.clienteId) {
+      conditions.push({ clienteId: dto.clienteId });
+    }
+
+    if (dto.estabelecimentoId) {
+      conditions.push({ estabelecimentoId: dto.estabelecimentoId });
+    }
+
+    if (dto.ambiente) {
+      conditions.push({ ambiente: dto.ambiente === 'producao' ? Ambiente.producao : Ambiente.producao_restrita });
+    }
+
+    return conditions.length === 1 ? conditions[0] : { AND: conditions };
+  }
+
   private async ensureDanfseFile(doc: NfseDocumento): Promise<{ danfsePath: string; pdf: Buffer }> {
     if (doc.danfsePath) {
       try {
@@ -813,6 +915,31 @@ export class NfseService {
       }
     }
 
+    return this.regenerateDanfseFile(doc);
+  }
+
+  private async shouldRegenerateDanfse(doc: NfseDocumento, somenteLegadas: boolean): Promise<boolean> {
+    if (!somenteLegadas) {
+      return true;
+    }
+
+    if (!doc.danfsePath) {
+      return true;
+    }
+
+    try {
+      const existingPdf = await this.storage.getObject(doc.danfsePath);
+      return this.isLegacyDanfse(existingPdf);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message.includes('ENOENT')) {
+        return true;
+      }
+      throw error;
+    }
+  }
+
+  private async regenerateDanfseFile(doc: NfseDocumento): Promise<{ danfsePath: string; pdf: Buffer }> {
     if (!doc.xmlPath) {
       throw new NotFoundException('DANFSe nao disponivel para esta NFS-e');
     }

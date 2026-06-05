@@ -197,6 +197,72 @@ describe('NfseService', () => {
     expect(result.contentBase64.length).toBeGreaterThan(20);
   });
 
+  it('reprocessa DANFSEs legadas e ignora PDFs ja no modelo novo', async () => {
+    const legacyDoc = {
+      id: '10000000-0000-4000-8000-000000000001',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      chaveAcesso: '42110092206960810000176000000000000726016992784184',
+      ambiente: Ambiente.producao,
+      danfsePath: 'nfse/legado/danfse-antigo.pdf',
+      xmlPath: 'nfse/producao/06960810000176/2026/01/xml/doc-7.xml',
+      numeroNfse: '7',
+      dataEmissao: new Date('2026-01-09T00:00:00.000Z'),
+      status: 'autorizada',
+      cnpjPrestador: '06960810000176',
+      razaoSocialPrestador: 'Prestador Teste',
+      cnpjTomador: '12345678000199',
+      razaoSocialTomador: 'Tomador Teste',
+      valorServico: {
+        toString: () => '100.00'
+      },
+      descricaoServico: 'Servico de teste',
+      createdAt: new Date('2026-01-09T00:00:00.000Z'),
+      updatedAt: new Date('2026-01-09T00:00:00.000Z')
+    };
+    const currentDoc = {
+      ...legacyDoc,
+      id: '10000000-0000-4000-8000-000000000002',
+      chaveAcesso: '42110092206960810000176000000000000826016992784185',
+      danfsePath:
+        'nfse/producao/06960810000176/2026/01/danfse/42110092206960810000176000000000000826016992784185.pdf',
+      xmlPath: 'nfse/producao/06960810000176/2026/01/xml/doc-8.xml',
+      numeroNfse: '8'
+    };
+
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([legacyDoc, currentDoc]).mockResolvedValueOnce([]);
+    storage.getObject
+      .mockResolvedValueOnce(Buffer.from('%PDF-1.4\narquivo legado', 'utf8'))
+      .mockResolvedValueOnce(Buffer.from('<NFSe><nNFSe>7</nNFSe></NFSe>', 'utf8'))
+      .mockResolvedValueOnce(Buffer.from('%PDF-1.4\nDANFSE - pagina 1', 'utf8'));
+    storage.putObject.mockResolvedValue('/tmp/danfse-regenerado.pdf');
+    prisma.nfseDocumento.update.mockResolvedValue({});
+
+    const result = await service.reprocessarDanfses({
+      somenteLegadas: true,
+      lote: 2
+    });
+
+    expect(result).toMatchObject({
+      processados: 2,
+      regeneradas: 1,
+      ignoradas: 1,
+      falhas: 0
+    });
+    expect(storage.putObject).toHaveBeenCalledTimes(1);
+    expect(storage.putObject).toHaveBeenCalledWith(
+      expect.stringContaining('/danfse/42110092206960810000176000000000000726016992784184.pdf'),
+      expect.any(Buffer)
+    );
+    expect(prisma.nfseDocumento.update).toHaveBeenCalledWith({
+      where: { id: legacyDoc.id },
+      data: {
+        danfsePath:
+          'nfse/producao/06960810000176/2026/01/danfse/42110092206960810000176000000000000726016992784184.pdf'
+      }
+    });
+  });
+
   it('importa XML de evento de cancelamento e vincula a NFS-e relacionada', async () => {
     const eventXml = `<?xml version="1.0" encoding="utf-8"?>
 <evento versao="1.01" xmlns="http://www.sped.fazenda.gov.br/nfse">

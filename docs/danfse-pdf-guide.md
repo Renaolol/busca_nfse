@@ -122,6 +122,7 @@ Tipografia:
 Endpoint:
 
 - `POST /nfse/reprocessar-xmls`
+- `POST /nfse/reprocessar-danfses`
 
 Payload recomendado (regenerar tudo para um cliente/estabelecimento):
 
@@ -135,6 +136,19 @@ Payload recomendado (regenerar tudo para um cliente/estabelecimento):
   "regenerarDanfse": true
 }
 ```
+
+Payload recomendado para atualizar apenas DANFSE legado ou ausente:
+
+```json
+{
+  "clienteId": "UUID",
+  "ambiente": "producao",
+  "somenteLegadas": true,
+  "lote": 100
+}
+```
+
+A tela `Configuracoes > Manutencao` executa esse fluxo para atualizar PDFs antigos para o modelo atual.
 
 ## DANFSE legado
 
@@ -150,4 +164,3 @@ Regra atual:
 3. Menos linhas internas, mais legibilidade.
 4. Cabecalho proporcional ao padrao oficial.
 5. Quebras de pagina sem cortar secoes.
-

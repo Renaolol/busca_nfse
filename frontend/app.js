@@ -121,7 +121,8 @@ const state = {
       alertarFalhaBusca: true,
       alertarXmlNaoArmazenado: true,
       canal: 'Somente painel'
-    }
+    },
+    danfseReprocessRunning: false
   },
   filters: {
     clients: {
@@ -634,6 +635,22 @@ function onDocumentClick(event) {
       }
       state.settings.tab = tab;
       render();
+      return;
+    }
+    case 'settings-reprocess-danfse': {
+      if (state.settings.danfseReprocessRunning) {
+        pushToast('Reprocessamento de DANFSEs ja esta em andamento.', 'info');
+        return;
+      }
+
+      openModal({
+        kind: 'confirm',
+        title: 'Reprocessar DANFSEs antigas',
+        subtitle: 'Confirmar atualizacao dos PDFs legados ou ausentes para o modelo atual?',
+        confirmLabel: 'Reprocessar DANFSEs',
+        intent: 'warning',
+        payload: { type: 'reprocess-danfses' }
+      });
       return;
     }
     case 'drawer-close':
@@ -1913,6 +1930,7 @@ function renderSettingsPage() {
           ${renderTabButton('rotina', 'Rotina noturna')}
           ${renderTabButton('servidor', 'Servidor de XMLs')}
           ${renderTabButton('notificacoes', 'Notificacoes')}
+          ${renderTabButton('manutencao', 'Manutencao')}
         </div>
         ${renderSettingsTabPanel()}
       </article>
@@ -2030,6 +2048,25 @@ function renderSettingsTabPanel() {
           </div>
         </form>
       `;
+    case 'manutencao': {
+      const running = state.settings.danfseReprocessRunning;
+      return `
+        <div class="maintenance-list">
+          <div class="maintenance-row">
+            <div>
+              <strong>DANFSEs antigas</strong>
+              <span class="row-sub">PDFs legados ou ausentes</span>
+            </div>
+            <div class="maintenance-actions">
+              ${statusBadge(running ? 'Executando' : 'Pronto', running ? 'info' : 'neutral')}
+              <button class="btn primary" type="button" data-action="settings-reprocess-danfse" ${running ? 'disabled' : ''}>
+                ${running ? 'Reprocessando...' : 'Reprocessar DANFSEs'}
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+    }
     default:
       return '';
   }
@@ -3530,8 +3567,54 @@ async function executeConfirmAction(payload) {
       pushToast('Reprocessamento solicitado para o alerta selecionado.', 'success');
       return;
     }
+    case 'reprocess-danfses': {
+      await reprocessLegacyDanfses();
+      return;
+    }
     default:
       return;
+  }
+}
+
+async function reprocessLegacyDanfses() {
+  if (state.settings.danfseReprocessRunning) {
+    pushToast('Reprocessamento de DANFSEs ja esta em andamento.', 'info');
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('DANFSEs antigas reprocessadas (mock).', 'success');
+    return;
+  }
+
+  state.settings.danfseReprocessRunning = true;
+  render();
+  pushToast('Reprocessamento de DANFSEs iniciado.', 'info');
+
+  try {
+    const result = await apiRequest('/nfse/reprocessar-danfses', {
+      method: 'POST',
+      body: {
+        somenteLegadas: true,
+        lote: 100
+      },
+      timeoutMs: 30 * 60 * 1000
+    });
+
+    await refreshApiData();
+
+    const regeneradas = Number(result?.regeneradas || 0);
+    const ignoradas = Number(result?.ignoradas || 0);
+    const falhas = Number(result?.falhas || 0);
+    pushToast(
+      `DANFSEs: ${regeneradas} atualizada(s), ${ignoradas} ja no modelo novo, ${falhas} falha(s).`,
+      falhas ? 'error' : 'success'
+    );
+  } catch (error) {
+    pushToast(`Falha ao reprocessar DANFSEs: ${toErrorMessage(error)}`, 'error');
+  } finally {
+    state.settings.danfseReprocessRunning = false;
+    render();
   }
 }
 

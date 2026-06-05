@@ -7,6 +7,7 @@ import { DownloadLoteResponseDto } from './dto/download-lote-response.dto';
 import { DownloadDocumentDto } from './dto/download-document.dto';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
+import { ReprocessarDanfsesDto, ReprocessarDanfsesResponseDto } from './dto/reprocessar-danfses.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
 import { NfseService } from './nfse.service';
 
@@ -67,5 +68,12 @@ export class NfseController {
   @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
   reprocessarXmls(@Body() dto: ReprocessarXmlsDto) {
     return this.nfseService.reprocessarXmls(dto);
+  }
+
+  @Post('reprocessar-danfses')
+  @ApiOkResponse({ type: ReprocessarDanfsesResponseDto })
+  @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
+  reprocessarDanfses(@Body() dto: ReprocessarDanfsesDto) {
+    return this.nfseService.reprocessarDanfses(dto);
   }
 }

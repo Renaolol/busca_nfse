@@ -906,6 +906,30 @@ textarea {
   font-size: 0.78rem;
 }
 
+.maintenance-list {
+  display: grid;
+  gap: 10px;
+}
+
+.maintenance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fdfdfd;
+}
+
+.maintenance-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .dual-grid {
   display: grid;
   grid-template-columns: 1.8fr 1fr;
@@ -1160,12 +1184,24 @@ textarea {
   }
 
   .stack-actions,
-  .page-actions {
+  .page-actions,
+  .maintenance-row {
     width: 100%;
   }
 
+  .maintenance-row {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .maintenance-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .stack-actions .btn,
-  .page-actions .btn {
+  .page-actions .btn,
+  .maintenance-actions .btn {
     flex: 1;
   }
 }
