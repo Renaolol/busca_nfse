@@ -36,7 +36,8 @@
 
 ## Erro de escopo (`clienteId`)
 
-- Em endpoints por `id` (`/certificados/:id...`, `/nfse/:id...`, `/sync/logs`), `clienteId` e obrigatorio.
+- Em endpoints por `id` de NFS-e e logs (`/nfse/:id...`, `/sync/logs`), `clienteId` e obrigatorio.
+- Em endpoints por `id` de certificado, `clienteId` e obrigatorio apenas quando o certificado esta vinculado a cliente. Certificados avulsos devem omitir `clienteId`.
 - O valor de `clienteId` precisa ser UUID valido; caso contrario a API retorna `400`.
 - Se o `clienteId` nao corresponder ao dono do recurso, a API responde como nao encontrado (`404`) para evitar vazamento de contexto.
 

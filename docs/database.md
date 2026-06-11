@@ -16,6 +16,8 @@ Regras principais:
 - Deduplicacao por `UNIQUE (ambiente, chave_acesso)` em documentos.
 - Controle NSU por contexto (`cliente/cnpj/ambiente`) com `UNIQUE (cliente_id, cnpj_consulta, ambiente)` em `nfse_sync_controle`.
 - Historico de certificados e vinculo de substituicao.
+- `certificados.cliente_id` e opcional para permitir controle de certificados avulsos.
+- `certificados.anotacoes` guarda observacoes internas sobre origem, renovacao e uso operacional.
 - Cadastro do responsavel interno em `clientes.responsavel_interno`.
 - Dados fiscais do estabelecimento principal em `cliente_estabelecimentos`, incluindo inscricao municipal e municipio.
 - Eventos de NFS-e sao vinculados em `nfse_eventos.nfse_documento_id` pela chave da NFS-e referenciada no XML (`chNFSe`).

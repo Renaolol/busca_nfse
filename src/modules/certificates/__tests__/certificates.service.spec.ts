@@ -73,7 +73,8 @@ type PrismaMock = {
 describe('CertificatesService', () => {
   let service: CertificatesService;
   let prisma: PrismaMock;
-  let storage: { putObject: jest.Mock; deleteObject: jest.Mock };
+  let crypto: { encrypt: jest.Mock; decrypt: jest.Mock };
+  let storage: { putObject: jest.Mock; getObject: jest.Mock; deleteObject: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -90,14 +91,16 @@ describe('CertificatesService', () => {
       }
     };
 
-    const crypto = {
+    crypto = {
       encrypt: jest.fn((input: Buffer | string) =>
         Buffer.isBuffer(input) ? `enc:${input.toString('base64')}` : `enc:${input}`
-      )
+      ),
+      decrypt: jest.fn((input: string) => Buffer.from(`dec:${input}`))
     };
 
     storage = {
       putObject: jest.fn().mockResolvedValue('/tmp/storage/certificado.bin'),
+      getObject: jest.fn().mockResolvedValue(Buffer.from('enc:certificado')),
       deleteObject: jest.fn().mockResolvedValue(undefined)
     };
 
@@ -145,6 +148,40 @@ describe('CertificatesService', () => {
     expect(createPayload.serialNumber).toBeTruthy();
     expect(createPayload.thumbprint).toBeTruthy();
     expect(created.validadeFim).toEqual(createPayload.validadeFim);
+  });
+
+  it('cadastra certificado sem cliente vinculado com anotacoes', async () => {
+    mockedSpawnSync.mockReturnValue({
+      pid: 124,
+      output: [null, `Bag Attributes\n${SAMPLE_PEM_CERTIFICATE}\n`, ''],
+      stdout: `Bag Attributes\n${SAMPLE_PEM_CERTIFICATE}\n`,
+      stderr: '',
+      status: 0,
+      signal: null
+    } as ReturnType<typeof spawnSync>);
+
+    prisma.certificado.create.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+      Promise.resolve(buildCertificateRecord(data))
+    );
+
+    const dto: CreateCertificateDto = {
+      nome: 'Certificado Reserva',
+      cnpjTitular: '12345678000199',
+      arquivoBase64: Buffer.from('conteudo-pfx-fake').toString('base64'),
+      senha: 'senha-certificado',
+      anotacoes: 'Reserva sem vinculo inicial'
+    };
+
+    const created = await service.create(null, dto);
+    const createPayload = prisma.certificado.create.mock.calls[0][0].data as Record<string, unknown>;
+
+    expect(prisma.cliente.findUnique).not.toHaveBeenCalled();
+    expect(createPayload.clienteId).toBeNull();
+    expect(createPayload.estabelecimentoId).toBeUndefined();
+    expect(createPayload.anotacoes).toBe('Reserva sem vinculo inicial');
+    expect(storage.putObject.mock.calls[0][0]).toMatch(/^certificados\/sem-cliente\/.+\.bin$/);
+    expect(created.clienteId).toBeNull();
+    expect(created.anotacoes).toBe('Reserva sem vinculo inicial');
   });
 
   it('faz fallback sem -clcerts quando necessario para extrair certificado', async () => {
@@ -312,6 +349,99 @@ describe('CertificatesService', () => {
     await expect(service.remove('cert-outro-cliente', 'cliente-1')).rejects.toThrow('Certificado nao encontrado');
     expect(prisma.certificado.delete).not.toHaveBeenCalled();
   });
+
+  it('atualiza anotacoes de certificado avulso sem exigir clienteId', async () => {
+    const certificate = buildCertificateRecord(
+      {
+        id: 'cert-avulso',
+        clienteId: null,
+        nome: 'Certificado Avulso',
+        cnpjTitular: '12345678000199',
+        tipo: 'A1',
+        arquivoCriptografadoPath: 'certificados/sem-cliente/cert-avulso.bin',
+        senhaCriptografada: 'enc:senha'
+      },
+      { ativo: false }
+    );
+
+    prisma.certificado.findUnique.mockResolvedValue(certificate);
+    prisma.certificado.update.mockResolvedValue({
+      ...certificate,
+      anotacoes: 'Uso futuro'
+    });
+
+    const result = await service.updateNotes('cert-avulso', 'Uso futuro');
+
+    expect(prisma.certificado.update).toHaveBeenCalledWith({
+      where: { id: 'cert-avulso' },
+      data: { anotacoes: 'Uso futuro' }
+    });
+    expect(result.anotacoes).toBe('Uso futuro');
+  });
+
+  it('baixa certificado avulso descriptografando somente em memoria', async () => {
+    const certificate = buildCertificateRecord(
+      {
+        id: 'cert-download',
+        clienteId: null,
+        nome: 'Certificado Download',
+        cnpjTitular: '12345678000199',
+        tipo: 'A1',
+        arquivoCriptografadoPath: 'certificados/sem-cliente/cert-download.bin',
+        senhaCriptografada: 'enc:senha'
+      },
+      { ativo: false }
+    );
+
+    prisma.certificado.findUnique.mockResolvedValue(certificate);
+    storage.getObject.mockResolvedValue(Buffer.from('payload-criptografado'));
+    crypto.decrypt.mockReturnValue(Buffer.from('pfx-original'));
+
+    const result = await service.download('cert-download');
+
+    expect(storage.getObject).toHaveBeenCalledWith('certificados/sem-cliente/cert-download.bin');
+    expect(crypto.decrypt).toHaveBeenCalledWith('payload-criptografado');
+    expect(result).toEqual({
+      id: 'cert-download',
+      fileName: 'certificado-download-cert-download.pfx',
+      contentType: 'application/x-pkcs12',
+      contentBase64: Buffer.from('pfx-original').toString('base64')
+    });
+  });
+
+  it('desvincula certificado de cliente e deixa inativo', async () => {
+    const certificate = buildCertificateRecord({
+      id: 'cert-vinculado',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      nome: 'Certificado Vinculado',
+      cnpjTitular: '12345678000199',
+      tipo: 'A1',
+      arquivoCriptografadoPath: 'certificados/cliente-1/cert-vinculado.bin',
+      senhaCriptografada: 'enc:senha'
+    });
+
+    prisma.certificado.findUnique.mockResolvedValue(certificate);
+    prisma.certificado.update.mockResolvedValue({
+      ...certificate,
+      clienteId: null,
+      estabelecimentoId: null,
+      ativo: false
+    });
+
+    const result = await service.unlink('cert-vinculado', 'cliente-1');
+
+    expect(prisma.certificado.update).toHaveBeenCalledWith({
+      where: { id: 'cert-vinculado' },
+      data: {
+        clienteId: null,
+        estabelecimentoId: null,
+        ativo: false
+      }
+    });
+    expect(result.clienteId).toBeNull();
+    expect(result.ativo).toBe(false);
+  });
 });
 
 function buildCertificateRecord(
@@ -320,7 +450,7 @@ function buildCertificateRecord(
 ): Certificado {
   return {
     id: data.id as string,
-    clienteId: data.clienteId as string,
+    clienteId: (data.clienteId as string | null | undefined) ?? null,
     estabelecimentoId: (data.estabelecimentoId as string | undefined) ?? null,
     nome: data.nome as string,
     cnpjTitular: data.cnpjTitular as string,
@@ -333,6 +463,7 @@ function buildCertificateRecord(
     serialNumber: (data.serialNumber as string | undefined) ?? null,
     emissor: (data.emissor as string | undefined) ?? null,
     subject: (data.subject as string | undefined) ?? null,
+    anotacoes: (data.anotacoes as string | undefined) ?? null,
     ativo: true,
     substituidoPorCertificadoId: null,
     createdAt: new Date('2026-05-19T00:00:00.000Z'),

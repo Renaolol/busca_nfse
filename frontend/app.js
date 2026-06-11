@@ -223,9 +223,10 @@ async function hydrateFromApi() {
   }));
   const clientIds = apiClients.map((client) => client.id);
 
-  const [establishmentsByClient, certificatesByClient, syncByClient, nfseDocs, auditRows, schedulerStatus] = await Promise.all([
+  const [establishmentsByClient, certificatesByClient, allCertificatesRaw, syncByClient, nfseDocs, auditRows, schedulerStatus] = await Promise.all([
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/estabelecimentos`, []),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/certificados`, []),
+    apiRequest('/certificados').catch(() => null),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/sync/status`, { controles: [], logs: [] }),
     apiRequest('/nfse').catch(() => []),
     apiRequest('/auditoria').catch(() => []),
@@ -233,7 +234,7 @@ async function hydrateFromApi() {
   ]);
 
   const clients = buildClientsFromApi(apiClients, establishmentsByClient, certificatesByClient, syncByClient, nfseDocs);
-  const certificates = buildCertificatesFromApi(apiClients, certificatesByClient);
+  const certificates = buildCertificatesFromApi(apiClients, certificatesByClient, allCertificatesRaw);
   const xmlFiles = buildXmlFilesFromApi(nfseDocs, clients);
   const searchRuns = buildSearchRunsFromApi(syncByClient, clients);
   const alerts = buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, auditRows);
@@ -404,6 +405,22 @@ function onDocumentClick(event) {
       void simulateCertificateTest(certificateId);
       return;
     }
+    case 'certificate-download': {
+      const certificateId = actionNode.getAttribute('data-cert-id');
+      if (!certificateId) {
+        return;
+      }
+      void downloadCertificate(certificateId);
+      return;
+    }
+    case 'certificate-notes': {
+      const certificateId = actionNode.getAttribute('data-cert-id');
+      if (!certificateId) {
+        return;
+      }
+      openModal({ kind: 'certificate-notes', certId: certificateId });
+      return;
+    }
     case 'certificate-view-client': {
       const clientId = actionNode.getAttribute('data-client-id');
       if (!clientId) {
@@ -425,11 +442,14 @@ function onDocumentClick(event) {
     }
     case 'certificate-unlink': {
       const certId = actionNode.getAttribute('data-cert-id');
+      const cert = state.certificates.find((item) => item.id === certId);
       openModal({
         kind: 'confirm',
-        title: 'Remover vinculo de certificado',
-        subtitle: 'Deseja remover o vinculo deste certificado com o cliente atual? Isso vai desativar o certificado.',
-        confirmLabel: 'Remover vinculo',
+        title: cert?.clientId ? 'Remover vinculo de certificado' : 'Desativar certificado',
+        subtitle: cert?.clientId
+          ? 'Deseja remover o vinculo deste certificado com o cliente atual? O certificado ficara avulso e inativo.'
+          : 'Deseja desativar este certificado avulso?',
+        confirmLabel: cert?.clientId ? 'Remover vinculo' : 'Desativar',
         payload: { type: 'unlink-certificate', certId }
       });
       return;
@@ -703,6 +723,11 @@ function onDocumentSubmit(event) {
     case 'certificatesModalForm': {
       event.preventDefault();
       void submitCertificateForm(target);
+      return;
+    }
+    case 'certificateNotesForm': {
+      event.preventDefault();
+      void submitCertificateNotesForm(target);
       return;
     }
     case 'runsFilterForm': {
@@ -1296,10 +1321,13 @@ function renderClientDetailsPage(clientId) {
               ${detailItem('Data de validade', clientCertificate?.validade ? formatDate(clientCertificate.validade) : '-')}
               ${detailItem('Status', clientCertificate?.status || 'Nao cadastrado')}
               ${detailItem('Ultima validacao', clientCertificate?.ultimaValidacao ? formatDateTime(clientCertificate.ultimaValidacao) : '-')}
+              ${detailItem('Anotacoes', clientCertificate?.anotacoes || '-')}
             </div>
             <div class="table-actions" style="margin-top:12px;">
               <button class="btn primary" type="button" data-action="certificate-open-create">Atualizar certificado</button>
               <button class="btn secondary" type="button" data-action="certificate-test" data-cert-id="${escapeHtml(clientCertificate?.id || '')}" ${clientCertificate ? '' : 'disabled'}>Testar certificado</button>
+              <button class="btn secondary" type="button" data-action="certificate-download" data-cert-id="${escapeHtml(clientCertificate?.id || '')}" ${clientCertificate ? '' : 'disabled'}>Baixar</button>
+              <button class="btn secondary" type="button" data-action="certificate-notes" data-cert-id="${escapeHtml(clientCertificate?.id || '')}" ${clientCertificate ? '' : 'disabled'}>Anotacoes</button>
             </div>
           </article>
 
@@ -1391,13 +1419,14 @@ function renderCertificatesPage() {
                 <th>Dias restantes</th>
                 <th>Status</th>
                 <th>Ultima validacao</th>
+                <th>Anotacoes</th>
                 <th>Acoes</th>
               </tr>
             </thead>
             <tbody>
               ${renderTableRowsOrState({
                 key: 'certificates',
-                colSpan: 9,
+                colSpan: 10,
                 rowsHtml: certificates
                   .map((cert) => {
                     const rowClass = cert.status === 'Vencido' ? ' style="background:#fff5f5;"' : cert.status === 'A vencer' ? ' style="background:#fffbf0;"' : '';
@@ -1411,12 +1440,15 @@ function renderCertificatesPage() {
                       <td>${escapeHtml(String(cert.diasRestantes))}</td>
                       <td>${statusBadge(cert.status, toneFromCertificateStatus(cert.status))}</td>
                       <td>${escapeHtml(cert.ultimaValidacao ? formatDateTime(cert.ultimaValidacao) : '-')}</td>
+                      <td>${escapeHtml(truncateText(cert.anotacoes || '-', 72))}</td>
                       <td>
                         <div class="table-actions">
                           <button class="icon-btn" data-action="certificate-view-client" data-client-id="${escapeHtml(cert.clientId || '')}" ${cert.clientId ? '' : 'disabled'}>Ver cliente</button>
                           <button class="icon-btn" data-action="certificate-test" data-cert-id="${escapeHtml(cert.id)}">Testar certificado</button>
+                          <button class="icon-btn" data-action="certificate-download" data-cert-id="${escapeHtml(cert.id)}">Baixar</button>
+                          <button class="icon-btn" data-action="certificate-notes" data-cert-id="${escapeHtml(cert.id)}">Anotacoes</button>
                           <button class="icon-btn" data-action="certificate-replace" data-cert-id="${escapeHtml(cert.id)}">Substituir</button>
-                          <button class="icon-btn" data-action="certificate-unlink" data-cert-id="${escapeHtml(cert.id)}">Remover vinculo</button>
+                          <button class="icon-btn" data-action="certificate-unlink" data-cert-id="${escapeHtml(cert.id)}" ${cert.clientId || cert.ativo ? '' : 'disabled'}>Remover vinculo</button>
                           <button class="icon-btn" data-action="certificate-delete" data-cert-id="${escapeHtml(cert.id)}" ${canDelete ? '' : 'disabled'}>Excluir certificado</button>
                         </div>
                       </td>
@@ -2116,6 +2148,8 @@ function renderModal() {
       return renderClientFormModal();
     case 'certificate-form':
       return renderCertificateFormModal();
+    case 'certificate-notes':
+      return renderCertificateNotesModal(state.modal.certId);
     case 'xml-details':
       return renderXmlDetailsModal(state.modal.xmlId);
     case 'xml-view':
@@ -2232,18 +2266,26 @@ function renderCertificateFormModal() {
       <div class="modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <h3 class="modal-title">Cadastrar certificado</h3>
-          <p class="modal-subtitle">Formulario preparado para integracao com backend de certificados.</p>
+          <p class="modal-subtitle">Cadastre o A1 para uso na rotina ou como controle interno sem cliente vinculado.</p>
         </div>
         <form id="certificatesModalForm">
           <div class="modal-body">
             <div class="form-grid two">
               <label class="field">
                 Cliente
-                <select name="clientId" required>${renderOptions(state.clients.map((client) => client.id), '', mapClientOptions(), 'Selecione')}</select>
+                <select name="clientId">${renderOptions(state.clients.map((client) => client.id), '', mapClientOptions(), 'Sem cliente vinculado')}</select>
               </label>
               <label class="field">
                 Apelido
                 <input name="apelido" required />
+              </label>
+              <label class="field">
+                CNPJ titular
+                <input name="cnpjTitular" maxlength="18" />
+              </label>
+              <label class="field">
+                Tipo
+                <input name="tipo" value="A1" required />
               </label>
               <label class="field">
                 Arquivo do certificado
@@ -2252,10 +2294,6 @@ function renderCertificateFormModal() {
               <label class="field">
                 Senha
                 <input name="senha" type="password" required />
-              </label>
-              <label class="field">
-                Tipo
-                <input name="tipo" value="A1" required />
               </label>
               ${
                 autoValidity
@@ -2268,11 +2306,46 @@ function renderCertificateFormModal() {
                 <input name="validade" type="date" required />
               </label>`
               }
+              <label class="field" style="grid-column: span 2;">
+                Anotacoes
+                <textarea name="anotacoes"></textarea>
+              </label>
             </div>
           </div>
           <div class="modal-footer">
             <button class="btn secondary" type="button" data-action="close-modal">Cancelar</button>
             <button class="btn primary" type="submit">Salvar certificado</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderCertificateNotesModal(certId) {
+  const cert = state.certificates.find((item) => item.id === certId);
+  if (!cert) {
+    return '';
+  }
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Anotacoes do certificado</h3>
+          <p class="modal-subtitle">${escapeHtml(cert.apelido)} - ${escapeHtml(cert.cliente || 'Sem cliente vinculado')}</p>
+        </div>
+        <form id="certificateNotesForm">
+          <div class="modal-body">
+            <input type="hidden" name="certId" value="${escapeHtml(cert.id)}" />
+            <label class="field">
+              Anotacoes
+              <textarea name="anotacoes">${escapeHtml(cert.anotacoes || '')}</textarea>
+            </label>
+          </div>
+          <div class="modal-footer">
+            <button class="btn secondary" type="button" data-action="close-modal">Cancelar</button>
+            <button class="btn primary" type="submit">Salvar anotacoes</button>
           </div>
         </form>
       </div>
@@ -2911,14 +2984,9 @@ async function simulateCertificateTest(certificateId) {
   }
 
   if (state.dataSource === 'api') {
-    if (!cert.clientId) {
-      pushToast('Certificado sem cliente vinculado para validacao.', 'error');
-      return;
-    }
-
     pushToast(`Testando certificado ${cert.apelido}...`, 'info');
     try {
-      const result = await apiRequest(`/certificados/${certificateId}/validar?clienteId=${encodeURIComponent(cert.clientId)}`, {
+      const result = await apiRequest(`/certificados/${certificateId}/validar${buildCertificateScopeQuery(cert)}`, {
         method: 'POST'
       });
       const valido = Boolean(result?.valido);
@@ -2949,8 +3017,15 @@ async function submitCertificateForm(form) {
   const formData = new FormData(form);
   const clientId = String(formData.get('clientId') || '');
   const client = findClientById(clientId);
-  if (!client) {
-    pushToast('Selecione um cliente valido para vincular o certificado.', 'error');
+  const cnpjTitular = normalizeDigits(String(formData.get('cnpjTitular') || client?.cnpj || ''));
+
+  if (clientId && !client) {
+    pushToast('Cliente selecionado nao foi encontrado.', 'error');
+    return;
+  }
+
+  if (cnpjTitular.length !== 14) {
+    pushToast('Informe um CNPJ titular com 14 digitos.', 'error');
     return;
   }
 
@@ -2963,15 +3038,18 @@ async function submitCertificateForm(form) {
 
     try {
       const arquivoBase64 = await fileToBase64(file);
-      const estabelecimentoId = client.estabelecimentoIdPrincipal || state.establishmentsByClient?.[clientId]?.[0]?.id;
-      const created = await apiRequest(`/clientes/${clientId}/certificados`, {
+      const estabelecimentoId = client ? client.estabelecimentoIdPrincipal || state.establishmentsByClient?.[clientId]?.[0]?.id : null;
+      const endpoint = clientId ? `/clientes/${clientId}/certificados` : '/certificados';
+      const created = await apiRequest(endpoint, {
         method: 'POST',
         body: {
           nome: String(formData.get('apelido') || 'Certificado'),
-          cnpjTitular: normalizeDigits(client.cnpj),
+          clienteId: clientId || undefined,
+          cnpjTitular,
           estabelecimentoId: estabelecimentoId || undefined,
           arquivoBase64,
-          senha: String(formData.get('senha') || '')
+          senha: String(formData.get('senha') || ''),
+          anotacoes: String(formData.get('anotacoes') || '').trim() || undefined
         }
       });
 
@@ -2995,23 +3073,85 @@ async function submitCertificateForm(form) {
 
   state.certificates.unshift({
     id: `cert-${Math.random().toString(16).slice(2, 8)}`,
-    clientId,
-    cliente: client.razaoSocial,
-    cnpj: client.cnpj,
+    clientId: clientId || null,
+    cliente: client?.razaoSocial || 'Sem cliente vinculado',
+    cnpj: cnpjTitular,
     tipo: String(formData.get('tipo') || 'A1'),
     apelido: String(formData.get('apelido') || 'Sem apelido'),
     validade,
     diasRestantes: dias,
     status,
-    ultimaValidacao: new Date().toISOString()
+    ultimaValidacao: new Date().toISOString(),
+    ativo: true,
+    anotacoes: String(formData.get('anotacoes') || '').trim()
   });
 
-  client.certificadoStatus = status === 'Valido' ? 'Valido' : status === 'A vencer' ? 'A vencer' : 'Vencido';
-  client.certificadoValidade = validade;
+  if (client) {
+    client.certificadoStatus = status === 'Valido' ? 'Valido' : status === 'A vencer' ? 'A vencer' : 'Vencido';
+    client.certificadoValidade = validade;
+  }
 
   closeModal();
   pushToast('Certificado cadastrado com sucesso (mock).', 'success');
   render();
+}
+
+async function submitCertificateNotesForm(form) {
+  const formData = new FormData(form);
+  const certId = String(formData.get('certId') || '');
+  const cert = state.certificates.find((item) => item.id === certId);
+  if (!cert) {
+    pushToast('Certificado nao encontrado.', 'error');
+    return;
+  }
+
+  const anotacoes = String(formData.get('anotacoes') || '').trim();
+
+  if (state.dataSource === 'api') {
+    try {
+      const updated = await apiRequest(`/certificados/${cert.id}/anotacoes${buildCertificateScopeQuery(cert)}`, {
+        method: 'PATCH',
+        body: {
+          anotacoes: anotacoes || undefined
+        }
+      });
+      cert.anotacoes = updated?.anotacoes || '';
+      closeModal();
+      pushToast('Anotacoes salvas.', 'success');
+      await refreshApiData();
+    } catch (error) {
+      pushToast(`Falha ao salvar anotacoes: ${toErrorMessage(error)}`, 'error');
+    }
+    return;
+  }
+
+  cert.anotacoes = anotacoes;
+  closeModal();
+  pushToast('Anotacoes salvas (mock).', 'success');
+  render();
+}
+
+async function downloadCertificate(certificateId) {
+  const cert = state.certificates.find((item) => item.id === certificateId);
+  if (!cert) {
+    pushToast('Certificado nao encontrado.', 'error');
+    return;
+  }
+
+  if (state.dataSource === 'api') {
+    try {
+      const payload = await apiRequest(`/certificados/${cert.id}/download${buildCertificateScopeQuery(cert)}`);
+      downloadFromPayload(payload, `certificado-${toSafeFileName(cert.apelido)}.pfx`);
+      pushToast(`Download do certificado ${cert.apelido} iniciado.`, 'success');
+    } catch (error) {
+      pushToast(`Falha ao baixar certificado: ${toErrorMessage(error)}`, 'error');
+    }
+    return;
+  }
+
+  const blob = new Blob(['certificado mock'], { type: 'application/x-pkcs12' });
+  triggerBrowserDownload(`certificado-${toSafeFileName(cert.apelido)}.pfx`, blob);
+  pushToast(`Download do certificado ${cert.apelido} iniciado (mock).`, 'success');
 }
 
 function applyRunsFilters(form) {
@@ -3480,16 +3620,12 @@ async function executeConfirmAction(payload) {
       const cert = state.certificates.find((item) => item.id === payload.certId);
       if (cert) {
         if (state.dataSource === 'api') {
-          if (!cert.clientId) {
-            pushToast('Certificado sem cliente vinculado para desativacao.', 'error');
-            return;
-          }
-
           try {
-            await apiRequest(`/certificados/${cert.id}/desativar?clienteId=${encodeURIComponent(cert.clientId)}`, {
+            const actionPath = cert.clientId ? 'desvincular' : 'desativar';
+            await apiRequest(`/certificados/${cert.id}/${actionPath}${buildCertificateScopeQuery(cert)}`, {
               method: 'POST'
             });
-            pushToast('Vinculo removido do uso ativo. Agora voce pode excluir o certificado.', 'success');
+            pushToast(cert.clientId ? 'Vinculo removido. Agora voce pode manter o certificado como avulso ou exclui-lo.' : 'Certificado desativado.', 'success');
             await refreshApiData();
           } catch (error) {
             pushToast(`Falha ao remover vinculo: ${toErrorMessage(error)}`, 'error');
@@ -3511,17 +3647,13 @@ async function executeConfirmAction(payload) {
       }
 
       if (state.dataSource === 'api') {
-        if (!cert.clientId) {
-          pushToast('Certificado sem cliente associado para exclusao.', 'error');
-          return;
-        }
         if (cert.ativo) {
           pushToast('Remova o vinculo (desative) antes de excluir o certificado.', 'error');
           return;
         }
 
         try {
-          await apiRequest(`/certificados/${cert.id}?clienteId=${encodeURIComponent(cert.clientId)}`, {
+          await apiRequest(`/certificados/${cert.id}${buildCertificateScopeQuery(cert)}`, {
             method: 'DELETE'
           });
           pushToast('Certificado excluido com sucesso.', 'success');
@@ -4119,35 +4251,51 @@ function buildClientsFromApi(apiClients, establishmentsByClient, certificatesByC
   });
 }
 
-function buildCertificatesFromApi(apiClients, certificatesByClient) {
+function buildCertificatesFromApi(apiClients, certificatesByClient, allCertificatesRaw = null) {
   const clientById = Object.fromEntries(apiClients.map((client) => [client.id, client]));
   const result = [];
+  const globalCertificates = Array.isArray(allCertificatesRaw) ? allCertificatesRaw : null;
+
+  if (globalCertificates) {
+    globalCertificates.forEach((cert) => {
+      result.push(mapCertificateFromApi(cert, clientById, cert.clienteId || null));
+    });
+
+    return result.sort((a, b) => a.diasRestantes - b.diasRestantes);
+  }
 
   for (const [clientId, certsRaw] of Object.entries(certificatesByClient || {})) {
     const certs = Array.isArray(certsRaw) ? certsRaw : [];
-    const client = clientById[clientId];
 
     certs.forEach((cert) => {
-      const validade = cert.validadeFim || cert.validadeInicio || null;
-      const days = validade ? daysUntil(validade) : 9999;
-      result.push({
-        id: cert.id,
-        clientId: cert.clienteId || clientId,
-        estabelecimentoId: cert.estabelecimentoId || null,
-        cliente: client?.razaoSocial || 'Cliente nao identificado',
-        cnpj: normalizeDigits(cert.cnpjTitular || client?.cnpj || ''),
-        tipo: cert.tipo || 'A1',
-        apelido: cert.nome || 'Sem apelido',
-        validade,
-        diasRestantes: days,
-        status: deriveCertificateStatus(cert, days),
-        ultimaValidacao: cert.updatedAt || cert.createdAt || null,
-        ativo: Boolean(cert.ativo)
-      });
+      result.push(mapCertificateFromApi(cert, clientById, cert.clienteId || clientId));
     });
   }
 
   return result.sort((a, b) => a.diasRestantes - b.diasRestantes);
+}
+
+function mapCertificateFromApi(cert, clientById, fallbackClientId = null) {
+  const clientId = cert?.clienteId || fallbackClientId || null;
+  const client = clientId ? clientById[clientId] : null;
+  const validade = cert?.validadeFim || cert?.validadeInicio || null;
+  const days = validade ? daysUntil(validade) : 9999;
+
+  return {
+    id: cert.id,
+    clientId,
+    estabelecimentoId: cert.estabelecimentoId || null,
+    cliente: client?.razaoSocial || (clientId ? 'Cliente nao identificado' : 'Sem cliente vinculado'),
+    cnpj: normalizeDigits(cert.cnpjTitular || client?.cnpj || ''),
+    tipo: cert.tipo || 'A1',
+    apelido: cert.nome || 'Sem apelido',
+    validade,
+    diasRestantes: days,
+    status: deriveCertificateStatus(cert, days),
+    ultimaValidacao: cert.updatedAt || cert.createdAt || null,
+    ativo: Boolean(cert.ativo),
+    anotacoes: cert.anotacoes || ''
+  };
 }
 
 function buildXmlFilesFromApi(nfseDocs, clients) {
@@ -4642,6 +4790,10 @@ function findClientById(clientId) {
   return state.clients.find((client) => client.id === clientId) || null;
 }
 
+function buildCertificateScopeQuery(cert) {
+  return cert?.clientId ? `?clienteId=${encodeURIComponent(cert.clientId)}` : '';
+}
+
 function findXmlById(xmlId) {
   if (!xmlId) {
     return null;
@@ -4896,6 +5048,14 @@ function normalizeSearchText(value) {
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase();
+}
+
+function truncateText(value, maxLength) {
+  const text = String(value || '');
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, Math.max(0, maxLength - 3))}...`;
 }
 
 function diffMinutes(start, end) {

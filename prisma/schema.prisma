@@ -79,7 +79,7 @@ model ClienteEstabelecimento {
 
 model Certificado {
   id                          String    @id @default(uuid()) @db.Uuid
-  clienteId                   String    @map("cliente_id") @db.Uuid
+  clienteId                   String?   @map("cliente_id") @db.Uuid
   estabelecimentoId           String?   @map("estabelecimento_id") @db.Uuid
   nome                        String    @db.VarChar(255)
   cnpjTitular                 String    @map("cnpj_titular") @db.VarChar(14)
@@ -92,12 +92,13 @@ model Certificado {
   serialNumber                String?   @map("serial_number") @db.VarChar(255)
   emissor                     String?   @db.Text
   subject                     String?   @db.Text
+  anotacoes                   String?   @db.Text
   ativo                       Boolean   @default(true)
   substituidoPorCertificadoId String?   @map("substituido_por_certificado_id") @db.Uuid
   createdAt                   DateTime  @default(now()) @map("created_at")
   updatedAt                   DateTime  @updatedAt @map("updated_at")
 
-  cliente         Cliente                 @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  cliente         Cliente?                @relation(fields: [clienteId], references: [id], onDelete: SetNull)
   estabelecimento ClienteEstabelecimento? @relation(fields: [estabelecimentoId], references: [id], onDelete: SetNull)
   syncLogs        NfseSyncLog[]
 

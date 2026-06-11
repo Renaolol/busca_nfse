@@ -18,11 +18,18 @@ export class CertificatesService {
     private readonly storage: LocalStorageService
   ) {}
 
-  async create(clienteId: string, dto: CreateCertificateDto): Promise<Record<string, unknown>> {
-    await this.ensureClientExists(clienteId);
+  async create(clienteId: string | null | undefined, dto: CreateCertificateDto): Promise<Record<string, unknown>> {
+    const effectiveClienteId = this.normalizeOptionalString(clienteId ?? dto.clienteId);
+
+    if (effectiveClienteId) {
+      await this.ensureClientExists(effectiveClienteId);
+    }
 
     if (dto.estabelecimentoId) {
-      await this.ensureEstablishmentBelongsToClient(dto.estabelecimentoId, clienteId);
+      if (!effectiveClienteId) {
+        throw new BadRequestException('estabelecimentoId exige clienteId vinculado ao certificado');
+      }
+      await this.ensureEstablishmentBelongsToClient(dto.estabelecimentoId, effectiveClienteId);
     }
 
     const certificateId = randomUUID();
@@ -32,10 +39,11 @@ export class CertificatesService {
     const encryptedCertificate = this.crypto.encrypt(certificateBuffer);
     const encryptedPassword = this.crypto.encrypt(dto.senha);
 
-    const key = `certificados/${clienteId}/${certificateId}.bin`;
+    const key = `certificados/${effectiveClienteId ?? 'sem-cliente'}/${certificateId}.bin`;
     await this.storage.putObject(key, encryptedCertificate);
 
     if (dto.substituirCertificadoId) {
+      await this.ensureCertificateCanBeScoped(dto.substituirCertificadoId, effectiveClienteId);
       await this.prisma.certificado.update({
         where: { id: dto.substituirCertificadoId },
         data: {
@@ -48,7 +56,7 @@ export class CertificatesService {
     const created = await this.prisma.certificado.create({
       data: {
         id: certificateId,
-        clienteId,
+        clienteId: effectiveClienteId,
         estabelecimentoId: dto.estabelecimentoId,
         nome: dto.nome,
         cnpjTitular: dto.cnpjTitular,
@@ -61,6 +69,7 @@ export class CertificatesService {
         serialNumber: extractedMetadata.serialNumber ?? dto.serialNumber,
         emissor: extractedMetadata.emissor ?? dto.emissor,
         subject: extractedMetadata.subject ?? dto.subject,
+        anotacoes: this.normalizeNullableText(dto.anotacoes),
         ativo: true
       }
     });
@@ -77,7 +86,16 @@ export class CertificatesService {
     return certificates.map((certificate) => this.toPublic(certificate));
   }
 
-  async findOne(id: string, clienteId: string): Promise<Record<string, unknown>> {
+  async listAll(clienteId?: string): Promise<Array<Record<string, unknown>>> {
+    const certificates = await this.prisma.certificado.findMany({
+      where: clienteId ? { clienteId } : {},
+      orderBy: { createdAt: 'desc' }
+    });
+
+    return certificates.map((certificate) => this.toPublic(certificate));
+  }
+
+  async findOne(id: string, clienteId?: string): Promise<Record<string, unknown>> {
     const certificate = await this.prisma.certificado.findUnique({ where: { id } });
     if (!certificate) {
       throw new NotFoundException('Certificado nao encontrado');
@@ -87,7 +105,7 @@ export class CertificatesService {
     return this.toPublic(certificate);
   }
 
-  async setActive(id: string, ativo: boolean, clienteId: string): Promise<Record<string, unknown>> {
+  async setActive(id: string, ativo: boolean, clienteId?: string): Promise<Record<string, unknown>> {
     const certificate = await this.prisma.certificado.findUnique({ where: { id } });
     if (!certificate) {
       throw new NotFoundException('Certificado nao encontrado');
@@ -102,7 +120,66 @@ export class CertificatesService {
     return this.toPublic(updated);
   }
 
-  async remove(id: string, clienteId: string): Promise<{ id: string; removido: true }> {
+  async unlink(id: string, clienteId?: string): Promise<Record<string, unknown>> {
+    const certificate = await this.prisma.certificado.findUnique({ where: { id } });
+    if (!certificate) {
+      throw new NotFoundException('Certificado nao encontrado');
+    }
+    this.assertCertificateClientScope(certificate, clienteId);
+
+    const updated = await this.prisma.certificado.update({
+      where: { id },
+      data: {
+        clienteId: null,
+        estabelecimentoId: null,
+        ativo: false
+      }
+    });
+
+    return this.toPublic(updated);
+  }
+
+  async updateNotes(id: string, anotacoes: string | undefined, clienteId?: string): Promise<Record<string, unknown>> {
+    const certificate = await this.prisma.certificado.findUnique({ where: { id } });
+    if (!certificate) {
+      throw new NotFoundException('Certificado nao encontrado');
+    }
+    this.assertCertificateClientScope(certificate, clienteId);
+
+    const updated = await this.prisma.certificado.update({
+      where: { id },
+      data: {
+        anotacoes: this.normalizeNullableText(anotacoes)
+      }
+    });
+
+    return this.toPublic(updated);
+  }
+
+  async download(id: string, clienteId?: string): Promise<{
+    id: string;
+    fileName: string;
+    contentType: string;
+    contentBase64: string;
+  }> {
+    const certificate = await this.prisma.certificado.findUnique({ where: { id } });
+    if (!certificate) {
+      throw new NotFoundException('Certificado nao encontrado');
+    }
+    this.assertCertificateClientScope(certificate, clienteId);
+
+    const encryptedPayload = await this.storage.getObject(certificate.arquivoCriptografadoPath);
+    const certificateBuffer = this.crypto.decrypt(encryptedPayload.toString('utf8'));
+
+    return {
+      id: certificate.id,
+      fileName: `${this.toSafeFileName(certificate.nome || 'certificado')}-${certificate.id}.pfx`,
+      contentType: 'application/x-pkcs12',
+      contentBase64: certificateBuffer.toString('base64')
+    };
+  }
+
+  async remove(id: string, clienteId?: string): Promise<{ id: string; removido: true }> {
     const certificate = await this.prisma.certificado.findUnique({ where: { id } });
     if (!certificate) {
       throw new NotFoundException('Certificado nao encontrado');
@@ -119,7 +196,7 @@ export class CertificatesService {
     return { id, removido: true };
   }
 
-  async validate(id: string, clienteId: string): Promise<{
+  async validate(id: string, clienteId?: string): Promise<{
     valido: boolean;
     motivos: string[];
     validadeFim?: Date | null;
@@ -166,6 +243,7 @@ export class CertificatesService {
       serialNumber: certificate.serialNumber,
       emissor: certificate.emissor,
       subject: certificate.subject,
+      anotacoes: certificate.anotacoes,
       ativo: certificate.ativo,
       substituidoPorCertificadoId: certificate.substituidoPorCertificadoId,
       createdAt: certificate.createdAt,
@@ -191,14 +269,54 @@ export class CertificatesService {
     }
   }
 
-  private assertCertificateClientScope(certificate: Certificado, clienteId: string): void {
-    if (!clienteId) {
+  private async ensureCertificateCanBeScoped(id: string, clienteId: string | null): Promise<void> {
+    const certificate = await this.prisma.certificado.findUnique({ where: { id } });
+    if (!certificate) {
+      throw new NotFoundException('Certificado a substituir nao encontrado');
+    }
+
+    this.assertCertificateClientScope(certificate, clienteId ?? undefined);
+  }
+
+  private assertCertificateClientScope(certificate: Certificado, clienteId?: string): void {
+    const effectiveClienteId = this.normalizeOptionalString(clienteId);
+
+    if (!certificate.clienteId) {
+      if (effectiveClienteId) {
+        throw new NotFoundException('Certificado nao encontrado');
+      }
+      return;
+    }
+
+    if (!effectiveClienteId) {
       throw new BadRequestException('clienteId obrigatorio para operacao de certificado');
     }
 
-    if (certificate.clienteId !== clienteId) {
+    if (certificate.clienteId !== effectiveClienteId) {
       throw new NotFoundException('Certificado nao encontrado');
     }
+  }
+
+  private normalizeOptionalString(value?: string | null): string | null {
+    const normalized = String(value ?? '').trim();
+    return normalized || null;
+  }
+
+  private normalizeNullableText(value?: string | null): string | null {
+    const normalized = String(value ?? '').trim();
+    return normalized || null;
+  }
+
+  private toSafeFileName(value: string): string {
+    return (
+      value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80)
+        .toLowerCase() || 'certificado'
+    );
   }
 
   private decodeBase64(input: string): Buffer {

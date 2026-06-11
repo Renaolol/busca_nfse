@@ -3,6 +3,11 @@ import { Type } from 'class-transformer';
 import { IsDate, IsOptional, IsString, IsUUID, Length } from 'class-validator';
 
 export class CreateCertificateDto {
+  @ApiPropertyOptional({ description: 'Cliente vinculado ao certificado. Opcional para certificados avulsos.' })
+  @IsOptional()
+  @IsUUID()
+  clienteId?: string;
+
   @ApiProperty()
   @IsString()
   nome!: string;
@@ -56,6 +61,11 @@ export class CreateCertificateDto {
   @IsOptional()
   @IsString()
   subject?: string;
+
+  @ApiPropertyOptional({ description: 'Anotacoes internas sobre uso, renovacao ou origem do certificado.' })
+  @IsOptional()
+  @IsString()
+  anotacoes?: string;
 
   @ApiPropertyOptional({ description: 'ID de certificado antigo para substituicao' })
   @IsOptional()

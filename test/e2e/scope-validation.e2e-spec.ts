@@ -12,7 +12,13 @@ describe('Client Scope Validation (e2e)', () => {
   let app: INestApplication;
 
   const certificatesService = {
-    findOne: jest.fn().mockResolvedValue({ id: 'cert-1' })
+    findOne: jest.fn().mockResolvedValue({ id: 'cert-1' }),
+    download: jest.fn().mockResolvedValue({
+      id: 'cert-1',
+      fileName: 'certificado.pfx',
+      contentType: 'application/x-pkcs12',
+      contentBase64: 'Y2VydA=='
+    })
   };
 
   const nfseService = {
@@ -53,9 +59,9 @@ describe('Client Scope Validation (e2e)', () => {
     jest.clearAllMocks();
   });
 
-  it('retorna 400 quando clienteId nao e informado em GET /certificados/:id', async () => {
-    await request(app.getHttpServer()).get('/certificados/cert-1').expect(400);
-    expect(certificatesService.findOne).not.toHaveBeenCalled();
+  it('aceita clienteId ausente em GET /certificados/:id para permitir certificado avulso', async () => {
+    await request(app.getHttpServer()).get('/certificados/cert-1').expect(200);
+    expect(certificatesService.findOne).toHaveBeenCalledWith('cert-1', undefined);
   });
 
   it('retorna 400 quando clienteId e invalido em GET /certificados/:id', async () => {
@@ -73,6 +79,11 @@ describe('Client Scope Validation (e2e)', () => {
       .query({ clienteId })
       .expect(200);
     expect(certificatesService.findOne).toHaveBeenCalledWith('cert-1', clienteId);
+  });
+
+  it('aceita clienteId ausente em GET /certificados/:id/download para permitir certificado avulso', async () => {
+    await request(app.getHttpServer()).get('/certificados/cert-1/download').expect(200);
+    expect(certificatesService.download).toHaveBeenCalledWith('cert-1', undefined);
   });
 
   it('retorna 400 quando clienteId nao e informado em GET /nfse/:id/xml', async () => {

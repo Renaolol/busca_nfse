@@ -9,7 +9,8 @@ export const mockCertificates = [
     validade: '2027-03-22',
     diasRestantes: 294,
     status: 'Valido',
-    ultimaValidacao: '2026-06-01T02:05:00.000Z'
+    ultimaValidacao: '2026-06-01T02:05:00.000Z',
+    anotacoes: 'Certificado principal para sincronizacao diaria.'
   },
   {
     id: 'cert-002',
@@ -21,7 +22,8 @@ export const mockCertificates = [
     validade: '2026-06-09',
     diasRestantes: 8,
     status: 'A vencer',
-    ultimaValidacao: '2026-06-01T02:04:00.000Z'
+    ultimaValidacao: '2026-06-01T02:04:00.000Z',
+    anotacoes: 'Renovacao solicitada ao cliente.'
   },
   {
     id: 'cert-003',
@@ -33,7 +35,8 @@ export const mockCertificates = [
     validade: '2026-12-18',
     diasRestantes: 200,
     status: 'Erro de senha',
-    ultimaValidacao: '2026-06-01T01:57:00.000Z'
+    ultimaValidacao: '2026-06-01T01:57:00.000Z',
+    anotacoes: 'Senha pendente de conferencia.'
   },
   {
     id: 'cert-004',
@@ -45,7 +48,8 @@ export const mockCertificates = [
     validade: '2026-05-20',
     diasRestantes: -12,
     status: 'Vencido',
-    ultimaValidacao: '2026-05-29T02:10:00.000Z'
+    ultimaValidacao: '2026-05-29T02:10:00.000Z',
+    anotacoes: 'Manter historico ate conclusao da renovacao.'
   },
   {
     id: 'cert-005',
@@ -57,7 +61,8 @@ export const mockCertificates = [
     validade: '2028-01-17',
     diasRestantes: 595,
     status: 'Valido',
-    ultimaValidacao: '2026-06-01T02:09:00.000Z'
+    ultimaValidacao: '2026-06-01T02:09:00.000Z',
+    anotacoes: ''
   },
   {
     id: 'cert-006',
@@ -69,6 +74,7 @@ export const mockCertificates = [
     validade: '2026-11-20',
     diasRestantes: 172,
     status: 'Nao validado',
-    ultimaValidacao: null
+    ultimaValidacao: null,
+    anotacoes: 'Reserva sem cliente vinculado para uso futuro.'
   }
 ];

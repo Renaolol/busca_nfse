@@ -122,7 +122,7 @@ Veja `.env.example`.
 
 - O app esta configurado para uso interno e nao exige login por usuario/senha.
 - Todos os endpoints ficam acessiveis na rede interna onde a API estiver publicada.
-- O isolamento de contexto continua sendo feito por `clienteId` nos endpoints que exigem escopo (ex.: `/certificados/:id`, `/nfse/:id/*`, `/sync/logs`).
+- O isolamento de contexto continua sendo feito por `clienteId` nos endpoints que exigem escopo (ex.: certificados vinculados, `/nfse/:id/*`, `/sync/logs`).
 - Operacoes de escrita (`POST/PATCH/DELETE`) continuam gerando trilha de auditoria automatica em `auditoria_usuario` (acao, entidade, cliente, ip e user-agent).
 
 ## Comandos principais
@@ -246,13 +246,17 @@ Edicao de dados e certificados fica disponivel via botoes \"Editar dados\" e \"E
 Ao criar cliente, o backend ja cria automaticamente o estabelecimento principal com o mesmo CNPJ, inscricao municipal e municipio informados.
 O campo `responsavelInterno` fica salvo no cadastro do cliente para acompanhamento operacional interno.
 No cadastro de certificado, a API extrai automaticamente validade, thumbprint, serial, emissor e subject do arquivo `.pfx/.p12`.
-Certificados inativos podem ser excluidos por `DELETE /certificados/:id` (ativos exigem desativacao antes).
-Nos endpoints por `id` de certificado (`GET/POST/DELETE /certificados/:id...`), informe `?clienteId=...` para validar escopo.
+Certificados podem ser cadastrados sem cliente vinculado por `POST /certificados`, para controle interno da plataforma.
+Certificados aceitam `anotacoes` no cadastro e em `PATCH /certificados/:id/anotacoes`.
+Certificados podem ser baixados por `GET /certificados/:id/download`; a API descriptografa o PFX somente em memoria e nunca retorna a senha.
+Certificados inativos podem ser excluidos por `DELETE /certificados/:id` (ativos exigem desativacao ou desvinculo antes).
+Nos endpoints por `id` de certificado vinculado (`GET/POST/PATCH/DELETE /certificados/:id...`), informe `?clienteId=...` para validar escopo.
   - `clienteId` deve ser UUID valido.
+  - Certificados avulsos devem ser acessados sem `clienteId`.
 Tambem permite consultar por CNPJ base e alternar entre NFS-e emitidas e recebidas.
 Na tabela de resultados, os botoes `XML` e `DANFSE` fazem download direto dos arquivos.
 Na tela `XMLs Armazenados`, a listagem inicia vazia; selecione empresa e periodo de emissao e clique em `Buscar XMLs` para consultar os documentos no banco. Depois da consulta, `Exportar listagem` gera um CSV da listagem atual.
-As operacoes por ID em certificado e NFS-e usam `clienteId` como escopo (query string) para evitar acesso cruzado entre clientes.
+As operacoes por ID em certificado vinculado e NFS-e usam `clienteId` como escopo (query string) para evitar acesso cruzado entre clientes; certificados avulsos omitem esse parametro.
 Quando houver pendencias (sem certificado, sem sync ou sem notas), o painel exibe mensagens explicativas.
 
 ## Jobs avulsos (operacao)
