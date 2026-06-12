@@ -13,6 +13,7 @@
 - Em `NODE_ENV=production`, `NFSE_ADN_REJECT_UNAUTHORIZED=false` e bloqueado.
 - Endpoints por `id` de certificado vinculado exigem `clienteId` (UUID) para validacao de escopo; certificados avulsos omitem `clienteId`.
 - Download de certificado descriptografa o arquivo apenas em memoria e nao retorna senha.
+- Consulta de senha via `POST /certificados/:id/senha` descriptografa a senha apenas em memoria e exige o mesmo escopo do certificado.
 - Anotacoes de certificado nao devem receber senha, chave privada ou segredos operacionais.
 - Endpoint `GET /sync/logs` exige `clienteId` (UUID) para isolamento de logs por cliente.
 - `POST /nfse/download-lote` respeita escopo por `clienteId`.

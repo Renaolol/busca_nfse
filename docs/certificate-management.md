@@ -20,7 +20,7 @@
 - Operacoes por ID de certificado vinculado exigem escopo por `clienteId` (query string, UUID valido).
 - Operacoes por ID de certificado avulso devem omitir `clienteId`.
 - Download via `GET /certificados/:id/download` retorna o `.pfx` original em Base64, descriptografado somente em memoria.
-- A senha do certificado nunca e retornada no download.
+- A senha do certificado nao e retornada no download; pode ser consultada por rota propria e descriptografada somente em memoria.
 - Exclusao via API permitida apenas para certificados inativos (`DELETE /certificados/:id?clienteId=...` para vinculados ou `DELETE /certificados/:id` para avulsos).
 - Pronto para evolucao para S3/MinIO.
 
@@ -31,5 +31,6 @@
 - `GET /certificados`: lista todos os certificados, incluindo avulsos. Aceita `?clienteId=...` como filtro.
 - `PATCH /certificados/:id`: edita dados do certificado; use `?clienteId=...` quando o certificado atual estiver vinculado.
 - `PATCH /certificados/:id/anotacoes`: atualiza anotacoes.
+- `POST /certificados/:id/senha`: consulta a senha cadastrada; use `?clienteId=...` quando o certificado estiver vinculado.
 - `POST /certificados/:id/desvincular`: remove vinculo com cliente e deixa o certificado inativo.
 - `GET /certificados/:id/download`: baixa o arquivo do certificado.

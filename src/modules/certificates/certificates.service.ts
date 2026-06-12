@@ -291,6 +291,21 @@ export class CertificatesService {
     };
   }
 
+  async revealPassword(id: string, clienteId?: string): Promise<{ id: string; senha: string }> {
+    const certificate = await this.prisma.certificado.findUnique({ where: { id } });
+    if (!certificate) {
+      throw new NotFoundException('Certificado nao encontrado');
+    }
+    this.assertCertificateClientScope(certificate, clienteId);
+
+    const passwordBuffer = this.crypto.decrypt(certificate.senhaCriptografada);
+
+    return {
+      id: certificate.id,
+      senha: passwordBuffer.toString('utf8')
+    };
+  }
+
   async remove(id: string, clienteId?: string): Promise<{ id: string; removido: true }> {
     const certificate = await this.prisma.certificado.findUnique({ where: { id } });
     if (!certificate) {

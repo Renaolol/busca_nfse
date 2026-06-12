@@ -250,7 +250,8 @@ Certificados podem ser cadastrados sem cliente vinculado por `POST /certificados
 Certificados podem ser editados por `PATCH /certificados/:id`, incluindo apelido, CNPJ titular, vinculo, anotacoes e substituicao opcional de arquivo/senha.
 Ao editar com novo arquivo, informe tambem a senha; arquivo e senha continuam criptografados e os metadados sao extraidos novamente.
 Certificados aceitam `anotacoes` no cadastro, em `PATCH /certificados/:id` e em `PATCH /certificados/:id/anotacoes`.
-Certificados podem ser baixados por `GET /certificados/:id/download`; a API descriptografa o PFX somente em memoria e nunca retorna a senha.
+Certificados podem ser baixados por `GET /certificados/:id/download`; a API descriptografa o PFX somente em memoria e nao retorna a senha nessa rota.
+A senha cadastrada pode ser consultada por `POST /certificados/:id/senha`; a API descriptografa somente em memoria e aplica o mesmo escopo por `clienteId`.
 Certificados inativos podem ser excluidos por `DELETE /certificados/:id` (ativos exigem desativacao ou desvinculo antes).
 Nos endpoints por `id` de certificado vinculado (`GET/POST/PATCH/DELETE /certificados/:id...`), informe `?clienteId=...` para validar escopo.
   - `clienteId` deve ser UUID valido.

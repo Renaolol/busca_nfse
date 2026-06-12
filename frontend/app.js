@@ -421,6 +421,23 @@ function onDocumentClick(event) {
       void downloadCertificate(certificateId);
       return;
     }
+    case 'certificate-password': {
+      const certificateId = actionNode.getAttribute('data-cert-id');
+      if (!certificateId) {
+        return;
+      }
+      void revealCertificatePassword(certificateId);
+      return;
+    }
+    case 'copy-certificate-password': {
+      if (state.modal?.kind !== 'certificate-password' || !state.modal.senha) {
+        return;
+      }
+      void copyTextToClipboard(state.modal.senha)
+        .then(() => pushToast('Senha copiada.', 'success'))
+        .catch(() => pushToast('Nao foi possivel copiar a senha.', 'error'));
+      return;
+    }
     case 'certificate-notes': {
       const certificateId = actionNode.getAttribute('data-cert-id');
       if (!certificateId) {
@@ -1336,6 +1353,7 @@ function renderClientDetailsPage(clientId) {
               }
               <button class="btn secondary" type="button" data-action="certificate-test" data-cert-id="${escapeHtml(clientCertificate?.id || '')}" ${clientCertificate ? '' : 'disabled'}>Testar certificado</button>
               <button class="btn secondary" type="button" data-action="certificate-download" data-cert-id="${escapeHtml(clientCertificate?.id || '')}" ${clientCertificate ? '' : 'disabled'}>Baixar</button>
+              <button class="btn secondary" type="button" data-action="certificate-password" data-cert-id="${escapeHtml(clientCertificate?.id || '')}" ${clientCertificate ? '' : 'disabled'}>Ver senha</button>
               <button class="btn secondary" type="button" data-action="certificate-notes" data-cert-id="${escapeHtml(clientCertificate?.id || '')}" ${clientCertificate ? '' : 'disabled'}>Anotacoes</button>
             </div>
           </article>
@@ -1455,6 +1473,7 @@ function renderCertificatesPage() {
                           <button class="icon-btn" data-action="certificate-view-client" data-client-id="${escapeHtml(cert.clientId || '')}" ${cert.clientId ? '' : 'disabled'}>Ver cliente</button>
                           <button class="icon-btn" data-action="certificate-test" data-cert-id="${escapeHtml(cert.id)}">Testar certificado</button>
                           <button class="icon-btn" data-action="certificate-download" data-cert-id="${escapeHtml(cert.id)}">Baixar</button>
+                          <button class="icon-btn" data-action="certificate-password" data-cert-id="${escapeHtml(cert.id)}">Ver senha</button>
                           <button class="icon-btn" data-action="certificate-edit" data-cert-id="${escapeHtml(cert.id)}">Editar</button>
                           <button class="icon-btn" data-action="certificate-notes" data-cert-id="${escapeHtml(cert.id)}">Anotacoes</button>
                           <button class="icon-btn" data-action="certificate-replace" data-cert-id="${escapeHtml(cert.id)}">Substituir</button>
@@ -2158,6 +2177,8 @@ function renderModal() {
       return renderClientFormModal();
     case 'certificate-form':
       return renderCertificateFormModal();
+    case 'certificate-password':
+      return renderCertificatePasswordModal();
     case 'certificate-notes':
       return renderCertificateNotesModal(state.modal.certId);
     case 'xml-details':
@@ -2373,6 +2394,33 @@ function renderCertificateNotesModal(certId) {
             <button class="btn primary" type="submit">Salvar anotacoes</button>
           </div>
         </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderCertificatePasswordModal() {
+  const certName = state.modal.certName || 'Certificado';
+  const clientName = state.modal.clientName || 'Sem cliente vinculado';
+  const senha = state.modal.senha || '';
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Senha do certificado</h3>
+          <p class="modal-subtitle">${escapeHtml(certName)} - ${escapeHtml(clientName)}</p>
+        </div>
+        <div class="modal-body">
+          <label class="field">
+            Senha cadastrada
+            <input type="text" readonly value="${escapeHtml(senha)}" />
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" type="button" data-action="close-modal">Fechar</button>
+          <button class="btn primary" type="button" data-action="copy-certificate-password">Copiar senha</button>
+        </div>
       </div>
     </div>
   `;
@@ -3217,6 +3265,40 @@ async function downloadCertificate(certificateId) {
   const blob = new Blob(['certificado mock'], { type: 'application/x-pkcs12' });
   triggerBrowserDownload(`certificado-${toSafeFileName(cert.apelido)}.pfx`, blob);
   pushToast(`Download do certificado ${cert.apelido} iniciado (mock).`, 'success');
+}
+
+async function revealCertificatePassword(certificateId) {
+  const cert = state.certificates.find((item) => item.id === certificateId);
+  if (!cert) {
+    pushToast('Certificado nao encontrado.', 'error');
+    return;
+  }
+
+  if (state.dataSource === 'api') {
+    try {
+      const payload = await apiRequest(`/certificados/${cert.id}/senha${buildCertificateScopeQuery(cert)}`, {
+        method: 'POST'
+      });
+      openModal({
+        kind: 'certificate-password',
+        certId: cert.id,
+        certName: cert.apelido,
+        clientName: cert.cliente,
+        senha: String(payload?.senha || '')
+      });
+    } catch (error) {
+      pushToast(`Falha ao consultar senha do certificado: ${toErrorMessage(error)}`, 'error');
+    }
+    return;
+  }
+
+  openModal({
+    kind: 'certificate-password',
+    certId: cert.id,
+    certName: cert.apelido,
+    clientName: cert.cliente,
+    senha: 'senha-mock'
+  });
 }
 
 function applyRunsFilters(form) {
@@ -5392,6 +5474,27 @@ function triggerBrowserDownload(fileName, blob) {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+async function copyTextToClipboard(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+
+  const textarea = document.createElement('textarea');
+  textarea.value = value;
+  textarea.style.position = 'fixed';
+  textarea.style.opacity = '0';
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  const copied = document.execCommand('copy');
+  textarea.remove();
+
+  if (!copied) {
+    throw new Error('Falha ao copiar texto');
+  }
 }
 
 function formatXml(xml) {

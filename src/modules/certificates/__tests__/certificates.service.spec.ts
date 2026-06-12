@@ -526,6 +526,31 @@ describe('CertificatesService', () => {
     });
   });
 
+  it('consulta senha descriptografada somente em memoria', async () => {
+    const certificate = buildCertificateRecord({
+      id: 'cert-senha',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      nome: 'Certificado Senha',
+      cnpjTitular: '12345678000199',
+      tipo: 'A1',
+      arquivoCriptografadoPath: 'certificados/cliente-1/cert-senha.bin',
+      senhaCriptografada: 'payload-senha-criptografada'
+    });
+
+    prisma.certificado.findUnique.mockResolvedValue(certificate);
+    crypto.decrypt.mockReturnValue(Buffer.from('senha-original'));
+
+    const result = await service.revealPassword('cert-senha', 'cliente-1');
+
+    expect(crypto.decrypt).toHaveBeenCalledWith('payload-senha-criptografada');
+    expect(storage.getObject).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      id: 'cert-senha',
+      senha: 'senha-original'
+    });
+  });
+
   it('desvincula certificado de cliente e deixa inativo', async () => {
     const certificate = buildCertificateRecord({
       id: 'cert-vinculado',

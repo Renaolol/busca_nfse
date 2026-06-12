@@ -14,6 +14,7 @@ describe('Client Scope Validation (e2e)', () => {
   const certificatesService = {
     findOne: jest.fn().mockResolvedValue({ id: 'cert-1' }),
     update: jest.fn().mockResolvedValue({ id: 'cert-1' }),
+    revealPassword: jest.fn().mockResolvedValue({ id: 'cert-1', senha: 'senha-certificado' }),
     download: jest.fn().mockResolvedValue({
       id: 'cert-1',
       fileName: 'certificado.pfx',
@@ -109,6 +110,33 @@ describe('Client Scope Validation (e2e)', () => {
   it('aceita clienteId ausente em GET /certificados/:id/download para permitir certificado avulso', async () => {
     await request(app.getHttpServer()).get('/certificados/cert-1/download').expect(200);
     expect(certificatesService.download).toHaveBeenCalledWith('cert-1', undefined);
+  });
+
+  it('aceita clienteId valido em GET /certificados/:id/download', async () => {
+    const certId = 'dc31a2d0-dc8d-4600-a7fb-ed3f0a3a393b';
+    const clienteId = 'a1afc290-12bc-4607-ba12-58551e9927a0';
+
+    await request(app.getHttpServer()).get(`/certificados/${certId}/download`).query({ clienteId }).expect(200);
+    expect(certificatesService.download).toHaveBeenCalledWith(certId, clienteId);
+  });
+
+  it('aceita clienteId ausente em POST /certificados/:id/senha para permitir certificado avulso', async () => {
+    await request(app.getHttpServer()).post('/certificados/cert-1/senha').expect(200);
+    expect(certificatesService.revealPassword).toHaveBeenCalledWith('cert-1', undefined);
+  });
+
+  it('retorna 400 quando clienteId e invalido em POST /certificados/:id/senha', async () => {
+    await request(app.getHttpServer())
+      .post('/certificados/cert-1/senha')
+      .query({ clienteId: 'invalido' })
+      .expect(400);
+    expect(certificatesService.revealPassword).not.toHaveBeenCalled();
+  });
+
+  it('aceita clienteId valido em POST /certificados/:id/senha', async () => {
+    const clienteId = '550e8400-e29b-41d4-a716-446655440000';
+    await request(app.getHttpServer()).post('/certificados/cert-1/senha').query({ clienteId }).expect(200);
+    expect(certificatesService.revealPassword).toHaveBeenCalledWith('cert-1', clienteId);
   });
 
   it('retorna 400 quando clienteId nao e informado em GET /nfse/:id/xml', async () => {

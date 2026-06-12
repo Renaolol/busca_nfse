@@ -1,7 +1,8 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { CertificateScopeQueryDto } from './dto/certificate-scope-query.dto';
+import { CertificatePasswordDto } from './dto/certificate-password.dto';
 import { CreateCertificateDto } from './dto/create-certificate.dto';
 import { DownloadCertificateDto } from './dto/download-certificate.dto';
 import { UpdateCertificateDto } from './dto/update-certificate.dto';
@@ -136,6 +137,19 @@ export class CertificatesController {
   @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })
   download(@Param('id') id: string, @Query() query: CertificateScopeQueryDto) {
     return this.certificatesService.download(id, query.clienteId);
+  }
+
+  @Post('certificados/:id/senha')
+  @HttpCode(200)
+  @ApiOkResponse({ type: CertificatePasswordDto })
+  @ApiQuery({
+    name: 'clienteId',
+    required: false,
+    description: 'Escopo do cliente quando o certificado esta vinculado'
+  })
+  @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })
+  revealPassword(@Param('id') id: string, @Query() query: CertificateScopeQueryDto) {
+    return this.certificatesService.revealPassword(id, query.clienteId);
   }
 
   @Delete('certificados/:id')
