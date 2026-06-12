@@ -2295,7 +2295,12 @@ function renderCertificateFormModal() {
   if (mode === 'edit' && !cert) {
     return '';
   }
-  const selectedClientId = mode === 'edit' ? cert?.clientId || '' : state.modal.clientId || '';
+  const draft = state.modal.draft || {};
+  const selectedClientId = draft.clientId ?? (mode === 'edit' ? cert?.clientId || '' : state.modal.clientId || '');
+  const apelidoValue = draft.apelido ?? cert?.apelido ?? '';
+  const cnpjTitularValue = draft.cnpjTitular ?? cert?.cnpj ?? '';
+  const senhaValue = draft.senha ?? '';
+  const anotacoesValue = draft.anotacoes ?? cert?.anotacoes ?? '';
   const autoValidity = state.dataSource === 'api';
   const title = mode === 'edit' ? (state.modal.replace ? 'Substituir certificado' : 'Editar certificado') : 'Cadastrar certificado';
   const subtitle =
@@ -2323,11 +2328,11 @@ function renderCertificateFormModal() {
               </label>
               <label class="field">
                 Apelido
-                <input name="apelido" required value="${escapeHtml(cert?.apelido || '')}" />
+                <input name="apelido" required value="${escapeHtml(apelidoValue)}" />
               </label>
               <label class="field">
                 CNPJ titular
-                <input name="cnpjTitular" maxlength="18" value="${escapeHtml(cert?.cnpj || '')}" />
+                <input name="cnpjTitular" maxlength="18" value="${escapeHtml(cnpjTitularValue)}" />
               </label>
               <label class="field">
                 Tipo
@@ -2336,10 +2341,11 @@ function renderCertificateFormModal() {
               <label class="field">
                 Arquivo do certificado
                 <input name="arquivo" type="file" accept=".pfx,.p12" ${fileRequired ? 'required' : ''} />
+                ${draft.fileName ? `<span class="row-sub">Selecionado: ${escapeHtml(draft.fileName)}</span>` : ''}
               </label>
               <label class="field">
                 ${escapeHtml(passwordLabel)}
-                <input name="senha" type="password" ${mode === 'create' ? 'required' : ''} />
+                <input name="senha" type="password" ${mode === 'create' ? 'required' : ''} value="${escapeHtml(senhaValue)}" />
               </label>
               ${
                 autoValidity
@@ -2354,7 +2360,7 @@ function renderCertificateFormModal() {
               }
               <label class="field" style="grid-column: span 2;">
                 Anotacoes
-                <textarea name="anotacoes">${escapeHtml(cert?.anotacoes || '')}</textarea>
+                <textarea name="anotacoes">${escapeHtml(anotacoesValue)}</textarea>
               </label>
             </div>
           </div>
@@ -3095,8 +3101,12 @@ async function submitCertificateForm(form) {
   const client = findClientById(clientId);
   const cnpjTitular = normalizeDigits(String(formData.get('cnpjTitular') || client?.cnpj || ''));
   const senha = String(formData.get('senha') || '');
-  const file = formData.get('arquivo');
+  const selectedFile = formData.get('arquivo');
+  const draftFile = state.modal?.draft?.file instanceof File ? state.modal.draft.file : null;
+  const file = selectedFile instanceof File && selectedFile.size > 0 ? selectedFile : draftFile;
   const hasFile = file instanceof File && file.size > 0;
+
+  persistCertificateFormDraft(form, file);
 
   if (clientId && !client) {
     pushToast('Cliente selecionado nao foi encontrado.', 'error');
@@ -3144,28 +3154,50 @@ async function submitCertificateForm(form) {
         body.senha = senha;
       }
 
-      const response =
-        mode === 'edit'
-          ? await apiRequest(`/certificados/${cert.id}${buildCertificateScopeQuery(cert)}`, {
-              method: 'PATCH',
-              body
-            })
-          : await apiRequest(clientId ? `/clientes/${clientId}/certificados` : '/certificados', {
-              method: 'POST',
-              body
-            });
+      let usedReplacementFallback = false;
+      let response;
+
+      if (mode === 'edit') {
+        try {
+          response = await apiRequest(`/certificados/${cert.id}${buildCertificateScopeQuery(cert)}`, {
+            method: 'PATCH',
+            body
+          });
+        } catch (error) {
+          if (!hasFile || !isMissingCertificatePatchRoute(error)) {
+            throw error;
+          }
+
+          usedReplacementFallback = true;
+          response = await createCertificateReplacement(clientId, body, cert.id);
+        }
+      } else {
+        response = await apiRequest(clientId ? `/clientes/${clientId}/certificados` : '/certificados', {
+          method: 'POST',
+          body
+        });
+      }
 
       closeModal();
       const detectedValidity = response?.validadeFim || response?.validadeInicio;
       if (detectedValidity) {
         pushToast(
-          mode === 'edit'
+          usedReplacementFallback
+            ? `Certificado substituido. Validade detectada: ${formatDate(detectedValidity)}.`
+            : mode === 'edit'
             ? `Certificado atualizado. Validade detectada: ${formatDate(detectedValidity)}.`
             : `Certificado cadastrado. Validade detectada: ${formatDate(detectedValidity)}.`,
           'success'
         );
       } else {
-        pushToast(mode === 'edit' ? 'Certificado atualizado com sucesso.' : 'Certificado cadastrado com sucesso.', 'success');
+        pushToast(
+          usedReplacementFallback
+            ? 'Certificado substituido com sucesso.'
+            : mode === 'edit'
+              ? 'Certificado atualizado com sucesso.'
+              : 'Certificado cadastrado com sucesso.',
+          'success'
+        );
       }
       await refreshApiData();
     } catch (error) {
@@ -3207,6 +3239,43 @@ async function submitCertificateForm(form) {
   closeModal();
   pushToast(mode === 'edit' ? 'Certificado atualizado com sucesso (mock).' : 'Certificado cadastrado com sucesso (mock).', 'success');
   render();
+}
+
+function persistCertificateFormDraft(form, file) {
+  if (!state.modal || state.modal.kind !== 'certificate-form') {
+    return;
+  }
+
+  const formData = new FormData(form);
+  const selectedFile = file instanceof File && file.size > 0 ? file : null;
+
+  state.modal = {
+    ...state.modal,
+    draft: {
+      clientId: String(formData.get('clientId') || ''),
+      apelido: String(formData.get('apelido') || ''),
+      cnpjTitular: String(formData.get('cnpjTitular') || ''),
+      senha: String(formData.get('senha') || ''),
+      anotacoes: String(formData.get('anotacoes') || ''),
+      file: selectedFile,
+      fileName: selectedFile?.name || ''
+    }
+  };
+}
+
+async function createCertificateReplacement(clientId, body, certificateId) {
+  return await apiRequest(clientId ? `/clientes/${clientId}/certificados` : '/certificados', {
+    method: 'POST',
+    body: {
+      ...body,
+      substituirCertificadoId: certificateId
+    }
+  });
+}
+
+function isMissingCertificatePatchRoute(error) {
+  const message = toErrorMessage(error);
+  return message.includes('HTTP 404') && message.includes('Cannot PATCH /certificados/');
 }
 
 async function submitCertificateNotesForm(form) {
