@@ -4,6 +4,7 @@ import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { CertificateScopeQueryDto } from './dto/certificate-scope-query.dto';
 import { CreateCertificateDto } from './dto/create-certificate.dto';
 import { DownloadCertificateDto } from './dto/download-certificate.dto';
+import { UpdateCertificateDto } from './dto/update-certificate.dto';
 import { UpdateCertificateNotesDto } from './dto/update-certificate-notes.dto';
 import { CertificatesService } from './certificates.service';
 
@@ -94,6 +95,20 @@ export class CertificatesController {
   @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })
   validate(@Param('id') id: string, @Query() query: CertificateScopeQueryDto) {
     return this.certificatesService.validate(id, query.clienteId);
+  }
+
+  @Patch('certificados/:id')
+  @ApiQuery({
+    name: 'clienteId',
+    required: false,
+    description: 'Escopo do cliente quando o certificado esta vinculado'
+  })
+  @TenantScope(
+    { source: 'query', key: 'clienteId', injectWhenMissing: true },
+    { source: 'body', key: 'clienteId' }
+  )
+  update(@Param('id') id: string, @Query() query: CertificateScopeQueryDto, @Body() dto: UpdateCertificateDto) {
+    return this.certificatesService.update(id, dto, query.clienteId);
   }
 
   @Patch('certificados/:id/anotacoes')

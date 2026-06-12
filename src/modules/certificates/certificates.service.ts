@@ -1,5 +1,5 @@
 import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
-import { Certificado } from '@prisma/client';
+import { Certificado, Prisma } from '@prisma/client';
 import { spawnSync } from 'node:child_process';
 import { randomUUID, X509Certificate } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -9,6 +9,7 @@ import { LocalStorageService } from '../storage/storage.service';
 import { CryptoService } from '../shared/crypto.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateCertificateDto } from './dto/create-certificate.dto';
+import { UpdateCertificateDto } from './dto/update-certificate.dto';
 
 @Injectable()
 export class CertificatesService {
@@ -154,6 +155,117 @@ export class CertificatesService {
     });
 
     return this.toPublic(updated);
+  }
+
+  async update(id: string, dto: UpdateCertificateDto, clienteId?: string): Promise<Record<string, unknown>> {
+    const certificate = await this.prisma.certificado.findUnique({ where: { id } });
+    if (!certificate) {
+      throw new NotFoundException('Certificado nao encontrado');
+    }
+    this.assertCertificateClientScope(certificate, clienteId);
+
+    const hasClienteId = this.hasOwn(dto, 'clienteId');
+    const hasEstabelecimentoId = this.hasOwn(dto, 'estabelecimentoId');
+    const targetClienteId = hasClienteId ? this.normalizeOptionalString(dto.clienteId) : certificate.clienteId;
+    let targetEstabelecimentoId = hasEstabelecimentoId
+      ? this.normalizeOptionalString(dto.estabelecimentoId)
+      : certificate.estabelecimentoId;
+
+    if (targetClienteId) {
+      await this.ensureClientExists(targetClienteId);
+    }
+
+    if (targetClienteId && !hasEstabelecimentoId && targetClienteId !== certificate.clienteId) {
+      targetEstabelecimentoId = null;
+    }
+
+    if (!targetClienteId) {
+      targetEstabelecimentoId = null;
+    } else if (targetEstabelecimentoId) {
+      await this.ensureEstablishmentBelongsToClient(targetEstabelecimentoId, targetClienteId);
+    }
+
+    const data: Prisma.CertificadoUncheckedUpdateInput = {};
+    const hasArquivoBase64 = this.hasOwn(dto, 'arquivoBase64') && Boolean(this.normalizeOptionalString(dto.arquivoBase64));
+    const normalizedPassword = this.normalizeOptionalString(dto.senha);
+    const hasPassword = Boolean(normalizedPassword);
+    let newStorageKey: string | null = null;
+    let shouldDeleteNewStorageOnError = false;
+    let oldStorageKeyToDelete: string | null = null;
+
+    if (hasClienteId || targetClienteId !== certificate.clienteId) {
+      data.clienteId = targetClienteId;
+    }
+
+    if (hasEstabelecimentoId || targetEstabelecimentoId !== certificate.estabelecimentoId) {
+      data.estabelecimentoId = targetEstabelecimentoId;
+    }
+
+    if (this.hasOwn(dto, 'nome')) {
+      const nome = this.normalizeOptionalString(dto.nome);
+      if (!nome) {
+        throw new BadRequestException('nome nao pode ser vazio');
+      }
+      data.nome = nome;
+    }
+
+    if (this.hasOwn(dto, 'cnpjTitular')) {
+      const cnpjTitular = this.normalizeOptionalString(dto.cnpjTitular);
+      if (!cnpjTitular || cnpjTitular.length !== 14) {
+        throw new BadRequestException('cnpjTitular deve conter 14 digitos');
+      }
+      data.cnpjTitular = cnpjTitular;
+    }
+
+    if (this.hasOwn(dto, 'anotacoes')) {
+      data.anotacoes = this.normalizeNullableText(dto.anotacoes);
+    }
+
+    if (hasArquivoBase64) {
+      if (!normalizedPassword) {
+        throw new BadRequestException('senha obrigatoria para atualizar o arquivo do certificado');
+      }
+
+      const certificateBuffer = this.decodeBase64(dto.arquivoBase64 as string);
+      const extractedMetadata = await this.extractCertificateMetadata(certificateBuffer, normalizedPassword);
+      const encryptedCertificate = this.crypto.encrypt(certificateBuffer);
+
+      newStorageKey = `certificados/${targetClienteId ?? 'sem-cliente'}/${id}.bin`;
+      await this.storage.putObject(newStorageKey, encryptedCertificate);
+      shouldDeleteNewStorageOnError = newStorageKey !== certificate.arquivoCriptografadoPath;
+      oldStorageKeyToDelete = newStorageKey !== certificate.arquivoCriptografadoPath ? certificate.arquivoCriptografadoPath : null;
+
+      data.arquivoCriptografadoPath = newStorageKey;
+      data.senhaCriptografada = this.crypto.encrypt(normalizedPassword);
+      this.assignExtractedMetadata(data, extractedMetadata);
+    } else if (this.hasOwn(dto, 'arquivoBase64')) {
+      throw new BadRequestException('Arquivo do certificado em Base64 invalido');
+    } else if (hasPassword && normalizedPassword) {
+      const encryptedPayload = await this.storage.getObject(certificate.arquivoCriptografadoPath);
+      const certificateBuffer = this.crypto.decrypt(encryptedPayload.toString('utf8'));
+      const extractedMetadata = await this.extractCertificateMetadata(certificateBuffer, normalizedPassword);
+
+      data.senhaCriptografada = this.crypto.encrypt(normalizedPassword);
+      this.assignExtractedMetadata(data, extractedMetadata);
+    }
+
+    try {
+      const updated = await this.prisma.certificado.update({
+        where: { id },
+        data
+      });
+
+      if (oldStorageKeyToDelete) {
+        await this.storage.deleteObject(oldStorageKeyToDelete);
+      }
+
+      return this.toPublic(updated);
+    } catch (error) {
+      if (newStorageKey && shouldDeleteNewStorageOnError) {
+        await this.storage.deleteObject(newStorageKey);
+      }
+      throw error;
+    }
   }
 
   async download(id: string, clienteId?: string): Promise<{
@@ -305,6 +417,29 @@ export class CertificatesService {
   private normalizeNullableText(value?: string | null): string | null {
     const normalized = String(value ?? '').trim();
     return normalized || null;
+  }
+
+  private hasOwn<T extends object>(target: T, key: keyof T): boolean {
+    return Object.prototype.hasOwnProperty.call(target, key);
+  }
+
+  private assignExtractedMetadata(
+    data: Prisma.CertificadoUncheckedUpdateInput,
+    extractedMetadata: {
+      validadeInicio: Date;
+      validadeFim: Date;
+      thumbprint?: string;
+      serialNumber?: string;
+      emissor?: string;
+      subject?: string;
+    }
+  ): void {
+    data.validadeInicio = extractedMetadata.validadeInicio;
+    data.validadeFim = extractedMetadata.validadeFim;
+    data.thumbprint = extractedMetadata.thumbprint;
+    data.serialNumber = extractedMetadata.serialNumber;
+    data.emissor = extractedMetadata.emissor;
+    data.subject = extractedMetadata.subject;
   }
 
   private toSafeFileName(value: string): string {

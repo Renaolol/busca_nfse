@@ -13,6 +13,7 @@ describe('Client Scope Validation (e2e)', () => {
 
   const certificatesService = {
     findOne: jest.fn().mockResolvedValue({ id: 'cert-1' }),
+    update: jest.fn().mockResolvedValue({ id: 'cert-1' }),
     download: jest.fn().mockResolvedValue({
       id: 'cert-1',
       fileName: 'certificado.pfx',
@@ -79,6 +80,30 @@ describe('Client Scope Validation (e2e)', () => {
       .query({ clienteId })
       .expect(200);
     expect(certificatesService.findOne).toHaveBeenCalledWith('cert-1', clienteId);
+  });
+
+  it('aceita clienteId ausente em PATCH /certificados/:id para permitir certificado avulso', async () => {
+    await request(app.getHttpServer()).patch('/certificados/cert-1').send({ nome: 'Certificado Editado' }).expect(200);
+    expect(certificatesService.update).toHaveBeenCalledWith('cert-1', { nome: 'Certificado Editado' }, undefined);
+  });
+
+  it('retorna 400 quando clienteId e invalido em PATCH /certificados/:id', async () => {
+    await request(app.getHttpServer())
+      .patch('/certificados/cert-1')
+      .query({ clienteId: 'invalido' })
+      .send({ nome: 'Certificado Editado' })
+      .expect(400);
+    expect(certificatesService.update).not.toHaveBeenCalled();
+  });
+
+  it('aceita clienteId valido em PATCH /certificados/:id', async () => {
+    const clienteId = '550e8400-e29b-41d4-a716-446655440000';
+    await request(app.getHttpServer())
+      .patch('/certificados/cert-1')
+      .query({ clienteId })
+      .send({ nome: 'Certificado Editado' })
+      .expect(200);
+    expect(certificatesService.update).toHaveBeenCalledWith('cert-1', { nome: 'Certificado Editado' }, clienteId);
   });
 
   it('aceita clienteId ausente em GET /certificados/:id/download para permitir certificado avulso', async () => {

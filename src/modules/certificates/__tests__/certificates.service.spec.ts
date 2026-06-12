@@ -379,6 +379,123 @@ describe('CertificatesService', () => {
     expect(result.anotacoes).toBe('Uso futuro');
   });
 
+  it('atualiza dados cadastrais e vinculo sem trocar arquivo ou senha', async () => {
+    const certificate = buildCertificateRecord({
+      id: 'cert-edicao',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      nome: 'Certificado Antigo',
+      cnpjTitular: '12345678000199',
+      tipo: 'A1',
+      arquivoCriptografadoPath: 'certificados/cliente-1/cert-edicao.bin',
+      senhaCriptografada: 'enc:senha'
+    });
+
+    prisma.certificado.findUnique.mockResolvedValue(certificate);
+    prisma.cliente.findUnique.mockResolvedValue({ id: 'cliente-2' });
+    prisma.clienteEstabelecimento.findUnique.mockResolvedValue({ id: 'estab-2', clienteId: 'cliente-2' });
+    prisma.certificado.update.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+      Promise.resolve(buildCertificateRecord({ ...certificate, ...data }))
+    );
+
+    const result = await service.update(
+      'cert-edicao',
+      {
+        clienteId: 'cliente-2',
+        estabelecimentoId: 'estab-2',
+        nome: 'Certificado Atualizado',
+        cnpjTitular: '22345678000199',
+        anotacoes: 'Editado pelo painel'
+      },
+      'cliente-1'
+    );
+
+    expect(prisma.certificado.update).toHaveBeenCalledWith({
+      where: { id: 'cert-edicao' },
+      data: {
+        clienteId: 'cliente-2',
+        estabelecimentoId: 'estab-2',
+        nome: 'Certificado Atualizado',
+        cnpjTitular: '22345678000199',
+        anotacoes: 'Editado pelo painel'
+      }
+    });
+    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(result.clienteId).toBe('cliente-2');
+    expect(result.nome).toBe('Certificado Atualizado');
+  });
+
+  it('substitui arquivo e senha mantendo conteudo criptografado', async () => {
+    mockedSpawnSync.mockReturnValue({
+      pid: 910,
+      output: [null, `Bag Attributes\n${SAMPLE_PEM_CERTIFICATE}\n`, ''],
+      stdout: `Bag Attributes\n${SAMPLE_PEM_CERTIFICATE}\n`,
+      stderr: '',
+      status: 0,
+      signal: null
+    } as ReturnType<typeof spawnSync>);
+
+    const certificate = buildCertificateRecord({
+      id: 'cert-arquivo',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      nome: 'Certificado Arquivo',
+      cnpjTitular: '12345678000199',
+      tipo: 'A1',
+      arquivoCriptografadoPath: 'certificados/cliente-1/cert-arquivo.bin',
+      senhaCriptografada: 'enc:senha-antiga'
+    });
+
+    prisma.certificado.findUnique.mockResolvedValue(certificate);
+    prisma.certificado.update.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+      Promise.resolve(buildCertificateRecord({ ...certificate, ...data }))
+    );
+
+    const result = await service.update(
+      'cert-arquivo',
+      {
+        arquivoBase64: Buffer.from('novo-pfx-fake').toString('base64'),
+        senha: 'senha-nova'
+      },
+      'cliente-1'
+    );
+    const updatePayload = prisma.certificado.update.mock.calls[0][0].data as Record<string, unknown>;
+
+    expect(storage.putObject).toHaveBeenCalledWith('certificados/cliente-1/cert-arquivo.bin', `enc:${Buffer.from('novo-pfx-fake').toString('base64')}`);
+    expect(updatePayload.senhaCriptografada).toBe('enc:senha-nova');
+    expect(updatePayload.validadeInicio).toBeInstanceOf(Date);
+    expect(updatePayload.validadeFim).toBeInstanceOf(Date);
+    expect(updatePayload.arquivoCriptografadoPath).toBe('certificados/cliente-1/cert-arquivo.bin');
+    expect(result.senhaCriptografada).toBeUndefined();
+  });
+
+  it('bloqueia troca de arquivo sem senha nova', async () => {
+    const certificate = buildCertificateRecord({
+      id: 'cert-sem-senha',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      nome: 'Certificado Sem Senha',
+      cnpjTitular: '12345678000199',
+      tipo: 'A1',
+      arquivoCriptografadoPath: 'certificados/cliente-1/cert-sem-senha.bin',
+      senhaCriptografada: 'enc:senha-antiga'
+    });
+
+    prisma.certificado.findUnique.mockResolvedValue(certificate);
+
+    await expect(
+      service.update(
+        'cert-sem-senha',
+        {
+          arquivoBase64: Buffer.from('novo-pfx-fake').toString('base64')
+        },
+        'cliente-1'
+      )
+    ).rejects.toThrow(BadRequestException);
+    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(prisma.certificado.update).not.toHaveBeenCalled();
+  });
+
   it('baixa certificado avulso descriptografando somente em memoria', async () => {
     const certificate = buildCertificateRecord(
       {

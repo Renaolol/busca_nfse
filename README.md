@@ -247,7 +247,9 @@ Ao criar cliente, o backend ja cria automaticamente o estabelecimento principal 
 O campo `responsavelInterno` fica salvo no cadastro do cliente para acompanhamento operacional interno.
 No cadastro de certificado, a API extrai automaticamente validade, thumbprint, serial, emissor e subject do arquivo `.pfx/.p12`.
 Certificados podem ser cadastrados sem cliente vinculado por `POST /certificados`, para controle interno da plataforma.
-Certificados aceitam `anotacoes` no cadastro e em `PATCH /certificados/:id/anotacoes`.
+Certificados podem ser editados por `PATCH /certificados/:id`, incluindo apelido, CNPJ titular, vinculo, anotacoes e substituicao opcional de arquivo/senha.
+Ao editar com novo arquivo, informe tambem a senha; arquivo e senha continuam criptografados e os metadados sao extraidos novamente.
+Certificados aceitam `anotacoes` no cadastro, em `PATCH /certificados/:id` e em `PATCH /certificados/:id/anotacoes`.
 Certificados podem ser baixados por `GET /certificados/:id/download`; a API descriptografa o PFX somente em memoria e nunca retorna a senha.
 Certificados inativos podem ser excluidos por `DELETE /certificados/:id` (ativos exigem desativacao ou desvinculo antes).
 Nos endpoints por `id` de certificado vinculado (`GET/POST/PATCH/DELETE /certificados/:id...`), informe `?clienteId=...` para validar escopo.
