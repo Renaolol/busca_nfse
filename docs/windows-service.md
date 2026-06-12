@@ -103,6 +103,19 @@ Se quiser que o script tambem rode `npm ci`, build e migrations, remova `-SkipBu
 .\deploy\windows\install-notasync-service.ps1 -Port 3000
 ```
 
+O script para o servico antes do build para liberar a DLL do Prisma (`query_engine-windows.dll.node`) e inicia novamente no final.
+
+## Build manual com servico instalado
+
+Se for rodar `npm run build` diretamente, pare o servico antes para evitar erro `EPERM` ao executar `prisma generate`:
+
+```powershell
+cd C:\Users\Administrador\Documents\GitHub\busca_nfse
+.\NotaSyncGCONT.exe stop
+npm run build
+.\NotaSyncGCONT.exe start
+```
+
 O script cria:
 
 - `NotaSyncGCONT.xml`

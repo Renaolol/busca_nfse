@@ -48,6 +48,13 @@ if (-not (Test-Path $winSwPath)) {
 New-Item -ItemType Directory -Force -Path $storagePath | Out-Null
 New-Item -ItemType Directory -Force -Path $logsPath | Out-Null
 
+$existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+
+if ($existingService -and $existingService.Status -ne "Stopped") {
+  Write-Host "Parando servico '$ServiceName' antes do build para liberar arquivos do Prisma..."
+  & $winSwPath stop
+}
+
 if (-not $SkipBuild) {
   Push-Location $ProjectPath
   try {
@@ -85,9 +92,12 @@ $xml = @"
 
 Set-Content -Path $xmlPath -Value $xml -Encoding UTF8
 
-$existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existingService) {
-  & $winSwPath restart
+  $existingService = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+  if ($existingService.Status -ne "Stopped") {
+    & $winSwPath stop
+  }
+  & $winSwPath start
 } else {
   & $winSwPath install
   & $winSwPath start
