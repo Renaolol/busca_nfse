@@ -1,0 +1,16 @@
+﻿<service>
+  <id>NotaSyncGCONT</id>
+  <name>NotaSync GCONT</name>
+  <description>Servico interno NotaSync GCONT para busca e consulta de NFS-e.</description>
+  <executable>C:\Program Files\nodejs\node.exe</executable>
+  <arguments>dist\main.js</arguments>
+  <workingdirectory>C:\Users\Administrador\Documents\GitHub\busca_nfse</workingdirectory>
+  <env name="NODE_ENV" value="production" />
+  <env name="PORT" value="3000" />
+  <env name="STORAGE_ROOT_PATH" value="C:\Users\Administrador\Documents\GitHub\busca_nfse\storage" />
+  <logpath>C:\Users\Administrador\Documents\GitHub\busca_nfse\logs</logpath>
+  <log mode="roll" />
+  <onfailure action="restart" delay="10 sec" />
+  <resetfailure>1 hour</resetfailure>
+  <stoptimeout>20 sec</stoptimeout>
+</service>
