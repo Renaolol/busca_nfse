@@ -4469,26 +4469,28 @@ function buildClientsFromApi(apiClients, establishmentsByClient, certificatesByC
 
 function buildCertificatesFromApi(apiClients, certificatesByClient, allCertificatesRaw = null) {
   const clientById = Object.fromEntries(apiClients.map((client) => [client.id, client]));
-  const result = [];
+  const resultById = new Map();
   const globalCertificates = Array.isArray(allCertificatesRaw) ? allCertificatesRaw : null;
 
   if (globalCertificates) {
     globalCertificates.forEach((cert) => {
-      result.push(mapCertificateFromApi(cert, clientById, cert.clienteId || null));
+      const mapped = mapCertificateFromApi(cert, clientById, cert.clienteId || null);
+      resultById.set(mapped.id, mapped);
     });
-
-    return result.sort((a, b) => a.diasRestantes - b.diasRestantes);
   }
 
   for (const [clientId, certsRaw] of Object.entries(certificatesByClient || {})) {
     const certs = Array.isArray(certsRaw) ? certsRaw : [];
 
     certs.forEach((cert) => {
-      result.push(mapCertificateFromApi(cert, clientById, cert.clienteId || clientId));
+      const mapped = mapCertificateFromApi(cert, clientById, cert.clienteId || clientId);
+      if (!resultById.has(mapped.id)) {
+        resultById.set(mapped.id, mapped);
+      }
     });
   }
 
-  return result.sort((a, b) => a.diasRestantes - b.diasRestantes);
+  return Array.from(resultById.values()).sort((a, b) => a.diasRestantes - b.diasRestantes);
 }
 
 function mapCertificateFromApi(cert, clientById, fallbackClientId = null) {
