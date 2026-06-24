@@ -1176,70 +1176,71 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     await this.storage.putObject(danfseKey, danfsePdf);
     const hash = this.parser.getHash(params.document.xml);
 
-    await this.prisma.nfseDocumento.upsert({
-      where: {
-        ambiente_chaveAcesso: {
-          ambiente: params.control.ambiente,
-          chaveAcesso: chave
-        }
-      },
-      update: {
-        nsu: params.document.nsu,
-        numeroNfse: parsedXml?.numeroNfse,
-        serie: parsedXml?.serie,
-        dataEmissao: parsedXml?.dataEmissao,
-        competencia,
-        dataCancelamento: documentCancelamentoDate,
-        status: documentStatus,
-        cnpjPrestador: parsedXml?.cnpjPrestador ?? params.control.cnpjConsulta,
-        razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
-        cnpjTomador: parsedXml?.cnpjTomador,
-        razaoSocialTomador: parsedXml?.razaoSocialTomador,
-        municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
-        municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
-        valorServico: this.toDecimal(parsedXml?.valorServico),
-        valorDeducoes: this.toDecimal(parsedXml?.valorDeducoes),
-        valorIss: this.toDecimal(parsedXml?.valorIss),
-        aliquotaIss: this.toDecimal(parsedXml?.aliquotaIss),
-        codigoServicoNacional: parsedXml?.codigoServicoNacional,
-        itemListaServico: parsedXml?.itemListaServico,
-        descricaoServico: parsedXml?.descricaoServico,
-        xmlPath: xmlKey,
-        danfsePath: isCanceledDocument ? null : danfseKey,
-        hashXml: hash,
-        origem: DocumentoOrigem.adn_nsu,
-        updatedAt: new Date()
-      },
-      create: {
-        clienteId: params.control.clienteId,
-        estabelecimentoId: params.control.estabelecimentoId,
-        ambiente: params.control.ambiente,
-        nsu: params.document.nsu,
-        chaveAcesso: chave,
-        numeroNfse: parsedXml?.numeroNfse,
-        serie: parsedXml?.serie,
-        dataEmissao: parsedXml?.dataEmissao,
-        competencia,
-        dataCancelamento: documentCancelamentoDate,
-        status: documentStatus,
-        cnpjPrestador: parsedXml?.cnpjPrestador ?? params.control.cnpjConsulta,
-        razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
-        cnpjTomador: parsedXml?.cnpjTomador,
-        razaoSocialTomador: parsedXml?.razaoSocialTomador,
-        municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
-        municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
-        valorServico: this.toDecimal(parsedXml?.valorServico),
-        valorDeducoes: this.toDecimal(parsedXml?.valorDeducoes),
-        valorIss: this.toDecimal(parsedXml?.valorIss),
-        aliquotaIss: this.toDecimal(parsedXml?.aliquotaIss),
-        codigoServicoNacional: parsedXml?.codigoServicoNacional,
-        itemListaServico: parsedXml?.itemListaServico,
-        descricaoServico: parsedXml?.descricaoServico,
-        xmlPath: xmlKey,
-        danfsePath: isCanceledDocument ? null : danfseKey,
-        hashXml: hash,
-        origem: DocumentoOrigem.adn_nsu
-      }
+    const updateData: Prisma.NfseDocumentoUncheckedUpdateInput = {
+      nsu: params.document.nsu,
+      numeroNfse: parsedXml?.numeroNfse,
+      serie: parsedXml?.serie,
+      dataEmissao: parsedXml?.dataEmissao,
+      competencia,
+      dataCancelamento: documentCancelamentoDate,
+      status: documentStatus,
+      cnpjPrestador: parsedXml?.cnpjPrestador ?? params.control.cnpjConsulta,
+      razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
+      cnpjTomador: parsedXml?.cnpjTomador,
+      razaoSocialTomador: parsedXml?.razaoSocialTomador,
+      municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
+      municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
+      valorServico: this.toDecimal(parsedXml?.valorServico),
+      valorDeducoes: this.toDecimal(parsedXml?.valorDeducoes),
+      valorIss: this.toDecimal(parsedXml?.valorIss),
+      aliquotaIss: this.toDecimal(parsedXml?.aliquotaIss),
+      codigoServicoNacional: parsedXml?.codigoServicoNacional,
+      itemListaServico: parsedXml?.itemListaServico,
+      descricaoServico: parsedXml?.descricaoServico,
+      xmlPath: xmlKey,
+      danfsePath: isCanceledDocument ? null : danfseKey,
+      hashXml: hash,
+      origem: DocumentoOrigem.adn_nsu,
+      updatedAt: new Date()
+    };
+    const createData: Prisma.NfseDocumentoUncheckedCreateInput = {
+      clienteId: params.control.clienteId,
+      estabelecimentoId: params.control.estabelecimentoId,
+      ambiente: params.control.ambiente,
+      nsu: params.document.nsu,
+      chaveAcesso: chave,
+      numeroNfse: parsedXml?.numeroNfse,
+      serie: parsedXml?.serie,
+      dataEmissao: parsedXml?.dataEmissao,
+      competencia,
+      dataCancelamento: documentCancelamentoDate,
+      status: documentStatus,
+      cnpjPrestador: parsedXml?.cnpjPrestador ?? params.control.cnpjConsulta,
+      razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
+      cnpjTomador: parsedXml?.cnpjTomador,
+      razaoSocialTomador: parsedXml?.razaoSocialTomador,
+      municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
+      municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
+      valorServico: this.toDecimal(parsedXml?.valorServico),
+      valorDeducoes: this.toDecimal(parsedXml?.valorDeducoes),
+      valorIss: this.toDecimal(parsedXml?.valorIss),
+      aliquotaIss: this.toDecimal(parsedXml?.aliquotaIss),
+      codigoServicoNacional: parsedXml?.codigoServicoNacional,
+      itemListaServico: parsedXml?.itemListaServico,
+      descricaoServico: parsedXml?.descricaoServico,
+      xmlPath: xmlKey,
+      danfsePath: isCanceledDocument ? null : danfseKey,
+      hashXml: hash,
+      origem: DocumentoOrigem.adn_nsu
+    };
+
+    await this.upsertDocumentoResolvingNsuConflict({
+      ambiente: params.control.ambiente,
+      clienteId: params.control.clienteId,
+      chaveAcesso: chave,
+      nsu: params.document.nsu,
+      updateData,
+      createData
     });
 
     return {
@@ -1289,19 +1290,17 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     await this.storage.putObject(xmlKey, params.xml);
 
     const cancelamentoData = this.buildCancelamentoDocumentoData(params.evento);
-    const nfse = await this.prisma.nfseDocumento.upsert({
-      where: {
-        ambiente_chaveAcesso: {
-          ambiente,
-          chaveAcesso: params.evento.chaveAcesso
-        }
-      },
-      update: {
+    const nfse = await this.upsertDocumentoResolvingNsuConflict({
+      ambiente,
+      clienteId: params.control.clienteId,
+      chaveAcesso: params.evento.chaveAcesso,
+      nsu: params.nsu,
+      updateData: {
         clienteId: params.control.clienteId,
         estabelecimentoId: params.control.estabelecimentoId,
         ...cancelamentoData
       },
-      create: {
+      createData: {
         clienteId: params.control.clienteId,
         estabelecimentoId: params.control.estabelecimentoId,
         ambiente,
@@ -1405,6 +1404,93 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       descricao.includes('cancelamento') ||
       descricao.includes('cancelada')
     );
+  }
+
+  private async upsertDocumentoResolvingNsuConflict(params: {
+    ambiente: Ambiente;
+    clienteId: string;
+    chaveAcesso: string;
+    nsu?: bigint;
+    updateData: Prisma.NfseDocumentoUncheckedUpdateInput;
+    createData: Prisma.NfseDocumentoUncheckedCreateInput;
+  }): Promise<NfseDocumento> {
+    try {
+      return await this.prisma.nfseDocumento.upsert({
+        where: {
+          ambiente_chaveAcesso: {
+            ambiente: params.ambiente,
+            chaveAcesso: params.chaveAcesso
+          }
+        },
+        update: params.updateData,
+        create: params.createData
+      });
+    } catch (error) {
+      if (!this.isDocumentoNsuUniqueViolation(error, params.nsu)) {
+        throw error;
+      }
+
+      const nsu = params.nsu as bigint;
+      const existing = await this.prisma.nfseDocumento.findUnique({
+        where: {
+          clienteId_ambiente_nsu: {
+            clienteId: params.clienteId,
+            ambiente: params.ambiente,
+            nsu
+          }
+        },
+        select: {
+          id: true,
+          chaveAcesso: true
+        }
+      });
+
+      if (!existing) {
+        throw error;
+      }
+
+      this.logger.warn(
+        `Documento reconciliado por NSU ${nsu.toString()} em ${params.ambiente}; chave anterior ${existing.chaveAcesso}, nova chave ${params.chaveAcesso}`
+      );
+
+      return this.prisma.nfseDocumento.update({
+        where: { id: existing.id },
+        data: {
+          ...params.updateData,
+          clienteId: params.createData.clienteId,
+          estabelecimentoId: params.createData.estabelecimentoId,
+          ambiente: params.ambiente,
+          nsu,
+          chaveAcesso: params.chaveAcesso,
+          origem: params.createData.origem
+        }
+      });
+    }
+  }
+
+  private isDocumentoNsuUniqueViolation(
+    error: unknown,
+    nsu?: bigint
+  ): error is { code: string; meta?: { target?: unknown } } {
+    if (nsu === undefined || !error || typeof error !== 'object' || !('code' in error)) {
+      return false;
+    }
+
+    if (error.code !== 'P2002') {
+      return false;
+    }
+
+    const meta = 'meta' in error && error.meta && typeof error.meta === 'object' ? (error.meta as { target?: unknown }) : null;
+    const target = meta?.target;
+    if (!Array.isArray(target)) {
+      return false;
+    }
+
+    const normalizedTarget = target
+      .filter((value): value is string => typeof value === 'string')
+      .map((value) => value.toLowerCase());
+
+    return normalizedTarget.includes('cliente_id') && normalizedTarget.includes('ambiente') && normalizedTarget.includes('nsu');
   }
 
   private async waitForAdnRequestSlot(): Promise<void> {
