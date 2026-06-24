@@ -1426,11 +1426,11 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         create: params.createData
       });
     } catch (error) {
-      if (!this.isDocumentoNsuUniqueViolation(error, params.nsu)) {
+      if (!this.isUniqueConstraintViolation(error) || params.nsu === undefined) {
         throw error;
       }
 
-      const nsu = params.nsu as bigint;
+      const nsu = params.nsu;
       const existing = await this.prisma.nfseDocumento.findUnique({
         where: {
           clienteId_ambiente_nsu: {
@@ -1468,29 +1468,12 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private isDocumentoNsuUniqueViolation(
-    error: unknown,
-    nsu?: bigint
-  ): error is { code: string; meta?: { target?: unknown } } {
-    if (nsu === undefined || !error || typeof error !== 'object' || !('code' in error)) {
+  private isUniqueConstraintViolation(error: unknown): error is { code: string } {
+    if (!error || typeof error !== 'object' || !('code' in error)) {
       return false;
     }
 
-    if (error.code !== 'P2002') {
-      return false;
-    }
-
-    const meta = 'meta' in error && error.meta && typeof error.meta === 'object' ? (error.meta as { target?: unknown }) : null;
-    const target = meta?.target;
-    if (!Array.isArray(target)) {
-      return false;
-    }
-
-    const normalizedTarget = target
-      .filter((value): value is string => typeof value === 'string')
-      .map((value) => value.toLowerCase());
-
-    return normalizedTarget.includes('cliente_id') && normalizedTarget.includes('ambiente') && normalizedTarget.includes('nsu');
+    return error.code === 'P2002';
   }
 
   private async waitForAdnRequestSlot(): Promise<void> {
