@@ -1,3 +1,6 @@
+import { rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { BadRequestException } from '@nestjs/common';
 import { Ambiente } from '@prisma/client';
 import { NfseAmbiente } from '../../../common/enums/nfse-ambiente.enum';
@@ -9,6 +12,7 @@ import { LocalStorageService } from '../../storage/storage.service';
 import { SyncService } from '../sync.service';
 
 describe('SyncService', () => {
+  const schedulerConfigPath = join(tmpdir(), 'busca-nfse-tests', 'nightly-sweep.json');
   const prisma = {
     cliente: {
       findUnique: jest.fn()
@@ -45,7 +49,8 @@ describe('SyncService', () => {
   };
 
   const storage = {
-    putObject: jest.fn()
+    putObject: jest.fn(),
+    resolveKeyPath: jest.fn().mockReturnValue(schedulerConfigPath)
   };
 
   const adnClient: Pick<NfseAdnClient, 'getDFeByNsu'> = {
@@ -124,6 +129,10 @@ describe('SyncService', () => {
     storage.putObject.mockResolvedValue(undefined);
 
     service = buildService();
+  });
+
+  afterAll(async () => {
+    await rm(join(tmpdir(), 'busca-nfse-tests'), { recursive: true, force: true });
   });
 
   it('consulta um NSU especifico sem persistir nota', async () => {
@@ -1023,11 +1032,30 @@ describe('SyncService', () => {
         running: false,
         hour: expect.any(Number),
         minute: expect.any(Number),
+        activeSlots: ['02:00'],
+        availableSlots: ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'],
         timezoneOffsetMinutes: expect.any(Number),
         checkIntervalMs: expect.any(Number),
         nextRunAt: expect.any(String)
       })
     );
+  });
+
+  it('atualiza configuracao dos horarios da rotina noturna', async () => {
+    const result = await service.updateSchedulerSettings({
+      enabled: true,
+      activeSlots: ['18:00', '22:00', '02:00']
+    });
+
+    expect(result.nightlySweep).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        activeSlots: ['18:00', '22:00', '02:00'],
+        hour: 18,
+        minute: 0
+      })
+    );
+    expect(storage.resolveKeyPath).toHaveBeenCalled();
   });
 
   it('filtra logs por cliente', async () => {

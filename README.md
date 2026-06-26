@@ -104,8 +104,9 @@ Veja `.env.example`.
 - `SYNC_ADN_REQUEST_INTERVAL_MS`: intervalo minimo entre chamadas ao ADN (padrao `5000`).
 - `SYNC_ADN_RATE_LIMIT_COOLDOWN_MS`: cooldown global apos `HTTP 429` (padrao `300000`).
 - `SYNC_NIGHTLY_SWEEP_ENABLED`: habilita busca noturna automatica para todos os clientes cadastrados (padrao `true`).
-- `SYNC_NIGHTLY_SWEEP_HOUR`: hora da execucao noturna (0-23, padrao `2`).
-- `SYNC_NIGHTLY_SWEEP_MINUTE`: minuto da execucao noturna (0-59, padrao `0`).
+- `SYNC_NIGHTLY_SWEEP_SLOTS`: lista de horarios noturnos separados por virgula (ex.: `18:00,20:00,22:00,00:00,02:00,04:00,06:00`). Pode ser sobrescrita pelo painel.
+- `SYNC_NIGHTLY_SWEEP_HOUR`: hora da execucao noturna legada (0-23, padrao `2`) quando nao houver slots configurados.
+- `SYNC_NIGHTLY_SWEEP_MINUTE`: minuto da execucao noturna legado (0-59, padrao `0`) quando nao houver slots configurados.
 - `SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES`: offset de fuso em minutos para agendamento noturno (padrao `-180`, UTC-3).
 - `SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS`: intervalo de verificacao do agendamento noturno (padrao `60000`).
 - `CERT_MASTER_KEY`: obrigatoria e deve ser configurada com segredo proprio (a API recusa iniciar com valor placeholder `CHANGE_ME...`).
@@ -179,6 +180,7 @@ Valores aceitos:
 - Quando o ADN responde em lote (`lote=true`), todos os XMLs do retorno sao salvos e o controle avanca ate o maior NSU do lote.
 - No modo diario, por padrao o ciclo processa ate `SYNC_DAILY_MAX_NSU_PER_RUN` NSUs por lote. Se todos os NSUs consultados tiverem documento, agenda nova execucao curta (`SYNC_DAILY_SUCCESS_COOLDOWN_MS`) antes de continuar.
 - A busca noturna (`SYNC_NIGHTLY_SWEEP_*`) ativa modo diario para todos os clientes cadastrados e dispara varredura incremental a partir do ultimo NSU salvo.
+- O painel permite ligar/desligar a rotina e marcar individualmente os horarios `18:00`, `20:00`, `22:00`, `00:00`, `02:00`, `04:00` e `06:00`.
 
 ## Importacao de XML
 

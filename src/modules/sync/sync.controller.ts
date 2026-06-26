@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -7,6 +7,7 @@ import { SyncService } from './sync.service';
 import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
 import { StartSyncDto } from './dto/start-sync.dto';
 import { ReprocessPastNsusDto } from './dto/reprocess-past-nsus.dto';
+import { UpdateSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
 
 @ApiTags('sync')
 @Controller()
@@ -40,6 +41,12 @@ export class SyncController {
   @Get('sync/scheduler-status')
   schedulerStatus() {
     return this.syncService.schedulerStatus();
+  }
+
+  @Put('sync/scheduler-settings')
+  @Roles('admin')
+  updateSchedulerSettings(@Body() dto: UpdateSchedulerSettingsDto) {
+    return this.syncService.updateSchedulerSettings(dto);
   }
 
   @Post('sync/rodar-agora')

@@ -16,7 +16,8 @@
 - O botao `Recuperar NSUs passados` permite selecionar um cliente especifico ou todos os clientes. Ele chama `POST /sync/reprocessar-nsus-passados` para varrer do NSU 1 ate o `ultimo_nsu_consultado`, pular documentos fiscais existentes e baixar apenas lacunas ainda ausentes no app.
 - Os botoes `Pausar` e `Retomar` atuam no mesmo fluxo continuo e atualizam o estado dos controles do cliente.
 - A interface diferencia `Busca habilitada` (cliente elegivel para rotinas) de `Executando agora` (consulta em andamento no monitor).
-- O endpoint `GET /sync/scheduler-status` informa se o ciclo automatico e a busca noturna estao ligados, rodando e qual a proxima execucao noturna.
+- O endpoint `GET /sync/scheduler-status` informa se o ciclo automatico e a busca noturna estao ligados, rodando, quais horarios noturnos estao ativos e qual a proxima execucao noturna.
+- O endpoint `PUT /sync/scheduler-settings` permite ativar/desativar a rotina noturna global e selecionar os horarios ativos entre `18:00`, `20:00`, `22:00`, `00:00`, `02:00`, `04:00` e `06:00`.
 - A consulta de logs (`GET /sync/logs`) exige `clienteId` (UUID valido) para retornar apenas o escopo do cliente informado.
 
 ## Jobs implementados
@@ -51,9 +52,11 @@ Os jobs podem ser disparados manualmente pelos scripts `npm run job:*` para oper
 ## Busca noturna global
 
 - A busca noturna roda em background quando `SYNC_NIGHTLY_SWEEP_ENABLED=true`.
-- O horario e controlado por:
+- Os horarios podem ser controlados pela API/painel ou pela variavel `SYNC_NIGHTLY_SWEEP_SLOTS` (lista separada por virgula).
+- Na ausencia de slots configurados, o sistema usa o horario legado definido por:
   - `SYNC_NIGHTLY_SWEEP_HOUR`
   - `SYNC_NIGHTLY_SWEEP_MINUTE`
+- O fuso segue controlado por:
   - `SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES`
 - A cada execucao noturna, o sistema:
   - percorre todos os clientes cadastrados,
@@ -61,4 +64,4 @@ Os jobs podem ser disparados manualmente pelos scripts `npm run job:*` para oper
   - preserva o `ultimo_nsu_consultado` dos controles existentes,
   - cria controles novos partindo do ultimo NSU encontrado localmente (ou `0` se nao houver historico).
 - Depois da ativacao, dispara um ciclo imediato de sincronizacao para comecar a busca incremental sem esperar o proximo intervalo.
-- O fluxo evita execucao duplicada no mesmo dia (`yyyy-mm-dd` no fuso configurado).
+- O fluxo evita execucao duplicada para a mesma combinacao de data local + horario configurado.

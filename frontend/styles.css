@@ -743,6 +743,36 @@ textarea {
   height: 18px;
 }
 
+.schedule-slot-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 10px;
+}
+
+.schedule-slot-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fbfbfd;
+  cursor: pointer;
+}
+
+.schedule-slot-option input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+
+.schedule-slot-option span {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #2a2a2e;
+}
+
 .stack-actions {
   display: flex;
   gap: 10px;

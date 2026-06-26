@@ -30,7 +30,8 @@
 - Em `429/timeout/5xx`, o sistema nao avanca NSU (evita pulo de documento) e agenda nova tentativa.
 - Se a busca noturna nao estiver rodando, conferir:
   - `SYNC_NIGHTLY_SWEEP_ENABLED=true`
-  - `SYNC_NIGHTLY_SWEEP_HOUR` / `SYNC_NIGHTLY_SWEEP_MINUTE`
+  - horarios salvos em `PUT /sync/scheduler-settings` ou a variavel `SYNC_NIGHTLY_SWEEP_SLOTS`
+  - fallback legado: `SYNC_NIGHTLY_SWEEP_HOUR` / `SYNC_NIGHTLY_SWEEP_MINUTE`
   - `SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES`
   - logs da aplicacao contendo `Busca noturna`.
 

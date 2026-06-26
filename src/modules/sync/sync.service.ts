@@ -10,6 +10,8 @@ import {
   SyncMode,
   SyncStatus
 } from '@prisma/client';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -56,14 +58,28 @@ type ReprocessPastNsusResult = {
   detalhes: ReprocessPastNsusDetail[];
 };
 
+type NightlySweepConfigFile = {
+  enabled?: boolean;
+  activeSlots?: string[];
+};
+
+type NightlySweepSlot = {
+  time: string;
+  hour: number;
+  minute: number;
+};
+
 @Injectable()
 export class SyncService implements OnModuleInit, OnModuleDestroy {
+  private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
+  private static readonly NIGHTLY_SWEEP_CONFIG_STORAGE_KEY = 'settings/nightly-sweep.json';
   private readonly logger = new Logger(SyncService.name);
   private autoSyncTimer: NodeJS.Timeout | null = null;
   private nightlySweepTimer: NodeJS.Timeout | null = null;
   private autoSyncRunning = false;
   private nightlySweepRunning = false;
-  private lastNightlySweepDateKey: string | null = null;
+  private lastNightlySweepExecutionKey: string | null = null;
+  private readonly executedNightlySweepKeys = new Set<string>();
   private readonly autoSyncEnabled = process.env.SYNC_AUTO_RUN_ENABLED !== 'false';
   private readonly autoSyncIntervalMs = this.parsePositiveNumberEnv('SYNC_AUTO_RUN_INTERVAL_MS', 30000);
   private readonly autoSyncStartupDelayMs = this.parsePositiveNumberEnv('SYNC_AUTO_RUN_STARTUP_DELAY_MS', 3000);
@@ -78,10 +94,11 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   private readonly controlClaimTtlMs = this.parsePositiveNumberEnv('SYNC_CONTROL_CLAIM_TTL_MS', 10 * 60 * 1000);
   private readonly nsuConflictRetryCount = this.parseBoundedIntegerEnv('SYNC_NSU_CONFLICT_RETRY_COUNT', 2, 0, 10);
   private readonly nsuConflictRetryDelayMs = this.parsePositiveNumberEnv('SYNC_NSU_CONFLICT_RETRY_DELAY_MS', 150);
-  private readonly nightlySweepEnabled = process.env.SYNC_NIGHTLY_SWEEP_ENABLED !== 'false';
+  private nightlySweepEnabled = process.env.SYNC_NIGHTLY_SWEEP_ENABLED !== 'false';
   private readonly nightlySweepCheckIntervalMs = this.parsePositiveNumberEnv('SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS', 60000);
   private readonly nightlySweepHour = this.parseBoundedIntegerEnv('SYNC_NIGHTLY_SWEEP_HOUR', 2, 0, 23);
   private readonly nightlySweepMinute = this.parseBoundedIntegerEnv('SYNC_NIGHTLY_SWEEP_MINUTE', 0, 0, 59);
+  private nightlySweepActiveSlots = this.resolveInitialNightlySweepSlots();
   private readonly nightlySweepTimezoneOffsetMinutes = this.parseBoundedIntegerEnv(
     'SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES',
     -180,
@@ -99,35 +116,26 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     @Inject(NFSE_ADN_CLIENT) private readonly adnClient: NfseAdnClient
   ) {}
 
-  onModuleInit(): void {
+  async onModuleInit(): Promise<void> {
+    await this.loadNightlySweepConfig();
+
     if (this.autoSyncEnabled) {
       this.autoSyncTimer = setInterval(() => {
         void this.runAutomaticSyncCycle();
       }, this.autoSyncIntervalMs);
+      this.autoSyncTimer.unref?.();
 
-      setTimeout(() => {
+      const autoSyncStartupTimer = setTimeout(() => {
         void this.runAutomaticSyncCycle();
       }, this.autoSyncStartupDelayMs);
+      autoSyncStartupTimer.unref?.();
 
       this.logger.log(`Execucao automatica de sync habilitada a cada ${this.autoSyncIntervalMs}ms`);
     } else {
       this.logger.log('Execucao automatica de sync desativada (SYNC_AUTO_RUN_ENABLED=false)');
     }
 
-    if (this.nightlySweepEnabled) {
-      this.nightlySweepTimer = setInterval(() => {
-        void this.tryRunNightlySweep();
-      }, this.nightlySweepCheckIntervalMs);
-      setTimeout(() => {
-        void this.tryRunNightlySweep();
-      }, 5000);
-
-      this.logger.log(
-        `Busca noturna habilitada para ${String(this.nightlySweepHour).padStart(2, '0')}:${String(this.nightlySweepMinute).padStart(2, '0')} (UTC${this.nightlySweepTimezoneOffsetMinutes >= 0 ? '+' : ''}${this.nightlySweepTimezoneOffsetMinutes / 60})`
-      );
-    } else {
-      this.logger.log('Busca noturna desativada (SYNC_NIGHTLY_SWEEP_ENABLED=false)');
-    }
+    this.refreshNightlySweepTimer();
   }
 
   onModuleDestroy(): void {
@@ -208,9 +216,11 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       running: boolean;
       hour: number;
       minute: number;
+      activeSlots: string[];
+      availableSlots: string[];
       timezoneOffsetMinutes: number;
       checkIntervalMs: number;
-      lastRunDateKey: string | null;
+      lastRunExecutionKey: string | null;
       nextRunAt: string | null;
     };
     dailySync: {
@@ -235,12 +245,14 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       nightlySweep: {
         enabled: this.nightlySweepEnabled,
         running: this.nightlySweepRunning,
-        hour: this.nightlySweepHour,
-        minute: this.nightlySweepMinute,
+        hour: this.getReferenceNightlySweepSlot().hour,
+        minute: this.getReferenceNightlySweepSlot().minute,
+        activeSlots: [...this.nightlySweepActiveSlots],
+        availableSlots: [...SyncService.NIGHTLY_SWEEP_AVAILABLE_SLOTS],
         timezoneOffsetMinutes: this.nightlySweepTimezoneOffsetMinutes,
         checkIntervalMs: this.nightlySweepCheckIntervalMs,
-        lastRunDateKey: this.lastNightlySweepDateKey,
-        nextRunAt: this.nightlySweepEnabled ? this.resolveNextNightlySweepAt(new Date()).toISOString() : null
+        lastRunExecutionKey: this.lastNightlySweepExecutionKey,
+        nextRunAt: this.nightlySweepEnabled ? this.resolveNextNightlySweepAt(new Date())?.toISOString() ?? null : null
       },
       dailySync: {
         intervalMs: this.dailySyncIntervalMs,
@@ -752,6 +764,20 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  async updateSchedulerSettings(params: { enabled?: boolean; activeSlots?: string[] }) {
+    if (typeof params.enabled === 'boolean') {
+      this.nightlySweepEnabled = params.enabled;
+    }
+
+    if (params.activeSlots) {
+      this.nightlySweepActiveSlots = this.normalizeNightlySweepSlots(params.activeSlots);
+    }
+
+    await this.persistNightlySweepConfig();
+    this.refreshNightlySweepTimer();
+    return this.schedulerStatus();
+  }
+
   private async activateSyncControlsForClient(
     clienteId: string,
     modoSync: SyncMode,
@@ -818,19 +844,21 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     const localReference = this.getNightlyReferenceDate(new Date());
-    const hour = localReference.getUTCHours();
-    const minute = localReference.getUTCMinutes();
+    const currentSlot = this.formatTime(localReference.getUTCHours(), localReference.getUTCMinutes());
     const dateKey = this.toDateKey(localReference);
+    this.pruneNightlySweepExecutionKeys(dateKey);
 
-    if (hour !== this.nightlySweepHour || minute !== this.nightlySweepMinute) {
+    if (!this.nightlySweepEnabled || !this.nightlySweepActiveSlots.includes(currentSlot)) {
       return;
     }
 
-    if (this.lastNightlySweepDateKey === dateKey) {
+    const executionKey = `${dateKey}T${currentSlot}`;
+    if (this.executedNightlySweepKeys.has(executionKey)) {
       return;
     }
 
-    this.lastNightlySweepDateKey = dateKey;
+    this.executedNightlySweepKeys.add(executionKey);
+    this.lastNightlySweepExecutionKey = executionKey;
     this.nightlySweepRunning = true;
 
     try {
@@ -1659,25 +1687,165 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     return `${year}-${month}-${day}`;
   }
 
-  private resolveNextNightlySweepAt(now: Date): Date {
-    const localReference = this.getNightlyReferenceDate(now);
-    let targetLocalUtcMs = Date.UTC(
-      localReference.getUTCFullYear(),
-      localReference.getUTCMonth(),
-      localReference.getUTCDate(),
-      this.nightlySweepHour,
-      this.nightlySweepMinute,
-      0,
-      0
-    );
-    let targetActualMs = targetLocalUtcMs - this.nightlySweepTimezoneOffsetMinutes * 60 * 1000;
-
-    if (targetActualMs <= now.getTime()) {
-      targetLocalUtcMs += 24 * 60 * 60 * 1000;
-      targetActualMs = targetLocalUtcMs - this.nightlySweepTimezoneOffsetMinutes * 60 * 1000;
+  private resolveNextNightlySweepAt(now: Date): Date | null {
+    if (!this.nightlySweepEnabled || this.nightlySweepActiveSlots.length === 0) {
+      return null;
     }
 
-    return new Date(targetActualMs);
+    const localReference = this.getNightlyReferenceDate(now);
+    let nextRunAt: Date | null = null;
+
+    for (const slot of this.getActiveNightlySweepSlots()) {
+      let targetLocalUtcMs = Date.UTC(
+        localReference.getUTCFullYear(),
+        localReference.getUTCMonth(),
+        localReference.getUTCDate(),
+        slot.hour,
+        slot.minute,
+        0,
+        0
+      );
+      let targetActualMs = targetLocalUtcMs - this.nightlySweepTimezoneOffsetMinutes * 60 * 1000;
+
+      if (targetActualMs <= now.getTime()) {
+        targetLocalUtcMs += 24 * 60 * 60 * 1000;
+        targetActualMs = targetLocalUtcMs - this.nightlySweepTimezoneOffsetMinutes * 60 * 1000;
+      }
+
+      const candidate = new Date(targetActualMs);
+      if (!nextRunAt || candidate.getTime() < nextRunAt.getTime()) {
+        nextRunAt = candidate;
+      }
+    }
+
+    return nextRunAt;
+  }
+
+  private refreshNightlySweepTimer(): void {
+    if (this.nightlySweepEnabled) {
+      if (!this.nightlySweepTimer) {
+        this.nightlySweepTimer = setInterval(() => {
+          void this.tryRunNightlySweep();
+        }, this.nightlySweepCheckIntervalMs);
+        this.nightlySweepTimer.unref?.();
+        const nightlySweepStartupTimer = setTimeout(() => {
+          void this.tryRunNightlySweep();
+        }, 5000);
+        nightlySweepStartupTimer.unref?.();
+      }
+
+      this.logger.log(
+        `Busca noturna habilitada para ${this.describeNightlySweepSlots()} (UTC${this.nightlySweepTimezoneOffsetMinutes >= 0 ? '+' : ''}${this.nightlySweepTimezoneOffsetMinutes / 60})`
+      );
+      return;
+    }
+
+    if (this.nightlySweepTimer) {
+      clearInterval(this.nightlySweepTimer);
+      this.nightlySweepTimer = null;
+    }
+
+    this.logger.log('Busca noturna desativada (SYNC_NIGHTLY_SWEEP_ENABLED=false)');
+  }
+
+  private resolveInitialNightlySweepSlots(): string[] {
+    const envSlots = process.env.SYNC_NIGHTLY_SWEEP_SLOTS
+      ?.split(',')
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0);
+
+    if (envSlots?.length) {
+      return this.normalizeNightlySweepSlots(envSlots);
+    }
+
+    return this.normalizeNightlySweepSlots([this.formatTime(this.nightlySweepHour, this.nightlySweepMinute)]);
+  }
+
+  private normalizeNightlySweepSlots(slots: string[]): string[] {
+    const valid = Array.from(
+      new Set(slots.map((value) => value.trim()).filter((value) => SyncService.NIGHTLY_SWEEP_AVAILABLE_SLOTS.includes(value)))
+    );
+
+    return SyncService.NIGHTLY_SWEEP_AVAILABLE_SLOTS.filter((slot) => valid.includes(slot));
+  }
+
+  private getReferenceNightlySweepSlot(): NightlySweepSlot {
+    return this.parseNightlySweepSlot(this.nightlySweepActiveSlots[0] ?? this.formatTime(this.nightlySweepHour, this.nightlySweepMinute));
+  }
+
+  private getActiveNightlySweepSlots(): NightlySweepSlot[] {
+    return this.nightlySweepActiveSlots.map((slot) => this.parseNightlySweepSlot(slot));
+  }
+
+  private parseNightlySweepSlot(time: string): NightlySweepSlot {
+    const [hourRaw, minuteRaw] = time.split(':');
+    const hour = Number(hourRaw);
+    const minute = Number(minuteRaw);
+    return {
+      time,
+      hour: Number.isInteger(hour) ? hour : this.nightlySweepHour,
+      minute: Number.isInteger(minute) ? minute : this.nightlySweepMinute
+    };
+  }
+
+  private describeNightlySweepSlots(): string {
+    if (this.nightlySweepActiveSlots.length === 0) {
+      return 'nenhum horario selecionado';
+    }
+
+    return this.nightlySweepActiveSlots.join(', ');
+  }
+
+  private formatTime(hour: number, minute: number): string {
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  }
+
+  private pruneNightlySweepExecutionKeys(currentDateKey: string): void {
+    for (const key of Array.from(this.executedNightlySweepKeys)) {
+      const [dateKey] = key.split('T');
+      if (dateKey < currentDateKey) {
+        this.executedNightlySweepKeys.delete(key);
+      }
+    }
+  }
+
+  private async loadNightlySweepConfig(): Promise<void> {
+    const absolutePath = this.storage.resolveKeyPath(SyncService.NIGHTLY_SWEEP_CONFIG_STORAGE_KEY);
+
+    try {
+      const raw = await readFile(absolutePath, 'utf8');
+      const parsed = JSON.parse(raw) as NightlySweepConfigFile;
+
+      if (typeof parsed.enabled === 'boolean') {
+        this.nightlySweepEnabled = parsed.enabled;
+      }
+
+      if (Array.isArray(parsed.activeSlots)) {
+        this.nightlySweepActiveSlots = this.normalizeNightlySweepSlots(parsed.activeSlots);
+      }
+    } catch (error) {
+      const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : null;
+      if (code !== 'ENOENT') {
+        this.logger.warn(`Falha ao carregar configuracao da rotina noturna: ${this.toErrorMessage(error)}`);
+      }
+    }
+  }
+
+  private async persistNightlySweepConfig(): Promise<void> {
+    const absolutePath = this.storage.resolveKeyPath(SyncService.NIGHTLY_SWEEP_CONFIG_STORAGE_KEY);
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await writeFile(
+      absolutePath,
+      JSON.stringify(
+        {
+          enabled: this.nightlySweepEnabled,
+          activeSlots: this.nightlySweepActiveSlots
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
   }
 
   private sleep(ms: number): Promise<void> {

@@ -3,6 +3,7 @@ const modalRoot = document.getElementById('modalRoot');
 const drawerRoot = document.getElementById('drawerRoot');
 const toastRoot = document.getElementById('toastRoot');
 const API_TIMEOUT_MS = 20000;
+const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
 
 const navItems = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', route: '/dashboard' },
@@ -103,7 +104,8 @@ const state = {
     },
     rotina: {
       ativa: true,
-      horarioInicio: '02:00',
+      horariosAtivos: ['02:00'],
+      horariosDisponiveis: [...NIGHTLY_SWEEP_AVAILABLE_SLOTS],
       limiteClientes: 200,
       retryFalha: true,
       maxTentativas: 3,
@@ -773,7 +775,13 @@ function onDocumentSubmit(event) {
       return;
     }
     case 'settingsGeralForm':
+      event.preventDefault();
+      pushToast('Configuracoes salvas com sucesso.', 'success');
+      return;
     case 'settingsRotinaForm':
+      event.preventDefault();
+      void submitSettingsRotinaForm(target);
+      return;
     case 'settingsServidorForm':
     case 'settingsNotificacoesForm': {
       event.preventDefault();
@@ -2029,10 +2037,11 @@ function renderSettingsTabPanel() {
             <input name="ativa" type="checkbox" ${state.settings.rotina.ativa ? 'checked' : ''} />
             <span>Ativar rotina noturna</span>
           </label>
-          <label class="field">
-            Horario de inicio
-            <input name="horarioInicio" type="time" value="${escapeHtml(state.settings.rotina.horarioInicio)}" />
-          </label>
+          <div class="field" style="grid-column: span 3;">
+            <span>Horarios ativos da rotina</span>
+            <div class="schedule-slot-grid">${renderNightlySlotCheckboxes()}</div>
+            <small class="row-sub">Selecione os horarios em que a rotina deve executar automaticamente.</small>
+          </div>
           <label class="field">
             Limite de clientes por execucao
             <input name="limiteClientes" type="number" min="1" value="${escapeHtml(String(state.settings.rotina.limiteClientes))}" />
@@ -2731,6 +2740,24 @@ function renderSchedulerSettingsPanel() {
       </div>
     </div>
   `;
+}
+
+function renderNightlySlotCheckboxes() {
+  const availableSlots = state.settings.rotina.horariosDisponiveis?.length
+    ? state.settings.rotina.horariosDisponiveis
+    : NIGHTLY_SWEEP_AVAILABLE_SLOTS;
+  const activeSlots = new Set(state.settings.rotina.horariosAtivos || []);
+
+  return availableSlots
+    .map(
+      (slot) => `
+        <label class="schedule-slot-option">
+          <input name="activeSlots" type="checkbox" value="${escapeHtml(slot)}" ${activeSlots.has(slot) ? 'checked' : ''} />
+          <span>${escapeHtml(slot)}</span>
+        </label>
+      `
+    )
+    .join('');
 }
 
 function renderClientSearchActivation(client) {
@@ -4100,6 +4127,46 @@ async function refreshExecutionMonitorNow() {
   render();
 }
 
+async function submitSettingsRotinaForm(form) {
+  const data = new FormData(form);
+  const activeSlots = data
+    .getAll('activeSlots')
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+
+  state.settings.rotina.ativa = data.get('ativa') === 'on';
+  state.settings.rotina.horariosAtivos = activeSlots;
+  state.settings.rotina.limiteClientes = Number(data.get('limiteClientes') || state.settings.rotina.limiteClientes || 200);
+  state.settings.rotina.retryFalha = data.get('retryFalha') === 'on';
+  state.settings.rotina.maxTentativas = Number(data.get('maxTentativas') || state.settings.rotina.maxTentativas || 3);
+  state.settings.rotina.intervaloTentativas = Number(
+    data.get('intervaloTentativas') || state.settings.rotina.intervaloTentativas || 5
+  );
+
+  if (state.dataSource !== 'api') {
+    pushToast('Configuracoes da rotina salvas no modo mock.', 'success');
+    render();
+    return;
+  }
+
+  try {
+    const schedulerStatus = await apiRequest('/sync/scheduler-settings', {
+      method: 'PUT',
+      body: {
+        enabled: state.settings.rotina.ativa,
+        activeSlots
+      }
+    });
+
+    state.schedulerStatus = schedulerStatus;
+    applySchedulerStatusToSettings(schedulerStatus);
+    render();
+    pushToast('Rotina noturna atualizada com sucesso.', 'success');
+  } catch (error) {
+    pushToast(`Falha ao salvar rotina noturna: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
 async function pauseSyncForAllClients(clients) {
   const targets = Array.isArray(clients) ? clients.filter((client) => client && client.id) : [];
   if (!targets.length) {
@@ -4292,7 +4359,11 @@ function applySchedulerStatusToSettings(schedulerStatus) {
   }
 
   state.settings.rotina.ativa = Boolean(nightly.enabled);
-  state.settings.rotina.horarioInicio = formatTimeFromHourMinute(nightly.hour, nightly.minute);
+  state.settings.rotina.horariosAtivos = Array.isArray(nightly.activeSlots) ? [...nightly.activeSlots] : [];
+  state.settings.rotina.horariosDisponiveis =
+    Array.isArray(nightly.availableSlots) && nightly.availableSlots.length
+      ? [...nightly.availableSlots]
+      : [...NIGHTLY_SWEEP_AVAILABLE_SLOTS];
 }
 
 function getNightlyScheduleInfo() {
@@ -4311,7 +4382,8 @@ function getNightlyScheduleInfo() {
 
   const enabled = Boolean(nightly.enabled);
   const running = Boolean(nightly.running);
-  const time = formatTimeFromHourMinute(nightly.hour, nightly.minute);
+  const activeSlots = Array.isArray(nightly.activeSlots) ? nightly.activeSlots : [];
+  const activeSlotsText = activeSlots.length ? activeSlots.join(', ') : 'Nenhum horario selecionado';
   const timezone = formatTimezoneOffset(nightly.timezoneOffsetMinutes);
   const nextRunText = nightly.nextRunAt ? formatDateTime(nightly.nextRunAt) : '-';
 
@@ -4321,8 +4393,20 @@ function getNightlyScheduleInfo() {
       running,
       tone: 'info',
       badgeLabel: 'Executando agora',
-      shortLabel: `Executando desde ${time}`,
-      description: `Rotina noturna em execucao. Agendamento base: ${time} (${timezone}).`,
+      shortLabel: activeSlotsText,
+      description: `Rotina noturna em execucao. Slots ativos: ${activeSlotsText} (${timezone}).`,
+      nextRunText
+    };
+  }
+
+  if (enabled && activeSlots.length > 0) {
+    return {
+      enabled,
+      running,
+      tone: 'success',
+      badgeLabel: 'Ativa',
+      shortLabel: `${activeSlotsText} ${timezone}`,
+      description: `Agendada para executar diariamente nos horarios ${activeSlotsText} (${timezone}).`,
       nextRunText
     };
   }
@@ -4331,10 +4415,10 @@ function getNightlyScheduleInfo() {
     return {
       enabled,
       running,
-      tone: 'success',
-      badgeLabel: 'Ativa',
-      shortLabel: `${time} ${timezone}`,
-      description: `Agendada para todos os dias as ${time} (${timezone}).`,
+      tone: 'warning',
+      badgeLabel: 'Sem horarios',
+      shortLabel: 'Nenhum horario ativo',
+      description: 'A rotina noturna esta habilitada, mas nao possui horarios selecionados.',
       nextRunText
     };
   }
