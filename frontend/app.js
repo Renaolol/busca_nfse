@@ -1703,7 +1703,7 @@ function renderXmlsPage() {
 
       <article class="card filter-card">
         <h3 class="card-title">Consulta de XMLs</h3>
-        <p class="card-subtitle">Selecione uma empresa e um periodo de emissao antes de carregar a listagem.</p>
+        <p class="card-subtitle">Selecione uma empresa. Se nao informar datas, a listagem busca todos os XMLs armazenados desse cliente.</p>
         <form id="xmlsFilterForm" class="form-grid">
           <label class="field">
             Empresa
@@ -1711,11 +1711,11 @@ function renderXmlsPage() {
           </label>
           <label class="field">
             Emissao inicio
-            <input name="emissaoInicio" type="date" required value="${escapeHtml(state.filters.xmls.emissaoInicio)}" />
+            <input name="emissaoInicio" type="date" value="${escapeHtml(state.filters.xmls.emissaoInicio)}" />
           </label>
           <label class="field">
             Emissao fim
-            <input name="emissaoFim" type="date" required value="${escapeHtml(state.filters.xmls.emissaoFim)}" />
+            <input name="emissaoFim" type="date" value="${escapeHtml(state.filters.xmls.emissaoFim)}" />
           </label>
           <label class="field">
             Tipo
@@ -1778,11 +1778,15 @@ function renderXmlSearchSummary() {
   }
 
   const client = findClientById(query.cliente);
+  const periodText =
+    query.emissaoInicio || query.emissaoFim
+      ? `${formatDate(query.emissaoInicio || '')} ate ${formatDate(query.emissaoFim || '')}`
+      : 'Todos os XMLs armazenados';
   return `
     <article class="card" style="box-shadow:none; border-style:dashed;">
       <div class="progress-meta">
         <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
-        <span>Periodo: <strong>${escapeHtml(formatDate(query.emissaoInicio))} ate ${escapeHtml(formatDate(query.emissaoFim))}</strong></span>
+        <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
         <span>Resultado: <strong>${escapeHtml(String(state.xmlSearch.results.length))} XML(s)</strong></span>
         <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.xmlSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
       </div>
@@ -3479,17 +3483,21 @@ async function applyXmlFilters(form) {
     status: String(data.get('status') || 'Todos')
   };
 
-  if (!state.filters.xmls.cliente || !state.filters.xmls.emissaoInicio || !state.filters.xmls.emissaoFim) {
+  if (!state.filters.xmls.cliente) {
     state.xmlSearch.hasSearched = false;
     state.xmlSearch.results = [];
     state.xmlSearch.lastQuery = null;
     state.tableState.xmls = 'data';
-    pushToast('Selecione empresa, emissao inicio e emissao fim para buscar XMLs.', 'error');
+    pushToast('Selecione uma empresa para buscar XMLs.', 'error');
     render();
     return;
   }
 
-  if (Date.parse(state.filters.xmls.emissaoInicio) > Date.parse(state.filters.xmls.emissaoFim)) {
+  if (
+    state.filters.xmls.emissaoInicio &&
+    state.filters.xmls.emissaoFim &&
+    Date.parse(state.filters.xmls.emissaoInicio) > Date.parse(state.filters.xmls.emissaoFim)
+  ) {
     state.xmlSearch.hasSearched = false;
     state.xmlSearch.results = [];
     state.xmlSearch.lastQuery = null;
@@ -3533,8 +3541,14 @@ async function applyXmlFilters(form) {
 function buildXmlSearchQuery(filters) {
   const query = new URLSearchParams();
   query.set('clienteId', filters.cliente);
-  query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
-  query.set('dataFim', `${filters.emissaoFim}T23:59:59.999Z`);
+
+  if (filters.emissaoInicio) {
+    query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
+  }
+
+  if (filters.emissaoFim) {
+    query.set('dataFim', `${filters.emissaoFim}T23:59:59.999Z`);
+  }
 
   const client = findClientById(filters.cliente);
   if (client?.cnpj && filters.tipo !== 'Todos') {
