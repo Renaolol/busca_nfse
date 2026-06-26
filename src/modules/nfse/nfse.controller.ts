@@ -5,6 +5,7 @@ import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { DownloadLoteDto } from './dto/download-lote.dto';
 import { DownloadLoteResponseDto } from './dto/download-lote-response.dto';
 import { DownloadDocumentDto } from './dto/download-document.dto';
+import { DashboardStatsQueryDto, DashboardStatsResponseDto } from './dto/dashboard-stats.dto';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
 import { ReprocessarDanfsesDto, ReprocessarDanfsesResponseDto } from './dto/reprocessar-danfses.dto';
@@ -15,6 +16,13 @@ import { NfseService } from './nfse.service';
 @Controller('nfse')
 export class NfseController {
   constructor(private readonly nfseService: NfseService) {}
+
+  @Get('dashboard-stats')
+  @ApiOkResponse({ type: DashboardStatsResponseDto })
+  @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })
+  dashboardStats(@Query() query: DashboardStatsQueryDto) {
+    return this.nfseService.getDashboardStats(query);
+  }
 
   @Get()
   @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })

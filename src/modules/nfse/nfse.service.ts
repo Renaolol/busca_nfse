@@ -3,6 +3,7 @@ import { Ambiente, DocumentoOrigem, NfseDocumento, Prisma } from '@prisma/client
 import JSZip from 'jszip';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { DashboardStatsQueryDto } from './dto/dashboard-stats.dto';
 import { DownloadLoteDto } from './dto/download-lote.dto';
 import { NfseDanfseService } from './nfse-danfse.service';
 import { ImportXmlDto } from './dto/import-xml.dto';
@@ -42,6 +43,80 @@ export class NfseService {
       take: 500,
       include: this.nfseDocumentoInclude()
     });
+  }
+
+  async getDashboardStats(query: DashboardStatsQueryDto) {
+    const where: Prisma.NfseDocumentoWhereInput = {};
+
+    if (query.clienteId) {
+      where.clienteId = query.clienteId;
+    }
+
+    const storedXmlWhere: Prisma.NfseDocumentoWhereInput = {
+      ...where,
+      xmlPath: {
+        not: null
+      }
+    };
+
+    const [totalNfse, storedXmls, totalByClientRows, storedByClientRows] = await Promise.all([
+      this.prisma.nfseDocumento.count({ where }),
+      this.prisma.nfseDocumento.count({ where: storedXmlWhere }),
+      this.prisma.nfseDocumento.groupBy({
+        by: ['clienteId'],
+        where,
+        _count: {
+          _all: true
+        }
+      }),
+      this.prisma.nfseDocumento.groupBy({
+        by: ['clienteId'],
+        where: storedXmlWhere,
+        _count: {
+          _all: true
+        }
+      })
+    ]);
+
+    const byClient = new Map<string, { clienteId: string; totalNfse: number; storedXmls: number }>();
+
+    totalByClientRows.forEach((row) => {
+      if (!row.clienteId) {
+        return;
+      }
+
+      byClient.set(row.clienteId, {
+        clienteId: row.clienteId,
+        totalNfse: row._count._all,
+        storedXmls: 0
+      });
+    });
+
+    storedByClientRows.forEach((row) => {
+      if (!row.clienteId) {
+        return;
+      }
+
+      const current = byClient.get(row.clienteId) ?? {
+        clienteId: row.clienteId,
+        totalNfse: 0,
+        storedXmls: 0
+      };
+
+      current.storedXmls = row._count._all;
+      byClient.set(row.clienteId, current);
+    });
+
+    return {
+      totalNfse,
+      storedXmls,
+      byClient: Array.from(byClient.values()).sort(
+        (left, right) =>
+          right.totalNfse - left.totalNfse ||
+          right.storedXmls - left.storedXmls ||
+          left.clienteId.localeCompare(right.clienteId)
+      )
+    };
   }
 
   async findSeparated(query: QueryNfseDto) {

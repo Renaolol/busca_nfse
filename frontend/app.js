@@ -94,6 +94,7 @@ const state = {
   alerts: [],
   establishmentsByClient: {},
   syncByClient: {},
+  dashboardStats: null,
   schedulerStatus: null,
   settings: {
     tab: 'geral',
@@ -225,17 +226,25 @@ async function hydrateFromApi() {
   }));
   const clientIds = apiClients.map((client) => client.id);
 
-  const [establishmentsByClient, certificatesByClient, allCertificatesRaw, syncByClient, nfseDocs, auditRows, schedulerStatus] = await Promise.all([
+  const [establishmentsByClient, certificatesByClient, allCertificatesRaw, syncByClient, dashboardStats, nfseDocs, auditRows, schedulerStatus] = await Promise.all([
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/estabelecimentos`, []),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/certificados`, []),
     apiRequest('/certificados').catch(() => null),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/sync/status`, { controles: [], logs: [] }),
+    apiRequest('/nfse/dashboard-stats').catch(() => null),
     apiRequest('/nfse').catch(() => []),
     apiRequest('/auditoria').catch(() => []),
     apiRequest('/sync/scheduler-status').catch(() => null)
   ]);
 
-  const clients = buildClientsFromApi(apiClients, establishmentsByClient, certificatesByClient, syncByClient, nfseDocs);
+  const clients = buildClientsFromApi(
+    apiClients,
+    establishmentsByClient,
+    certificatesByClient,
+    syncByClient,
+    nfseDocs,
+    dashboardStats
+  );
   const certificates = buildCertificatesFromApi(apiClients, certificatesByClient, allCertificatesRaw);
   const xmlFiles = buildXmlFilesFromApi(nfseDocs, clients);
   const searchRuns = buildSearchRunsFromApi(syncByClient, clients);
@@ -249,6 +258,7 @@ async function hydrateFromApi() {
   state.alerts = alerts;
   state.establishmentsByClient = establishmentsByClient;
   state.syncByClient = syncByClient;
+  state.dashboardStats = dashboardStats;
   state.schedulerStatus = schedulerStatus;
   applySchedulerStatusToSettings(schedulerStatus);
   syncExecutionMonitorWithData();
@@ -1085,10 +1095,12 @@ function renderDashboardPage() {
 function getDashboardStats() {
   const totalClients = state.clients.length;
   const activeClients = state.clients.filter((client) => client.buscaAtiva).length;
-  const totalNfseByClient = state.clients.reduce((sum, client) => sum + Number(client.xmlsEncontrados || 0), 0);
-  const totalNfse = Math.max(totalNfseByClient, state.xmlFiles.length);
-  const storedXmls = state.xmlFiles.filter((xml) => xml.statusArmazenamento === 'Armazenado').length;
+  const fallbackTotalNfseByClient = state.clients.reduce((sum, client) => sum + Number(client.xmlsEncontrados || 0), 0);
+  const fallbackTotalNfse = Math.max(fallbackTotalNfseByClient, state.xmlFiles.length);
+  const fallbackStoredXmls = state.xmlFiles.filter((xml) => xml.statusArmazenamento === 'Armazenado').length;
   const clientsWithErrors = state.clients.filter((client) => client.buscaStatus === 'Erro' || client.statusOperacional === 'Erro').length;
+  const totalNfse = Number(state.dashboardStats?.totalNfse ?? fallbackTotalNfse);
+  const storedXmls = Number(state.dashboardStats?.storedXmls ?? fallbackStoredXmls);
 
   return {
     totalClients,
@@ -4520,11 +4532,17 @@ function getDailySyncInfo() {
   };
 }
 
-function buildClientsFromApi(apiClients, establishmentsByClient, certificatesByClient, syncByClient, nfseDocs) {
-  const totalNfseByClient = (Array.isArray(nfseDocs) ? nfseDocs : []).reduce((acc, doc) => {
+function buildClientsFromApi(apiClients, establishmentsByClient, certificatesByClient, syncByClient, nfseDocs, dashboardStats = null) {
+  const fallbackTotalNfseByClient = (Array.isArray(nfseDocs) ? nfseDocs : []).reduce((acc, doc) => {
     const clientId = doc?.clienteId;
     if (clientId) {
       acc[clientId] = (acc[clientId] || 0) + 1;
+    }
+    return acc;
+  }, {});
+  const totalNfseByClient = (Array.isArray(dashboardStats?.byClient) ? dashboardStats.byClient : []).reduce((acc, row) => {
+    if (row?.clienteId) {
+      acc[row.clienteId] = Number(row.totalNfse || 0);
     }
     return acc;
   }, {});
@@ -4553,7 +4571,7 @@ function buildClientsFromApi(apiClients, establishmentsByClient, certificatesByC
       buscaAtiva: buscaStatus === 'Ativo',
       buscaStatus,
       ultimaBusca: latestLog?.createdAt || latestControl?.ultimaExecucao || client.updatedAt || client.createdAt,
-      xmlsEncontrados: totalNfseByClient[client.id] || 0,
+      xmlsEncontrados: totalNfseByClient[client.id] ?? fallbackTotalNfseByClient[client.id] ?? 0,
       certificadoStatus: certificateSummary.status,
       certificadoValidade: certificateSummary.validade,
       statusOperacional: deriveClientOperationalStatus(latestLog),

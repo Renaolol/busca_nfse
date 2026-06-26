@@ -9,10 +9,12 @@ import { NfseXmlParserService } from '../nfse-xml-parser.service';
 describe('NfseService', () => {
   const prisma = {
     nfseDocumento: {
+      count: jest.fn(),
       findUnique: jest.fn(),
       update: jest.fn(),
       upsert: jest.fn(),
-      findMany: jest.fn()
+      findMany: jest.fn(),
+      groupBy: jest.fn()
     },
     nfseEvento: {
       upsert: jest.fn()
@@ -36,6 +38,84 @@ describe('NfseService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+  });
+
+  it('retorna estatisticas agregadas do dashboard por cliente', async () => {
+    prisma.nfseDocumento.count.mockResolvedValueOnce(512).mockResolvedValueOnce(492);
+    prisma.nfseDocumento.groupBy
+      .mockResolvedValueOnce([
+        {
+          clienteId: 'cliente-1',
+          _count: {
+            _all: 400
+          }
+        },
+        {
+          clienteId: 'cliente-2',
+          _count: {
+            _all: 112
+          }
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          clienteId: 'cliente-1',
+          _count: {
+            _all: 390
+          }
+        },
+        {
+          clienteId: 'cliente-2',
+          _count: {
+            _all: 102
+          }
+        }
+      ]);
+
+    const result = await service.getDashboardStats({});
+
+    expect(prisma.nfseDocumento.count).toHaveBeenNthCalledWith(1, { where: {} });
+    expect(prisma.nfseDocumento.count).toHaveBeenNthCalledWith(2, {
+      where: {
+        xmlPath: {
+          not: null
+        }
+      }
+    });
+    expect(prisma.nfseDocumento.groupBy).toHaveBeenNthCalledWith(1, {
+      by: ['clienteId'],
+      where: {},
+      _count: {
+        _all: true
+      }
+    });
+    expect(prisma.nfseDocumento.groupBy).toHaveBeenNthCalledWith(2, {
+      by: ['clienteId'],
+      where: {
+        xmlPath: {
+          not: null
+        }
+      },
+      _count: {
+        _all: true
+      }
+    });
+    expect(result).toEqual({
+      totalNfse: 512,
+      storedXmls: 492,
+      byClient: [
+        {
+          clienteId: 'cliente-1',
+          totalNfse: 400,
+          storedXmls: 390
+        },
+        {
+          clienteId: 'cliente-2',
+          totalNfse: 112,
+          storedXmls: 102
+        }
+      ]
+    });
   });
 
   it('retorna XML com metadados de download', async () => {
