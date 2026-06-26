@@ -75,6 +75,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   private readonly adnRequestIntervalMs = this.parsePositiveNumberEnv('SYNC_ADN_REQUEST_INTERVAL_MS', 5000);
   private readonly apiRetryJitterMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_JITTER_MS', 60000);
   private readonly rateLimitGlobalCooldownMs = this.parsePositiveNumberEnv('SYNC_ADN_RATE_LIMIT_COOLDOWN_MS', 300000);
+  private readonly controlClaimTtlMs = this.parsePositiveNumberEnv('SYNC_CONTROL_CLAIM_TTL_MS', 10 * 60 * 1000);
+  private readonly nsuConflictRetryCount = this.parseBoundedIntegerEnv('SYNC_NSU_CONFLICT_RETRY_COUNT', 2, 0, 10);
+  private readonly nsuConflictRetryDelayMs = this.parsePositiveNumberEnv('SYNC_NSU_CONFLICT_RETRY_DELAY_MS', 150);
   private readonly nightlySweepEnabled = process.env.SYNC_NIGHTLY_SWEEP_ENABLED !== 'false';
   private readonly nightlySweepCheckIntervalMs = this.parsePositiveNumberEnv('SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS', 60000);
   private readonly nightlySweepHour = this.parseBoundedIntegerEnv('SYNC_NIGHTLY_SWEEP_HOUR', 2, 0, 23);
@@ -283,6 +286,12 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     for (const control of controls) {
       if (rateLimitTriggered) {
         break;
+      }
+
+      const claimed = await this.tryClaimDueControl(control.id);
+      if (!claimed) {
+        this.logger.debug(`Controle ${control.id} ignorado nesta execucao porque ja foi reservado por outro worker.`);
+        continue;
       }
 
       const certificate = await this.prisma.certificado.findFirst({
@@ -1414,46 +1423,76 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     updateData: Prisma.NfseDocumentoUncheckedUpdateInput;
     createData: Prisma.NfseDocumentoUncheckedCreateInput;
   }): Promise<NfseDocumento> {
-    try {
-      return await this.prisma.nfseDocumento.upsert({
-        where: {
-          ambiente_chaveAcesso: {
-            ambiente: params.ambiente,
-            chaveAcesso: params.chaveAcesso
-          }
-        },
-        update: params.updateData,
-        create: params.createData
-      });
-    } catch (error) {
-      if (!this.isUniqueConstraintViolation(error) || params.nsu === undefined) {
-        throw error;
-      }
-
-      const nsu = params.nsu;
-      const existing = await this.prisma.nfseDocumento.findUnique({
-        where: {
-          clienteId_ambiente_nsu: {
-            clienteId: params.clienteId,
-            ambiente: params.ambiente,
-            nsu
-          }
-        },
-        select: {
-          id: true,
-          chaveAcesso: true
+    for (let attempt = 0; attempt <= this.nsuConflictRetryCount; attempt += 1) {
+      try {
+        return await this.prisma.nfseDocumento.upsert({
+          where: {
+            ambiente_chaveAcesso: {
+              ambiente: params.ambiente,
+              chaveAcesso: params.chaveAcesso
+            }
+          },
+          update: params.updateData,
+          create: params.createData
+        });
+      } catch (error) {
+        if (!this.isUniqueConstraintViolation(error) || params.nsu === undefined) {
+          throw error;
         }
-      });
 
-      if (!existing) {
-        throw error;
+        const reconciled = await this.tryReconcileDocumentoByNsu(params);
+        if (reconciled) {
+          return reconciled;
+        }
+
+        if (attempt >= this.nsuConflictRetryCount) {
+          throw error;
+        }
+
+        await this.sleep(this.nsuConflictRetryDelayMs * (attempt + 1));
       }
+    }
 
-      this.logger.warn(
-        `Documento reconciliado por NSU ${nsu.toString()} em ${params.ambiente}; chave anterior ${existing.chaveAcesso}, nova chave ${params.chaveAcesso}`
-      );
+    throw new Error('Falha inesperada ao reconciliar documento por NSU');
+  }
 
-      return this.prisma.nfseDocumento.update({
+  private async tryReconcileDocumentoByNsu(params: {
+    ambiente: Ambiente;
+    clienteId: string;
+    chaveAcesso: string;
+    nsu?: bigint;
+    updateData: Prisma.NfseDocumentoUncheckedUpdateInput;
+    createData: Prisma.NfseDocumentoUncheckedCreateInput;
+  }): Promise<NfseDocumento | null> {
+    if (params.nsu === undefined) {
+      return null;
+    }
+
+    const nsu = params.nsu;
+    const existing = await this.prisma.nfseDocumento.findUnique({
+      where: {
+        clienteId_ambiente_nsu: {
+          clienteId: params.clienteId,
+          ambiente: params.ambiente,
+          nsu
+        }
+      },
+      select: {
+        id: true,
+        chaveAcesso: true
+      }
+    });
+
+    if (!existing) {
+      return null;
+    }
+
+    this.logger.warn(
+      `Documento reconciliado por NSU ${nsu.toString()} em ${params.ambiente}; chave anterior ${existing.chaveAcesso}, nova chave ${params.chaveAcesso}`
+    );
+
+    try {
+      return await this.prisma.nfseDocumento.update({
         where: { id: existing.id },
         data: {
           ...params.updateData,
@@ -1465,6 +1504,19 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           origem: params.createData.origem
         }
       });
+    } catch (error) {
+      if (!this.isUniqueConstraintViolation(error)) {
+        throw error;
+      }
+
+      return this.prisma.nfseDocumento.findUnique({
+        where: {
+          ambiente_chaveAcesso: {
+            ambiente: params.ambiente,
+            chaveAcesso: params.chaveAcesso
+          }
+        }
+      });
     }
   }
 
@@ -1474,6 +1526,23 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     return error.code === 'P2002';
+  }
+
+  private async tryClaimDueControl(controlId: string): Promise<boolean> {
+    const now = new Date();
+    const leaseUntil = new Date(now.getTime() + this.controlClaimTtlMs);
+    const result = await this.prisma.nfseSyncControle.updateMany({
+      where: {
+        id: controlId,
+        status: SyncStatus.ativo,
+        OR: [{ proximaExecucao: null }, { proximaExecucao: { lte: now } }]
+      },
+      data: {
+        proximaExecucao: leaseUntil
+      }
+    });
+
+    return result.count > 0;
   }
 
   private async waitForAdnRequestSlot(): Promise<void> {

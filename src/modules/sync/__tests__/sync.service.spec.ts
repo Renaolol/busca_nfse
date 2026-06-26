@@ -259,6 +259,29 @@ describe('SyncService', () => {
     );
   });
 
+  it('ignora controle ja reservado por outro worker', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 8n
+      }
+    ]);
+    prisma.nfseSyncControle.updateMany.mockResolvedValue({ count: 0 });
+
+    const result = await service.runNow();
+
+    expect(result).toEqual({
+      processed: 1,
+      documentsSaved: 0
+    });
+    expect(adnClient.getDFeByNsu).not.toHaveBeenCalled();
+    expect(prisma.certificado.findFirst).not.toHaveBeenCalled();
+  });
+
   it('salva campos completos quando ADN retorna documento com XML', async () => {
     prisma.nfseSyncControle.findMany.mockResolvedValue([
       {
@@ -388,6 +411,68 @@ describe('SyncService', () => {
         })
       })
     );
+  });
+
+  it('repete o upsert quando a linha conflitante ainda nao esta visivel para reconciliacao', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 8n
+      }
+    ]);
+
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 9n,
+      hasDocument: true,
+      chaveAcesso: '42110092206960810000176000000000000926062205552016',
+      xml: '<NFSe><chaveAcesso>42110092206960810000176000000000000926062205552016</chaveAcesso><numeroNFSe>9</numeroNFSe></NFSe>',
+      statusCode: 200,
+      rawResponse: {}
+    });
+
+    parser.parse.mockReturnValue({
+      chaveAcesso: '42110092206960810000176000000000000926062205552016',
+      numeroNfse: '9',
+      dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+      status: '100',
+      cnpjPrestador: '12345678000199'
+    });
+
+    prisma.nfseDocumento.upsert
+      .mockRejectedValueOnce({
+        code: 'P2002',
+        meta: {
+          target: ['cliente_id', 'ambiente', 'nsu']
+        }
+      })
+      .mockResolvedValueOnce({
+        id: 'doc-retried',
+        chaveAcesso: '42110092206960810000176000000000000926062205552016'
+      });
+    prisma.nfseDocumento.findUnique.mockImplementation(({ where }) => {
+      if (where?.ambiente_chaveAcesso) {
+        return Promise.resolve(null);
+      }
+
+      if (where?.clienteId_ambiente_nsu) {
+        return Promise.resolve(null);
+      }
+
+      return Promise.resolve(null);
+    });
+
+    const result = await service.runNow();
+
+    expect(result).toEqual({
+      processed: 1,
+      documentsSaved: 1
+    });
+    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.nfseDocumento.update).not.toHaveBeenCalled();
   });
 
   it('reconcilia documento existente pelo NSU mesmo sem target detalhado no erro do Prisma', async () => {
