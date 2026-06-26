@@ -1451,6 +1451,11 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     updateData: Prisma.NfseDocumentoUncheckedUpdateInput;
     createData: Prisma.NfseDocumentoUncheckedCreateInput;
   }): Promise<NfseDocumento> {
+    const resolvedExisting = await this.resolveExistingDocumentoBeforeUpsert(params);
+    if (resolvedExisting) {
+      return resolvedExisting;
+    }
+
     for (let attempt = 0; attempt <= this.nsuConflictRetryCount; attempt += 1) {
       try {
         return await this.prisma.nfseDocumento.upsert({
@@ -1482,6 +1487,80 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     throw new Error('Falha inesperada ao reconciliar documento por NSU');
+  }
+
+  private async resolveExistingDocumentoBeforeUpsert(params: {
+    ambiente: Ambiente;
+    clienteId: string;
+    chaveAcesso: string;
+    nsu?: bigint;
+    updateData: Prisma.NfseDocumentoUncheckedUpdateInput;
+    createData: Prisma.NfseDocumentoUncheckedCreateInput;
+  }): Promise<NfseDocumento | null> {
+    const existingByChave = await this.prisma.nfseDocumento.findUnique({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente: params.ambiente,
+          chaveAcesso: params.chaveAcesso
+        }
+      },
+      select: {
+        id: true,
+        chaveAcesso: true
+      }
+    });
+
+    if (params.nsu === undefined) {
+      if (!existingByChave) {
+        return null;
+      }
+
+      return this.updateDocumentoById(existingByChave.id, params);
+    }
+
+    const existingByNsu = await this.prisma.nfseDocumento.findUnique({
+      where: {
+        clienteId_ambiente_nsu: {
+          clienteId: params.clienteId,
+          ambiente: params.ambiente,
+          nsu: params.nsu
+        }
+      },
+      select: {
+        id: true,
+        chaveAcesso: true
+      }
+    });
+
+    if (!existingByChave && !existingByNsu) {
+      return null;
+    }
+
+    if (existingByChave && existingByNsu && existingByChave.id !== existingByNsu.id) {
+      await this.mergeDocumentoDuplicates({
+        canonicalId: existingByChave.id,
+        duplicateId: existingByNsu.id,
+        ambiente: params.ambiente,
+        nsu: params.nsu,
+        chaveAnterior: existingByNsu.chaveAcesso,
+        chaveAtual: params.chaveAcesso
+      });
+
+      return this.updateDocumentoById(existingByChave.id, params);
+    }
+
+    const target = existingByChave ?? existingByNsu;
+    if (!target) {
+      return null;
+    }
+
+    if (existingByNsu && existingByNsu.chaveAcesso !== params.chaveAcesso) {
+      this.logger.warn(
+        `Documento reconciliado por NSU ${params.nsu.toString()} em ${params.ambiente}; chave anterior ${existingByNsu.chaveAcesso}, nova chave ${params.chaveAcesso}`
+      );
+    }
+
+    return this.updateDocumentoById(target.id, params);
   }
 
   private async tryReconcileDocumentoByNsu(params: {
@@ -1546,6 +1625,58 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         }
       });
     }
+  }
+
+  private async updateDocumentoById(
+    documentoId: string,
+    params: {
+      ambiente: Ambiente;
+      chaveAcesso: string;
+      nsu?: bigint;
+      updateData: Prisma.NfseDocumentoUncheckedUpdateInput;
+      createData: Prisma.NfseDocumentoUncheckedCreateInput;
+    }
+  ): Promise<NfseDocumento> {
+    return this.prisma.nfseDocumento.update({
+      where: { id: documentoId },
+      data: {
+        ...params.updateData,
+        clienteId: params.createData.clienteId,
+        estabelecimentoId: params.createData.estabelecimentoId,
+        ambiente: params.ambiente,
+        nsu: params.nsu,
+        chaveAcesso: params.chaveAcesso,
+        origem: params.createData.origem
+      }
+    });
+  }
+
+  private async mergeDocumentoDuplicates(params: {
+    canonicalId: string;
+    duplicateId: string;
+    ambiente: Ambiente;
+    nsu: bigint;
+    chaveAnterior: string;
+    chaveAtual: string;
+  }): Promise<void> {
+    await this.prisma.nfseEvento.updateMany({
+      where: {
+        nfseDocumentoId: params.duplicateId
+      },
+      data: {
+        nfseDocumentoId: params.canonicalId
+      }
+    });
+
+    await this.prisma.nfseDocumento.delete({
+      where: {
+        id: params.duplicateId
+      }
+    });
+
+    this.logger.warn(
+      `Documento duplicado mesclado por NSU ${params.nsu.toString()} em ${params.ambiente}; chave antiga ${params.chaveAnterior}, chave canonica ${params.chaveAtual}`
+    );
   }
 
   private isUniqueConstraintViolation(error: unknown): error is { code: string } {

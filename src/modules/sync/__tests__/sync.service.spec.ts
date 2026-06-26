@@ -39,12 +39,14 @@ describe('SyncService', () => {
     nfseDocumento: {
       upsert: jest.fn(),
       update: jest.fn(),
+      delete: jest.fn(),
       findUnique: jest.fn(),
       findFirst: jest.fn(),
       findMany: jest.fn()
     },
     nfseEvento: {
-      upsert: jest.fn()
+      upsert: jest.fn(),
+      updateMany: jest.fn()
     }
   };
 
@@ -122,10 +124,12 @@ describe('SyncService', () => {
     prisma.nfseSyncLog.create.mockResolvedValue({});
     prisma.nfseDocumento.upsert.mockResolvedValue({});
     prisma.nfseDocumento.update.mockResolvedValue({});
+    prisma.nfseDocumento.delete.mockResolvedValue({});
     prisma.nfseDocumento.findUnique.mockResolvedValue(null);
     prisma.nfseDocumento.findFirst.mockResolvedValue(null);
     prisma.nfseDocumento.findMany.mockResolvedValue([]);
     prisma.nfseEvento.upsert.mockResolvedValue({});
+    prisma.nfseEvento.updateMany.mockResolvedValue({ count: 0 });
     storage.putObject.mockResolvedValue(undefined);
 
     service = buildService();
@@ -409,7 +413,7 @@ describe('SyncService', () => {
       processed: 1,
       documentsSaved: 1
     });
-    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.nfseDocumento.upsert).not.toHaveBeenCalled();
     expect(prisma.nfseDocumento.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'doc-existing' },
@@ -417,6 +421,90 @@ describe('SyncService', () => {
           nsu: 9n,
           chaveAcesso: '42110092206960810000176000000000000926062205552016',
           numeroNfse: '9'
+        })
+      })
+    );
+  });
+
+  it('mescla documento existente por chave com placeholder ja ocupado pelo mesmo NSU', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 8n
+      }
+    ]);
+
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 9n,
+      hasDocument: true,
+      chaveAcesso: '42110092206960810000176000000000000926062205552016',
+      xml: '<NFSe><chaveAcesso>42110092206960810000176000000000000926062205552016</chaveAcesso><numeroNFSe>9</numeroNFSe></NFSe>',
+      statusCode: 200,
+      rawResponse: {}
+    });
+
+    parser.parse.mockReturnValue({
+      chaveAcesso: '42110092206960810000176000000000000926062205552016',
+      numeroNfse: '9',
+      dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+      status: '100',
+      cnpjPrestador: '12345678000199'
+    });
+
+    prisma.nfseDocumento.findUnique.mockImplementation(({ where }) => {
+      if (where?.ambiente_chaveAcesso) {
+        return Promise.resolve({
+          id: 'doc-by-chave',
+          chaveAcesso: '42110092206960810000176000000000000926062205552016'
+        });
+      }
+
+      if (where?.clienteId_ambiente_nsu) {
+        return Promise.resolve({
+          id: 'doc-by-nsu',
+          chaveAcesso: '42110092206960810000176000000000000126062205552001'
+        });
+      }
+
+      return Promise.resolve(null);
+    });
+    prisma.nfseDocumento.update.mockResolvedValue({
+      id: 'doc-by-chave',
+      chaveAcesso: '42110092206960810000176000000000000926062205552016'
+    });
+
+    const result = await service.runNow();
+
+    expect(result).toEqual({
+      processed: 1,
+      documentsSaved: 1
+    });
+    expect(prisma.nfseEvento.updateMany).toHaveBeenCalledWith({
+      where: {
+        nfseDocumentoId: 'doc-by-nsu'
+      },
+      data: {
+        nfseDocumentoId: 'doc-by-chave'
+      }
+    });
+    expect(prisma.nfseDocumento.delete).toHaveBeenCalledWith({
+      where: {
+        id: 'doc-by-nsu'
+      }
+    });
+    expect(prisma.nfseDocumento.upsert).not.toHaveBeenCalled();
+    expect(prisma.nfseDocumento.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          id: 'doc-by-chave'
+        },
+        data: expect.objectContaining({
+          nsu: 9n,
+          chaveAcesso: '42110092206960810000176000000000000926062205552016'
         })
       })
     );
