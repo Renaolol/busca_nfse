@@ -1,9 +1,11 @@
 import { Module } from '@nestjs/common';
+import { StorageModule } from '../../modules/storage/storage.module';
 import { FakeNfeDistribuicaoClient } from './fake-nfe-distribuicao.client';
 import { NFE_DISTRIBUICAO_CLIENT } from './nfe-distribuicao.types';
 import { RealNfeDistribuicaoClient } from './real-nfe-distribuicao.client';
 
 @Module({
+  imports: [StorageModule],
   providers: [
     FakeNfeDistribuicaoClient,
     RealNfeDistribuicaoClient,
