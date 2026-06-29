@@ -48,4 +48,17 @@ describe('RealNfseAdnClient', () => {
       }
     ]);
   });
+
+  it('normaliza erro de cadeia TLS autoassinada com mensagem orientativa', () => {
+    const client = new RealNfseAdnClient({} as never, {} as never, {} as never) as unknown as {
+      normalizeAdnQueryErrorMessage(error: unknown): string;
+    };
+
+    const message = client.normalizeAdnQueryErrorMessage(
+      new Error('self-signed certificate in certificate chain')
+    );
+
+    expect(message).toContain('Falha na validacao TLS da API ADN');
+    expect(message).toContain('proxy');
+  });
 });
