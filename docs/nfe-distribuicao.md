@@ -10,7 +10,7 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - Novo modulo NestJS `nfe` com controller, service, DTOs e testes.
 - Novo parser de XML para `resNFe` e `procNFe`.
 - Novo adapter `nfe-distribuicao` com implementacao `mock` para desenvolvimento e testes.
-- Implementacao `real` isolada por contrato, pronta para evolucao sem quebrar a API do modulo.
+- Implementacao `real` com SOAP 1.2, mTLS, leitura de `distNSU` e descompactacao de `docZip`.
 
 ## Reaproveitamento
 
@@ -35,5 +35,8 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 
 - NF-e e NFS-e mantem controles de NSU independentes.
 - A deduplicacao de NF-e ocorre por `ambiente + chave_acesso`.
-- `NFE_DISTRIBUICAO_CLIENT_MODE=mock` e o modo recomendado nesta entrega.
-- O adapter `real` ainda precisa ser homologado com o webservice oficial antes de uso produtivo.
+- `NFE_DISTRIBUICAO_CLIENT_MODE=real` usa por padrao:
+- producao: `https://www1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx`
+- homologacao: `https://hom1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx`
+- As URLs acima seguem a relacao oficial de servicos web do portal da NF-e e podem ser sobrescritas por env var.
+- O fluxo atual implementa `distNSU`. Consultas pontuais por `consNSU` e `consChNFe` podem ser adicionadas sem mudar o contrato do adapter.

@@ -91,7 +91,10 @@ Veja `.env.example`.
 - `NFSE_ADN_CLIENT_MODE`: `real` (recomendado/obrigatorio em producao) ou `mock` (somente desenvolvimento).
 - `NFSE_API_BASE_URL_PRODUCAO` e `NFSE_API_BASE_URL_RESTRITA`: hosts do ADN.
 - `NFSE_ADN_PATH_PREFIX`: prefixo da API (padrao `contribuintes`).
-- `NFE_DISTRIBUICAO_CLIENT_MODE`: `mock` (padrao recomendado nesta entrega) ou `real` para ativar o adapter da distribuicao NF-e quando homologado.
+- `NFE_DISTRIBUICAO_CLIENT_MODE`: `mock` ou `real` para ativar o adapter da distribuicao NF-e.
+- `NFE_DISTRIBUICAO_URL_PRODUCAO` e `NFE_DISTRIBUICAO_URL_HOMOLOGACAO`: URLs do `NFeDistribuicaoDFe` do Ambiente Nacional publicadas no portal da NF-e.
+- `NFE_DISTRIBUICAO_TIMEOUT_MS`: timeout das chamadas SOAP de distribuicao NF-e.
+- `NFE_DISTRIBUICAO_REJECT_UNAUTHORIZED`: controle de validacao TLS do endpoint NF-e.
 - `ENABLE_SWAGGER`: habilita docs em `/api/docs` (`false` recomendado em producao).
 - `SYNC_AUTO_RUN_ENABLED`: habilita ciclo automatico de sync em background (padrao `true`).
 - `SYNC_AUTO_RUN_INTERVAL_MS`: intervalo entre ciclos automaticos (padrao `30000`).
@@ -221,8 +224,8 @@ Exemplo de body para lote:
 
 - A base de NF-e reaproveita `cliente`, `estabelecimento`, `certificado` e `storage` ja existentes.
 - O fluxo de NF-e e separado do fluxo de NFS-e: usa modulo proprio, parser proprio, tabelas proprias e adapter proprio de distribuicao.
-- Nesta entrega o app fica pronto para desenvolvimento e testes com `NFE_DISTRIBUICAO_CLIENT_MODE=mock`.
-- O adapter `real` foi mantido desacoplado para a fase de homologacao do webservice oficial da SEFAZ.
+- O adapter `real` agora envia SOAP 1.2 com mTLS para o `NFeDistribuicaoDFe` do Ambiente Nacional.
+- Os endpoints padrao de producao e homologacao seguem a relacao oficial de servicos web publicada no portal da NF-e e podem ser sobrescritos por variavel de ambiente.
 
 Rotas principais:
 
@@ -242,6 +245,7 @@ Observacoes:
 - `POST /nfe/sync/rodar-agora` executa a distribuicao manual e persiste os documentos retornados.
 - A deduplicacao de NF-e tambem ocorre por `ambiente + chave_acesso`.
 - `GET /nfe` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, periodo, status e `somenteXmlCompleto`.
+- Quando `NFE_DISTRIBUICAO_CLIENT_MODE=real`, o sistema consulta `distNSU`, descompacta `docZip` e armazena resumos `resNFe` e XMLs completos retornados pelo Ambiente Nacional.
 
 ## Guia de layout do DANFSE
 

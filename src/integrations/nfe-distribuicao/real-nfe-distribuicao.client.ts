@@ -1,25 +1,534 @@
 import { Injectable } from '@nestjs/common';
-import { NfeAmbiente } from '@prisma/client';
-import { NfeDistribuicaoClient, NfeDistribuicaoResult } from './nfe-distribuicao.types';
+import { Certificado, NfeAmbiente } from '@prisma/client';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import type { IncomingHttpHeaders } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
+import { PrismaService } from '../../prisma/prisma.service';
+import { LocalStorageService } from '../../modules/storage/storage.service';
+import { CryptoService } from '../../modules/shared/crypto.service';
+import { NfeDistribuicaoClient, NfeDistribuicaoDocument, NfeDistribuicaoResult } from './nfe-distribuicao.types';
+
+type PfxCredentials = {
+  mode: 'pfx';
+  pfx: Buffer;
+  passphrase: string;
+};
+
+type PemCredentials = {
+  mode: 'pem';
+  cert: string;
+  key: string;
+};
+
+type MutualTlsCredentials = PfxCredentials | PemCredentials;
 
 @Injectable()
 export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
+  private static readonly SOAP_NAMESPACE = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe';
+  private static readonly XML_NAMESPACE = 'http://www.portalfiscal.inf.br/nfe';
+  private static readonly AN_CUF = '91';
+  private static readonly LAYOUT_VERSION = '1.01';
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: LocalStorageService,
+    private readonly crypto: CryptoService
+  ) {}
+
   async distribuirPorNsu(params: {
     cnpjConsulta: string;
     ultNsu: bigint;
     ambiente: NfeAmbiente;
     certificateId: string;
   }): Promise<NfeDistribuicaoResult> {
-    return {
-      statusCode: 501,
-      cStat: '500',
-      xMotivo: `Integracao real de NF-e ainda nao configurada para ${params.cnpjConsulta} em ${params.ambiente}`,
-      ultNsu: params.ultNsu,
-      maxNsu: params.ultNsu,
-      documents: [],
-      rawResponse: {
-        certificateId: params.certificateId
+    try {
+      const certificate = await this.loadCertificate(params.certificateId);
+      const url = this.buildDistribuicaoUrl(params.ambiente);
+      const requestXml = this.buildDistNsuRequestXml(params.cnpjConsulta, params.ambiente, params.ultNsu);
+      const soapEnvelope = this.buildSoapEnvelope(requestXml);
+      const response = await this.doSoapRequestWithFallback(url, certificate, soapEnvelope);
+      let parsed;
+
+      try {
+        parsed = this.parseSoapResponse(response.body);
+      } catch (error) {
+        return {
+          statusCode: response.statusCode,
+          cStat: '000',
+          xMotivo: this.normalizeQueryErrorMessage(error),
+          ultNsu: params.ultNsu,
+          maxNsu: params.ultNsu,
+          documents: [],
+          rawResponse: response.body
+        };
       }
+
+      return {
+        statusCode: response.statusCode,
+        cStat: parsed.cStat,
+        xMotivo: parsed.xMotivo,
+        ultNsu: parsed.ultNsu,
+        maxNsu: parsed.maxNsu,
+        documents: parsed.documents,
+        rawResponse: parsed.rawXml
+      };
+    } catch (error) {
+      return {
+        statusCode: 0,
+        cStat: '000',
+        xMotivo: this.normalizeQueryErrorMessage(error),
+        ultNsu: params.ultNsu,
+        maxNsu: params.ultNsu,
+        documents: [],
+        rawResponse: { error: this.normalizeQueryErrorMessage(error) }
+      };
+    }
+  }
+
+  private async loadCertificate(certificateId: string): Promise<Certificado> {
+    const certificate = await this.prisma.certificado.findUnique({ where: { id: certificateId } });
+    if (!certificate) {
+      throw new Error('Certificado nao encontrado para distribuicao NF-e');
+    }
+
+    return certificate;
+  }
+
+  private async getPfxCredentials(certificate: Certificado): Promise<PfxCredentials> {
+    let encryptedPfxPayload: Buffer;
+    try {
+      encryptedPfxPayload = await this.storage.getObject(certificate.arquivoCriptografadoPath);
+    } catch (error) {
+      const message = this.toErrorMessage(error);
+      if (message.includes('ENOENT')) {
+        throw new Error(
+          'Arquivo do certificado nao encontrado no storage local. Recadastre o certificado para este estabelecimento.'
+        );
+      }
+      throw error;
+    }
+
+    const encryptedPfx = encryptedPfxPayload.toString('utf8').trim();
+    const pfx = this.crypto.decrypt(encryptedPfx);
+    const passphrase = this.crypto.decrypt(certificate.senhaCriptografada).toString('utf8');
+
+    return { mode: 'pfx', pfx, passphrase };
+  }
+
+  private buildDistribuicaoUrl(ambiente: NfeAmbiente): URL {
+    const configured =
+      ambiente === NfeAmbiente.producao
+        ? process.env.NFE_DISTRIBUICAO_URL_PRODUCAO?.trim()
+        : process.env.NFE_DISTRIBUICAO_URL_HOMOLOGACAO?.trim();
+
+    const url =
+      configured ||
+      (ambiente === NfeAmbiente.producao
+        ? 'https://www1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx'
+        : 'https://hom1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx');
+
+    return new URL(url);
+  }
+
+  private buildDistNsuRequestXml(cnpjConsulta: string, ambiente: NfeAmbiente, ultNsu: bigint): string {
+    const tpAmb = ambiente === NfeAmbiente.producao ? '1' : '2';
+    const cnpj = this.onlyDigits(cnpjConsulta);
+
+    return [
+      `<?xml version="1.0" encoding="utf-8"?>`,
+      `<distDFeInt xmlns="${RealNfeDistribuicaoClient.XML_NAMESPACE}" versao="${RealNfeDistribuicaoClient.LAYOUT_VERSION}">`,
+      `<tpAmb>${tpAmb}</tpAmb>`,
+      `<cUFAutor>${RealNfeDistribuicaoClient.AN_CUF}</cUFAutor>`,
+      `<CNPJ>${cnpj}</CNPJ>`,
+      `<distNSU><ultNSU>${ultNsu.toString().padStart(15, '0')}</ultNSU></distNSU>`,
+      `</distDFeInt>`
+    ].join('');
+  }
+
+  private buildSoapEnvelope(requestXml: string): string {
+    return [
+      `<?xml version="1.0" encoding="utf-8"?>`,
+      `<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"`,
+      ` xmlns:xsd="http://www.w3.org/2001/XMLSchema"`,
+      ` xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">`,
+      `<soap12:Header>`,
+      `<nfeCabecMsg xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`,
+      `<cUF>${RealNfeDistribuicaoClient.AN_CUF}</cUF>`,
+      `<versaoDados>${RealNfeDistribuicaoClient.LAYOUT_VERSION}</versaoDados>`,
+      `</nfeCabecMsg>`,
+      `</soap12:Header>`,
+      `<soap12:Body>`,
+      `<nfeDadosMsg xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`,
+      requestXml,
+      `</nfeDadosMsg>`,
+      `</soap12:Body>`,
+      `</soap12:Envelope>`
+    ].join('');
+  }
+
+  private async doSoapRequestWithFallback(
+    url: URL,
+    certificate: Certificado,
+    envelope: string
+  ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
+    const pfxCredentials = await this.getPfxCredentials(certificate);
+
+    try {
+      return await this.doSoapRequest(url, pfxCredentials, envelope);
+    } catch (error) {
+      const message = this.toErrorMessage(error);
+      if (!this.isUnsupportedPkcs12Error(message)) {
+        throw error;
+      }
+
+      const pemCredentials = await this.convertPfxToPemCredentials(pfxCredentials.pfx, pfxCredentials.passphrase);
+      return this.doSoapRequest(url, pemCredentials, envelope);
+    }
+  }
+
+  private doSoapRequest(
+    url: URL,
+    mtls: MutualTlsCredentials,
+    envelope: string
+  ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
+    return new Promise((resolve, reject) => {
+      const tlsOptions =
+        mtls.mode === 'pfx'
+          ? { pfx: mtls.pfx, passphrase: mtls.passphrase }
+          : { cert: mtls.cert, key: mtls.key };
+
+      const req = httpsRequest(
+        {
+          protocol: url.protocol,
+          hostname: url.hostname,
+          port: url.port ? Number(url.port) : undefined,
+          path: `${url.pathname}${url.search}`,
+          method: 'POST',
+          headers: {
+            'Content-Type': `application/soap+xml; charset=utf-8; action="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}/nfeDistDFeInteresse"`,
+            SOAPAction: `${RealNfeDistribuicaoClient.SOAP_NAMESPACE}/nfeDistDFeInteresse`,
+            Accept: 'application/soap+xml, text/xml, application/xml',
+            'Content-Length': Buffer.byteLength(envelope, 'utf8')
+          },
+          ...tlsOptions,
+          rejectUnauthorized: process.env.NFE_DISTRIBUICAO_REJECT_UNAUTHORIZED !== 'false',
+          timeout: Number(process.env.NFE_DISTRIBUICAO_TIMEOUT_MS ?? 30000)
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer | string) => {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          });
+          res.on('end', () => {
+            resolve({
+              statusCode: res.statusCode ?? 0,
+              headers: res.headers,
+              body: Buffer.concat(chunks).toString('utf8')
+            });
+          });
+        }
+      );
+
+      req.on('timeout', () => {
+        req.destroy(new Error('Timeout ao consultar distribuicao NF-e'));
+      });
+
+      req.on('error', reject);
+      req.write(envelope, 'utf8');
+      req.end();
+    });
+  }
+
+  private parseSoapResponse(body: string): {
+    cStat?: string;
+    xMotivo?: string;
+    ultNsu: bigint;
+    maxNsu: bigint;
+    documents: NfeDistribuicaoDocument[];
+    rawXml: string;
+  } {
+    const fault = this.extractSoapFault(body);
+    if (fault) {
+      throw new Error(fault);
+    }
+
+    const innerXml = this.extractSoapResultXml(body);
+    if (!innerXml) {
+      throw new Error('Resposta SOAP da distribuicao NF-e sem retDistDFeInt reconhecivel');
+    }
+
+    const cStat = this.extractFirstTagText(innerXml, 'cStat');
+    const xMotivo = this.extractFirstTagText(innerXml, 'xMotivo');
+    const ultNsu = this.parseOptionalBigInt(this.extractFirstTagText(innerXml, 'ultNSU')) ?? 0n;
+    const maxNsu = this.parseOptionalBigInt(this.extractFirstTagText(innerXml, 'maxNSU')) ?? 0n;
+
+    return {
+      cStat,
+      xMotivo,
+      ultNsu,
+      maxNsu,
+      documents: this.extractDocuments(innerXml),
+      rawXml: innerXml
     };
+  }
+
+  private extractSoapResultXml(soapXml: string): string | null {
+    const direct = soapXml.match(/<retDistDFeInt\b[\s\S]*?<\/retDistDFeInt>/i)?.[0];
+    if (direct) {
+      return direct;
+    }
+
+    const wrapped = soapXml.match(/<nfeDistDFeInteresseResult\b[^>]*>([\s\S]*?)<\/nfeDistDFeInteresseResult>/i)?.[1];
+    if (!wrapped) {
+      return null;
+    }
+
+    const decoded = this.decodeXmlEntities(wrapped);
+    return decoded.match(/<retDistDFeInt\b[\s\S]*?<\/retDistDFeInt>/i)?.[0] ?? null;
+  }
+
+  private extractDocuments(retXml: string): NfeDistribuicaoDocument[] {
+    const matches = retXml.matchAll(/<docZip\b([^>]*)>([\s\S]*?)<\/docZip>/gi);
+    const documents: NfeDistribuicaoDocument[] = [];
+
+    for (const match of matches) {
+      const attributes = match[1] ?? '';
+      const payload = this.cleanTextContent(match[2] ?? '');
+      const schema = this.extractAttribute(attributes, 'schema');
+      const xml = this.extractXml(payload);
+
+      if (!schema || !xml) {
+        continue;
+      }
+
+      documents.push({
+        nsu: this.parseOptionalBigInt(this.extractAttribute(attributes, 'NSU')),
+        schema,
+        xml,
+        chaveAcesso: this.extractChaveAcesso(xml)
+      });
+    }
+
+    return documents;
+  }
+
+  private extractXml(payload: string): string | null {
+    if (!payload) {
+      return null;
+    }
+
+    try {
+      return gunzipSync(Buffer.from(payload, 'base64')).toString('utf8');
+    } catch {
+      try {
+        const decoded = Buffer.from(payload, 'base64').toString('utf8');
+        return decoded.includes('<') ? decoded : null;
+      } catch {
+        return null;
+      }
+    }
+  }
+
+  private extractChaveAcesso(xml: string): string | undefined {
+    const explicit = this.extractFirstTagText(xml, 'chNFe');
+    if (explicit) {
+      return explicit.replace(/\D/g, '').slice(-44);
+    }
+
+    const id = xml.match(/\bId\s*=\s*["']NFe(\d{44})["']/i)?.[1];
+    if (id) {
+      return id;
+    }
+
+    const generic = xml.match(/\b\d{44}\b/)?.[0];
+    return generic;
+  }
+
+  private extractFirstTagText(xml: string, tagName: string): string | undefined {
+    const regex = new RegExp(`<(?:\\w+:)?${tagName}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${tagName}>`, 'i');
+    const match = regex.exec(xml);
+    return match?.[1] ? this.cleanTextContent(match[1]) : undefined;
+  }
+
+  private extractAttribute(source: string, attributeName: string): string | undefined {
+    const regex = new RegExp(`\\b${attributeName}\\s*=\\s*["']([^"']+)["']`, 'i');
+    return regex.exec(source)?.[1]?.trim();
+  }
+
+  private extractSoapFault(soapXml: string): string | null {
+    const reason =
+      soapXml.match(/<(?:\w+:)?Text\b[^>]*>([\s\S]*?)<\/(?:\w+:)?Text>/i)?.[1] ??
+      soapXml.match(/<(?:\w+:)?faultstring\b[^>]*>([\s\S]*?)<\/(?:\w+:)?faultstring>/i)?.[1];
+
+    if (!reason) {
+      return null;
+    }
+
+    return this.cleanTextContent(this.decodeXmlEntities(reason)) || null;
+  }
+
+  private cleanTextContent(value: string): string {
+    return this.decodeXmlEntities(value.replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1').trim());
+  }
+
+  private decodeXmlEntities(value: string): string {
+    return value
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .replace(/&quot;/gi, '"')
+      .replace(/&apos;/gi, "'")
+      .replace(/&amp;/gi, '&');
+  }
+
+  private parseOptionalBigInt(value?: string): bigint | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    try {
+      return BigInt(value.replace(/\D/g, '') || value);
+    } catch {
+      return undefined;
+    }
+  }
+
+  private onlyDigits(value: string): string {
+    return value.replace(/\D/g, '');
+  }
+
+  private isUnsupportedPkcs12Error(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes('unsupported pkcs12 pfx data') ||
+      (normalized.includes('pkcs12') && normalized.includes('unsupported')) ||
+      normalized.includes('err_ossl_evp_unsupported') ||
+      (normalized.includes('digital envelope routines') && normalized.includes('unsupported'))
+    );
+  }
+
+  private async convertPfxToPemCredentials(pfx: Buffer, passphrase: string): Promise<PemCredentials> {
+    const tempDir = await mkdtemp(join(tmpdir(), 'nfe-mtls-'));
+    const pfxPath = join(tempDir, 'certificado.pfx');
+    let lastError = '';
+
+    try {
+      await writeFile(pfxPath, pfx);
+
+      for (const legacy of [false, true]) {
+        const certExtract = this.runOpenSslPkcs12Extract(pfxPath, passphrase, ['-clcerts', '-nokeys'], legacy);
+        if (!certExtract.ok) {
+          if (certExtract.commandMissing) {
+            throw new Error(
+              'OpenSSL nao encontrado no servidor. Instale OpenSSL ou use certificado PFX compativel com Node.'
+            );
+          }
+          lastError = certExtract.stderr ?? lastError;
+          continue;
+        }
+
+        const keyExtract = this.runOpenSslPkcs12Extract(pfxPath, passphrase, ['-nocerts', '-nodes'], legacy);
+        if (!keyExtract.ok) {
+          if (keyExtract.commandMissing) {
+            throw new Error(
+              'OpenSSL nao encontrado no servidor. Instale OpenSSL ou use certificado PFX compativel com Node.'
+            );
+          }
+          lastError = keyExtract.stderr ?? lastError;
+          continue;
+        }
+
+        const cert = this.extractPemBlock(certExtract.stdout ?? '', 'CERTIFICATE');
+        const key = this.extractPrivateKeyPem(keyExtract.stdout ?? '');
+
+        if (cert && key) {
+          return { mode: 'pem', cert, key };
+        }
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+
+    throw new Error(
+      `Nao foi possivel converter certificado PFX para PEM. Detalhe: ${lastError || 'erro desconhecido'}.`
+    );
+  }
+
+  private runOpenSslPkcs12Extract(
+    pfxPath: string,
+    passphrase: string,
+    extraArgs: string[],
+    legacy: boolean
+  ): { ok: boolean; stdout?: string; stderr?: string; commandMissing?: boolean } {
+    const args = ['pkcs12', '-in', pfxPath, '-passin', 'env:OPENSSL_CERT_PASSWORD', ...extraArgs];
+    if (legacy) {
+      args.push('-legacy');
+    }
+
+    const result = spawnSync('openssl', args, {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        OPENSSL_CERT_PASSWORD: passphrase
+      },
+      maxBuffer: 1024 * 1024 * 5
+    });
+
+    if (result.error && 'code' in result.error && result.error.code === 'ENOENT') {
+      return { ok: false, commandMissing: true, stderr: result.error.message };
+    }
+
+    if (result.error || result.status !== 0) {
+      return { ok: false, stderr: result.stderr };
+    }
+
+    return { ok: true, stdout: result.stdout, stderr: result.stderr };
+  }
+
+  private extractPemBlock(content: string, blockType: string): string | null {
+    const regex = new RegExp(`-----BEGIN ${blockType}-----[\\s\\S]+?-----END ${blockType}-----`, 'm');
+    return content.match(regex)?.[0] ?? null;
+  }
+
+  private extractPrivateKeyPem(content: string): string | null {
+    const match =
+      content.match(/-----BEGIN PRIVATE KEY-----[\s\S]+?-----END PRIVATE KEY-----/m) ??
+      content.match(/-----BEGIN ENCRYPTED PRIVATE KEY-----[\s\S]+?-----END ENCRYPTED PRIVATE KEY-----/m) ??
+      content.match(/-----BEGIN RSA PRIVATE KEY-----[\s\S]+?-----END RSA PRIVATE KEY-----/m) ??
+      content.match(/-----BEGIN EC PRIVATE KEY-----[\s\S]+?-----END EC PRIVATE KEY-----/m);
+
+    return match?.[0] ?? null;
+  }
+
+  private toErrorMessage(error: unknown): string {
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+
+    return String(error);
+  }
+
+  private normalizeQueryErrorMessage(error: unknown): string {
+    const message = this.toErrorMessage(error);
+    const normalized = message.toLowerCase();
+
+    if (
+      normalized.includes('unsupported state or unable to authenticate data') ||
+      normalized.includes('unable to authenticate data')
+    ) {
+      return 'Falha ao descriptografar certificado/senha. Verifique CERT_MASTER_KEY e recadastre o certificado.';
+    }
+
+    if (normalized.includes('self-signed certificate in certificate chain')) {
+      return (
+        'Falha na validacao TLS da distribuicao NF-e: certificado autoassinado na cadeia apresentada pelo servidor/proxy. ' +
+        'Verifique a cadeia CA do ambiente, inspecao HTTPS/proxy corporativo e a configuracao de truststore do servidor.'
+      );
+    }
+
+    return message;
   }
 }
