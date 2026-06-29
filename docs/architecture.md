@@ -2,7 +2,7 @@
 
 ## Objetivo do sistema
 
-Coletar NFS-e Nacional na API oficial ADN por NSU, por contexto de `cliente/cnpj/ambiente`, e disponibilizar uma camada operacional segura para consulta fiscal e download de documentos.
+Coletar NFS-e Nacional na API oficial ADN por NSU, por contexto de `cliente/cnpj/ambiente`, e disponibilizar uma camada operacional segura para consulta fiscal e download de documentos, com base separada para NF-e de mercadorias.
 
 ## Resultado final esperado
 
@@ -17,10 +17,11 @@ Coletar NFS-e Nacional na API oficial ADN por NSU, por contexto de `cliente/cnpj
 A aplicacao segue arquitetura backend-first:
 
 1. Adapter da API oficial NFS-e/ADN
-2. Worker de sincronizacao por NSU
-3. Persistencia em PostgreSQL
-4. Armazenamento de XML/PDF via provider de storage (implementacao local no MVP)
-5. API interna com validacoes de escopo por `clienteId` nos endpoints multi-tenant
+2. Adapter de distribuicao NF-e desacoplado do fluxo de servicos
+3. Worker/servicos de sincronizacao por NSU
+4. Persistencia em PostgreSQL
+5. Armazenamento de XML/PDF via provider de storage (implementacao local no MVP)
+6. API interna com validacoes de escopo por `clienteId` nos endpoints multi-tenant
 
 ## Modulos
 
@@ -29,6 +30,7 @@ A aplicacao segue arquitetura backend-first:
 - `certificates`
 - `sync`
 - `nfse`
+- `nfe`
 - `audit`
 - `storage`
 - `jobs`

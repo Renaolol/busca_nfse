@@ -34,6 +34,29 @@ enum DocumentoOrigem {
   consulta_dps
 }
 
+enum NfeAmbiente {
+  producao
+  homologacao
+}
+
+enum NfeSyncStatus {
+  ativo
+  pausado
+  erro_certificado
+  erro_autorizacao
+  erro_api
+}
+
+enum NfeDocumentoOrigem {
+  distribuicao_nsu
+  importacao_xml
+}
+
+enum NfeTipoRelacao {
+  emitida
+  recebida
+}
+
 model Cliente {
   id                 String   @id @default(uuid()) @db.Uuid
   razaoSocial        String   @map("razao_social") @db.VarChar(255)
@@ -50,6 +73,8 @@ model Cliente {
   certificados     Certificado[]
   syncControles    NfseSyncControle[]
   documentos       NfseDocumento[]
+  nfeSyncControles NfeSyncControle[]
+  nfeDocumentos    NfeDocumento[]
   syncLogs         NfseSyncLog[]
   auditorias       AuditoriaUsuario[]
 
@@ -72,6 +97,8 @@ model ClienteEstabelecimento {
   certificados  Certificado[]
   syncControles NfseSyncControle[]
   documentos    NfseDocumento[]
+  nfeSyncControles NfeSyncControle[]
+  nfeDocumentos    NfeDocumento[]
 
   @@unique([clienteId, cnpj], map: "cliente_estabelecimentos_cliente_id_cnpj_key")
   @@map("cliente_estabelecimentos")
@@ -209,6 +236,67 @@ model NfseSyncLog {
   certificado  Certificado?      @relation(fields: [certificadoId], references: [id], onDelete: SetNull)
 
   @@map("nfse_sync_logs")
+}
+
+model NfeSyncControle {
+  id                    String        @id @default(uuid()) @db.Uuid
+  clienteId             String        @map("cliente_id") @db.Uuid
+  estabelecimentoId     String        @map("estabelecimento_id") @db.Uuid
+  cnpjConsulta          String        @map("cnpj_consulta") @db.VarChar(14)
+  ambiente              NfeAmbiente
+  ultimoNsuConsultado   BigInt        @default(0) @map("ultimo_nsu_consultado")
+  ultimoNsuDistribuido  BigInt        @default(0) @map("ultimo_nsu_distribuido")
+  maxNsu                BigInt        @default(0) @map("max_nsu")
+  status                NfeSyncStatus @default(ativo)
+  ultimaExecucao        DateTime?     @map("ultima_execucao")
+  ultimaMensagem        String?       @map("ultima_mensagem") @db.Text
+  totalDocumentosBaixados Int         @default(0) @map("total_documentos_baixados")
+  createdAt             DateTime      @default(now()) @map("created_at")
+  updatedAt             DateTime      @updatedAt @map("updated_at")
+
+  cliente         Cliente                @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  estabelecimento ClienteEstabelecimento @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
+
+  @@unique([clienteId, cnpjConsulta, ambiente], map: "nfe_sync_controle_cliente_id_cnpj_consulta_ambiente_key")
+  @@map("nfe_sync_controle")
+}
+
+model NfeDocumento {
+  id                  String              @id @default(uuid()) @db.Uuid
+  clienteId           String              @map("cliente_id") @db.Uuid
+  estabelecimentoId   String              @map("estabelecimento_id") @db.Uuid
+  ambiente            NfeAmbiente
+  nsu                 BigInt?
+  chaveAcesso         String              @map("chave_acesso") @db.VarChar(44)
+  numeroNfe           String?             @map("numero_nfe") @db.VarChar(20)
+  serie               String?             @db.VarChar(20)
+  modelo              String?             @db.VarChar(4)
+  dataEmissao         DateTime?           @map("data_emissao")
+  dataAutorizacao     DateTime?           @map("data_autorizacao")
+  status              String?             @db.VarChar(50)
+  tipoRelacao         NfeTipoRelacao?     @map("tipo_relacao")
+  schemaDoc           String?             @map("schema_doc") @db.VarChar(120)
+  resumoDisponivel    Boolean             @default(false) @map("resumo_disponivel")
+  xmlCompletoDisponivel Boolean           @default(false) @map("xml_completo_disponivel")
+  cnpjEmitente        String?             @map("cnpj_emitente") @db.VarChar(14)
+  razaoSocialEmitente String?             @map("razao_social_emitente") @db.VarChar(255)
+  cnpjDestinatario    String?             @map("cnpj_destinatario") @db.VarChar(14)
+  razaoSocialDestinatario String?         @map("razao_social_destinatario") @db.VarChar(255)
+  valorTotal          Decimal?            @map("valor_total") @db.Decimal(15, 2)
+  xmlResumoPath       String?             @map("xml_resumo_path") @db.Text
+  xmlCompletoPath     String?             @map("xml_completo_path") @db.Text
+  hashResumo          String?             @map("hash_resumo") @db.VarChar(128)
+  hashXmlCompleto     String?             @map("hash_xml_completo") @db.VarChar(128)
+  origem              NfeDocumentoOrigem?
+  createdAt           DateTime            @default(now()) @map("created_at")
+  updatedAt           DateTime            @updatedAt @map("updated_at")
+
+  cliente         Cliente                @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  estabelecimento ClienteEstabelecimento @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
+
+  @@unique([ambiente, chaveAcesso], map: "nfe_documentos_ambiente_chave_acesso_key")
+  @@unique([clienteId, ambiente, nsu], map: "nfe_documentos_cliente_id_ambiente_nsu_key")
+  @@map("nfe_documentos")
 }
 
 model AuditoriaUsuario {

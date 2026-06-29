@@ -27,8 +27,8 @@ async function bootstrap(): Promise<void> {
 
   if (swaggerEnabled) {
     const swaggerConfig = new DocumentBuilder()
-      .setTitle('NFS-e Collector API')
-      .setDescription('API interna para sincronizacao, armazenamento e consulta de NFS-e Nacional')
+      .setTitle('Documentos Fiscais Collector API')
+      .setDescription('API interna para sincronizacao, armazenamento e consulta de NFS-e Nacional e NF-e')
       .setVersion('0.1.0')
       .build();
 

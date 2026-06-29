@@ -1,16 +1,16 @@
-# App Coletor de NFS-e Nacional por NSU
+# App Coletor de NFS-e Nacional e NF-e
 
-Backend para sincronizar, armazenar e consultar NFS-e Nacional usando a API oficial do ADN por NSU.
+Backend para sincronizar, armazenar e consultar NFS-e Nacional usando a API oficial do ADN por NSU e estruturar a captura de NF-e de mercadorias.
 
 ## Objetivo do projeto
 
-Centralizar a captura de NFS-e Nacional por cliente, usando consulta incremental por NSU na API oficial ADN, com trilha operacional para cadastro, sincronizacao, armazenamento, consulta e download de documentos fiscais.
+Centralizar a captura de NFS-e Nacional por cliente, usando consulta incremental por NSU na API oficial ADN, com trilha operacional para cadastro, sincronizacao, armazenamento, consulta e download de documentos fiscais, e manter uma base separada para NF-e de compra e venda com reaproveitamento dos certificados digitais ja cadastrados.
 
 ## Resultado final esperado
 
 1. Onboarding completo de cliente, estabelecimento e certificado A1 com dados sensiveis protegidos.
 2. Sincronizacao historica e diaria por NSU, com controles por `cliente/cnpj/ambiente` e sem pulo de NSU em erros temporarios.
-3. Base fiscal consolidada, deduplicada por `ambiente + chave_acesso`, com XML e DANFSE armazenados.
+3. Base fiscal consolidada, deduplicada por `ambiente + chave_acesso`, com XML e DANFSE/XML armazenados.
 4. API interna e painel operacional com acesso direto na rede interna, escopo por cliente nos endpoints e operacoes de status/logs/pesquisa/download.
 5. Jobs idempotentes para manutencao continua (validacao de certificado, reprocessamento e limpeza tecnica).
 
@@ -91,6 +91,7 @@ Veja `.env.example`.
 - `NFSE_ADN_CLIENT_MODE`: `real` (recomendado/obrigatorio em producao) ou `mock` (somente desenvolvimento).
 - `NFSE_API_BASE_URL_PRODUCAO` e `NFSE_API_BASE_URL_RESTRITA`: hosts do ADN.
 - `NFSE_ADN_PATH_PREFIX`: prefixo da API (padrao `contribuintes`).
+- `NFE_DISTRIBUICAO_CLIENT_MODE`: `mock` (padrao recomendado nesta entrega) ou `real` para ativar o adapter da distribuicao NF-e quando homologado.
 - `ENABLE_SWAGGER`: habilita docs em `/api/docs` (`false` recomendado em producao).
 - `SYNC_AUTO_RUN_ENABLED`: habilita ciclo automatico de sync em background (padrao `true`).
 - `SYNC_AUTO_RUN_INTERVAL_MS`: intervalo entre ciclos automaticos (padrao `30000`).
@@ -215,6 +216,32 @@ Exemplo de body para lote:
   "clienteId": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
+
+## NF-e de compra e venda
+
+- A base de NF-e reaproveita `cliente`, `estabelecimento`, `certificado` e `storage` ja existentes.
+- O fluxo de NF-e e separado do fluxo de NFS-e: usa modulo proprio, parser proprio, tabelas proprias e adapter proprio de distribuicao.
+- Nesta entrega o app fica pronto para desenvolvimento e testes com `NFE_DISTRIBUICAO_CLIENT_MODE=mock`.
+- O adapter `real` foi mantido desacoplado para a fase de homologacao do webservice oficial da SEFAZ.
+
+Rotas principais:
+
+- `GET /nfe`
+- `GET /nfe/:id`
+- `GET /nfe/:id/xml`
+- `GET /nfe/dashboard-stats`
+- `GET /nfe/sync/status?clienteId=...`
+- `POST /nfe/importar-xml`
+- `POST /nfe/sync/iniciar`
+- `POST /nfe/sync/pausar`
+- `POST /nfe/sync/rodar-agora`
+
+Observacoes:
+
+- `POST /nfe/sync/iniciar` cria ou reativa controles de busca por `cliente/cnpj/ambiente` sem misturar NSU de NFS-e.
+- `POST /nfe/sync/rodar-agora` executa a distribuicao manual e persiste os documentos retornados.
+- A deduplicacao de NF-e tambem ocorre por `ambiente + chave_acesso`.
+- `GET /nfe` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, periodo, status e `somenteXmlCompleto`.
 
 ## Guia de layout do DANFSE
 
