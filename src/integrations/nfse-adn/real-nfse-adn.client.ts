@@ -566,6 +566,13 @@ export class RealNfseAdnClient implements NfseAdnClient {
       return 'Falha ao descriptografar certificado/senha. Verifique CERT_MASTER_KEY e recadastre o certificado.';
     }
 
+    if (normalized.includes('self-signed certificate in certificate chain')) {
+      return (
+        'Falha na validacao TLS da API ADN: certificado autoassinado na cadeia apresentada pelo servidor/proxy. ' +
+        'Verifique a cadeia CA do ambiente, inspecao HTTPS/proxy corporativo e a configuracao de truststore do servidor.'
+      );
+    }
+
     return message;
   }
 }

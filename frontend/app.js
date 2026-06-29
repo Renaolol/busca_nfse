@@ -3,6 +3,7 @@ const modalRoot = document.getElementById('modalRoot');
 const drawerRoot = document.getElementById('drawerRoot');
 const toastRoot = document.getElementById('toastRoot');
 const API_TIMEOUT_MS = 20000;
+const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
 
 const navItems = [
@@ -92,6 +93,7 @@ const state = {
     lastSearchedAt: null
   },
   alerts: [],
+  resolvedAlerts: loadResolvedAlertsStore(),
   establishmentsByClient: {},
   syncByClient: {},
   dashboardStats: null,
@@ -255,7 +257,7 @@ async function hydrateFromApi() {
   state.searchRuns = searchRuns;
   state.runningExecution = null;
   state.xmlFiles = xmlFiles;
-  state.alerts = alerts;
+  state.alerts = applyResolvedAlertState(alerts);
   state.establishmentsByClient = establishmentsByClient;
   state.syncByClient = syncByClient;
   state.dashboardStats = dashboardStats;
@@ -3754,7 +3756,7 @@ function markSelectedAlertsResolved() {
 
   state.alerts.forEach((alert) => {
     if (state.selectedAlertIds.has(alert.id)) {
-      alert.status = 'Resolvido';
+      markAlertAsResolved(alert);
     }
   });
 
@@ -3769,7 +3771,7 @@ function resolveAlert(alertId) {
     return;
   }
 
-  alert.status = 'Resolvido';
+  markAlertAsResolved(alert);
   pushToast(`Alerta "${alert.titulo}" resolvido.`, 'success');
   render();
 }
@@ -4809,30 +4811,45 @@ function buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, audit
   });
 
   Object.entries(syncByClient || {}).forEach(([clientId, payload]) => {
+    const controles = Array.isArray(payload?.controles) ? payload.controles : [];
     const logs = Array.isArray(payload?.logs) ? payload.logs : [];
+    const erroStatusByControleId = new Map(
+      controles
+        .filter((controle) => isSyncControlErrorStatus(controle?.status))
+        .map((controle) => [controle.id, String(controle.status || '')])
+    );
+    const latestErrorLogByControlId = new Map();
+
     logs
       .filter((log) => String(log?.status || '').startsWith('erro'))
-      .slice(0, 10)
       .forEach((log) => {
-        const isCertError = log.status === 'erro_certificado';
-        const client = clientById[clientId];
-        alerts.push({
-          id: `sync-${log.id}`,
-          severity: 'Critico',
-          tipo: isCertError ? 'Certificado' : 'Prefeitura',
-          titulo: isCertError ? 'Falha de certificado na sincronizacao' : 'Falha de sincronizacao na API',
-          descricao: log.mensagem || 'Falha registrada durante sincronizacao.',
-          clientId,
-          cliente: client?.razaoSocial || 'Cliente nao identificado',
-          dataHora: log.createdAt || new Date().toISOString(),
-          status: 'Aberto',
-          origem: 'sync-log',
-          mensagemTecnica: log.mensagem || '-',
-          sugestaoAcao: isCertError ? 'Verificar certificado ativo e validade.' : 'Reprocessar sincronizacao e verificar conectividade.',
-          historicoTentativas: [],
-          allowsReprocess: true
-        });
+        const controleId = String(log?.controleSyncId || '');
+        if (!controleId || !erroStatusByControleId.has(controleId) || latestErrorLogByControlId.has(controleId)) {
+          return;
+        }
+        latestErrorLogByControlId.set(controleId, log);
       });
+
+    [...latestErrorLogByControlId.values()].slice(0, 10).forEach((log) => {
+      const isCertError = log.status === 'erro_certificado';
+      const client = clientById[clientId];
+      alerts.push({
+        id: `sync-${log.id}`,
+        severity: 'Critico',
+        tipo: isCertError ? 'Certificado' : 'Prefeitura',
+        titulo: isCertError ? 'Falha de certificado na sincronizacao' : 'Falha de sincronizacao na API',
+        descricao: log.mensagem || 'Falha registrada durante sincronizacao.',
+        clientId,
+        cliente: client?.razaoSocial || 'Cliente nao identificado',
+        dataHora: log.createdAt || new Date().toISOString(),
+        status: 'Aberto',
+        origem: 'sync-log',
+        mensagemTecnica: log.mensagem || '-',
+        sugestaoAcao: isCertError ? 'Verificar certificado ativo e validade.' : 'Reprocessar sincronizacao e verificar conectividade.',
+        historicoTentativas: [],
+        allowsReprocess: true
+      });
+    });
   });
 
   xmlFiles
@@ -4886,6 +4903,78 @@ function buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, audit
     });
 
   return alerts.sort((a, b) => Date.parse(b.dataHora || 0) - Date.parse(a.dataHora || 0)).slice(0, 120);
+}
+
+function applyResolvedAlertState(alerts) {
+  const nextStore = {};
+
+  alerts.forEach((alert) => {
+    const fingerprint = buildAlertFingerprint(alert);
+    const persisted = state.resolvedAlerts[alert.id];
+    if (persisted?.fingerprint === fingerprint) {
+      alert.status = 'Resolvido';
+      nextStore[alert.id] = persisted;
+      return;
+    }
+
+    if (alert.status === 'Resolvido') {
+      nextStore[alert.id] = {
+        fingerprint,
+        resolvedAt: new Date().toISOString()
+      };
+    }
+  });
+
+  state.resolvedAlerts = nextStore;
+  saveResolvedAlertsStore(nextStore);
+  return alerts;
+}
+
+function markAlertAsResolved(alert) {
+  alert.status = 'Resolvido';
+  state.resolvedAlerts[alert.id] = {
+    fingerprint: buildAlertFingerprint(alert),
+    resolvedAt: new Date().toISOString()
+  };
+  saveResolvedAlertsStore(state.resolvedAlerts);
+}
+
+function buildAlertFingerprint(alert) {
+  return JSON.stringify([
+    alert.id,
+    alert.origem || '',
+    alert.dataHora || '',
+    alert.titulo || '',
+    alert.descricao || '',
+    alert.mensagemTecnica || ''
+  ]);
+}
+
+function loadResolvedAlertsStore() {
+  try {
+    const raw = window.localStorage.getItem(RESOLVED_ALERTS_STORAGE_KEY);
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (error) {
+    console.warn('Falha ao carregar alertas resolvidos do navegador.', error);
+    return {};
+  }
+}
+
+function saveResolvedAlertsStore(store) {
+  try {
+    window.localStorage.setItem(RESOLVED_ALERTS_STORAGE_KEY, JSON.stringify(store));
+  } catch (error) {
+    console.warn('Falha ao persistir alertas resolvidos no navegador.', error);
+  }
+}
+
+function isSyncControlErrorStatus(status) {
+  return String(status || '').startsWith('erro_');
 }
 
 function summarizeCertificateStatus(certsRaw) {

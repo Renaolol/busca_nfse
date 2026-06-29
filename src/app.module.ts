@@ -7,6 +7,7 @@ import { CertificatesModule } from './modules/certificates/certificates.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { EstablishmentsModule } from './modules/establishments/establishments.module';
 import { HealthModule } from './modules/health/health.module';
+import { NfeModule } from './modules/nfe/nfe.module';
 import { NfseModule } from './modules/nfse/nfse.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { SyncModule } from './modules/sync/sync.module';
@@ -23,6 +24,7 @@ import { PrismaModule } from './prisma/prisma.module';
     CertificatesModule,
     SyncModule,
     NfseModule,
+    NfeModule,
     AuditModule,
     JobsModule
   ],

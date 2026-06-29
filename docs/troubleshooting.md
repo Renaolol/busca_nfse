@@ -18,6 +18,8 @@
 - Validar certificado ativo e validade.
 - Se o objetivo for teste real, confirmar `NFSE_ADN_CLIENT_MODE=real`.
 - Conferir `NFSE_API_BASE_URL_RESTRITA`/`NFSE_API_BASE_URL_PRODUCAO` e conectividade HTTPS mTLS.
+- Se aparecer `self-signed certificate in certificate chain`, a conexao TLS foi interceptada ou a cadeia CA retornada nao e confiavel para o servidor onde a API roda.
+- Nesse caso, verificar proxy corporativo/inspecao HTTPS, cadeia de certificados intermediarios/raiz instalada no sistema operacional e qualquer balanceador na frente do endpoint ADN.
 - Se aparecer `HTTP 429`, reduzir frequencia de consulta e ajustar:
   - `SYNC_AUTO_RUN_INTERVAL_MS`
   - `SYNC_API_RETRY_DELAY_MS`
