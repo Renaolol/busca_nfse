@@ -38,17 +38,17 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
   private static readonly SOAP_NAMESPACE = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe';
   private static readonly XML_NAMESPACE = 'http://www.portalfiscal.inf.br/nfe';
   private static readonly AN_CUF = '91';
-  private static readonly LAYOUT_VERSION = process.env.NFE_DISTRIBUICAO_LAYOUT_VERSION?.trim() || '1.00';
+  private static readonly LAYOUT_VERSION = process.env.NFE_DISTRIBUICAO_LAYOUT_VERSION?.trim() || '1.01';
   private static readonly ENVELOPE_PROFILES: SoapEnvelopeProfile[] = [
     {
-      id: 'operation-body-namespaced',
-      includeSoapHeader: false,
+      id: 'header-operation-body-namespaced',
+      includeSoapHeader: true,
       includeOperationWrapper: true,
       namespacedBody: true
     },
     {
-      id: 'header-operation-body-namespaced',
-      includeSoapHeader: true,
+      id: 'operation-body-namespaced',
+      includeSoapHeader: false,
       includeOperationWrapper: true,
       namespacedBody: true
     },
