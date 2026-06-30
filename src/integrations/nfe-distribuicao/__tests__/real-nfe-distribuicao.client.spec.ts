@@ -98,6 +98,19 @@ describe('RealNfeDistribuicaoClient', () => {
     expect(envelope).toContain('<nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe">');
   });
 
+  it('monta envelope SOAP 1.1 para fallback em endpoints .asmx', () => {
+    const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
+      buildSoapEnvelope(xml: string, soapVersion: '1.1' | '1.2'): string;
+    };
+
+    const envelope = client.buildSoapEnvelope('<teste />', '1.1');
+
+    expect(envelope).toContain('xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"');
+    expect(envelope).toContain('<soap:Header>');
+    expect(envelope).toContain('<soap:Body>');
+    expect(envelope).toContain('<teste />');
+  });
+
   it('monta payload para consNSU e consChNFe', () => {
     const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
       buildRequestXml(params: {

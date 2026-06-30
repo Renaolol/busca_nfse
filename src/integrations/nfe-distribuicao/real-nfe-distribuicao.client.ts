@@ -25,6 +25,7 @@ type PemCredentials = {
 };
 
 type MutualTlsCredentials = PfxCredentials | PemCredentials;
+type SoapVersion = '1.1' | '1.2';
 
 @Injectable()
 export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
@@ -115,8 +116,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     try {
       const certificate = await this.loadCertificate(params.certificateId);
       const url = this.buildDistribuicaoUrl(params.ambiente);
-      const soapEnvelope = this.buildSoapEnvelope(params.requestXml);
-      const response = await this.doSoapRequestWithFallback(url, certificate, soapEnvelope);
+      const response = await this.doSoapRequestWithFallback(url, certificate, params.requestXml);
       let parsed;
 
       try {
@@ -239,36 +239,42 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     ].join('');
   }
 
-  private buildSoapEnvelope(requestXml: string): string {
+  private buildSoapEnvelope(requestXml: string, soapVersion: SoapVersion = '1.2'): string {
+    const envelopeNamespace =
+      soapVersion === '1.2'
+        ? 'http://www.w3.org/2003/05/soap-envelope'
+        : 'http://schemas.xmlsoap.org/soap/envelope/';
+    const prefix = soapVersion === '1.2' ? 'soap12' : 'soap';
+
     return [
       `<?xml version="1.0" encoding="utf-8"?>`,
-      `<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"`,
+      `<${prefix}:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"`,
       ` xmlns:xsd="http://www.w3.org/2001/XMLSchema"`,
-      ` xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">`,
-      `<soap12:Header>`,
+      ` xmlns:${prefix}="${envelopeNamespace}">`,
+      `<${prefix}:Header>`,
       `<nfeCabecMsg xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`,
       `<cUF>${RealNfeDistribuicaoClient.AN_CUF}</cUF>`,
       `<versaoDados>${RealNfeDistribuicaoClient.LAYOUT_VERSION}</versaoDados>`,
       `</nfeCabecMsg>`,
-      `</soap12:Header>`,
-      `<soap12:Body>`,
+      `</${prefix}:Header>`,
+      `<${prefix}:Body>`,
       `<nfeDadosMsg xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`,
       requestXml,
       `</nfeDadosMsg>`,
-      `</soap12:Body>`,
-      `</soap12:Envelope>`
+      `</${prefix}:Body>`,
+      `</${prefix}:Envelope>`
     ].join('');
   }
 
   private async doSoapRequestWithFallback(
     url: URL,
     certificate: Certificado,
-    envelope: string
+    requestXml: string
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     const pfxCredentials = await this.getPfxCredentials(certificate);
 
     try {
-      return await this.doSoapRequest(url, pfxCredentials, envelope);
+      return await this.doSoapRequestSequence(url, pfxCredentials, requestXml);
     } catch (error) {
       const message = this.toErrorMessage(error);
       if (!this.isUnsupportedPkcs12Error(message)) {
@@ -276,20 +282,40 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
       }
 
       const pemCredentials = await this.convertPfxToPemCredentials(pfxCredentials.pfx, pfxCredentials.passphrase);
-      return this.doSoapRequest(url, pemCredentials, envelope);
+      return this.doSoapRequestSequence(url, pemCredentials, requestXml);
     }
+  }
+
+  private async doSoapRequestSequence(
+    url: URL,
+    mtls: MutualTlsCredentials,
+    requestXml: string
+  ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
+    const soap12Response = await this.doSoapRequest(url, mtls, requestXml, '1.2');
+    if (!this.shouldRetryWithSoap11(soap12Response.statusCode, soap12Response.body)) {
+      return soap12Response;
+    }
+
+    return this.doSoapRequest(url, mtls, requestXml, '1.1');
   }
 
   private doSoapRequest(
     url: URL,
     mtls: MutualTlsCredentials,
-    envelope: string
+    requestXml: string,
+    soapVersion: SoapVersion
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     return new Promise((resolve, reject) => {
+      const envelope = this.buildSoapEnvelope(requestXml, soapVersion);
       const tlsOptions =
         mtls.mode === 'pfx'
           ? { pfx: mtls.pfx, passphrase: mtls.passphrase }
           : { cert: mtls.cert, key: mtls.key };
+      const soapAction = `${RealNfeDistribuicaoClient.SOAP_NAMESPACE}/nfeDistDFeInteresse`;
+      const contentType =
+        soapVersion === '1.2'
+          ? `application/soap+xml; charset=utf-8; action="${soapAction}"`
+          : 'text/xml; charset=utf-8';
 
       const req = httpsRequest(
         {
@@ -299,8 +325,8 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
           path: `${url.pathname}${url.search}`,
           method: 'POST',
           headers: {
-            'Content-Type': `application/soap+xml; charset=utf-8; action="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}/nfeDistDFeInteresse"`,
-            SOAPAction: `${RealNfeDistribuicaoClient.SOAP_NAMESPACE}/nfeDistDFeInteresse`,
+            'Content-Type': contentType,
+            SOAPAction: soapAction,
             Accept: 'application/soap+xml, text/xml, application/xml',
             'Accept-Encoding': 'gzip, deflate, br',
             'Content-Length': Buffer.byteLength(envelope, 'utf8')
@@ -333,6 +359,10 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
       req.write(envelope, 'utf8');
       req.end();
     });
+  }
+
+  private shouldRetryWithSoap11(statusCode: number, body: string): boolean {
+    return statusCode === 400 && !String(body || '').trim();
   }
 
   private parseSoapResponse(body: string): {
