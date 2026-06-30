@@ -94,8 +94,11 @@ describe('RealNfeDistribuicaoClient', () => {
     expect(request).toContain('<CNPJ>12345678000199</CNPJ>');
     expect(request).toContain('<ultNSU>000000000000007</ultNSU>');
     expect(envelope).toContain('<cUF>91</cUF>');
+    expect(envelope).toContain('<indComp>0</indComp>');
     expect(envelope).toContain('<versaoDados>1.01</versaoDados>');
-    expect(envelope).toContain('<nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe">');
+    expect(envelope).toContain('<nfeDistDFeInteresse xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe">');
+    expect(envelope).toContain('<nfeDadosMsg>');
+    expect(envelope).toContain(request);
   });
 
   it('monta envelope SOAP 1.1 para fallback em endpoints .asmx', () => {

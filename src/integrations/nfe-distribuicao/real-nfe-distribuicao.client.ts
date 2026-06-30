@@ -245,6 +245,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
         ? 'http://www.w3.org/2003/05/soap-envelope'
         : 'http://schemas.xmlsoap.org/soap/envelope/';
     const prefix = soapVersion === '1.2' ? 'soap12' : 'soap';
+    const operation = 'nfeDistDFeInteresse';
 
     return [
       `<?xml version="1.0" encoding="utf-8"?>`,
@@ -254,13 +255,16 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
       `<${prefix}:Header>`,
       `<nfeCabecMsg xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`,
       `<cUF>${RealNfeDistribuicaoClient.AN_CUF}</cUF>`,
+      `<indComp>0</indComp>`,
       `<versaoDados>${RealNfeDistribuicaoClient.LAYOUT_VERSION}</versaoDados>`,
       `</nfeCabecMsg>`,
       `</${prefix}:Header>`,
       `<${prefix}:Body>`,
-      `<nfeDadosMsg xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`,
+      `<${operation} xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`,
+      `<nfeDadosMsg>`,
       requestXml,
       `</nfeDadosMsg>`,
+      `</${operation}>`,
       `</${prefix}:Body>`,
       `</${prefix}:Envelope>`
     ].join('');
