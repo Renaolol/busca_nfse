@@ -19,6 +19,7 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
+    "nfe:reset": "node scripts/reset-nfe-data.js",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down -v",
     "sync:run-once": "node dist/jobs/run-sync-once.js",
