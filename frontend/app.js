@@ -1391,6 +1391,8 @@ function renderClientsPage() {
                 <th><input type="checkbox" data-action="clients-toggle-all" ${isAllFilteredClientsSelected(clients) ? 'checked' : ''} aria-label="Selecionar todos" /></th>
                 <th>Cliente</th>
                 <th>Municipio</th>
+                <th>Estabelecimento</th>
+                <th>NSU base NF-e</th>
                 <th>Certificado</th>
                 <th>Busca NFS-e</th>
                 <th>Ultima busca</th>
@@ -1402,9 +1404,11 @@ function renderClientsPage() {
             <tbody>
               ${renderTableRowsOrState({
                 key: 'clients',
-                colSpan: 9,
+                colSpan: 11,
                 rowsHtml: clients
                   .map((client) => {
+                    const establishmentSummary = getClientEstablishmentSummary(client.id);
+                    const nfeBaseSummary = getClientNfeBaseSummary(client.id);
                     return `
                       <tr>
                         <td><input type="checkbox" data-action="client-select" data-client-id="${client.id}" ${state.selectedClientIds.has(client.id) ? 'checked' : ''} aria-label="Selecionar ${escapeHtml(client.razaoSocial)}" /></td>
@@ -1413,6 +1417,14 @@ function renderClientsPage() {
                           <span class="row-sub">${escapeHtml(formatCnpj(client.cnpj))}</span>
                         </td>
                         <td>${escapeHtml(client.municipio)} / ${escapeHtml(client.uf)}</td>
+                        <td>
+                          ${statusBadge(establishmentSummary.statusLabel, establishmentSummary.statusTone)}
+                          <span class="row-sub">${escapeHtml(establishmentSummary.detail)}</span>
+                        </td>
+                        <td>
+                          <span class="row-title">${escapeHtml(nfeBaseSummary.displayValue)}</span>
+                          <span class="row-sub">${escapeHtml(nfeBaseSummary.detail)}</span>
+                        </td>
                         <td>
                           ${statusBadge(client.certificadoStatus, toneFromCertificateStatus(client.certificadoStatus))}
                           <span class="row-sub">${client.certificadoValidade ? `Validade: ${escapeHtml(formatDate(client.certificadoValidade))}` : 'Sem certificado'}</span>
@@ -1460,6 +1472,8 @@ function renderClientDetailsPage(clientId) {
   const historyRows = getRunHistoryByClient(client.id);
   const clientXmls = state.xmlFiles.filter((xml) => xml.clientId === client.id).slice(0, 6);
   const clientAlerts = state.alerts.filter((alert) => alert.clientId === client.id).slice(0, 5);
+  const establishmentSummary = getClientEstablishmentSummary(client.id);
+  const nfeBaseSummary = getClientNfeBaseSummary(client.id);
 
   return `
     <section class="page-section">
@@ -1486,6 +1500,9 @@ function renderClientDetailsPage(clientId) {
               ${detailItem('CNPJ', formatCnpj(client.cnpj))}
               ${detailItem('Inscricao municipal', client.inscricaoMunicipal || '-')}
               ${detailItem('Municipio', `${client.municipio} / ${client.uf}`)}
+              ${detailItem('Estabelecimento', establishmentSummary.detail)}
+              ${detailItem('NSU base NF-e', nfeBaseSummary.displayValue)}
+              ${detailItem('Controles NF-e', nfeBaseSummary.controlsLabel)}
               ${detailItem('Responsavel interno', client.responsavelInterno)}
               ${detailItem('Status do cliente', client.buscaStatus)}
             </div>
@@ -4302,6 +4319,81 @@ function getNfeSyncClientRows(controls = state.nfeSyncControls) {
   });
 }
 
+function getClientEstablishmentSummary(clientId) {
+  const establishments = Array.isArray(state.establishmentsByClient?.[clientId]) ? state.establishmentsByClient[clientId] : [];
+  const activeRows = establishments.filter((item) => item?.ativo);
+  const primary = activeRows[0] || establishments[0] || null;
+
+  if (!primary) {
+    return {
+      total: 0,
+      activeCount: 0,
+      statusLabel: 'Sem cadastro',
+      statusTone: 'danger',
+      detail: 'Nenhum estabelecimento vinculado'
+    };
+  }
+
+  const primaryLabel = primary.razaoSocial || formatCnpj(primary.cnpj) || primary.municipioNome || 'Estabelecimento principal';
+
+  if (!activeRows.length) {
+    return {
+      total: establishments.length,
+      activeCount: 0,
+      statusLabel: 'Sem ativo',
+      statusTone: 'neutral',
+      detail: `${primaryLabel} - ${establishments.length} cadastrado(s)`
+    };
+  }
+
+  return {
+    total: establishments.length,
+    activeCount: activeRows.length,
+    statusLabel: activeRows.length === 1 ? '1 ativo' : `${activeRows.length} ativos`,
+    statusTone: 'success',
+    detail: `${primaryLabel} - ${establishments.length} cadastrado(s)`
+  };
+}
+
+function getClientNfeBaseSummary(clientId, controls = state.nfeSyncControls) {
+  const rows = (Array.isArray(controls) ? controls : []).filter((control) => control.clientId === clientId);
+
+  if (!rows.length) {
+    return {
+      displayValue: 'Nao inicializado',
+      detail: 'Ative a busca para capturar o NSU atual',
+      controlsLabel: 'Nenhum controle criado'
+    };
+  }
+
+  const nsuValues = rows
+    .map((control) => String(control.ultimoNsuConsultado ?? '').trim())
+    .filter((value) => value && value !== '-');
+  const distinctNsuValues = [...new Set(nsuValues)];
+  const latestControl =
+    [...rows].sort((a, b) => {
+      const dateDiff = Date.parse(b.ultimaExecucao || 0) - Date.parse(a.ultimaExecucao || 0);
+      if (dateDiff !== 0) {
+        return dateDiff;
+      }
+      return String(b.id || '').localeCompare(String(a.id || ''));
+    })[0] || rows[0];
+  const displayValue =
+    distinctNsuValues.length === 1
+      ? formatInteger(distinctNsuValues[0])
+      : formatInteger(latestControl?.ultimoNsuConsultado || distinctNsuValues[0] || '0');
+  const detail =
+    distinctNsuValues.length > 1
+      ? `${rows.length} controle(s) com NSUs independentes`
+      : `${rows.length} controle(s) configurado(s) para NF-e`;
+
+  return {
+    displayValue,
+    detail,
+    controlsLabel: `${rows.length} controle(s)`
+  };
+}
+
 async function enableNfeSearchForAllClients() {
   try {
     const result = await apiRequest('/nfe/sync/ativar-todos', {
@@ -6982,6 +7074,24 @@ function formatCurrency(value) {
     style: 'currency',
     currency: 'BRL'
   }).format(Number.isFinite(numeric) ? numeric : 0);
+}
+
+function formatInteger(value) {
+  const digits = String(value ?? '').trim();
+  if (!digits || digits === '-') {
+    return '-';
+  }
+
+  if (/^\d+$/.test(digits)) {
+    return digits.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  }
+
+  const numeric = Number(digits);
+  if (!Number.isFinite(numeric)) {
+    return digits;
+  }
+
+  return new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 }).format(numeric);
 }
 
 function formatCnpj(value) {
