@@ -122,10 +122,12 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
       try {
         parsed = this.parseSoapResponse(response.body);
       } catch (error) {
+        const parseMessage = this.toErrorMessage(error);
+        const responseDetails = this.describeHttpResponse(response.statusCode, response.headers, response.body);
         return {
           statusCode: response.statusCode,
           cStat: '000',
-          xMotivo: this.normalizeQueryErrorMessage(error),
+          xMotivo: this.normalizeQueryErrorMessage(`${parseMessage}. ${responseDetails}`),
           ultNsu: params.fallbackNsu,
           maxNsu: params.fallbackNsu,
           documents: [],
@@ -413,6 +415,30 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
   private previewBody(body: string): string {
     const compact = String(body || '').replace(/\s+/g, ' ').trim();
     return compact ? compact.slice(0, 240) : '(vazio)';
+  }
+
+  private describeHttpResponse(statusCode: number, headers: IncomingHttpHeaders, body: string): string {
+    const interestingHeaders = [
+      'content-type',
+      'content-length',
+      'content-encoding',
+      'transfer-encoding',
+      'location',
+      'server'
+    ]
+      .map((key) => {
+        const rawValue = headers[key];
+        if (!rawValue) {
+          return null;
+        }
+
+        const value = Array.isArray(rawValue) ? rawValue.join(', ') : String(rawValue);
+        return `${key}=${value}`;
+      })
+      .filter(Boolean)
+      .join(', ');
+
+    return `HTTP ${statusCode}${interestingHeaders ? ` [${interestingHeaders}]` : ''}. Preview: ${this.previewBody(body)}`;
   }
 
   private extractDocuments(retXml: string): NfeDistribuicaoDocument[] {
