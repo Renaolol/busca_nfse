@@ -32,7 +32,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
   private static readonly SOAP_NAMESPACE = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe';
   private static readonly XML_NAMESPACE = 'http://www.portalfiscal.inf.br/nfe';
   private static readonly AN_CUF = '91';
-  private static readonly LAYOUT_VERSION = '1.01';
+  private static readonly LAYOUT_VERSION = process.env.NFE_DISTRIBUICAO_LAYOUT_VERSION?.trim() || '1.00';
 
   constructor(
     private readonly prisma: PrismaService,
@@ -252,13 +252,6 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
       `<${prefix}:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"`,
       ` xmlns:xsd="http://www.w3.org/2001/XMLSchema"`,
       ` xmlns:${prefix}="${envelopeNamespace}">`,
-      `<${prefix}:Header>`,
-      `<nfeCabecMsg xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`,
-      `<cUF>${RealNfeDistribuicaoClient.AN_CUF}</cUF>`,
-      `<indComp>0</indComp>`,
-      `<versaoDados>${RealNfeDistribuicaoClient.LAYOUT_VERSION}</versaoDados>`,
-      `</nfeCabecMsg>`,
-      `</${prefix}:Header>`,
       `<${prefix}:Body>`,
       `<${operation} xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`,
       `<nfeDadosMsg>`,
@@ -320,6 +313,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
         soapVersion === '1.2'
           ? `application/soap+xml; charset=utf-8; action="${soapAction}"`
           : 'text/xml; charset=utf-8';
+      const soapActionHeader = soapVersion === '1.2' ? soapAction : `"${soapAction}"`;
 
       const req = httpsRequest(
         {
@@ -330,7 +324,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
           method: 'POST',
           headers: {
             'Content-Type': contentType,
-            SOAPAction: soapAction,
+            SOAPAction: soapActionHeader,
             Accept: 'application/soap+xml, text/xml, application/xml',
             'Accept-Encoding': 'gzip, deflate, br',
             'Content-Length': Buffer.byteLength(envelope, 'utf8')
