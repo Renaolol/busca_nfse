@@ -12,6 +12,8 @@ const navItems = [
   { key: 'certificados', label: 'Certificados', icon: 'shield', route: '/certificados' },
   { key: 'buscas', label: 'Buscas NFS-e', icon: 'search', route: '/buscas' },
   { key: 'xmls', label: 'XMLs Armazenados', icon: 'file', route: '/xmls' },
+  { key: 'buscas-nfe', label: 'Buscas NF-e', icon: 'search', route: '/buscas-nfe' },
+  { key: 'xmls-nfe', label: 'XMLs NF-e', icon: 'file', route: '/xmls-nfe' },
   { key: 'alertas', label: 'Alertas', icon: 'alert', route: '/alertas' },
   { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' }
 ];
@@ -40,6 +42,14 @@ const pageMeta = {
   xmls: {
     title: 'XMLs Armazenados',
     description: 'Consulte os arquivos XML de NFS-e salvos no servidor interno.'
+  },
+  'buscas-nfe': {
+    title: 'Buscas NF-e',
+    description: 'Gerencie a sincronizacao de NF-e de compra e venda via distribuicao DFe.'
+  },
+  'xmls-nfe': {
+    title: 'XMLs NF-e',
+    description: 'Consulte XMLs completos e resumos de NF-e armazenados no servidor interno.'
   },
   alertas: {
     title: 'Alertas',
@@ -84,6 +94,16 @@ const state = {
     running: false,
     stopRequested: false,
     disabling: false
+  },
+  nfeSyncControls: [],
+  nfeDocuments: [],
+  nfeDashboardStats: null,
+  nfeManualResult: null,
+  nfeSearch: {
+    hasSearched: false,
+    results: [],
+    lastQuery: null,
+    lastSearchedAt: null
   },
   xmlFiles: [],
   xmlSearch: {
@@ -143,6 +163,11 @@ const state = {
       status: 'Todos',
       tipo: 'Todos'
     },
+    nfeSync: {
+      cliente: 'Todos',
+      status: 'Todos',
+      ambiente: 'Todos'
+    },
     xmls: {
       cliente: 'Todos',
       cnpj: '',
@@ -154,6 +179,21 @@ const state = {
       municipio: 'Todos',
       tipo: 'Todos',
       status: 'Todos'
+    },
+    nfeDocs: {
+      cliente: 'Todos',
+      tipo: 'Todos',
+      cnpj: '',
+      numero: '',
+      chave: '',
+      emissaoInicio: '',
+      emissaoFim: '',
+      status: 'Todos',
+      schemaDoc: 'Todos',
+      valorMin: '',
+      valorMax: '',
+      xmlCompleto: 'Todos',
+      ambiente: 'Todos'
     },
     alerts: {
       severidade: 'Todos',
@@ -168,12 +208,18 @@ const state = {
     clients: 'loading',
     certificates: 'loading',
     runs: 'loading',
+    nfeSync: 'loading',
     xmls: 'loading',
+    nfeDocs: 'loading',
     alerts: 'loading'
   },
   sort: {
     xmls: {
       key: 'dataDownload',
+      direction: 'desc'
+    },
+    nfeDocs: {
+      key: 'dataEmissao',
       direction: 'desc'
     }
   }
@@ -228,13 +274,28 @@ async function hydrateFromApi() {
   }));
   const clientIds = apiClients.map((client) => client.id);
 
-  const [establishmentsByClient, certificatesByClient, allCertificatesRaw, syncByClient, dashboardStats, nfseDocs, auditRows, schedulerStatus] = await Promise.all([
+  const [
+    establishmentsByClient,
+    certificatesByClient,
+    allCertificatesRaw,
+    syncByClient,
+    nfeSyncByClient,
+    dashboardStats,
+    nfeDashboardStats,
+    nfseDocs,
+    nfeDocs,
+    auditRows,
+    schedulerStatus
+  ] = await Promise.all([
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/estabelecimentos`, []),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/certificados`, []),
     apiRequest('/certificados').catch(() => null),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/sync/status`, { controles: [], logs: [] }),
+    fetchJsonByClientId(clientIds, (clientId) => `/nfe/sync/status?clienteId=${encodeURIComponent(clientId)}`, []),
     apiRequest('/nfse/dashboard-stats').catch(() => null),
+    apiRequest('/nfe/dashboard-stats').catch(() => null),
     apiRequest('/nfse').catch(() => []),
+    apiRequest('/nfe').catch(() => []),
     apiRequest('/auditoria').catch(() => []),
     apiRequest('/sync/scheduler-status').catch(() => null)
   ]);
@@ -250,6 +311,8 @@ async function hydrateFromApi() {
   const certificates = buildCertificatesFromApi(apiClients, certificatesByClient, allCertificatesRaw);
   const xmlFiles = buildXmlFilesFromApi(nfseDocs, clients);
   const searchRuns = buildSearchRunsFromApi(syncByClient, clients);
+  const nfeDocuments = buildNfeDocumentsFromApi(nfeDocs, clients);
+  const nfeSyncControls = buildNfeSyncControlsFromApi(nfeSyncByClient, clients, establishmentsByClient);
   const alerts = buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, auditRows);
 
   state.clients = clients;
@@ -257,6 +320,9 @@ async function hydrateFromApi() {
   state.searchRuns = searchRuns;
   state.runningExecution = null;
   state.xmlFiles = xmlFiles;
+  state.nfeDocuments = nfeDocuments;
+  state.nfeSyncControls = nfeSyncControls;
+  state.nfeDashboardStats = nfeDashboardStats;
   state.alerts = applyResolvedAlertState(alerts);
   state.establishmentsByClient = establishmentsByClient;
   state.syncByClient = syncByClient;
@@ -570,6 +636,83 @@ function onDocumentClick(event) {
       exportXmlListToCsv();
       return;
     }
+    case 'nfe-sync-refresh': {
+      void refreshApiData();
+      return;
+    }
+    case 'nfe-sync-clear-filters': {
+      resetNfeSyncFilters();
+      render();
+      return;
+    }
+    case 'nfe-sync-run-control': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      const estabelecimentoId = actionNode.getAttribute('data-estabelecimento-id') || '';
+      const ambiente = actionNode.getAttribute('data-ambiente') || 'producao';
+      if (!clientId) {
+        return;
+      }
+      void runNfeSyncNow({
+        clienteId: clientId,
+        estabelecimentoId: estabelecimentoId || undefined,
+        ambiente,
+        limitControles: 1
+      });
+      return;
+    }
+    case 'nfe-sync-pause-control': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      const ambiente = actionNode.getAttribute('data-ambiente') || 'producao';
+      if (!clientId) {
+        return;
+      }
+      void pauseNfeSync({
+        clienteId: clientId,
+        ambiente
+      });
+      return;
+    }
+    case 'nfe-docs-clear-filters': {
+      resetNfeDocsSearch();
+      render();
+      return;
+    }
+    case 'nfe-export-list': {
+      exportNfeListToCsv();
+      return;
+    }
+    case 'nfe-details': {
+      const nfeId = actionNode.getAttribute('data-nfe-id');
+      if (!nfeId) {
+        return;
+      }
+      openModal({ kind: 'nfe-details', nfeId });
+      return;
+    }
+    case 'nfe-view': {
+      const nfeId = actionNode.getAttribute('data-nfe-id');
+      if (!nfeId) {
+        return;
+      }
+      void openNfeViewer(nfeId);
+      return;
+    }
+    case 'nfe-download': {
+      const nfeId = actionNode.getAttribute('data-nfe-id');
+      if (!nfeId) {
+        return;
+      }
+      void downloadNfeXmlById(nfeId);
+      return;
+    }
+    case 'nfe-docs-sort': {
+      const key = actionNode.getAttribute('data-sort-key');
+      if (!key) {
+        return;
+      }
+      updateNfeSort(key);
+      return;
+    }
     case 'xml-details': {
       const xmlId = actionNode.getAttribute('data-xml-id');
       if (!xmlId) {
@@ -771,9 +914,39 @@ function onDocumentSubmit(event) {
       applyRunsFilters(target);
       return;
     }
+    case 'nfeSyncFilterForm': {
+      event.preventDefault();
+      applyNfeSyncFilters(target);
+      return;
+    }
+    case 'nfeSyncStartForm': {
+      event.preventDefault();
+      void submitNfeSyncStartForm(target);
+      return;
+    }
+    case 'nfeSyncRunNowForm': {
+      event.preventDefault();
+      void submitNfeSyncRunNowForm(target);
+      return;
+    }
+    case 'nfeQueryNsuForm': {
+      event.preventDefault();
+      void submitNfeQueryNsuForm(target);
+      return;
+    }
+    case 'nfeQueryChaveForm': {
+      event.preventDefault();
+      void submitNfeQueryChaveForm(target);
+      return;
+    }
     case 'xmlsFilterForm': {
       event.preventDefault();
       void applyXmlFilters(target);
+      return;
+    }
+    case 'nfeDocsFilterForm': {
+      event.preventDefault();
+      void applyNfeDocsFilters(target);
       return;
     }
     case 'alertsFilterForm': {
@@ -935,6 +1108,10 @@ function renderCurrentPage() {
       return renderSearchRunsPage();
     case 'xmls':
       return renderXmlsPage();
+    case 'buscas-nfe':
+      return renderNfeSyncPage();
+    case 'xmls-nfe':
+      return renderNfeDocumentsPage();
     case 'alertas':
       return renderAlertsPage();
     case 'configuracoes':
@@ -1700,6 +1877,516 @@ function renderRunningExecutionCard() {
   `;
 }
 
+function renderNfeSyncPage() {
+  const controls = getFilteredNfeSyncControls();
+  const syncStats = getNfeSyncStats();
+  const statusOptions = uniqueValues(state.nfeSyncControls.map((control) => control.status));
+  const ambienteOptions = uniqueValues(state.nfeSyncControls.map((control) => control.ambiente));
+  const nfeStats = getNfeDashboardStats();
+
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'Buscas NF-e',
+        description: 'Gerencie sincronizacao, consultas manuais por NSU/chave e acompanhe o armazenamento das NF-e.',
+        actions: [actionButton('Atualizar painel', 'nfe-sync-refresh', 'secondary')]
+      })}
+
+      <section class="stats-grid">
+        ${statCard('search', 'Controles ativos', String(syncStats.ativos), 'sincronizando distribuicao', 'success')}
+        ${statCard('clock', 'Controles pausados', String(syncStats.pausados), 'aguardando retomada', 'neutral')}
+        ${statCard('alert', 'Controles com erro', String(syncStats.erros), 'revisar certificado ou API', 'danger')}
+        ${statCard('file', 'NF-e no banco', String(nfeStats.totalNfe), `${nfeStats.xmlsCompletos} XML(s) completos`, 'info')}
+      </section>
+
+      <section class="split-grid">
+        <article class="card">
+          <h3 class="card-title">Habilitar busca de NF-e</h3>
+          <p class="card-subtitle">Cria ou reativa controles por cliente. Se nenhum estabelecimento for escolhido, todos os ativos do cliente entram na busca.</p>
+          <form id="nfeSyncStartForm" class="form-grid" style="margin-top:12px;">
+            <label class="field">
+              Cliente
+              <select name="clienteId" required>
+                <option value="">Selecione</option>
+                ${renderOptions(state.clients.map((client) => client.id), '', mapClientOptions())}
+              </select>
+            </label>
+            <label class="field">
+              Estabelecimento
+              <select name="scope">
+                <option value="">Todos os estabelecimentos ativos</option>
+                ${renderNfeScopeOptions()}
+              </select>
+            </label>
+            <label class="field">
+              Ambiente
+              <select name="ambiente">${renderOptions(['producao', 'homologacao'], 'producao', {
+                producao: 'Producao',
+                homologacao: 'Homologacao'
+              })}</select>
+            </label>
+            <label class="field">
+              NSU inicial
+              <input name="nsuInicial" inputmode="numeric" placeholder="1" />
+            </label>
+            <label class="field" style="grid-column: span 2;">
+              CNPJ de consulta
+              <input name="cnpjConsulta" placeholder="Usar CNPJ do estabelecimento quando vazio" />
+            </label>
+            <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
+              <button class="btn primary" type="submit">Habilitar busca</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="card">
+          <h3 class="card-title">Rodar sincronizacao agora</h3>
+          <p class="card-subtitle">Executa a distribuicao para controles ativos sem esperar o agendamento automatico.</p>
+          <form id="nfeSyncRunNowForm" class="form-grid" style="margin-top:12px;">
+            <label class="field">
+              Cliente
+              <select name="clienteId" required>
+                <option value="">Selecione</option>
+                ${renderOptions(state.clients.map((client) => client.id), '', mapClientOptions())}
+              </select>
+            </label>
+            <label class="field">
+              Estabelecimento
+              <select name="scope">
+                <option value="">Todos os controles ativos do cliente</option>
+                ${renderNfeScopeOptions()}
+              </select>
+            </label>
+            <label class="field">
+              Ambiente
+              <select name="ambiente">${renderOptions(['producao', 'homologacao'], 'producao', {
+                producao: 'Producao',
+                homologacao: 'Homologacao'
+              })}</select>
+            </label>
+            <label class="field">
+              Limite de controles
+              <input name="limitControles" type="number" min="1" value="10" />
+            </label>
+            <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
+              <button class="btn primary" type="submit">Executar agora</button>
+            </div>
+          </form>
+        </article>
+      </section>
+
+      <section class="split-grid">
+        <article class="card">
+          <h3 class="card-title">Consultar NSU especifico</h3>
+          <form id="nfeQueryNsuForm" class="form-grid" style="margin-top:12px;">
+            <label class="field" style="grid-column: span 2;">
+              Estabelecimento
+              <select name="scope" required>
+                <option value="">Selecione</option>
+                ${renderNfeScopeOptions()}
+              </select>
+            </label>
+            <label class="field">
+              Ambiente
+              <select name="ambiente">${renderOptions(['producao', 'homologacao'], 'producao', {
+                producao: 'Producao',
+                homologacao: 'Homologacao'
+              })}</select>
+            </label>
+            <label class="field">
+              NSU
+              <input name="nsu" required inputmode="numeric" />
+            </label>
+            <label class="field-inline" style="grid-column: span 2;">
+              <input name="persistir" type="checkbox" checked />
+              <span>Persistir documentos retornados</span>
+            </label>
+            <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
+              <button class="btn secondary" type="submit">Consultar NSU</button>
+            </div>
+          </form>
+        </article>
+
+        <article class="card">
+          <h3 class="card-title">Consultar chave de acesso</h3>
+          <form id="nfeQueryChaveForm" class="form-grid" style="margin-top:12px;">
+            <label class="field" style="grid-column: span 2;">
+              Estabelecimento
+              <select name="scope" required>
+                <option value="">Selecione</option>
+                ${renderNfeScopeOptions()}
+              </select>
+            </label>
+            <label class="field">
+              Ambiente
+              <select name="ambiente">${renderOptions(['producao', 'homologacao'], 'producao', {
+                producao: 'Producao',
+                homologacao: 'Homologacao'
+              })}</select>
+            </label>
+            <label class="field">
+              Chave de acesso
+              <input name="chaveAcesso" required maxlength="44" />
+            </label>
+            <label class="field-inline" style="grid-column: span 2;">
+              <input name="persistir" type="checkbox" checked />
+              <span>Persistir documentos retornados</span>
+            </label>
+            <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
+              <button class="btn secondary" type="submit">Consultar chave</button>
+            </div>
+          </form>
+        </article>
+      </section>
+
+      ${renderNfeManualResultCard()}
+
+      <article class="card filter-card">
+        <h3 class="card-title">Filtros dos controles</h3>
+        <form id="nfeSyncFilterForm" class="form-grid">
+          <label class="field">
+            Cliente
+            <select name="cliente">${renderOptions(['Todos', ...state.clients.map((client) => client.id)], state.filters.nfeSync.cliente, mapClientOptions())}</select>
+          </label>
+          <label class="field">
+            Status
+            <select name="status">${renderOptions(['Todos', ...statusOptions], state.filters.nfeSync.status, mapNfeSyncStatusOptions(statusOptions))}</select>
+          </label>
+          <label class="field">
+            Ambiente
+            <select name="ambiente">${renderOptions(['Todos', ...ambienteOptions], state.filters.nfeSync.ambiente, {
+              Todos: 'Todos',
+              producao: 'Producao',
+              homologacao: 'Homologacao'
+            })}</select>
+          </label>
+          <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
+            <button class="btn primary" type="submit">Filtrar</button>
+            <button class="btn secondary" type="button" data-action="nfe-sync-clear-filters">Limpar</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="card">
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>Estabelecimento</th>
+                <th>CNPJ consulta</th>
+                <th>Ambiente</th>
+                <th>Ult. NSU consultado</th>
+                <th>Ult. NSU distribuido</th>
+                <th>Max NSU</th>
+                <th>Documentos</th>
+                <th>Ultima execucao</th>
+                <th>Status</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderTableRowsOrState({
+                key: 'nfeSync',
+                colSpan: 11,
+                rowsHtml: controls
+                  .map((control) => {
+                    return `<tr>
+                      <td>${escapeHtml(control.cliente)}</td>
+                      <td>
+                        <span class="row-title">${escapeHtml(control.estabelecimento)}</span>
+                        <span class="row-sub">${escapeHtml(formatCnpj(control.cnpjEstabelecimento))}</span>
+                      </td>
+                      <td>${escapeHtml(formatCnpj(control.cnpjConsulta))}</td>
+                      <td>${statusBadge(mapNfeAmbienteLabel(control.ambiente), control.ambiente === 'producao' ? 'success' : 'warning')}</td>
+                      <td>${escapeHtml(control.ultimoNsuConsultado)}</td>
+                      <td>${escapeHtml(control.ultimoNsuDistribuido)}</td>
+                      <td>${escapeHtml(control.maxNsu)}</td>
+                      <td>${escapeHtml(String(control.totalDocumentosBaixados))}</td>
+                      <td>${escapeHtml(formatDateTime(control.ultimaExecucao))}</td>
+                      <td>
+                        ${statusBadge(mapNfeSyncStatusLabel(control.status), toneFromNfeSyncStatus(control.status))}
+                        <span class="row-sub">${escapeHtml(control.ultimaMensagem || '-')}</span>
+                      </td>
+                      <td>
+                        <div class="table-actions">
+                          <button class="icon-btn" data-action="nfe-sync-run-control" data-client-id="${control.clientId}" data-estabelecimento-id="${control.estabelecimentoId}" data-ambiente="${control.ambiente}">Rodar agora</button>
+                          <button class="icon-btn" data-action="nfe-sync-pause-control" data-client-id="${control.clientId}" data-ambiente="${control.ambiente}">Pausar</button>
+                        </div>
+                      </td>
+                    </tr>`;
+                  })
+                  .join(''),
+                emptyMessage: 'Nenhum controle de sincronizacao de NF-e encontrado.'
+              })}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
+function renderNfeManualResultCard() {
+  const result = state.nfeManualResult;
+  if (!result) {
+    return '';
+  }
+
+  const documentos = Array.isArray(result.documentos) ? result.documentos : [];
+  return `
+    <article class="card" style="box-shadow:none; border-style:dashed;">
+      <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">
+        <div>
+          <h3 class="card-title">Resultado da ultima consulta manual</h3>
+          <p class="card-subtitle">${escapeHtml(result.tipo || 'Consulta')} concluida com retorno ${escapeHtml(String(result.cStat || result.statusCode || '-'))}.</p>
+        </div>
+        ${statusBadge(result.documentosEncontrados > 0 ? 'Documentos localizados' : 'Sem documentos', result.documentosEncontrados > 0 ? 'success' : 'warning')}
+      </div>
+      <div class="progress-meta" style="margin-top:10px;">
+        <span>Mensagem: <strong>${escapeHtml(result.xMotivo || '-')}</strong></span>
+        <span>Encontrados: <strong>${escapeHtml(String(result.documentosEncontrados || 0))}</strong></span>
+        <span>Persistidos: <strong>${escapeHtml(String(result.documentosPersistidos || 0))}</strong></span>
+        <span>Ult NSU: <strong>${escapeHtml(result.ultNsu || '-')}</strong></span>
+        <span>Max NSU: <strong>${escapeHtml(result.maxNsu || '-')}</strong></span>
+      </div>
+      ${
+        documentos.length
+          ? `<div class="table-wrap" style="margin-top:12px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>NSU</th>
+                    <th>Schema</th>
+                    <th>Chave de acesso</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${documentos
+                    .map((doc) => {
+                      return `<tr>
+                        <td>${escapeHtml(doc.nsu || '-')}</td>
+                        <td>${escapeHtml(doc.schema || '-')}</td>
+                        <td>${escapeHtml(doc.chaveAcesso || '-')}</td>
+                      </tr>`;
+                    })
+                    .join('')}
+                </tbody>
+              </table>
+            </div>`
+          : ''
+      }
+    </article>
+  `;
+}
+
+function renderNfeDocumentsPage() {
+  const docs = getFilteredNfeDocuments();
+  const canShowTable =
+    state.nfeSearch.hasSearched || state.tableState.nfeDocs === 'loading' || state.tableState.nfeDocs === 'error';
+  const statusOptions = uniqueValues(state.nfeDocuments.map((doc) => doc.statusFiscal).filter(Boolean));
+  const schemaOptions = uniqueValues(state.nfeDocuments.map((doc) => doc.schemaDoc).filter(Boolean));
+
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'XMLs NF-e',
+        description: 'Consulte XMLs completos e resumos das NF-e de compra e venda armazenados no servidor.',
+        actions: [actionButton('Exportar listagem', 'nfe-export-list', 'secondary')]
+      })}
+
+      <article class="card filter-card">
+        <h3 class="card-title">Consulta de NF-e</h3>
+        <p class="card-subtitle">Selecione uma empresa e refine por emissao, relacionamento e disponibilidade do XML completo.</p>
+        <form id="nfeDocsFilterForm" class="form-grid">
+          <label class="field">
+            Empresa
+            <select name="cliente" required>${renderOptions(state.clients.map((client) => client.id), state.filters.nfeDocs.cliente === 'Todos' ? '' : state.filters.nfeDocs.cliente, mapClientOptions(), 'Selecione uma empresa')}</select>
+          </label>
+          <label class="field">
+            Tipo
+            <select name="tipo">${renderOptions(['Todos', 'Emitida', 'Recebida'], state.filters.nfeDocs.tipo)}</select>
+          </label>
+          <label class="field">
+            Ambiente
+            <select name="ambiente">${renderOptions(['Todos', 'producao', 'homologacao'], state.filters.nfeDocs.ambiente, {
+              Todos: 'Todos',
+              producao: 'Producao',
+              homologacao: 'Homologacao'
+            })}</select>
+          </label>
+          <label class="field">
+            Emissao inicio
+            <input name="emissaoInicio" type="date" value="${escapeHtml(state.filters.nfeDocs.emissaoInicio)}" />
+          </label>
+          <label class="field">
+            Emissao fim
+            <input name="emissaoFim" type="date" value="${escapeHtml(state.filters.nfeDocs.emissaoFim)}" />
+          </label>
+          <label class="field">
+            Status
+            <select name="status">${renderOptions(['Todos', ...statusOptions], state.filters.nfeDocs.status)}</select>
+          </label>
+          <label class="field">
+            Schema
+            <select name="schemaDoc">${renderOptions(['Todos', ...schemaOptions], state.filters.nfeDocs.schemaDoc)}</select>
+          </label>
+          <label class="field">
+            XML completo
+            <select name="xmlCompleto">${renderOptions(['Todos', 'Somente completos', 'Somente resumos'], state.filters.nfeDocs.xmlCompleto)}</select>
+          </label>
+          <label class="field">
+            CNPJ
+            <input name="cnpj" value="${escapeHtml(state.filters.nfeDocs.cnpj)}" />
+          </label>
+          <label class="field">
+            Numero NF-e
+            <input name="numero" value="${escapeHtml(state.filters.nfeDocs.numero)}" />
+          </label>
+          <label class="field">
+            Chave de acesso
+            <input name="chave" value="${escapeHtml(state.filters.nfeDocs.chave)}" maxlength="44" />
+          </label>
+          <label class="field">
+            Valor minimo
+            <input name="valorMin" type="number" min="0" step="0.01" value="${escapeHtml(state.filters.nfeDocs.valorMin)}" />
+          </label>
+          <label class="field">
+            Valor maximo
+            <input name="valorMax" type="number" min="0" step="0.01" value="${escapeHtml(state.filters.nfeDocs.valorMax)}" />
+          </label>
+          <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
+            <button class="btn primary" type="submit">Buscar NF-e</button>
+            <button class="btn secondary" type="button" data-action="nfe-docs-clear-filters">Limpar</button>
+          </div>
+        </form>
+      </article>
+
+      ${
+        canShowTable
+          ? `${renderNfeSearchSummary()}${renderNfeDocumentsTableCard(docs)}`
+          : renderNfeSearchEmptyState()
+      }
+    </section>
+  `;
+}
+
+function renderNfeSearchEmptyState() {
+  return `
+    <article class="card">
+      <div class="table-state">
+        Selecione a empresa e os filtros desejados, depois clique em <strong>Buscar NF-e</strong>.
+      </div>
+    </article>
+  `;
+}
+
+function renderNfeSearchSummary() {
+  const query = state.nfeSearch.lastQuery;
+  if (!query) {
+    return '';
+  }
+
+  const client = findClientById(query.cliente);
+  const periodText =
+    query.emissaoInicio || query.emissaoFim
+      ? `${formatDate(query.emissaoInicio || '')} ate ${formatDate(query.emissaoFim || '')}`
+      : 'Sem filtro de emissao';
+  return `
+    <article class="card" style="box-shadow:none; border-style:dashed;">
+      <div class="progress-meta">
+        <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
+        <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
+        <span>Tipo: <strong>${escapeHtml(query.tipo || 'Todos')}</strong></span>
+        <span>Resultado: <strong>${escapeHtml(String(state.nfeSearch.results.length))} NF-e</strong></span>
+        <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.nfeSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
+      </div>
+    </article>
+  `;
+}
+
+function renderNfeDocumentsTableCard(docs) {
+  return `
+    <article class="card">
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              ${renderNfeSortHeader('chaveAcesso', 'Chave')}
+              ${renderNfeSortHeader('numeroNfe', 'Numero')}
+              ${renderNfeSortHeader('cliente', 'Cliente')}
+              ${renderNfeSortHeader('tipo', 'Tipo')}
+              ${renderNfeSortHeader('contraparte', 'Emitente / destinatario')}
+              ${renderNfeSortHeader('dataEmissao', 'Data emissao')}
+              ${renderNfeSortHeader('valor', 'Valor')}
+              ${renderNfeSortHeader('ambiente', 'Ambiente')}
+              ${renderNfeSortHeader('arquivo', 'Arquivo')}
+              ${renderNfeSortHeader('status', 'Status')}
+              <th>Acoes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderTableRowsOrState({
+              key: 'nfeDocs',
+              colSpan: 11,
+              rowsHtml: docs
+                .map((doc) => {
+                  return `<tr>
+                    <td>
+                      <span class="row-title">${escapeHtml(doc.chaveAcesso)}</span>
+                      <span class="row-sub">${escapeHtml(doc.schemaDoc || '-')}</span>
+                    </td>
+                    <td>${escapeHtml(doc.numeroNfe || '-')}</td>
+                    <td>${escapeHtml(doc.cliente)}</td>
+                    <td>${statusBadge(doc.tipo, doc.tipo === 'Emitida' ? 'success' : doc.tipo === 'Recebida' ? 'info' : 'neutral')}</td>
+                    <td>
+                      <span class="row-title">${escapeHtml(doc.contraparteNome || '-')}</span>
+                      <span class="row-sub">${escapeHtml(formatCnpj(doc.contraparteCnpj || ''))}</span>
+                    </td>
+                    <td>${escapeHtml(formatDateTime(doc.dataEmissao))}</td>
+                    <td>${escapeHtml(formatCurrency(doc.valor))}</td>
+                    <td>${statusBadge(mapNfeAmbienteLabel(doc.ambiente), doc.ambiente === 'producao' ? 'success' : 'warning')}</td>
+                    <td>${renderNfeStorageBadges(doc)}</td>
+                    <td>${renderNfeStatusBadges(doc)}</td>
+                    <td>
+                      <div class="table-actions">
+                        <button class="icon-btn" data-action="nfe-details" data-nfe-id="${doc.id}">Visualizar detalhes</button>
+                        <button class="icon-btn" data-action="nfe-view" data-nfe-id="${doc.id}">Ver XML</button>
+                        <button class="icon-btn" data-action="nfe-download" data-nfe-id="${doc.id}">Baixar XML</button>
+                      </div>
+                    </td>
+                  </tr>`;
+                })
+                .join(''),
+              emptyMessage: 'Nenhuma NF-e encontrada para os filtros informados.'
+            })}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function renderNfeSortHeader(key, label) {
+  const isActive = state.sort.nfeDocs.key === key;
+  const direction = isActive ? state.sort.nfeDocs.direction : 'none';
+  const sortLabel =
+    direction === 'asc'
+      ? `${label}, ordenado crescente`
+      : direction === 'desc'
+        ? `${label}, ordenado decrescente`
+        : `${label}, ordenar`;
+
+  return `
+    <th>
+      <button class="sort-header ${isActive ? 'active' : ''}" type="button" data-action="nfe-docs-sort" data-sort-key="${escapeHtml(key)}" aria-label="${escapeHtml(sortLabel)}">
+        <span>${escapeHtml(label)}</span>
+        <span class="sort-indicator" aria-hidden="true">${direction === 'asc' ? '▲' : direction === 'desc' ? '▼' : '↕'}</span>
+      </button>
+    </th>
+  `;
+}
+
 function renderXmlsPage() {
   const xmls = getFilteredXmls();
   const xmlSearchCanShowTable =
@@ -2208,6 +2895,10 @@ function renderModal() {
       return renderCertificatePasswordModal();
     case 'certificate-notes':
       return renderCertificateNotesModal(state.modal.certId);
+    case 'nfe-details':
+      return renderNfeDetailsModal(state.modal.nfeId);
+    case 'nfe-view':
+      return renderNfeViewerModal(state.modal.nfeId);
     case 'xml-details':
       return renderXmlDetailsModal(state.modal.xmlId);
     case 'xml-view':
@@ -2453,6 +3144,73 @@ function renderCertificatePasswordModal() {
         <div class="modal-footer">
           <button class="btn secondary" type="button" data-action="close-modal">Fechar</button>
           <button class="btn primary" type="button" data-action="copy-certificate-password">Copiar senha</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderNfeDetailsModal(nfeId) {
+  const doc = findNfeById(nfeId);
+  if (!doc) {
+    return '';
+  }
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Detalhes da NF-e ${escapeHtml(doc.numeroNfe || doc.chaveAcesso)}</h3>
+          <p class="modal-subtitle">Resumo do documento armazenado para consulta interna.</p>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid two">
+            ${detailItem('Cliente', doc.cliente)}
+            ${detailItem('Tipo', doc.tipo)}
+            ${detailItem('Chave de acesso', doc.chaveAcesso)}
+            ${detailItem('Numero NF-e', doc.numeroNfe || '-')}
+            ${detailItem('Serie / modelo', `${doc.serie || '-'} / ${doc.modelo || '-'}`)}
+            ${detailItem('Ambiente', mapNfeAmbienteLabel(doc.ambiente))}
+            ${detailItem('Emitente', `${doc.emitenteNome || '-'}${doc.emitenteCnpj ? ` (${formatCnpj(doc.emitenteCnpj)})` : ''}`)}
+            ${detailItem('Destinatario', `${doc.destinatarioNome || '-'}${doc.destinatarioCnpj ? ` (${formatCnpj(doc.destinatarioCnpj)})` : ''}`)}
+            ${detailItem('Data de emissao', formatDateTime(doc.dataEmissao))}
+            ${detailItem('Data de autorizacao', formatDateTime(doc.dataAutorizacao))}
+            ${detailItem('Valor total', formatCurrency(doc.valor))}
+            ${detailItem('Schema', doc.schemaDoc || '-')}
+            ${detailItem('Arquivo completo', doc.xmlCompletoDisponivel ? 'Sim' : 'Nao')}
+            ${detailItem('Resumo disponivel', doc.resumoDisponivel ? 'Sim' : 'Nao')}
+            ${detailItem('Status fiscal', doc.statusFiscal || '-')}
+            ${detailItem('Caminho XML', doc.caminhoServidor || '-')}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="nfe-view" data-nfe-id="${doc.id}">Ver conteudo XML</button>
+          <button class="btn primary" data-action="nfe-download" data-nfe-id="${doc.id}">Baixar XML</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderNfeViewerModal(nfeId) {
+  const doc = findNfeById(nfeId);
+  if (!doc) {
+    return '';
+  }
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Visualizador XML - NF-e ${escapeHtml(doc.numeroNfe || doc.chaveAcesso)}</h3>
+          <p class="modal-subtitle">Visualizacao formatada para leitura interna.</p>
+        </div>
+        <div class="modal-body">
+          <pre class="xml-viewer">${escapeHtml(formatXml(doc.conteudoXml))}</pre>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="close-modal">Fechar</button>
+          <button class="btn primary" data-action="nfe-download" data-nfe-id="${doc.id}">Baixar XML</button>
         </div>
       </div>
     </div>
@@ -2813,6 +3571,29 @@ function renderXmlStatusBadges(xml) {
   return `<div class="status-stack">${badges.join('')}</div>`;
 }
 
+function renderNfeStorageBadges(doc) {
+  const badges = [];
+  if (doc.xmlCompletoDisponivel) {
+    badges.push(statusBadge('XML completo', 'success'));
+  }
+  if (doc.resumoDisponivel) {
+    badges.push(statusBadge('Resumo', 'info'));
+  }
+  if (!badges.length) {
+    badges.push(statusBadge('Sem arquivo', 'neutral'));
+  }
+  return `<div class="status-stack">${badges.join('')}</div>`;
+}
+
+function renderNfeStatusBadges(doc) {
+  const badges = [];
+  if (doc.statusFiscal && doc.statusFiscal !== '-') {
+    badges.push(statusBadge(doc.statusFiscal, toneFromFiscalStatus(doc.statusFiscal)));
+  }
+  badges.push(statusBadge(doc.tipo, doc.tipo === 'Emitida' ? 'success' : doc.tipo === 'Recebida' ? 'info' : 'neutral'));
+  return `<div class="status-stack">${badges.join('')}</div>`;
+}
+
 function renderTableRowsOrState({ key, colSpan, rowsHtml, emptyMessage }) {
   const tableState = state.tableState[key];
   if (tableState === 'loading') {
@@ -2859,6 +3640,8 @@ function parseRoute(hash) {
     '/certificados': 'certificados',
     '/buscas': 'buscas',
     '/xmls': 'xmls',
+    '/buscas-nfe': 'buscas-nfe',
+    '/xmls-nfe': 'xmls-nfe',
     '/alertas': 'alertas',
     '/configuracoes': 'configuracoes'
   };
@@ -3428,6 +4211,55 @@ function applyRunsFilters(form) {
   render();
 }
 
+function applyNfeSyncFilters(form) {
+  const data = new FormData(form);
+  state.filters.nfeSync = {
+    cliente: String(data.get('cliente') || 'Todos'),
+    status: String(data.get('status') || 'Todos'),
+    ambiente: String(data.get('ambiente') || 'Todos')
+  };
+  state.tableState.nfeSync = 'data';
+  render();
+}
+
+function getFilteredNfeSyncControls() {
+  const { cliente, status, ambiente } = state.filters.nfeSync;
+
+  return state.nfeSyncControls.filter((control) => {
+    const matchesClient = cliente === 'Todos' || control.clientId === cliente;
+    const matchesStatus = status === 'Todos' || control.status === status;
+    const matchesAmbiente = ambiente === 'Todos' || control.ambiente === ambiente;
+    return matchesClient && matchesStatus && matchesAmbiente;
+  });
+}
+
+function getNfeSyncStats() {
+  return state.nfeSyncControls.reduce(
+    (acc, control) => {
+      if (control.status === 'ativo') {
+        acc.ativos += 1;
+      } else if (control.status === 'pausado') {
+        acc.pausados += 1;
+      } else if (String(control.status || '').startsWith('erro')) {
+        acc.erros += 1;
+      }
+      return acc;
+    },
+    { ativos: 0, pausados: 0, erros: 0 }
+  );
+}
+
+function getNfeDashboardStats() {
+  return {
+    totalNfe: Number(state.nfeDashboardStats?.totalNfe || state.nfeDocuments.length || 0),
+    xmlsCompletos: Number(
+      state.nfeDashboardStats?.xmlsCompletos ||
+        state.nfeDocuments.filter((doc) => doc.xmlCompletoDisponivel).length ||
+        0
+    )
+  };
+}
+
 function getFilteredRuns() {
   const { periodo, cliente, municipio, status, tipo } = state.filters.runs;
   const now = Date.now();
@@ -3476,6 +4308,230 @@ function refreshRunningExecution() {
     pushToast('Busca manual concluida com sucesso.', 'success');
   } else {
     pushToast('Status da execucao atualizado.', 'info');
+  }
+
+  render();
+}
+
+async function submitNfeSyncStartForm(form) {
+  const data = new FormData(form);
+  const clienteId = String(data.get('clienteId') || '').trim();
+  const ambiente = String(data.get('ambiente') || 'producao');
+  const nsuInicial = String(data.get('nsuInicial') || '').trim();
+  const cnpjConsulta = normalizeDigits(String(data.get('cnpjConsulta') || ''));
+  const scope = parseNfeScopeValue(String(data.get('scope') || ''));
+
+  if (!clienteId) {
+    pushToast('Selecione um cliente para habilitar a busca de NF-e.', 'error');
+    return;
+  }
+  if (scope.clienteId && scope.clienteId !== clienteId) {
+    pushToast('O estabelecimento selecionado nao pertence ao cliente informado.', 'error');
+    return;
+  }
+
+  try {
+    const response = await apiRequest('/nfe/sync/iniciar', {
+      method: 'POST',
+      body: {
+        clienteId,
+        ambiente,
+        estabelecimentoId: scope.estabelecimentoId || undefined,
+        nsuInicial: nsuInicial || undefined,
+        cnpjConsulta: cnpjConsulta || undefined
+      }
+    });
+    pushToast(
+      `${response?.controlesCriadosOuAtualizados || 0} controle(s) de NF-e criado(s) ou reativado(s).`,
+      'success'
+    );
+    await refreshApiData();
+  } catch (error) {
+    pushToast(`Falha ao habilitar busca de NF-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function submitNfeSyncRunNowForm(form) {
+  const data = new FormData(form);
+  const clienteId = String(data.get('clienteId') || '').trim();
+  const ambiente = String(data.get('ambiente') || 'producao');
+  const limitControles = Number(data.get('limitControles') || 10);
+  const scope = parseNfeScopeValue(String(data.get('scope') || ''));
+
+  if (!clienteId) {
+    pushToast('Selecione um cliente para executar a sincronizacao.', 'error');
+    return;
+  }
+  if (scope.clienteId && scope.clienteId !== clienteId) {
+    pushToast('O estabelecimento selecionado nao pertence ao cliente informado.', 'error');
+    return;
+  }
+
+  await runNfeSyncNow({
+    clienteId,
+    ambiente,
+    estabelecimentoId: scope.estabelecimentoId || undefined,
+    limitControles: Number.isFinite(limitControles) && limitControles > 0 ? limitControles : 10
+  });
+}
+
+async function runNfeSyncNow(payload) {
+  try {
+    const response = await apiRequest('/nfe/sync/rodar-agora', {
+      method: 'POST',
+      body: payload
+    });
+    pushToast(
+      `Sincronizacao NF-e executada: ${response?.processed || 0} controle(s), ${response?.documentsSaved || 0} documento(s) salvo(s).`,
+      'success'
+    );
+    await refreshApiData();
+  } catch (error) {
+    pushToast(`Falha ao executar sincronizacao NF-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function pauseNfeSync(payload) {
+  try {
+    const response = await apiRequest('/nfe/sync/pausar', {
+      method: 'POST',
+      body: payload
+    });
+    pushToast(`${response?.total || 0} controle(s) de NF-e pausado(s).`, 'success');
+    await refreshApiData();
+  } catch (error) {
+    pushToast(`Falha ao pausar busca de NF-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function submitNfeQueryNsuForm(form) {
+  const data = new FormData(form);
+  const scope = parseNfeScopeValue(String(data.get('scope') || ''));
+  const nsu = String(data.get('nsu') || '').trim();
+
+  if (!scope.clienteId || !scope.estabelecimentoId) {
+    pushToast('Selecione um estabelecimento para consultar o NSU.', 'error');
+    return;
+  }
+
+  if (!nsu) {
+    pushToast('Informe o NSU desejado.', 'error');
+    return;
+  }
+
+  try {
+    const result = await apiRequest('/nfe/sync/consultar-nsu', {
+      method: 'POST',
+      body: {
+        clienteId: scope.clienteId,
+        estabelecimentoId: scope.estabelecimentoId,
+        ambiente: String(data.get('ambiente') || 'producao'),
+        nsu,
+        persistir: data.get('persistir') === 'on'
+      }
+    });
+    state.nfeManualResult = {
+      ...result,
+      tipo: `Consulta NSU ${nsu}`
+    };
+    pushToast(`Consulta do NSU ${nsu} concluida.`, 'success');
+    await refreshApiData();
+  } catch (error) {
+    pushToast(`Falha ao consultar NSU: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function submitNfeQueryChaveForm(form) {
+  const data = new FormData(form);
+  const scope = parseNfeScopeValue(String(data.get('scope') || ''));
+  const chaveAcesso = normalizeDigits(String(data.get('chaveAcesso') || ''));
+
+  if (!scope.clienteId || !scope.estabelecimentoId) {
+    pushToast('Selecione um estabelecimento para consultar a chave.', 'error');
+    return;
+  }
+
+  if (chaveAcesso.length !== 44) {
+    pushToast('Informe uma chave de acesso com 44 digitos.', 'error');
+    return;
+  }
+
+  try {
+    const result = await apiRequest('/nfe/sync/consultar-chave', {
+      method: 'POST',
+      body: {
+        clienteId: scope.clienteId,
+        estabelecimentoId: scope.estabelecimentoId,
+        ambiente: String(data.get('ambiente') || 'producao'),
+        chaveAcesso,
+        persistir: data.get('persistir') === 'on'
+      }
+    });
+    state.nfeManualResult = {
+      ...result,
+      tipo: `Consulta chave ${chaveAcesso}`
+    };
+    pushToast('Consulta por chave concluida.', 'success');
+    await refreshApiData();
+  } catch (error) {
+    pushToast(`Falha ao consultar chave: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function applyNfeDocsFilters(form) {
+  const data = new FormData(form);
+  state.filters.nfeDocs = {
+    cliente: String(data.get('cliente') || ''),
+    tipo: String(data.get('tipo') || 'Todos'),
+    cnpj: normalizeDigits(String(data.get('cnpj') || '')),
+    numero: String(data.get('numero') || '').trim(),
+    chave: normalizeDigits(String(data.get('chave') || '')),
+    emissaoInicio: String(data.get('emissaoInicio') || ''),
+    emissaoFim: String(data.get('emissaoFim') || ''),
+    status: String(data.get('status') || 'Todos'),
+    schemaDoc: String(data.get('schemaDoc') || 'Todos'),
+    valorMin: String(data.get('valorMin') || '').trim(),
+    valorMax: String(data.get('valorMax') || '').trim(),
+    xmlCompleto: String(data.get('xmlCompleto') || 'Todos'),
+    ambiente: String(data.get('ambiente') || 'Todos')
+  };
+
+  if (!state.filters.nfeDocs.cliente) {
+    resetNfeDocsSearch();
+    pushToast('Selecione uma empresa para buscar NF-e.', 'error');
+    render();
+    return;
+  }
+
+  if (
+    state.filters.nfeDocs.emissaoInicio &&
+    state.filters.nfeDocs.emissaoFim &&
+    Date.parse(state.filters.nfeDocs.emissaoInicio) > Date.parse(state.filters.nfeDocs.emissaoFim)
+  ) {
+    resetNfeDocsSearch();
+    pushToast('A data inicial nao pode ser maior que a data final.', 'error');
+    render();
+    return;
+  }
+
+  state.nfeSearch.hasSearched = true;
+  state.nfeSearch.results = [];
+  state.nfeSearch.lastQuery = { ...state.filters.nfeDocs };
+  state.tableState.nfeDocs = 'loading';
+  render();
+
+  try {
+    const query = buildNfeSearchQuery(state.filters.nfeDocs);
+    const docs = await apiRequest(`/nfe?${query.toString()}`);
+    const mapped = buildNfeDocumentsFromApi(Array.isArray(docs) ? docs : [], state.clients);
+    state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mapped);
+    state.nfeSearch.results = getFilteredNfeDocumentsFromSource(mapped);
+    state.nfeSearch.lastSearchedAt = new Date().toISOString();
+    state.tableState.nfeDocs = 'data';
+  } catch (error) {
+    state.nfeSearch.results = [];
+    state.tableState.nfeDocs = 'error';
+    pushToast(`Falha ao buscar NF-e: ${toErrorMessage(error)}`, 'error');
   }
 
   render();
@@ -3573,6 +4629,51 @@ function buildXmlSearchQuery(filters) {
   return query;
 }
 
+function buildNfeSearchQuery(filters) {
+  const query = new URLSearchParams();
+  query.set('clienteId', filters.cliente);
+
+  if (filters.emissaoInicio) {
+    query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
+  }
+
+  if (filters.emissaoFim) {
+    query.set('dataFim', `${filters.emissaoFim}T23:59:59.999Z`);
+  }
+
+  const client = findClientById(filters.cliente);
+  if (client?.cnpj) {
+    query.set('cnpjConsulta', normalizeDigits(client.cnpj));
+    if (filters.tipo === 'Emitida') {
+      query.set('tipoRelacao', 'emitidas');
+    } else if (filters.tipo === 'Recebida') {
+      query.set('tipoRelacao', 'recebidas');
+    }
+  }
+
+  if (filters.status !== 'Todos') {
+    query.set('status', filters.status);
+  }
+
+  if (filters.schemaDoc !== 'Todos') {
+    query.set('schemaDoc', filters.schemaDoc);
+  }
+
+  if (filters.valorMin) {
+    query.set('valorMin', filters.valorMin);
+  }
+
+  if (filters.valorMax) {
+    query.set('valorMax', filters.valorMax);
+  }
+
+  if (filters.xmlCompleto === 'Somente completos') {
+    query.set('somenteXmlCompleto', 'true');
+  }
+
+  return query;
+}
+
 function mergeXmlFilesById(existing, incoming) {
   const byId = new Map();
   [...existing, ...incoming].forEach((xml) => {
@@ -3581,6 +4682,16 @@ function mergeXmlFilesById(existing, incoming) {
     }
   });
   return Array.from(byId.values()).sort((a, b) => Date.parse(b.dataDownload || 0) - Date.parse(a.dataDownload || 0));
+}
+
+function mergeNfeDocumentsById(existing, incoming) {
+  const byId = new Map();
+  [...existing, ...incoming].forEach((doc) => {
+    if (doc?.id) {
+      byId.set(doc.id, doc);
+    }
+  });
+  return Array.from(byId.values()).sort((a, b) => Date.parse(b.dataEmissao || 0) - Date.parse(a.dataEmissao || 0));
 }
 
 function getFilteredXmls() {
@@ -3626,9 +4737,68 @@ function getFilteredXmlsFromSource(source) {
   });
 }
 
+function getFilteredNfeDocuments() {
+  if (!state.nfeSearch.hasSearched) {
+    return [];
+  }
+
+  return sortNfeDocuments(getFilteredNfeDocumentsFromSource(state.nfeSearch.results));
+}
+
+function getFilteredNfeDocumentsFromSource(source) {
+  const filters = state.filters.nfeDocs;
+  const docsSource = Array.isArray(source) ? source : [];
+
+  return docsSource.filter((doc) => {
+    const matchesClient = filters.cliente === 'Todos' || !filters.cliente || doc.clientId === filters.cliente;
+    const matchesTipo = filters.tipo === 'Todos' || doc.tipo === filters.tipo;
+    const matchesCnpj =
+      !filters.cnpj ||
+      normalizeDigits(doc.emitenteCnpj || '').includes(filters.cnpj) ||
+      normalizeDigits(doc.destinatarioCnpj || '').includes(filters.cnpj) ||
+      normalizeDigits(doc.contraparteCnpj || '').includes(filters.cnpj);
+    const matchesNumero = !filters.numero || String(doc.numeroNfe || '').includes(filters.numero);
+    const matchesChave = !filters.chave || String(doc.chaveAcesso || '').includes(filters.chave);
+    const matchesStatus = filters.status === 'Todos' || doc.statusFiscal === filters.status;
+    const matchesSchema = filters.schemaDoc === 'Todos' || doc.schemaDoc === filters.schemaDoc;
+    const matchesAmbiente = filters.ambiente === 'Todos' || doc.ambiente === filters.ambiente;
+    const matchesXmlCompleto =
+      filters.xmlCompleto === 'Todos' ||
+      (filters.xmlCompleto === 'Somente completos' && doc.xmlCompletoDisponivel) ||
+      (filters.xmlCompleto === 'Somente resumos' && !doc.xmlCompletoDisponivel);
+
+    const emissaoDate = Date.parse(doc.dataEmissao);
+    const matchesEmissaoInicio = !filters.emissaoInicio || emissaoDate >= Date.parse(`${filters.emissaoInicio}T00:00:00`);
+    const matchesEmissaoFim = !filters.emissaoFim || emissaoDate <= Date.parse(`${filters.emissaoFim}T23:59:59`);
+
+    return (
+      matchesClient &&
+      matchesTipo &&
+      matchesCnpj &&
+      matchesNumero &&
+      matchesChave &&
+      matchesStatus &&
+      matchesSchema &&
+      matchesAmbiente &&
+      matchesXmlCompleto &&
+      matchesEmissaoInicio &&
+      matchesEmissaoFim
+    );
+  });
+}
+
 function updateXmlSort(key) {
   const current = state.sort.xmls;
   state.sort.xmls = {
+    key,
+    direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
+  };
+  render();
+}
+
+function updateNfeSort(key) {
+  const current = state.sort.nfeDocs;
+  state.sort.nfeDocs = {
     key,
     direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
   };
@@ -3646,6 +4816,20 @@ function sortXmls(xmls) {
     }
 
     return compareXmlSortValues(getXmlSortValue(a, 'numeroNfse'), getXmlSortValue(b, 'numeroNfse'));
+  });
+}
+
+function sortNfeDocuments(docs) {
+  const sort = state.sort.nfeDocs;
+  const directionMultiplier = sort.direction === 'asc' ? 1 : -1;
+
+  return [...docs].sort((a, b) => {
+    const comparison = compareXmlSortValues(getNfeSortValue(a, sort.key), getNfeSortValue(b, sort.key));
+    if (comparison !== 0) {
+      return comparison * directionMultiplier;
+    }
+
+    return compareXmlSortValues(getNfeSortValue(a, 'chaveAcesso'), getNfeSortValue(b, 'chaveAcesso'));
   });
 }
 
@@ -3669,6 +4853,33 @@ function getXmlSortValue(xml, key) {
       return xml.tipo || '';
     case 'status':
       return `${xml.cancelada ? 'cancelada' : 'autorizada'} ${xml.statusArmazenamento || ''}`;
+    default:
+      return '';
+  }
+}
+
+function getNfeSortValue(doc, key) {
+  switch (key) {
+    case 'chaveAcesso':
+      return normalizeDigits(doc.chaveAcesso || '');
+    case 'numeroNfe':
+      return toSortableNumber(doc.numeroNfe);
+    case 'cliente':
+      return doc.cliente || '';
+    case 'tipo':
+      return doc.tipo || '';
+    case 'contraparte':
+      return doc.contraparteNome || '';
+    case 'dataEmissao':
+      return toSortableDate(doc.dataEmissao);
+    case 'valor':
+      return Number(doc.valor || 0);
+    case 'ambiente':
+      return doc.ambiente || '';
+    case 'arquivo':
+      return `${doc.xmlCompletoDisponivel ? '1' : '0'}${doc.resumoDisponivel ? '1' : '0'}`;
+    case 'status':
+      return doc.statusFiscal || '';
     default:
       return '';
   }
@@ -3714,6 +4925,38 @@ function resetXmlSearch() {
   state.xmlSearch.lastQuery = null;
   state.xmlSearch.lastSearchedAt = null;
   state.tableState.xmls = 'data';
+}
+
+function resetNfeSyncFilters() {
+  state.filters.nfeSync = {
+    cliente: 'Todos',
+    status: 'Todos',
+    ambiente: 'Todos'
+  };
+  state.tableState.nfeSync = 'data';
+}
+
+function resetNfeDocsSearch() {
+  state.filters.nfeDocs = {
+    cliente: 'Todos',
+    tipo: 'Todos',
+    cnpj: '',
+    numero: '',
+    chave: '',
+    emissaoInicio: '',
+    emissaoFim: '',
+    status: 'Todos',
+    schemaDoc: 'Todos',
+    valorMin: '',
+    valorMax: '',
+    xmlCompleto: 'Todos',
+    ambiente: 'Todos'
+  };
+  state.nfeSearch.hasSearched = false;
+  state.nfeSearch.results = [];
+  state.nfeSearch.lastQuery = null;
+  state.nfeSearch.lastSearchedAt = null;
+  state.tableState.nfeDocs = 'data';
 }
 
 function applyAlertsFilters(form) {
@@ -4720,6 +5963,93 @@ function buildEventosResumo(eventos) {
     .join(' / ');
 }
 
+function buildNfeDocumentsFromApi(nfeDocs, clients) {
+  const docs = Array.isArray(nfeDocs) ? nfeDocs : [];
+  const clientById = Object.fromEntries(clients.map((client) => [client.id, client]));
+
+  return docs
+    .map((doc) => {
+      const client = clientById[doc.clienteId] || null;
+      const tipo = mapNfeTipoLabel(doc.tipoRelacao);
+      const emitenteCnpj = normalizeDigits(doc.cnpjEmitente || '');
+      const destinatarioCnpj = normalizeDigits(doc.cnpjDestinatario || '');
+      const contraparteNome = tipo === 'Emitida' ? doc.razaoSocialDestinatario : doc.razaoSocialEmitente;
+      const contraparteCnpj = tipo === 'Emitida' ? destinatarioCnpj : emitenteCnpj;
+
+      return {
+        id: `nfe-${doc.id}`,
+        apiNfeId: doc.id,
+        clientId: doc.clienteId,
+        cliente: client?.razaoSocial || 'Cliente nao identificado',
+        estabelecimentoId: doc.estabelecimentoId || null,
+        chaveAcesso: doc.chaveAcesso || '-',
+        numeroNfe: doc.numeroNfe || '-',
+        serie: doc.serie || '-',
+        modelo: doc.modelo || '-',
+        ambiente: doc.ambiente || 'producao',
+        dataEmissao: doc.dataEmissao || doc.createdAt || doc.updatedAt,
+        dataAutorizacao: doc.dataAutorizacao || doc.updatedAt || doc.createdAt,
+        valor: toNumber(doc.valorTotal),
+        tipo,
+        statusFiscal: doc.status || '-',
+        schemaDoc: doc.schemaDoc || '-',
+        xmlCompletoDisponivel: Boolean(doc.xmlCompletoDisponivel),
+        resumoDisponivel: Boolean(doc.resumoDisponivel),
+        caminhoServidor: doc.xmlCompletoPath || doc.xmlResumoPath || '-',
+        emitenteNome: doc.razaoSocialEmitente || '-',
+        emitenteCnpj,
+        destinatarioNome: doc.razaoSocialDestinatario || '-',
+        destinatarioCnpj,
+        contraparteNome: contraparteNome || '-',
+        contraparteCnpj,
+        conteudoXml: null
+      };
+    })
+    .sort((a, b) => Date.parse(b.dataEmissao || 0) - Date.parse(a.dataEmissao || 0));
+}
+
+function buildNfeSyncControlsFromApi(nfeSyncByClient, clients, establishmentsByClient) {
+  const clientById = Object.fromEntries(clients.map((client) => [client.id, client]));
+  const establishmentById = {};
+
+  Object.values(establishmentsByClient || {}).forEach((rows) => {
+    const items = Array.isArray(rows) ? rows : [];
+    items.forEach((item) => {
+      if (item?.id) {
+        establishmentById[item.id] = item;
+      }
+    });
+  });
+
+  return Object.entries(nfeSyncByClient || {})
+    .flatMap(([clientId, rows]) => {
+      const controls = Array.isArray(rows) ? rows : [];
+      return controls.map((control) => {
+        const client = clientById[clientId] || null;
+        const establishment = establishmentById[control.estabelecimentoId] || null;
+
+        return {
+          id: control.id,
+          clientId,
+          cliente: client?.razaoSocial || 'Cliente nao identificado',
+          estabelecimentoId: control.estabelecimentoId,
+          estabelecimento: establishment?.razaoSocial || establishment?.municipioNome || 'Estabelecimento',
+          cnpjEstabelecimento: normalizeDigits(establishment?.cnpj || ''),
+          cnpjConsulta: normalizeDigits(control.cnpjConsulta || ''),
+          ambiente: control.ambiente || 'producao',
+          ultimoNsuConsultado: String(control.ultimoNsuConsultado ?? '0'),
+          ultimoNsuDistribuido: String(control.ultimoNsuDistribuido ?? '0'),
+          maxNsu: String(control.maxNsu ?? '0'),
+          status: control.status || 'ativo',
+          ultimaExecucao: control.ultimaExecucao || null,
+          ultimaMensagem: control.ultimaMensagem || '',
+          totalDocumentosBaixados: Number(control.totalDocumentosBaixados || 0)
+        };
+      });
+    })
+    .sort((a, b) => Date.parse(b.ultimaExecucao || 0) - Date.parse(a.ultimaExecucao || 0));
+}
+
 function buildSearchRunsFromApi(syncByClient, clients) {
   const clientById = Object.fromEntries(clients.map((client) => [client.id, client]));
   const flatLogs = [];
@@ -5231,9 +6561,44 @@ function findXmlById(xmlId) {
   return state.xmlSearch.results.find((xml) => xml.id === xmlId) || state.xmlFiles.find((xml) => xml.id === xmlId) || null;
 }
 
+function findNfeById(nfeId) {
+  if (!nfeId) {
+    return null;
+  }
+  return state.nfeSearch.results.find((doc) => doc.id === nfeId) || state.nfeDocuments.find((doc) => doc.id === nfeId) || null;
+}
+
 function mapClientOptions() {
   return state.clients.reduce((acc, client) => {
     acc[client.id] = `${client.razaoSocial} (${formatCnpj(client.cnpj)})`;
+    return acc;
+  }, {});
+}
+
+function renderNfeScopeOptions() {
+  return state.clients
+    .flatMap((client) => {
+      const establishments = Array.isArray(state.establishmentsByClient?.[client.id]) ? state.establishmentsByClient[client.id] : [];
+      return establishments.map((establishment) => {
+        const value = `${client.id}::${establishment.id}`;
+        const label = `${client.razaoSocial} - ${establishment.razaoSocial || establishment.municipioNome || establishment.cnpj} (${formatCnpj(establishment.cnpj)})`;
+        return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+      });
+    })
+    .join('');
+}
+
+function parseNfeScopeValue(value) {
+  const [clienteId = '', estabelecimentoId = ''] = String(value || '').split('::');
+  return {
+    clienteId,
+    estabelecimentoId
+  };
+}
+
+function mapNfeSyncStatusOptions(statuses) {
+  return ['Todos', ...(Array.isArray(statuses) ? statuses : [])].reduce((acc, status) => {
+    acc[status] = status === 'Todos' ? 'Todos' : mapNfeSyncStatusLabel(status);
     return acc;
   }, {});
 }
@@ -5309,6 +6674,44 @@ function toneFromStorageStatus(status) {
     return 'danger';
   }
   return 'neutral';
+}
+
+function toneFromNfeSyncStatus(status) {
+  if (status === 'ativo') {
+    return 'success';
+  }
+  if (status === 'pausado') {
+    return 'neutral';
+  }
+  if (String(status || '').startsWith('erro')) {
+    return 'danger';
+  }
+  return 'warning';
+}
+
+function mapNfeSyncStatusLabel(status) {
+  const labels = {
+    ativo: 'Ativo',
+    pausado: 'Pausado',
+    erro_api: 'Erro de API',
+    erro_autorizacao: 'Erro de autorizacao',
+    erro_certificado: 'Erro de certificado'
+  };
+  return labels[status] || status || '-';
+}
+
+function mapNfeAmbienteLabel(ambiente) {
+  return ambiente === 'homologacao' ? 'Homologacao' : 'Producao';
+}
+
+function mapNfeTipoLabel(tipoRelacao) {
+  if (tipoRelacao === 'emitida') {
+    return 'Emitida';
+  }
+  if (tipoRelacao === 'recebida') {
+    return 'Recebida';
+  }
+  return 'Nao identificado';
 }
 
 function toneFromFiscalStatus(status) {
@@ -5527,6 +6930,47 @@ function deepClone(input) {
   return JSON.parse(JSON.stringify(input));
 }
 
+async function openNfeViewer(nfeId) {
+  const doc = findNfeById(nfeId);
+  if (!doc) {
+    pushToast('NF-e nao encontrada.', 'error');
+    return;
+  }
+
+  try {
+    await ensureNfeContentLoaded(doc);
+    openModal({ kind: 'nfe-view', nfeId });
+  } catch (error) {
+    pushToast(`Falha ao carregar XML da NF-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function downloadNfeXmlById(nfeId) {
+  const doc = findNfeById(nfeId);
+  if (!doc) {
+    pushToast('NF-e nao encontrada.', 'error');
+    return;
+  }
+
+  try {
+    await ensureNfeContentLoaded(doc);
+  } catch (error) {
+    pushToast(`Falha ao baixar XML da NF-e: ${toErrorMessage(error)}`, 'error');
+    return;
+  }
+
+  const blob = new Blob([doc.conteudoXml], { type: 'application/xml' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `nfe-${doc.chaveAcesso}.xml`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  pushToast(`Download da NF-e ${doc.numeroNfe || doc.chaveAcesso} iniciado.`, 'success');
+}
+
 async function openXmlViewer(xmlId) {
   const xml = findXmlById(xmlId);
   if (!xml) {
@@ -5686,6 +7130,66 @@ function exportXmlListToCsv() {
   pushToast(`${xmls.length} XML(s) exportado(s) para CSV.`, 'success');
 }
 
+function exportNfeListToCsv() {
+  if (!state.nfeSearch.hasSearched) {
+    pushToast('Busque as NF-e antes de exportar a listagem.', 'error');
+    return;
+  }
+
+  const docs = getFilteredNfeDocuments();
+  if (!docs.length) {
+    pushToast('Nao ha NF-e na listagem atual para exportar.', 'error');
+    return;
+  }
+
+  const header = [
+    'Chave de acesso',
+    'Numero NF-e',
+    'Cliente',
+    'Tipo',
+    'Ambiente',
+    'Data emissao',
+    'Data autorizacao',
+    'Valor total',
+    'Status',
+    'Schema',
+    'Emitente',
+    'CNPJ emitente',
+    'Destinatario',
+    'CNPJ destinatario',
+    'Arquivo completo',
+    'Resumo disponivel'
+  ];
+  const rows = docs.map((doc) => [
+    doc.chaveAcesso,
+    doc.numeroNfe,
+    doc.cliente,
+    doc.tipo,
+    mapNfeAmbienteLabel(doc.ambiente),
+    formatDateTime(doc.dataEmissao),
+    formatDateTime(doc.dataAutorizacao),
+    formatCurrency(doc.valor),
+    doc.statusFiscal,
+    doc.schemaDoc,
+    doc.emitenteNome,
+    formatCnpj(doc.emitenteCnpj),
+    doc.destinatarioNome,
+    formatCnpj(doc.destinatarioCnpj),
+    doc.xmlCompletoDisponivel ? 'Sim' : 'Nao',
+    doc.resumoDisponivel ? 'Sim' : 'Nao'
+  ]);
+  const csv = [header, ...rows].map((row) => row.map(escapeCsvCell).join(';')).join('\r\n');
+  const client = findClientById(state.nfeSearch.lastQuery?.cliente);
+  const start = state.nfeSearch.lastQuery?.emissaoInicio || 'inicio';
+  const end = state.nfeSearch.lastQuery?.emissaoFim || 'fim';
+  const clientName = toSafeFileName(client?.razaoSocial || 'cliente');
+  const fileName = `nfe-${clientName}-${start}-${end}.csv`;
+  const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' });
+
+  triggerBrowserDownload(fileName, blob);
+  pushToast(`${docs.length} NF-e exportada(s) para CSV.`, 'success');
+}
+
 function escapeCsvCell(value) {
   const normalized = String(value ?? '').replaceAll('"', '""');
   return `"${normalized}"`;
@@ -5717,6 +7221,24 @@ async function ensureXmlContentLoaded(xml) {
   }
 
   xml.conteudoXml = rawXml;
+}
+
+async function ensureNfeContentLoaded(doc) {
+  if (doc.conteudoXml) {
+    return;
+  }
+
+  if (!doc.apiNfeId || !doc.clientId) {
+    throw new Error('Documento sem referencia para recuperar XML na API');
+  }
+
+  const result = await apiRequest(`/nfe/${doc.apiNfeId}/xml?clienteId=${encodeURIComponent(doc.clientId)}`);
+  const rawXml = result?.xml || (result?.contentBase64 ? atob(result.contentBase64) : '');
+  if (!rawXml) {
+    throw new Error('Conteudo XML vazio');
+  }
+
+  doc.conteudoXml = rawXml;
 }
 
 function downloadFromPayload(payload, fallbackName) {
