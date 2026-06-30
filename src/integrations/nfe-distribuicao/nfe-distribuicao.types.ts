@@ -24,6 +24,20 @@ export interface NfeDistribuicaoClient {
     ambiente: NfeAmbiente;
     certificateId: string;
   }): Promise<NfeDistribuicaoResult>;
+
+  consultarPorNsu(params: {
+    cnpjConsulta: string;
+    nsu: bigint;
+    ambiente: NfeAmbiente;
+    certificateId: string;
+  }): Promise<NfeDistribuicaoResult>;
+
+  consultarPorChave(params: {
+    cnpjConsulta: string;
+    chaveAcesso: string;
+    ambiente: NfeAmbiente;
+    certificateId: string;
+  }): Promise<NfeDistribuicaoResult>;
 }
 
 export const NFE_DISTRIBUICAO_CLIENT = Symbol('NFE_DISTRIBUICAO_CLIENT');

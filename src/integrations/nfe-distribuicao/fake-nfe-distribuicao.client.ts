@@ -93,4 +93,87 @@ export class FakeNfeDistribuicaoClient implements NfeDistribuicaoClient {
       }
     };
   }
+
+  async consultarPorNsu(params: {
+    cnpjConsulta: string;
+    nsu: bigint;
+    ambiente: NfeAmbiente;
+    certificateId: string;
+  }): Promise<NfeDistribuicaoResult> {
+    const distributed = await this.distribuirPorNsu({
+      cnpjConsulta: params.cnpjConsulta,
+      ultNsu: params.nsu - 1n,
+      ambiente: params.ambiente,
+      certificateId: params.certificateId
+    });
+
+    return {
+      ...distributed,
+      ultNsu: params.nsu,
+      maxNsu: distributed.maxNsu < params.nsu ? params.nsu : distributed.maxNsu
+    };
+  }
+
+  async consultarPorChave(params: {
+    cnpjConsulta: string;
+    chaveAcesso: string;
+    ambiente: NfeAmbiente;
+    certificateId: string;
+  }): Promise<NfeDistribuicaoResult> {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc versao="4.00" xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe${params.chaveAcesso}" versao="4.00">
+      <ide>
+        <cUF>35</cUF>
+        <mod>55</mod>
+        <serie>001</serie>
+        <nNF>123</nNF>
+        <dhEmi>2026-06-29T10:00:00-03:00</dhEmi>
+      </ide>
+      <emit>
+        <CNPJ>${params.cnpjConsulta}</CNPJ>
+        <xNome>Emitente Mock SA</xNome>
+      </emit>
+      <dest>
+        <CNPJ>99888777000166</CNPJ>
+        <xNome>Cliente Mock LTDA</xNome>
+      </dest>
+      <total>
+        <ICMSTot>
+          <vNF>150.00</vNF>
+        </ICMSTot>
+      </total>
+    </infNFe>
+  </NFe>
+  <protNFe>
+    <infProt>
+      <cStat>100</cStat>
+      <xMotivo>Autorizado o uso da NF-e</xMotivo>
+      <dhRecbto>2026-06-29T10:00:01-03:00</dhRecbto>
+      <chNFe>${params.chaveAcesso}</chNFe>
+    </infProt>
+  </protNFe>
+</nfeProc>`;
+
+    return {
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado por chave',
+      ultNsu: 0n,
+      maxNsu: 0n,
+      documents: [
+        {
+          schema: 'procNFe_v4.00',
+          xml,
+          chaveAcesso: params.chaveAcesso
+        }
+      ],
+      rawResponse: {
+        mock: true,
+        ambiente: params.ambiente,
+        certificateId: params.certificateId
+      }
+    };
+  }
 }

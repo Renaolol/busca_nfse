@@ -38,7 +38,9 @@ describe('NfeService', () => {
   };
 
   const distribuicaoClient: NfeDistribuicaoClient = {
-    distribuirPorNsu: jest.fn()
+    distribuirPorNsu: jest.fn(),
+    consultarPorNsu: jest.fn(),
+    consultarPorChave: jest.fn()
   };
 
   const service = new NfeService(
@@ -249,5 +251,107 @@ describe('NfeService', () => {
         })
       })
     );
+  });
+
+  it('consulta um NSU especifico e persiste documento retornado', async () => {
+    (distribuicaoClient.consultarPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado',
+      ultNsu: 15n,
+      maxNsu: 99n,
+      documents: [
+        {
+          nsu: 15n,
+          schema: 'procNFe_v4.00',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe35260612345678000199550010000001231000001231">
+      <ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>2026-06-29T10:00:00-03:00</dhEmi></ide>
+      <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
+      <dest><CNPJ>99888777000166</CNPJ><xNome>Cliente Teste</xNome></dest>
+      <total><ICMSTot><vNF>150.00</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat><dhRecbto>2026-06-29T10:00:01-03:00</dhRecbto></infProt></protNFe>
+</nfeProc>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.consultarNsu({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      nsu: '15',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(distribuicaoClient.consultarPorNsu).toHaveBeenCalledWith({
+      cnpjConsulta: '12345678000199',
+      nsu: 15n,
+      ambiente: NfeAmbiente.producao,
+      certificateId: 'cert-1'
+    });
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      requestedNsu: '15',
+      persistido: true,
+      documentosEncontrados: 1,
+      documentosPersistidos: 1
+    });
+  });
+
+  it('consulta por chave sem persistir quando persistir=false', async () => {
+    (distribuicaoClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado por chave',
+      ultNsu: 0n,
+      maxNsu: 0n,
+      documents: [
+        {
+          schema: 'resNFe_v1.01.xsd',
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<resNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01">
+  <chNFe>35260612345678000199550010000001231000001231</chNFe>
+  <CNPJ>12345678000199</CNPJ>
+  <xNome>Fornecedor Teste</xNome>
+  <IE>123456789</IE>
+  <dhEmi>2026-06-29T10:00:00-03:00</dhEmi>
+  <tpNF>0</tpNF>
+  <vNF>88.15</vNF>
+  <dhRecbto>2026-06-29T10:00:01-03:00</dhRecbto>
+  <nProt>135260000000001</nProt>
+  <cSitNFe>1</cSitNFe>
+</resNFe>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.consultarChave({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      chaveAcesso: '35260612345678000199550010000001231000001231',
+      ambiente: NfeAmbiente.producao,
+      persistir: false
+    });
+
+    expect(distribuicaoClient.consultarPorChave).toHaveBeenCalledWith({
+      cnpjConsulta: '12345678000199',
+      chaveAcesso: '35260612345678000199550010000001231000001231',
+      ambiente: NfeAmbiente.producao,
+      certificateId: 'cert-1'
+    });
+    expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      requestedChave: '35260612345678000199550010000001231000001231',
+      persistido: false,
+      documentosEncontrados: 1,
+      documentosPersistidos: 0
+    });
   });
 });

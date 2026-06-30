@@ -9,6 +9,8 @@ import {
 import { DownloadNfeDocumentDto } from './dto/download-document.dto';
 import { ImportNfeXmlDto } from './dto/import-xml.dto';
 import { PauseNfeSyncDto } from './dto/pause-sync.dto';
+import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
+import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
 import { RunNfeSyncDto } from './dto/run-sync.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
@@ -76,5 +78,17 @@ export class NfeController {
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   runNow(@Body() dto: RunNfeSyncDto) {
     return this.nfeService.runNow(dto);
+  }
+
+  @Post('sync/consultar-nsu')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  consultarNsu(@Body() dto: QueryNfeByNsuDto) {
+    return this.nfeService.consultarNsu(dto);
+  }
+
+  @Post('sync/consultar-chave')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  consultarChave(@Body() dto: QueryNfeByChaveDto) {
+    return this.nfeService.consultarChave(dto);
   }
 }

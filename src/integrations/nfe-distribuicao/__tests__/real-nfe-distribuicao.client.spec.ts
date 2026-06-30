@@ -60,11 +60,34 @@ describe('RealNfeDistribuicaoClient', () => {
 
   it('monta envelope SOAP com header da AN e payload distNSU', () => {
     const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
-      buildDistNsuRequestXml(cnpjConsulta: string, ambiente: 'producao' | 'homologacao', ultNsu: bigint): string;
+      buildRequestXml(params: {
+        cnpjConsulta: string;
+        ambiente: 'producao' | 'homologacao';
+        consulta:
+          | {
+              kind: 'distNSU';
+              ultNsu: bigint;
+            }
+          | {
+              kind: 'consNSU';
+              nsu: bigint;
+            }
+          | {
+              kind: 'consChNFe';
+              chaveAcesso: string;
+            };
+      }): string;
       buildSoapEnvelope(xml: string): string;
     };
 
-    const request = client.buildDistNsuRequestXml('12.345.678/0001-99', 'producao', 7n);
+    const request = client.buildRequestXml({
+      cnpjConsulta: '12.345.678/0001-99',
+      ambiente: 'producao',
+      consulta: {
+        kind: 'distNSU',
+        ultNsu: 7n
+      }
+    });
     const envelope = client.buildSoapEnvelope(request);
 
     expect(request).toContain('<tpAmb>1</tpAmb>');
@@ -73,5 +96,50 @@ describe('RealNfeDistribuicaoClient', () => {
     expect(envelope).toContain('<cUF>91</cUF>');
     expect(envelope).toContain('<versaoDados>1.01</versaoDados>');
     expect(envelope).toContain('<nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe">');
+  });
+
+  it('monta payload para consNSU e consChNFe', () => {
+    const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
+      buildRequestXml(params: {
+        cnpjConsulta: string;
+        ambiente: 'producao' | 'homologacao';
+        consulta:
+          | {
+              kind: 'distNSU';
+              ultNsu: bigint;
+            }
+          | {
+              kind: 'consNSU';
+              nsu: bigint;
+            }
+          | {
+              kind: 'consChNFe';
+              chaveAcesso: string;
+            };
+      }): string;
+    };
+
+    const byNsu = client.buildRequestXml({
+      cnpjConsulta: '12345678000199',
+      ambiente: 'homologacao',
+      consulta: {
+        kind: 'consNSU',
+        nsu: 15n
+      }
+    });
+    const byChave = client.buildRequestXml({
+      cnpjConsulta: '12345678000199',
+      ambiente: 'producao',
+      consulta: {
+        kind: 'consChNFe',
+        chaveAcesso: '35260612345678000199550010000001231000001231'
+      }
+    });
+
+    expect(byNsu).toContain('<tpAmb>2</tpAmb>');
+    expect(byNsu).toContain('<consNSU><NSU>000000000000015</NSU></consNSU>');
+    expect(byChave).toContain(
+      '<consChNFe><chNFe>35260612345678000199550010000001231000001231</chNFe></consChNFe>'
+    );
   });
 });

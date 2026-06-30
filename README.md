@@ -238,14 +238,18 @@ Rotas principais:
 - `POST /nfe/sync/iniciar`
 - `POST /nfe/sync/pausar`
 - `POST /nfe/sync/rodar-agora`
+- `POST /nfe/sync/consultar-nsu`
+- `POST /nfe/sync/consultar-chave`
 
 Observacoes:
 
 - `POST /nfe/sync/iniciar` cria ou reativa controles de busca por `cliente/cnpj/ambiente` sem misturar NSU de NFS-e.
 - `POST /nfe/sync/rodar-agora` executa a distribuicao manual e persiste os documentos retornados.
+- `POST /nfe/sync/consultar-nsu` consulta um NSU pontual via `consNSU`, com opcao de persistir o documento retornado.
+- `POST /nfe/sync/consultar-chave` consulta uma NF-e especifica via `consChNFe`, com opcao de persistir o retorno.
 - A deduplicacao de NF-e tambem ocorre por `ambiente + chave_acesso`.
 - `GET /nfe` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, periodo, status e `somenteXmlCompleto`.
-- Quando `NFE_DISTRIBUICAO_CLIENT_MODE=real`, o sistema consulta `distNSU`, descompacta `docZip` e armazena resumos `resNFe` e XMLs completos retornados pelo Ambiente Nacional.
+- Quando `NFE_DISTRIBUICAO_CLIENT_MODE=real`, o sistema consulta `distNSU`, `consNSU` e `consChNFe`, descompacta `docZip` e armazena resumos `resNFe` e XMLs completos retornados pelo Ambiente Nacional.
 
 ## Guia de layout do DANFSE
 

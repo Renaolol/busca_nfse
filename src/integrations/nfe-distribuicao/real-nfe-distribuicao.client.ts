@@ -45,11 +45,77 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     ambiente: NfeAmbiente;
     certificateId: string;
   }): Promise<NfeDistribuicaoResult> {
+    return this.executeConsulta({
+      cnpjConsulta: params.cnpjConsulta,
+      ambiente: params.ambiente,
+      certificateId: params.certificateId,
+      requestXml: this.buildRequestXml({
+        cnpjConsulta: params.cnpjConsulta,
+        ambiente: params.ambiente,
+        consulta: {
+          kind: 'distNSU',
+          ultNsu: params.ultNsu
+        }
+      }),
+      fallbackNsu: params.ultNsu
+    });
+  }
+
+  async consultarPorNsu(params: {
+    cnpjConsulta: string;
+    nsu: bigint;
+    ambiente: NfeAmbiente;
+    certificateId: string;
+  }): Promise<NfeDistribuicaoResult> {
+    return this.executeConsulta({
+      cnpjConsulta: params.cnpjConsulta,
+      ambiente: params.ambiente,
+      certificateId: params.certificateId,
+      requestXml: this.buildRequestXml({
+        cnpjConsulta: params.cnpjConsulta,
+        ambiente: params.ambiente,
+        consulta: {
+          kind: 'consNSU',
+          nsu: params.nsu
+        }
+      }),
+      fallbackNsu: params.nsu
+    });
+  }
+
+  async consultarPorChave(params: {
+    cnpjConsulta: string;
+    chaveAcesso: string;
+    ambiente: NfeAmbiente;
+    certificateId: string;
+  }): Promise<NfeDistribuicaoResult> {
+    return this.executeConsulta({
+      cnpjConsulta: params.cnpjConsulta,
+      ambiente: params.ambiente,
+      certificateId: params.certificateId,
+      requestXml: this.buildRequestXml({
+        cnpjConsulta: params.cnpjConsulta,
+        ambiente: params.ambiente,
+        consulta: {
+          kind: 'consChNFe',
+          chaveAcesso: params.chaveAcesso
+        }
+      }),
+      fallbackNsu: 0n
+    });
+  }
+
+  private async executeConsulta(params: {
+    cnpjConsulta: string;
+    ambiente: NfeAmbiente;
+    certificateId: string;
+    requestXml: string;
+    fallbackNsu: bigint;
+  }): Promise<NfeDistribuicaoResult> {
     try {
       const certificate = await this.loadCertificate(params.certificateId);
       const url = this.buildDistribuicaoUrl(params.ambiente);
-      const requestXml = this.buildDistNsuRequestXml(params.cnpjConsulta, params.ambiente, params.ultNsu);
-      const soapEnvelope = this.buildSoapEnvelope(requestXml);
+      const soapEnvelope = this.buildSoapEnvelope(params.requestXml);
       const response = await this.doSoapRequestWithFallback(url, certificate, soapEnvelope);
       let parsed;
 
@@ -60,8 +126,8 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
           statusCode: response.statusCode,
           cStat: '000',
           xMotivo: this.normalizeQueryErrorMessage(error),
-          ultNsu: params.ultNsu,
-          maxNsu: params.ultNsu,
+          ultNsu: params.fallbackNsu,
+          maxNsu: params.fallbackNsu,
           documents: [],
           rawResponse: response.body
         };
@@ -81,8 +147,8 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
         statusCode: 0,
         cStat: '000',
         xMotivo: this.normalizeQueryErrorMessage(error),
-        ultNsu: params.ultNsu,
-        maxNsu: params.ultNsu,
+        ultNsu: params.fallbackNsu,
+        maxNsu: params.fallbackNsu,
         documents: [],
         rawResponse: { error: this.normalizeQueryErrorMessage(error) }
       };
@@ -134,9 +200,31 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     return new URL(url);
   }
 
-  private buildDistNsuRequestXml(cnpjConsulta: string, ambiente: NfeAmbiente, ultNsu: bigint): string {
-    const tpAmb = ambiente === NfeAmbiente.producao ? '1' : '2';
-    const cnpj = this.onlyDigits(cnpjConsulta);
+  private buildRequestXml(params: {
+    cnpjConsulta: string;
+    ambiente: NfeAmbiente;
+    consulta:
+      | {
+          kind: 'distNSU';
+          ultNsu: bigint;
+        }
+      | {
+          kind: 'consNSU';
+          nsu: bigint;
+        }
+      | {
+          kind: 'consChNFe';
+          chaveAcesso: string;
+        };
+  }): string {
+    const tpAmb = params.ambiente === NfeAmbiente.producao ? '1' : '2';
+    const cnpj = this.onlyDigits(params.cnpjConsulta);
+    const consultaXml =
+      params.consulta.kind === 'distNSU'
+        ? `<distNSU><ultNSU>${params.consulta.ultNsu.toString().padStart(15, '0')}</ultNSU></distNSU>`
+        : params.consulta.kind === 'consNSU'
+          ? `<consNSU><NSU>${params.consulta.nsu.toString().padStart(15, '0')}</NSU></consNSU>`
+          : `<consChNFe><chNFe>${this.onlyDigits(params.consulta.chaveAcesso)}</chNFe></consChNFe>`;
 
     return [
       `<?xml version="1.0" encoding="utf-8"?>`,
@@ -144,7 +232,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
       `<tpAmb>${tpAmb}</tpAmb>`,
       `<cUFAutor>${RealNfeDistribuicaoClient.AN_CUF}</cUFAutor>`,
       `<CNPJ>${cnpj}</CNPJ>`,
-      `<distNSU><ultNSU>${ultNsu.toString().padStart(15, '0')}</ultNSU></distNSU>`,
+      consultaXml,
       `</distDFeInt>`
     ].join('');
   }

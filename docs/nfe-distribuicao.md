@@ -30,6 +30,8 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - `POST /nfe/sync/iniciar`
 - `POST /nfe/sync/pausar`
 - `POST /nfe/sync/rodar-agora`
+- `POST /nfe/sync/consultar-nsu`
+- `POST /nfe/sync/consultar-chave`
 
 ## Observacoes
 
@@ -39,4 +41,5 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - producao: `https://www1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx`
 - homologacao: `https://hom1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx`
 - As URLs acima seguem a relacao oficial de servicos web do portal da NF-e e podem ser sobrescritas por env var.
-- O fluxo atual implementa `distNSU`. Consultas pontuais por `consNSU` e `consChNFe` podem ser adicionadas sem mudar o contrato do adapter.
+- O fluxo atual implementa `distNSU`, `consNSU` e `consChNFe`.
+- As rotas manuais permitem testar o ambiente real e recuperar documentos pontuais sem depender do ciclo incremental.

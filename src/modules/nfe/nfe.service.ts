@@ -17,6 +17,8 @@ import {
 import { DashboardNfeStatsQueryDto } from './dto/dashboard-stats.dto';
 import { ImportNfeXmlDto } from './dto/import-xml.dto';
 import { PauseNfeSyncDto } from './dto/pause-sync.dto';
+import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
+import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
 import { RunNfeSyncDto } from './dto/run-sync.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
@@ -304,6 +306,54 @@ export class NfeService {
     };
   }
 
+  async consultarNsu(dto: QueryNfeByNsuDto) {
+    await this.ensureClient(dto.clienteId);
+    const establishment = await this.getEstablishmentOrThrow(dto.estabelecimentoId, dto.clienteId);
+    const ambiente = dto.ambiente ?? NfeAmbiente.producao;
+    const cnpjConsulta = establishment.cnpj;
+    const certificate = await this.findActiveCertificateOrThrow(dto.clienteId, dto.estabelecimentoId, cnpjConsulta);
+    const result = await this.distribuicaoClient.consultarPorNsu({
+      cnpjConsulta,
+      nsu: BigInt(dto.nsu),
+      ambiente,
+      certificateId: certificate.id
+    });
+
+    return this.handleManualConsultaResult({
+      clienteId: dto.clienteId,
+      estabelecimentoId: dto.estabelecimentoId,
+      ambiente,
+      cnpjConsulta,
+      persistir: dto.persistir !== false,
+      result,
+      requestedNsu: dto.nsu
+    });
+  }
+
+  async consultarChave(dto: QueryNfeByChaveDto) {
+    await this.ensureClient(dto.clienteId);
+    const establishment = await this.getEstablishmentOrThrow(dto.estabelecimentoId, dto.clienteId);
+    const ambiente = dto.ambiente ?? NfeAmbiente.producao;
+    const cnpjConsulta = establishment.cnpj;
+    const certificate = await this.findActiveCertificateOrThrow(dto.clienteId, dto.estabelecimentoId, cnpjConsulta);
+    const result = await this.distribuicaoClient.consultarPorChave({
+      cnpjConsulta,
+      chaveAcesso: dto.chaveAcesso,
+      ambiente,
+      certificateId: certificate.id
+    });
+
+    return this.handleManualConsultaResult({
+      clienteId: dto.clienteId,
+      estabelecimentoId: dto.estabelecimentoId,
+      ambiente,
+      cnpjConsulta,
+      persistir: dto.persistir !== false,
+      result,
+      requestedChave: dto.chaveAcesso
+    });
+  }
+
   private async persistDocument(params: {
     clienteId: string;
     estabelecimentoId: string;
@@ -416,6 +466,59 @@ export class NfeService {
     });
   }
 
+  private async handleManualConsultaResult(params: {
+    clienteId: string;
+    estabelecimentoId: string;
+    ambiente: NfeAmbiente;
+    cnpjConsulta: string;
+    persistir: boolean;
+    result: {
+      statusCode: number;
+      cStat?: string;
+      xMotivo?: string;
+      documents: NfeDistribuicaoDocument[];
+      ultNsu: bigint;
+      maxNsu: bigint;
+    };
+    requestedNsu?: string;
+    requestedChave?: string;
+  }) {
+    let documentosPersistidos = 0;
+    const documentos = params.result.documents.map((document) => ({
+      nsu: document.nsu?.toString(),
+      schema: document.schema,
+      chaveAcesso: document.chaveAcesso
+    }));
+
+    if (params.persistir) {
+      for (const document of params.result.documents) {
+        await this.persistDocument({
+          clienteId: params.clienteId,
+          estabelecimentoId: params.estabelecimentoId,
+          ambiente: params.ambiente,
+          cnpjConsulta: params.cnpjConsulta,
+          document,
+          origem: NfeDocumentoOrigem.distribuicao_nsu
+        });
+        documentosPersistidos += 1;
+      }
+    }
+
+    return {
+      statusCode: params.result.statusCode,
+      cStat: params.result.cStat,
+      xMotivo: params.result.xMotivo,
+      ultNsu: params.result.ultNsu.toString(),
+      maxNsu: params.result.maxNsu.toString(),
+      requestedNsu: params.requestedNsu,
+      requestedChave: params.requestedChave,
+      persistido: params.persistir,
+      documentosEncontrados: params.result.documents.length,
+      documentosPersistidos,
+      documentos
+    };
+  }
+
   private buildBaseWhere(query: QueryNfeDto): Prisma.NfeDocumentoWhereInput {
     const where: Prisma.NfeDocumentoWhereInput = {};
 
@@ -486,10 +589,16 @@ export class NfeService {
   }
 
   private async ensureEstablishment(estabelecimentoId: string, clienteId: string): Promise<void> {
+    await this.getEstablishmentOrThrow(estabelecimentoId, clienteId);
+  }
+
+  private async getEstablishmentOrThrow(estabelecimentoId: string, clienteId: string) {
     const found = await this.prisma.clienteEstabelecimento.findUnique({ where: { id: estabelecimentoId } });
     if (!found || found.clienteId !== clienteId) {
       throw new NotFoundException('Estabelecimento nao encontrado para o cliente informado');
     }
+
+    return found;
   }
 
   private async resolveTargetEstablishments(clienteId: string, estabelecimentoId?: string) {
