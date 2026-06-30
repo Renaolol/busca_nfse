@@ -1,4 +1,98 @@
-[32m[Nest] 16252  - [39m29/06/2026, 18:17:19 [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
-[32m[Nest] 16252  - [39m29/06/2026, 18:17:19 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPrismaModule dependencies initialized[39m[38;5;3m +10ms[39m
-[32m[Nest] 16252  - [39m29/06/2026, 18:17:19 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mStorageModule dependencies initialized[39m[38;5;3m +0ms[39m
-[32m[Nest] 16252  - [39m29/06/2026, 18:17:19 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mSharedModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPrismaModule dependencies initialized[39m[38;5;3m +11ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mStorageModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mSharedModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAppModule dependencies initialized[39m[38;5;3m +2ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mHealthModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigHostModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mClientsModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mEstablishmentsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mNfseAdnModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mNfeDistribuicaoModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mNfseModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mCertificatesModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAuditModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mSyncModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mNfeModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mJobsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAppController {/}:[39m[38;5;3m +3ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mHealthController {/health}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/health, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mClientsController {/clientes}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:id, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:id/ativar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:id/pausar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mEstablishmentsController {/}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/estabelecimentos, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/estabelecimentos, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/estabelecimentos/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mCertificatesController {/}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/certificados, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/certificados, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/ativar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/desativar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/desvincular, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/validar, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/anotacoes, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/download, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/senha, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mSyncController {/}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/sync/iniciar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/sync/pausar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/sync/retomar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/sync/status, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/scheduler-status, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/scheduler-settings, PUT} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/rodar-agora, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/reprocessar-nsus-passados, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/testar-nsu, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/logs, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mNfseController {/nfse}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/dashboard-stats, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/separadas, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/:id/xml, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/:id/danfse, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/importar-xml, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/download-lote, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/reprocessar-xmls, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/reprocessar-danfses, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mNfeController {/nfe}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/dashboard-stats, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/status, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/:id/xml, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/importar-xml, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/iniciar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/pausar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/rodar-agora, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAuditController {/auditoria}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auditoria, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mExecucao automatica de sync habilitada a cada 30000ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mBusca noturna habilitada para 18:00, 20:00, 22:00, 00:00, 02:00, 04:00, 06:00 (UTC-3)[39m
+[32m[Nest] 5084  - [39m29/06/2026, 18:17:25 [32m    LOG[39m [38;5;3m[NestApplication] [39m[32mNest application successfully started[39m[38;5;3m +138ms[39m
+[32m[Nest] 5084  - [39m29/06/2026, 20:00:26 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mBusca noturna: clientes=133, controles_ativados=133, falhas=0[39m
+[33m[Nest] 5084  - [39m29/06/2026, 20:01:03 [33m   WARN[39m [38;5;3m[SyncService] [39m[33mADN retornou 429. Novas consultas ficarao pausadas ate 2026-06-29T23:04:03.413Z[39m
+[33m[Nest] 5084  - [39m29/06/2026, 20:01:27 [33m   WARN[39m [38;5;3m[SyncService] [39m[33mConsulta ADN pausada por cooldown de rate limit ate 2026-06-29T23:04:03.413Z[39m
+[33m[Nest] 5084  - [39m29/06/2026, 20:01:57 [33m   WARN[39m [38;5;3m[SyncService] [39m[33mConsulta ADN pausada por cooldown de rate limit ate 2026-06-29T23:04:03.413Z[39m
+[33m[Nest] 5084  - [39m29/06/2026, 20:02:27 [33m   WARN[39m [38;5;3m[SyncService] [39m[33mConsulta ADN pausada por cooldown de rate limit ate 2026-06-29T23:04:03.413Z[39m
+[33m[Nest] 5084  - [39m29/06/2026, 20:02:57 [33m   WARN[39m [38;5;3m[SyncService] [39m[33mConsulta ADN pausada por cooldown de rate limit ate 2026-06-29T23:04:03.413Z[39m
+[33m[Nest] 5084  - [39m29/06/2026, 20:03:27 [33m   WARN[39m [38;5;3m[SyncService] [39m[33mConsulta ADN pausada por cooldown de rate limit ate 2026-06-29T23:04:03.413Z[39m
+[33m[Nest] 5084  - [39m29/06/2026, 20:03:57 [33m   WARN[39m [38;5;3m[SyncService] [39m[33mConsulta ADN pausada por cooldown de rate limit ate 2026-06-29T23:04:03.413Z[39m
+[32m[Nest] 5084  - [39m29/06/2026, 22:00:27 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mBusca noturna: clientes=133, controles_ativados=133, falhas=0[39m
+[32m[Nest] 5084  - [39m30/06/2026, 00:00:27 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mBusca noturna: clientes=133, controles_ativados=133, falhas=0[39m
+[32m[Nest] 5084  - [39m30/06/2026, 02:00:28 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mBusca noturna: clientes=133, controles_ativados=133, falhas=0[39m
+[32m[Nest] 5084  - [39m30/06/2026, 04:00:29 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mBusca noturna: clientes=133, controles_ativados=133, falhas=0[39m
+[32m[Nest] 5084  - [39m30/06/2026, 06:00:29 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mBusca noturna: clientes=133, controles_ativados=133, falhas=0[39m
