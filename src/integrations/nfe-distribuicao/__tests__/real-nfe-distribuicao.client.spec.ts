@@ -77,7 +77,7 @@ describe('RealNfeDistribuicaoClient', () => {
               chaveAcesso: string;
             };
       }): string;
-      buildSoapEnvelope(xml: string): string;
+      buildSoapEnvelope(xml: string, soapVersion?: '1.1' | '1.2', profile?: Record<string, unknown>): string;
     };
 
     const request = client.buildRequestXml({
@@ -94,14 +94,14 @@ describe('RealNfeDistribuicaoClient', () => {
     expect(request).toContain('<CNPJ>12345678000199</CNPJ>');
     expect(request).toContain('<ultNSU>000000000000007</ultNSU>');
     expect(envelope).toContain('<nfeDistDFeInteresse xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe">');
-    expect(envelope).toContain('<nfeDadosMsg>');
+    expect(envelope).toContain('<nfeDadosMsg xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe">');
     expect(envelope).toContain(request);
     expect(envelope).not.toContain('<soap12:Header>');
   });
 
   it('monta envelope SOAP 1.1 para fallback em endpoints .asmx', () => {
     const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
-      buildSoapEnvelope(xml: string, soapVersion: '1.1' | '1.2'): string;
+      buildSoapEnvelope(xml: string, soapVersion: '1.1' | '1.2', profile?: Record<string, unknown>): string;
     };
 
     const envelope = client.buildSoapEnvelope('<teste />', '1.1');

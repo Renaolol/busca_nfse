@@ -26,6 +26,12 @@ type PemCredentials = {
 
 type MutualTlsCredentials = PfxCredentials | PemCredentials;
 type SoapVersion = '1.1' | '1.2';
+type SoapEnvelopeProfile = {
+  id: string;
+  includeSoapHeader: boolean;
+  includeOperationWrapper: boolean;
+  namespacedBody: boolean;
+};
 
 @Injectable()
 export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
@@ -33,6 +39,38 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
   private static readonly XML_NAMESPACE = 'http://www.portalfiscal.inf.br/nfe';
   private static readonly AN_CUF = '91';
   private static readonly LAYOUT_VERSION = process.env.NFE_DISTRIBUICAO_LAYOUT_VERSION?.trim() || '1.00';
+  private static readonly ENVELOPE_PROFILES: SoapEnvelopeProfile[] = [
+    {
+      id: 'operation-body-namespaced',
+      includeSoapHeader: false,
+      includeOperationWrapper: true,
+      namespacedBody: true
+    },
+    {
+      id: 'header-operation-body-namespaced',
+      includeSoapHeader: true,
+      includeOperationWrapper: true,
+      namespacedBody: true
+    },
+    {
+      id: 'operation-body-plain',
+      includeSoapHeader: false,
+      includeOperationWrapper: true,
+      namespacedBody: false
+    },
+    {
+      id: 'header-operation-body-plain',
+      includeSoapHeader: true,
+      includeOperationWrapper: true,
+      namespacedBody: false
+    },
+    {
+      id: 'body-only-namespaced',
+      includeSoapHeader: false,
+      includeOperationWrapper: false,
+      namespacedBody: true
+    }
+  ];
 
   constructor(
     private readonly prisma: PrismaService,
@@ -239,25 +277,42 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     ].join('');
   }
 
-  private buildSoapEnvelope(requestXml: string, soapVersion: SoapVersion = '1.2'): string {
+  private buildSoapEnvelope(
+    requestXml: string,
+    soapVersion: SoapVersion = '1.2',
+    profile: SoapEnvelopeProfile = RealNfeDistribuicaoClient.ENVELOPE_PROFILES[0]
+  ): string {
     const envelopeNamespace =
       soapVersion === '1.2'
         ? 'http://www.w3.org/2003/05/soap-envelope'
         : 'http://schemas.xmlsoap.org/soap/envelope/';
     const prefix = soapVersion === '1.2' ? 'soap12' : 'soap';
     const operation = 'nfeDistDFeInteresse';
+    const bodyTagOpen = profile.namespacedBody
+      ? `<nfeDadosMsg xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`
+      : '<nfeDadosMsg>';
+    const bodyContent = profile.includeOperationWrapper
+      ? [`<${operation} xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`, bodyTagOpen, requestXml, `</nfeDadosMsg>`, `</${operation}>`]
+      : [bodyTagOpen, requestXml, `</nfeDadosMsg>`];
 
     return [
       `<?xml version="1.0" encoding="utf-8"?>`,
       `<${prefix}:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"`,
       ` xmlns:xsd="http://www.w3.org/2001/XMLSchema"`,
       ` xmlns:${prefix}="${envelopeNamespace}">`,
+      ...(profile.includeSoapHeader
+        ? [
+            `<${prefix}:Header>`,
+            `<nfeCabecMsg xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`,
+            `<cUF>${RealNfeDistribuicaoClient.AN_CUF}</cUF>`,
+            `<indComp>0</indComp>`,
+            `<versaoDados>${RealNfeDistribuicaoClient.LAYOUT_VERSION}</versaoDados>`,
+            `</nfeCabecMsg>`,
+            `</${prefix}:Header>`
+          ]
+        : []),
       `<${prefix}:Body>`,
-      `<${operation} xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`,
-      `<nfeDadosMsg>`,
-      requestXml,
-      `</nfeDadosMsg>`,
-      `</${operation}>`,
+      ...bodyContent,
       `</${prefix}:Body>`,
       `</${prefix}:Envelope>`
     ].join('');
@@ -288,22 +343,58 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     mtls: MutualTlsCredentials,
     requestXml: string
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
-    const soap12Response = await this.doSoapRequest(url, mtls, requestXml, '1.2');
-    if (!this.shouldRetryWithSoap11(soap12Response.statusCode, soap12Response.body)) {
-      return soap12Response;
+    const attempts: Array<{
+      version: SoapVersion;
+      profileId: string;
+      statusCode: number;
+      headers: IncomingHttpHeaders;
+      bodyPreview: string;
+    }> = [];
+    let lastResponse: { statusCode: number; headers: IncomingHttpHeaders; body: string } | null = null;
+
+    for (const version of ['1.2', '1.1'] as const) {
+      for (const profile of RealNfeDistribuicaoClient.ENVELOPE_PROFILES) {
+        const response = await this.doSoapRequest(url, mtls, requestXml, version, profile);
+        attempts.push({
+          version,
+          profileId: profile.id,
+          statusCode: response.statusCode,
+          headers: response.headers,
+          bodyPreview: this.previewBody(response.body)
+        });
+        lastResponse = response;
+
+        if (!this.shouldRetryWithAlternativeRequest(response.statusCode, response.body)) {
+          await this.persistDebugPayload(url, version, profile, requestXml, response, attempts);
+          return response;
+        }
+      }
     }
 
-    return this.doSoapRequest(url, mtls, requestXml, '1.1');
+    if (lastResponse) {
+      await this.persistDebugPayload(
+        url,
+        '1.1',
+        RealNfeDistribuicaoClient.ENVELOPE_PROFILES[RealNfeDistribuicaoClient.ENVELOPE_PROFILES.length - 1],
+        requestXml,
+        lastResponse,
+        attempts
+      );
+      return lastResponse;
+    }
+
+    throw new Error('Nao foi possivel executar tentativas SOAP para distribuicao NF-e');
   }
 
   private doSoapRequest(
     url: URL,
     mtls: MutualTlsCredentials,
     requestXml: string,
-    soapVersion: SoapVersion
+    soapVersion: SoapVersion,
+    profile: SoapEnvelopeProfile
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     return new Promise((resolve, reject) => {
-      const envelope = this.buildSoapEnvelope(requestXml, soapVersion);
+      const envelope = this.buildSoapEnvelope(requestXml, soapVersion, profile);
       const tlsOptions =
         mtls.mode === 'pfx'
           ? { pfx: mtls.pfx, passphrase: mtls.passphrase }
@@ -359,8 +450,44 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     });
   }
 
-  private shouldRetryWithSoap11(statusCode: number, body: string): boolean {
+  private shouldRetryWithAlternativeRequest(statusCode: number, body: string): boolean {
     return statusCode === 400 && !String(body || '').trim();
+  }
+
+  private async persistDebugPayload(
+    url: URL,
+    soapVersion: SoapVersion,
+    profile: SoapEnvelopeProfile,
+    requestXml: string,
+    response: { statusCode: number; headers: IncomingHttpHeaders; body: string },
+    attempts: Array<{
+      version: SoapVersion;
+      profileId: string;
+      statusCode: number;
+      headers: IncomingHttpHeaders;
+      bodyPreview: string;
+    }>
+  ): Promise<void> {
+    const envelope = this.buildSoapEnvelope(requestXml, soapVersion, profile);
+    const debugBase = 'nfe/debug';
+    await this.storage.putObject(`${debugBase}/last-distribuicao-request.xml`, envelope);
+    await this.storage.putObject(`${debugBase}/last-distribuicao-request-body.xml`, requestXml);
+    await this.storage.putObject(`${debugBase}/last-distribuicao-response.txt`, response.body || '');
+    await this.storage.putObject(
+      `${debugBase}/last-distribuicao-meta.json`,
+      JSON.stringify(
+        {
+          url: url.toString(),
+          soapVersion,
+          profile: profile.id,
+          statusCode: response.statusCode,
+          headers: response.headers,
+          attempts
+        },
+        null,
+        2
+      )
+    );
   }
 
   private parseSoapResponse(body: string): {
