@@ -204,6 +204,74 @@ describe('NfeService', () => {
     expect(result.falhas).toBe(0);
   });
 
+  it('recaptura NSU base quando controle existente esta zerado', async () => {
+    prisma.nfeSyncControle.findFirst.mockResolvedValue({
+      id: 'ctrl-1',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      cnpjConsulta: '12345678000199',
+      ambiente: NfeAmbiente.producao,
+      ultimoNsuConsultado: 0n,
+      maxNsu: 0n
+    });
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '137',
+      xMotivo: 'Nenhum documento localizado',
+      ultNsu: 321n,
+      maxNsu: 321n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.ativarSyncNoNsuAtual({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ctrl-1' },
+        data: expect.objectContaining({
+          ultimoNsuConsultado: 321n,
+          maxNsu: 321n,
+          status: NfeSyncStatus.ativo
+        })
+      })
+    );
+    expect(result.controlesInicializados).toBe(0);
+    expect(result.controlesReativados).toBe(1);
+    expect(result.falhas).toBe(0);
+  });
+
+  it('nao cria controle quando captura inicial retorna cStat invalido ou sem NSU base', async () => {
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '656',
+      xMotivo: 'Consumo indevido',
+      ultNsu: 0n,
+      maxNsu: 0n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.ativarSyncNoNsuAtual({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(prisma.nfeSyncControle.create).not.toHaveBeenCalled();
+    expect(result.controlesInicializados).toBe(0);
+    expect(result.controlesReativados).toBe(0);
+    expect(result.falhas).toBe(1);
+    expect(result.detalhes[0]).toEqual(
+      expect.objectContaining({
+        status: 'falha',
+        mensagem: expect.stringContaining('cStat 656')
+      })
+    );
+  });
+
   it('roda distribuicao e persiste NF-e sincronizada', async () => {
     prisma.nfeSyncControle.findMany.mockResolvedValue([
       {

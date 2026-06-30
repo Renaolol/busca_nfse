@@ -14,7 +14,8 @@ import { PrismaService } from '../../prisma/prisma.service';
 import {
   NFE_DISTRIBUICAO_CLIENT,
   NfeDistribuicaoClient,
-  NfeDistribuicaoDocument
+  NfeDistribuicaoDocument,
+  NfeDistribuicaoResult
 } from '../../integrations/nfe-distribuicao/nfe-distribuicao.types';
 import { DashboardNfeStatsQueryDto } from './dto/dashboard-stats.dto';
 import { EnableAllNfeSyncDto } from './dto/enable-all-sync.dto';
@@ -200,8 +201,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             ambiente
           }
         });
+        const shouldRecaptureBase = existing ? existing.ultimoNsuConsultado === 0n && existing.maxNsu === 0n : false;
 
-        if (existing) {
+        if (existing && !shouldRecaptureBase) {
           await this.prisma.nfeSyncControle.update({
             where: { id: existing.id },
             data: {
@@ -230,6 +232,29 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           throw new BadRequestException(
             currentNsuResult.xMotivo ?? `Falha ao consultar NSU atual da NF-e. HTTP ${currentNsuResult.statusCode}.`
           );
+        }
+
+        this.assertInitialCaptureResult(currentNsuResult, cnpjConsulta);
+
+        if (existing && shouldRecaptureBase) {
+          await this.prisma.nfeSyncControle.update({
+            where: { id: existing.id },
+            data: {
+              ultimoNsuConsultado: currentNsuResult.maxNsu,
+              maxNsu: currentNsuResult.maxNsu,
+              status: NfeSyncStatus.ativo,
+              ultimaExecucao: new Date(),
+              ultimaMensagem: `Busca de NF-e reativada e reposicionada no NSU atual ${currentNsuResult.maxNsu.toString()}`
+            }
+          });
+          controlesReativados += 1;
+          detalhes.push({
+            estabelecimentoId: establishment.id,
+            cnpjConsulta,
+            status: 'reativado',
+            mensagem: `Controle existente reposicionado no NSU atual ${currentNsuResult.maxNsu.toString()}`
+          });
+          continue;
         }
 
         await this.prisma.nfeSyncControle.create({
@@ -1203,6 +1228,24 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
 
     return certificate;
+  }
+
+  private assertInitialCaptureResult(
+    result: Pick<NfeDistribuicaoResult, 'cStat' | 'xMotivo' | 'maxNsu' | 'ultNsu'>,
+    cnpjConsulta: string
+  ): void {
+    const normalizedCStat = String(result.cStat || '').trim();
+    if (!['137', '138'].includes(normalizedCStat)) {
+      throw new BadRequestException(
+        `Distribuicao NF-e retornou cStat ${normalizedCStat || 'desconhecido'} para o CNPJ ${cnpjConsulta}. ${result.xMotivo || 'Sem xMotivo.'}`
+      );
+    }
+
+    if (result.maxNsu <= 0n && result.ultNsu <= 0n) {
+      throw new BadRequestException(
+        `Distribuicao NF-e nao retornou NSU base valido para o CNPJ ${cnpjConsulta}. cStat ${normalizedCStat}: ${result.xMotivo || 'Sem xMotivo.'}`
+      );
+    }
   }
 
   private assertClientScope(documentClientId: string, clienteId: string): void {
