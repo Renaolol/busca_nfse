@@ -60,13 +60,15 @@ describe('NfeService', () => {
     prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
       id: 'estab-1',
       clienteId: 'cliente-1',
-      cnpj: '12345678000199'
+      cnpj: '12345678000199',
+      municipioCodigoIbge: '4204202'
     });
     prisma.clienteEstabelecimento.findMany.mockResolvedValue([
       {
         id: 'estab-1',
         clienteId: 'cliente-1',
         cnpj: '12345678000199',
+        municipioCodigoIbge: '4204202',
         createdAt: new Date('2026-06-29T00:00:00.000Z')
       }
     ]);
@@ -184,6 +186,7 @@ describe('NfeService', () => {
 
     expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledWith({
       cnpjConsulta: '12345678000199',
+      cUfAutor: '42',
       ultNsu: 0n,
       ambiente: NfeAmbiente.producao,
       certificateId: 'cert-1'
@@ -440,6 +443,7 @@ describe('NfeService', () => {
 
     expect(distribuicaoClient.consultarPorNsu).toHaveBeenCalledWith({
       cnpjConsulta: '12345678000199',
+      cUfAutor: '42',
       nsu: 15n,
       ambiente: NfeAmbiente.producao,
       certificateId: 'cert-1'
@@ -492,6 +496,7 @@ describe('NfeService', () => {
 
     expect(distribuicaoClient.consultarPorChave).toHaveBeenCalledWith({
       cnpjConsulta: '12345678000199',
+      cUfAutor: '42',
       chaveAcesso: '35260612345678000199550010000001231000001231',
       ambiente: NfeAmbiente.producao,
       certificateId: 'cert-1'

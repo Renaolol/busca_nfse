@@ -223,6 +223,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
         const currentNsuResult = await this.distribuicaoClient.distribuirPorNsu({
           cnpjConsulta,
+          cUfAutor: this.resolveCUfAutorFromEstablishment(establishment),
           ultNsu: 0n,
           ambiente,
           certificateId: certificate.id
@@ -594,6 +595,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     let documentsSaved = 0;
 
     for (const control of controls) {
+      const establishment = await this.getEstablishmentOrThrow(control.estabelecimentoId, control.clienteId);
       const certificate = await this.findActiveCertificateOrThrow(
         control.clienteId,
         control.estabelecimentoId,
@@ -601,6 +603,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       );
       const result = await this.distribuicaoClient.distribuirPorNsu({
         cnpjConsulta: control.cnpjConsulta,
+        cUfAutor: this.resolveCUfAutorFromEstablishment(establishment),
         ultNsu: control.ultimoNsuConsultado,
         ambiente: control.ambiente,
         certificateId: certificate.id
@@ -664,6 +667,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const certificate = await this.findActiveCertificateOrThrow(dto.clienteId, dto.estabelecimentoId, cnpjConsulta);
     const result = await this.distribuicaoClient.consultarPorNsu({
       cnpjConsulta,
+      cUfAutor: this.resolveCUfAutorFromEstablishment(establishment),
       nsu: BigInt(dto.nsu),
       ambiente,
       certificateId: certificate.id
@@ -688,6 +692,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const certificate = await this.findActiveCertificateOrThrow(dto.clienteId, dto.estabelecimentoId, cnpjConsulta);
     const result = await this.distribuicaoClient.consultarPorChave({
       cnpjConsulta,
+      cUfAutor: this.resolveCUfAutorFromEstablishment(establishment),
       chaveAcesso: dto.chaveAcesso,
       ambiente,
       certificateId: certificate.id
@@ -1246,6 +1251,11 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         `Distribuicao NF-e nao retornou NSU base valido para o CNPJ ${cnpjConsulta}. cStat ${normalizedCStat}: ${result.xMotivo || 'Sem xMotivo.'}`
       );
     }
+  }
+
+  private resolveCUfAutorFromEstablishment(establishment: { municipioCodigoIbge?: string | null }): string | undefined {
+    const digits = String(establishment?.municipioCodigoIbge || '').replace(/\D/g, '');
+    return digits.length >= 2 ? digits.slice(0, 2) : undefined;
   }
 
   private assertClientScope(documentClientId: string, clienteId: string): void {

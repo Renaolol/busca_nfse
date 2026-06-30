@@ -6,6 +6,7 @@ import { NfeDistribuicaoClient, NfeDistribuicaoResult } from './nfe-distribuicao
 export class FakeNfeDistribuicaoClient implements NfeDistribuicaoClient {
   async distribuirPorNsu(params: {
     cnpjConsulta: string;
+    cUfAutor?: string;
     ultNsu: bigint;
     ambiente: NfeAmbiente;
     certificateId: string;
@@ -96,12 +97,14 @@ export class FakeNfeDistribuicaoClient implements NfeDistribuicaoClient {
 
   async consultarPorNsu(params: {
     cnpjConsulta: string;
+    cUfAutor?: string;
     nsu: bigint;
     ambiente: NfeAmbiente;
     certificateId: string;
   }): Promise<NfeDistribuicaoResult> {
     const distributed = await this.distribuirPorNsu({
       cnpjConsulta: params.cnpjConsulta,
+      cUfAutor: params.cUfAutor,
       ultNsu: params.nsu - 1n,
       ambiente: params.ambiente,
       certificateId: params.certificateId
@@ -116,6 +119,7 @@ export class FakeNfeDistribuicaoClient implements NfeDistribuicaoClient {
 
   async consultarPorChave(params: {
     cnpjConsulta: string;
+    cUfAutor?: string;
     chaveAcesso: string;
     ambiente: NfeAmbiente;
     certificateId: string;

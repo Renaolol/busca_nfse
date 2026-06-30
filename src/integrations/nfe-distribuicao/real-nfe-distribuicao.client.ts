@@ -80,6 +80,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
 
   async distribuirPorNsu(params: {
     cnpjConsulta: string;
+    cUfAutor?: string;
     ultNsu: bigint;
     ambiente: NfeAmbiente;
     certificateId: string;
@@ -90,6 +91,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
       certificateId: params.certificateId,
       requestXml: this.buildRequestXml({
         cnpjConsulta: params.cnpjConsulta,
+        cUfAutor: params.cUfAutor,
         ambiente: params.ambiente,
         consulta: {
           kind: 'distNSU',
@@ -102,6 +104,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
 
   async consultarPorNsu(params: {
     cnpjConsulta: string;
+    cUfAutor?: string;
     nsu: bigint;
     ambiente: NfeAmbiente;
     certificateId: string;
@@ -112,6 +115,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
       certificateId: params.certificateId,
       requestXml: this.buildRequestXml({
         cnpjConsulta: params.cnpjConsulta,
+        cUfAutor: params.cUfAutor,
         ambiente: params.ambiente,
         consulta: {
           kind: 'consNSU',
@@ -124,6 +128,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
 
   async consultarPorChave(params: {
     cnpjConsulta: string;
+    cUfAutor?: string;
     chaveAcesso: string;
     ambiente: NfeAmbiente;
     certificateId: string;
@@ -134,6 +139,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
       certificateId: params.certificateId,
       requestXml: this.buildRequestXml({
         cnpjConsulta: params.cnpjConsulta,
+        cUfAutor: params.cUfAutor,
         ambiente: params.ambiente,
         consulta: {
           kind: 'consChNFe',
@@ -242,6 +248,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
 
   private buildRequestXml(params: {
     cnpjConsulta: string;
+    cUfAutor?: string;
     ambiente: NfeAmbiente;
     consulta:
       | {
@@ -259,6 +266,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
   }): string {
     const tpAmb = params.ambiente === NfeAmbiente.producao ? '1' : '2';
     const cnpj = this.onlyDigits(params.cnpjConsulta);
+    const cUfAutor = this.resolveCUfAutor(params.cUfAutor);
     const consultaXml =
       params.consulta.kind === 'distNSU'
         ? `<distNSU><ultNSU>${params.consulta.ultNsu.toString().padStart(15, '0')}</ultNSU></distNSU>`
@@ -269,7 +277,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     return [
       `<distDFeInt xmlns="${RealNfeDistribuicaoClient.XML_NAMESPACE}" versao="${RealNfeDistribuicaoClient.LAYOUT_VERSION}">`,
       `<tpAmb>${tpAmb}</tpAmb>`,
-      `<cUFAutor>${RealNfeDistribuicaoClient.AN_CUF}</cUFAutor>`,
+      `<cUFAutor>${cUfAutor}</cUFAutor>`,
       `<CNPJ>${cnpj}</CNPJ>`,
       consultaXml,
       `</distDFeInt>`
@@ -702,6 +710,20 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
 
   private onlyDigits(value: string): string {
     return value.replace(/\D/g, '');
+  }
+
+  private resolveCUfAutor(cUfAutor?: string): string {
+    const explicit = this.onlyDigits(String(cUfAutor || ''));
+    if (explicit.length === 2) {
+      return explicit;
+    }
+
+    const configured = this.onlyDigits(String(process.env.NFE_DISTRIBUICAO_CUF_AUTOR || ''));
+    if (configured.length === 2) {
+      return configured;
+    }
+
+    return RealNfeDistribuicaoClient.AN_CUF;
   }
 
   private isUnsupportedPkcs12Error(message: string): boolean {

@@ -20,6 +20,7 @@ export interface NfeDistribuicaoResult {
 export interface NfeDistribuicaoClient {
   distribuirPorNsu(params: {
     cnpjConsulta: string;
+    cUfAutor?: string;
     ultNsu: bigint;
     ambiente: NfeAmbiente;
     certificateId: string;
@@ -27,6 +28,7 @@ export interface NfeDistribuicaoClient {
 
   consultarPorNsu(params: {
     cnpjConsulta: string;
+    cUfAutor?: string;
     nsu: bigint;
     ambiente: NfeAmbiente;
     certificateId: string;
@@ -34,6 +36,7 @@ export interface NfeDistribuicaoClient {
 
   consultarPorChave(params: {
     cnpjConsulta: string;
+    cUfAutor?: string;
     chaveAcesso: string;
     ambiente: NfeAmbiente;
     certificateId: string;
