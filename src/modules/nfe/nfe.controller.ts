@@ -1,11 +1,14 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
+import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import {
   DashboardNfeStatsQueryDto,
   DashboardNfeStatsResponseDto
 } from './dto/dashboard-stats.dto';
+import { EnableAllNfeSyncDto } from './dto/enable-all-sync.dto';
+import { EnableNfeSyncDto } from './dto/enable-sync.dto';
 import { DownloadNfeDocumentDto } from './dto/download-document.dto';
 import { ImportNfeXmlDto } from './dto/import-xml.dto';
 import { PauseNfeSyncDto } from './dto/pause-sync.dto';
@@ -14,6 +17,7 @@ import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
 import { RunNfeSyncDto } from './dto/run-sync.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
+import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
 import { NfeService } from './nfe.service';
 
 @ApiTags('nfe')
@@ -33,6 +37,11 @@ export class NfeController {
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   statusSync(@Query() query: ClienteScopeQueryDto) {
     return this.nfeService.statusSync(query.clienteId);
+  }
+
+  @Get('sync/scheduler-status')
+  schedulerStatus() {
+    return this.nfeService.schedulerStatus();
   }
 
   @Get()
@@ -68,16 +77,40 @@ export class NfeController {
     return this.nfeService.iniciarSync(dto);
   }
 
+  @Post('sync/ativar')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  ativarSync(@Body() dto: EnableNfeSyncDto) {
+    return this.nfeService.ativarSyncNoNsuAtual(dto);
+  }
+
+  @Post('sync/ativar-todos')
+  @Roles('admin')
+  ativarSyncTodos(@Body() dto: EnableAllNfeSyncDto) {
+    return this.nfeService.ativarSyncNoNsuAtualParaTodos(dto);
+  }
+
   @Post('sync/pausar')
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   pausarSync(@Body() dto: PauseNfeSyncDto) {
     return this.nfeService.pausarSync(dto);
   }
 
+  @Put('sync/scheduler-settings')
+  @Roles('admin')
+  updateSchedulerSettings(@Body() dto: UpdateNfeSchedulerSettingsDto) {
+    return this.nfeService.updateSchedulerSettings(dto);
+  }
+
   @Post('sync/rodar-agora')
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   runNow(@Body() dto: RunNfeSyncDto) {
     return this.nfeService.runNow(dto);
+  }
+
+  @Post('sync/rodar-agora-geral')
+  @Roles('admin')
+  runNowGlobal() {
+    return this.nfeService.runNowGlobal();
   }
 
   @Post('sync/consultar-nsu')

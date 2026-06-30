@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import {
   Certificado,
   NfeAmbiente,
@@ -7,6 +7,8 @@ import {
   NfeTipoRelacao,
   Prisma
 } from '@prisma/client';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -15,6 +17,8 @@ import {
   NfeDistribuicaoDocument
 } from '../../integrations/nfe-distribuicao/nfe-distribuicao.types';
 import { DashboardNfeStatsQueryDto } from './dto/dashboard-stats.dto';
+import { EnableAllNfeSyncDto } from './dto/enable-all-sync.dto';
+import { EnableNfeSyncDto } from './dto/enable-sync.dto';
 import { ImportNfeXmlDto } from './dto/import-xml.dto';
 import { PauseNfeSyncDto } from './dto/pause-sync.dto';
 import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
@@ -22,16 +26,319 @@ import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
 import { RunNfeSyncDto } from './dto/run-sync.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
+import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
 import { NfeXmlParserService, ParsedNfe } from './nfe-xml-parser.service';
 
+type NfeNightlySweepConfigFile = {
+  enabled?: boolean;
+  activeSlots?: string[];
+};
+
+type NfeNightlySweepSlot = {
+  time: string;
+  hour: number;
+  minute: number;
+};
+
 @Injectable()
-export class NfeService {
+export class NfeService implements OnModuleInit, OnModuleDestroy {
+  private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
+  private static readonly NIGHTLY_SWEEP_CONFIG_STORAGE_KEY = 'settings/nfe-nightly-sweep.json';
+  private readonly logger = new Logger(NfeService.name);
+  private autoSyncTimer: NodeJS.Timeout | null = null;
+  private nightlySweepTimer: NodeJS.Timeout | null = null;
+  private autoSyncRunning = false;
+  private nightlySweepRunning = false;
+  private lastNightlySweepExecutionKey: string | null = null;
+  private readonly executedNightlySweepKeys = new Set<string>();
+  private readonly autoSyncEnabled = process.env.NFE_SYNC_AUTO_RUN_ENABLED !== 'false';
+  private readonly autoSyncIntervalMs = this.parsePositiveNumberEnv('NFE_SYNC_AUTO_RUN_INTERVAL_MS', 5 * 60 * 1000);
+  private readonly autoSyncStartupDelayMs = this.parsePositiveNumberEnv('NFE_SYNC_AUTO_RUN_STARTUP_DELAY_MS', 15000);
+  private nightlySweepEnabled = process.env.NFE_SYNC_NIGHTLY_SWEEP_ENABLED !== 'false';
+  private readonly nightlySweepCheckIntervalMs = this.parsePositiveNumberEnv('NFE_SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS', 60000);
+  private readonly nightlySweepHour = this.parseBoundedIntegerEnv('NFE_SYNC_NIGHTLY_SWEEP_HOUR', 2, 0, 23);
+  private readonly nightlySweepMinute = this.parseBoundedIntegerEnv('NFE_SYNC_NIGHTLY_SWEEP_MINUTE', 0, 0, 59);
+  private nightlySweepActiveSlots = this.resolveInitialNightlySweepSlots();
+  private readonly nightlySweepTimezoneOffsetMinutes = this.parseBoundedIntegerEnv(
+    'NFE_SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES',
+    -180,
+    -720,
+    840
+  );
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly parser: NfeXmlParserService,
     private readonly storage: LocalStorageService,
     @Inject(NFE_DISTRIBUICAO_CLIENT) private readonly distribuicaoClient: NfeDistribuicaoClient
   ) {}
+
+  async onModuleInit(): Promise<void> {
+    await this.loadNightlySweepConfig();
+
+    if (this.autoSyncEnabled) {
+      this.autoSyncTimer = setInterval(() => {
+        void this.runAutomaticSyncCycle();
+      }, this.autoSyncIntervalMs);
+      this.autoSyncTimer.unref?.();
+
+      const autoSyncStartupTimer = setTimeout(() => {
+        void this.runAutomaticSyncCycle();
+      }, this.autoSyncStartupDelayMs);
+      autoSyncStartupTimer.unref?.();
+
+      this.logger.log(`Execucao automatica de NF-e habilitada a cada ${this.autoSyncIntervalMs}ms`);
+    } else {
+      this.logger.log('Execucao automatica de NF-e desativada (NFE_SYNC_AUTO_RUN_ENABLED=false)');
+    }
+
+    this.refreshNightlySweepTimer();
+  }
+
+  onModuleDestroy(): void {
+    if (this.autoSyncTimer) {
+      clearInterval(this.autoSyncTimer);
+      this.autoSyncTimer = null;
+    }
+
+    if (this.nightlySweepTimer) {
+      clearInterval(this.nightlySweepTimer);
+      this.nightlySweepTimer = null;
+    }
+  }
+
+  schedulerStatus(): {
+    autoSync: {
+      enabled: boolean;
+      running: boolean;
+      intervalMs: number;
+      startupDelayMs: number;
+    };
+    nightlySweep: {
+      enabled: boolean;
+      running: boolean;
+      hour: number;
+      minute: number;
+      activeSlots: string[];
+      availableSlots: string[];
+      timezoneOffsetMinutes: number;
+      checkIntervalMs: number;
+      lastRunExecutionKey: string | null;
+      nextRunAt: string | null;
+    };
+  } {
+    return {
+      autoSync: {
+        enabled: this.autoSyncEnabled,
+        running: this.autoSyncRunning,
+        intervalMs: this.autoSyncIntervalMs,
+        startupDelayMs: this.autoSyncStartupDelayMs
+      },
+      nightlySweep: {
+        enabled: this.nightlySweepEnabled,
+        running: this.nightlySweepRunning,
+        hour: this.getReferenceNightlySweepSlot().hour,
+        minute: this.getReferenceNightlySweepSlot().minute,
+        activeSlots: [...this.nightlySweepActiveSlots],
+        availableSlots: [...NfeService.NIGHTLY_SWEEP_AVAILABLE_SLOTS],
+        timezoneOffsetMinutes: this.nightlySweepTimezoneOffsetMinutes,
+        checkIntervalMs: this.nightlySweepCheckIntervalMs,
+        lastRunExecutionKey: this.lastNightlySweepExecutionKey,
+        nextRunAt: this.nightlySweepEnabled ? this.resolveNextNightlySweepAt(new Date())?.toISOString() ?? null : null
+      }
+    };
+  }
+
+  async updateSchedulerSettings(params: UpdateNfeSchedulerSettingsDto) {
+    if (typeof params.enabled === 'boolean') {
+      this.nightlySweepEnabled = params.enabled;
+    }
+
+    if (params.activeSlots) {
+      this.nightlySweepActiveSlots = this.normalizeNightlySweepSlots(params.activeSlots);
+    }
+
+    await this.saveNightlySweepConfig();
+    this.refreshNightlySweepTimer();
+    return this.schedulerStatus();
+  }
+
+  async ativarSyncNoNsuAtual(
+    dto: EnableNfeSyncDto
+  ): Promise<{
+    clienteId: string;
+    ambiente: NfeAmbiente;
+    controlesCriadosOuReativados: number;
+    controlesInicializados: number;
+    controlesReativados: number;
+    falhas: number;
+    detalhes: Array<{ estabelecimentoId: string; cnpjConsulta: string; status: 'inicializado' | 'reativado' | 'falha'; mensagem: string }>;
+  }> {
+    await this.ensureClient(dto.clienteId);
+    const ambiente = dto.ambiente ?? NfeAmbiente.producao;
+    const establishments = await this.resolveTargetEstablishments(dto.clienteId);
+    const detalhes: Array<{
+      estabelecimentoId: string;
+      cnpjConsulta: string;
+      status: 'inicializado' | 'reativado' | 'falha';
+      mensagem: string;
+    }> = [];
+    let controlesInicializados = 0;
+    let controlesReativados = 0;
+    let falhas = 0;
+
+    for (const establishment of establishments) {
+      const cnpjConsulta = establishment.cnpj;
+
+      try {
+        const certificate = await this.findActiveCertificateOrThrow(dto.clienteId, establishment.id, cnpjConsulta);
+        const existing = await this.prisma.nfeSyncControle.findFirst({
+          where: {
+            clienteId: dto.clienteId,
+            estabelecimentoId: establishment.id,
+            cnpjConsulta,
+            ambiente
+          }
+        });
+
+        if (existing) {
+          await this.prisma.nfeSyncControle.update({
+            where: { id: existing.id },
+            data: {
+              status: NfeSyncStatus.ativo,
+              ultimaMensagem: 'Busca de NF-e reativada mantendo o NSU base existente'
+            }
+          });
+          controlesReativados += 1;
+          detalhes.push({
+            estabelecimentoId: establishment.id,
+            cnpjConsulta,
+            status: 'reativado',
+            mensagem: 'Controle existente reativado'
+          });
+          continue;
+        }
+
+        const currentNsuResult = await this.distribuicaoClient.distribuirPorNsu({
+          cnpjConsulta,
+          ultNsu: 0n,
+          ambiente,
+          certificateId: certificate.id
+        });
+
+        if (currentNsuResult.statusCode !== 200) {
+          throw new BadRequestException(
+            currentNsuResult.xMotivo ?? `Falha ao consultar NSU atual da NF-e. HTTP ${currentNsuResult.statusCode}.`
+          );
+        }
+
+        await this.prisma.nfeSyncControle.create({
+          data: {
+            clienteId: dto.clienteId,
+            estabelecimentoId: establishment.id,
+            cnpjConsulta,
+            ambiente,
+            ultimoNsuConsultado: currentNsuResult.maxNsu,
+            maxNsu: currentNsuResult.maxNsu,
+            status: NfeSyncStatus.ativo,
+            ultimaExecucao: new Date(),
+            ultimaMensagem: `Busca de NF-e habilitada a partir do NSU atual ${currentNsuResult.maxNsu.toString()}`
+          }
+        });
+        controlesInicializados += 1;
+        detalhes.push({
+          estabelecimentoId: establishment.id,
+          cnpjConsulta,
+          status: 'inicializado',
+          mensagem: `Controle criado no NSU atual ${currentNsuResult.maxNsu.toString()}`
+        });
+      } catch (error) {
+        falhas += 1;
+        detalhes.push({
+          estabelecimentoId: establishment.id,
+          cnpjConsulta,
+          status: 'falha',
+          mensagem: this.toErrorMessage(error)
+        });
+      }
+    }
+
+    return {
+      clienteId: dto.clienteId,
+      ambiente,
+      controlesCriadosOuReativados: controlesInicializados + controlesReativados,
+      controlesInicializados,
+      controlesReativados,
+      falhas,
+      detalhes
+    };
+  }
+
+  async ativarSyncNoNsuAtualParaTodos(
+    dto: EnableAllNfeSyncDto = {}
+  ): Promise<{
+    ambiente: NfeAmbiente;
+    clientesProcessados: number;
+    clientesComSucesso: number;
+    controlesCriadosOuReativados: number;
+    controlesInicializados: number;
+    controlesReativados: number;
+    falhas: number;
+    detalhes: Array<{ clienteId: string; sucesso: boolean; mensagem: string }>;
+  }> {
+    const ambiente = dto.ambiente ?? NfeAmbiente.producao;
+    const clients = await this.prisma.cliente.findMany({
+      where: { ativo: true },
+      orderBy: { createdAt: 'asc' }
+    });
+    const detalhes: Array<{ clienteId: string; sucesso: boolean; mensagem: string }> = [];
+    let clientesComSucesso = 0;
+    let controlesCriadosOuReativados = 0;
+    let controlesInicializados = 0;
+    let controlesReativados = 0;
+    let falhas = 0;
+
+    for (const client of clients) {
+      try {
+        const result = await this.ativarSyncNoNsuAtual({
+          clienteId: client.id,
+          ambiente
+        });
+        const activated = result.controlesCriadosOuReativados;
+        const hasSuccess = activated > 0 && result.falhas < result.detalhes.length;
+        if (hasSuccess) {
+          clientesComSucesso += 1;
+        }
+        controlesCriadosOuReativados += result.controlesCriadosOuReativados;
+        controlesInicializados += result.controlesInicializados;
+        controlesReativados += result.controlesReativados;
+        falhas += result.falhas;
+        detalhes.push({
+          clienteId: client.id,
+          sucesso: hasSuccess,
+          mensagem: `${result.controlesCriadosOuReativados} controle(s) preparados; ${result.falhas} falha(s)`
+        });
+      } catch (error) {
+        falhas += 1;
+        detalhes.push({
+          clienteId: client.id,
+          sucesso: false,
+          mensagem: this.toErrorMessage(error)
+        });
+      }
+    }
+
+    return {
+      ambiente,
+      clientesProcessados: clients.length,
+      clientesComSucesso,
+      controlesCriadosOuReativados,
+      controlesInicializados,
+      controlesReativados,
+      falhas,
+      detalhes
+    };
+  }
 
   async findAll(query: QueryNfeDto) {
     const where = this.buildBaseWhere(query);
@@ -229,18 +536,36 @@ export class NfeService {
 
   async runNow(dto: RunNfeSyncDto): Promise<{ processed: number; documentsSaved: number }> {
     await this.ensureClient(dto.clienteId);
+    return this.runNowInternal({
+      clienteId: dto.clienteId,
+      ambiente: dto.ambiente,
+      estabelecimentoId: dto.estabelecimentoId,
+      limitControles: dto.limitControles
+    });
+  }
 
+  async runNowGlobal(): Promise<{ processed: number; documentsSaved: number }> {
+    return this.runNowInternal({
+      limitControles: 50
+    });
+  }
+
+  private async runNowInternal(params: {
+    clienteId?: string;
+    ambiente?: NfeAmbiente;
+    estabelecimentoId?: string;
+    limitControles?: number;
+  }): Promise<{ processed: number; documentsSaved: number }> {
     const controls = await this.prisma.nfeSyncControle.findMany({
       where: {
-        clienteId: dto.clienteId,
         status: NfeSyncStatus.ativo,
-        ...(dto.ambiente ? { ambiente: dto.ambiente } : {}),
-        ...(dto.estabelecimentoId ? { estabelecimentoId: dto.estabelecimentoId } : {})
+        ...(params.clienteId ? { clienteId: params.clienteId } : {}),
+        ...(params.ambiente ? { ambiente: params.ambiente } : {}),
+        ...(params.estabelecimentoId ? { estabelecimentoId: params.estabelecimentoId } : {})
       },
       orderBy: { updatedAt: 'asc' },
-      take: dto.limitControles ?? 10
+      take: params.limitControles ?? 10
     });
-
     let documentsSaved = 0;
 
     for (const control of controls) {
@@ -565,6 +890,49 @@ export class NfeService {
     return where;
   }
 
+  private async runAutomaticSyncCycle(): Promise<void> {
+    if (this.autoSyncRunning) {
+      return;
+    }
+
+    this.autoSyncRunning = true;
+    try {
+      await this.runNowGlobal();
+    } catch (error) {
+      this.logger.warn(`Falha na execucao automatica de NF-e: ${this.toErrorMessage(error)}`);
+    } finally {
+      this.autoSyncRunning = false;
+    }
+  }
+
+  private async runNightlySweepCycle(): Promise<void> {
+    if (this.nightlySweepRunning) {
+      return;
+    }
+
+    const executionKey = this.resolveCurrentNightlySweepExecutionKey(new Date());
+    if (!executionKey) {
+      return;
+    }
+
+    this.nightlySweepRunning = true;
+    try {
+      this.lastNightlySweepExecutionKey = executionKey;
+      this.executedNightlySweepKeys.add(executionKey);
+      const activation = await this.ativarSyncNoNsuAtualParaTodos({
+        ambiente: NfeAmbiente.producao
+      });
+      const runResult = await this.runNowGlobal();
+      this.logger.log(
+        `Busca noturna NF-e executada (${executionKey}): ${activation.controlesCriadosOuReativados} controle(s) preparados, ${runResult.documentsSaved} documento(s) salvo(s)`
+      );
+    } catch (error) {
+      this.logger.warn(`Falha na busca noturna de NF-e: ${this.toErrorMessage(error)}`);
+    } finally {
+      this.nightlySweepRunning = false;
+    }
+  }
+
   private resolveTipoRelacao(cnpjConsulta: string | undefined, parsed: ParsedNfe): NfeTipoRelacao | undefined {
     if (!cnpjConsulta) {
       return undefined;
@@ -620,6 +988,183 @@ export class NfeService {
     }
 
     return found;
+  }
+
+  private refreshNightlySweepTimer(): void {
+    if (this.nightlySweepEnabled) {
+      if (!this.nightlySweepTimer) {
+        this.nightlySweepTimer = setInterval(() => {
+          const executionKey = this.resolveCurrentNightlySweepExecutionKey(new Date());
+          if (!executionKey || this.executedNightlySweepKeys.has(executionKey)) {
+            return;
+          }
+          void this.runNightlySweepCycle();
+        }, this.nightlySweepCheckIntervalMs);
+        this.nightlySweepTimer.unref?.();
+        const nightlySweepStartupTimer = setTimeout(() => {
+          const executionKey = this.resolveCurrentNightlySweepExecutionKey(new Date());
+          if (!executionKey || this.executedNightlySweepKeys.has(executionKey)) {
+            return;
+          }
+          void this.runNightlySweepCycle();
+        }, 5000);
+        nightlySweepStartupTimer.unref?.();
+      }
+
+      this.logger.log(
+        `Busca noturna NF-e habilitada para ${this.describeNightlySweepSlots()} (UTC${this.nightlySweepTimezoneOffsetMinutes >= 0 ? '+' : ''}${this.nightlySweepTimezoneOffsetMinutes / 60})`
+      );
+      return;
+    }
+
+    if (this.nightlySweepTimer) {
+      clearInterval(this.nightlySweepTimer);
+      this.nightlySweepTimer = null;
+    }
+
+    this.logger.log('Busca noturna NF-e desativada (NFE_SYNC_NIGHTLY_SWEEP_ENABLED=false)');
+  }
+
+  private resolveInitialNightlySweepSlots(): string[] {
+    const envValue = process.env.NFE_SYNC_NIGHTLY_SWEEP_SLOTS;
+    if (!envValue) {
+      return this.normalizeNightlySweepSlots([this.formatTime(this.nightlySweepHour, this.nightlySweepMinute)]);
+    }
+
+    return this.normalizeNightlySweepSlots(envValue.split(','));
+  }
+
+  private normalizeNightlySweepSlots(slots: string[]): string[] {
+    const valid = Array.from(
+      new Set(slots.map((value) => value.trim()).filter((value) => NfeService.NIGHTLY_SWEEP_AVAILABLE_SLOTS.includes(value)))
+    );
+    return NfeService.NIGHTLY_SWEEP_AVAILABLE_SLOTS.filter((slot) => valid.includes(slot));
+  }
+
+  private getReferenceNightlySweepSlot(): NfeNightlySweepSlot {
+    return this.parseNightlySweepSlot(this.nightlySweepActiveSlots[0] ?? this.formatTime(this.nightlySweepHour, this.nightlySweepMinute));
+  }
+
+  private parseNightlySweepSlot(slot: string): NfeNightlySweepSlot {
+    const [hourRaw, minuteRaw] = slot.split(':');
+    const hour = Number(hourRaw);
+    const minute = Number(minuteRaw);
+    return {
+      time: slot,
+      hour: Number.isInteger(hour) ? hour : this.nightlySweepHour,
+      minute: Number.isInteger(minute) ? minute : this.nightlySweepMinute
+    };
+  }
+
+  private describeNightlySweepSlots(): string {
+    if (this.nightlySweepActiveSlots.length === 0) {
+      return 'nenhum horario ativo';
+    }
+
+    return this.nightlySweepActiveSlots.join(', ');
+  }
+
+  private resolveCurrentNightlySweepExecutionKey(now: Date): string | null {
+    if (!this.nightlySweepEnabled || this.nightlySweepActiveSlots.length === 0) {
+      return null;
+    }
+
+    const localNow = this.toNightlySweepLocalDate(now);
+    const currentMinutes = localNow.getUTCHours() * 60 + localNow.getUTCMinutes();
+
+    const matchedSlot = this.nightlySweepActiveSlots
+      .map((slot) => this.parseNightlySweepSlot(slot))
+      .find((slot) => currentMinutes >= slot.hour * 60 + slot.minute && currentMinutes < slot.hour * 60 + slot.minute + 1);
+
+    if (!matchedSlot) {
+      return null;
+    }
+
+    const year = localNow.getUTCFullYear();
+    const month = String(localNow.getUTCMonth() + 1).padStart(2, '0');
+    const day = String(localNow.getUTCDate()).padStart(2, '0');
+    return `${year}-${month}-${day} ${matchedSlot.time}`;
+  }
+
+  private resolveNextNightlySweepAt(now: Date): Date | null {
+    if (!this.nightlySweepEnabled || this.nightlySweepActiveSlots.length === 0) {
+      return null;
+    }
+
+    const localNow = this.toNightlySweepLocalDate(now);
+    const currentMs = localNow.getTime();
+    const slots = this.nightlySweepActiveSlots.map((slot) => this.parseNightlySweepSlot(slot));
+
+    let nextActual: Date | null = null;
+
+    for (let dayOffset = 0; dayOffset <= 2 && !nextActual; dayOffset += 1) {
+      const baseLocal = new Date(
+        Date.UTC(localNow.getUTCFullYear(), localNow.getUTCMonth(), localNow.getUTCDate() + dayOffset, 0, 0, 0, 0)
+      );
+
+      for (const slot of slots) {
+        const targetLocalUtcMs = Date.UTC(
+          baseLocal.getUTCFullYear(),
+          baseLocal.getUTCMonth(),
+          baseLocal.getUTCDate(),
+          slot.hour,
+          slot.minute,
+          0,
+          0
+        );
+        const targetActualMs = targetLocalUtcMs - this.nightlySweepTimezoneOffsetMinutes * 60 * 1000;
+        if (targetLocalUtcMs <= currentMs) {
+          continue;
+        }
+        if (targetActualMs > now.getTime()) {
+          nextActual = new Date(targetActualMs);
+          break;
+        }
+      }
+    }
+
+    return nextActual;
+  }
+
+  private toNightlySweepLocalDate(now: Date): Date {
+    return new Date(now.getTime() + this.nightlySweepTimezoneOffsetMinutes * 60 * 1000);
+  }
+
+  private async loadNightlySweepConfig(): Promise<void> {
+    const absolutePath = this.storage.resolveKeyPath(NfeService.NIGHTLY_SWEEP_CONFIG_STORAGE_KEY);
+    try {
+      const raw = await readFile(absolutePath, 'utf8');
+      const parsed = JSON.parse(raw) as NfeNightlySweepConfigFile;
+
+      if (typeof parsed.enabled === 'boolean') {
+        this.nightlySweepEnabled = parsed.enabled;
+      }
+
+      if (Array.isArray(parsed.activeSlots)) {
+        this.nightlySweepActiveSlots = this.normalizeNightlySweepSlots(parsed.activeSlots);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+        this.logger.warn(`Falha ao carregar configuracao de busca noturna NF-e: ${this.toErrorMessage(error)}`);
+      }
+    }
+  }
+
+  private async saveNightlySweepConfig(): Promise<void> {
+    const absolutePath = this.storage.resolveKeyPath(NfeService.NIGHTLY_SWEEP_CONFIG_STORAGE_KEY);
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await writeFile(
+      absolutePath,
+      JSON.stringify(
+        {
+          enabled: this.nightlySweepEnabled,
+          activeSlots: this.nightlySweepActiveSlots
+        } satisfies NfeNightlySweepConfigFile,
+        null,
+        2
+      ),
+      'utf8'
+    );
   }
 
   private async findActiveCertificateOrThrow(
@@ -681,5 +1226,41 @@ export class NfeService {
     }
 
     return new Prisma.Decimal(value.replace(',', '.'));
+  }
+
+  private parsePositiveNumberEnv(name: string, fallback: number): number {
+    const raw = process.env[name];
+    if (!raw) {
+      return fallback;
+    }
+
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+  }
+
+  private parseBoundedIntegerEnv(name: string, fallback: number, min: number, max: number): number {
+    const raw = process.env[name];
+    if (!raw) {
+      return fallback;
+    }
+
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isInteger(parsed)) {
+      return fallback;
+    }
+
+    return Math.min(max, Math.max(min, parsed));
+  }
+
+  private formatTime(hour: number, minute: number): string {
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+  }
+
+  private toErrorMessage(error: unknown): string {
+    if (error instanceof Error && error.message) {
+      return error.message;
+    }
+
+    return 'erro inesperado';
   }
 }

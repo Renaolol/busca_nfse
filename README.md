@@ -95,6 +95,14 @@ Veja `.env.example`.
 - `NFE_DISTRIBUICAO_URL_PRODUCAO` e `NFE_DISTRIBUICAO_URL_HOMOLOGACAO`: URLs do `NFeDistribuicaoDFe` do Ambiente Nacional publicadas no portal da NF-e.
 - `NFE_DISTRIBUICAO_TIMEOUT_MS`: timeout das chamadas SOAP de distribuicao NF-e.
 - `NFE_DISTRIBUICAO_REJECT_UNAUTHORIZED`: controle de validacao TLS do endpoint NF-e.
+- `NFE_SYNC_AUTO_RUN_ENABLED`: habilita ciclo automatico de NF-e em background (padrao `true`).
+- `NFE_SYNC_AUTO_RUN_INTERVAL_MS`: intervalo entre ciclos automaticos de NF-e (padrao `300000`).
+- `NFE_SYNC_AUTO_RUN_STARTUP_DELAY_MS`: atraso inicial apos boot para primeiro ciclo de NF-e (padrao `15000`).
+- `NFE_SYNC_NIGHTLY_SWEEP_ENABLED`: habilita busca noturna automatica de NF-e (padrao `true`).
+- `NFE_SYNC_NIGHTLY_SWEEP_SLOTS`: lista de horarios noturnos separados por virgula para NF-e.
+- `NFE_SYNC_NIGHTLY_SWEEP_HOUR` e `NFE_SYNC_NIGHTLY_SWEEP_MINUTE`: horario legado de NF-e quando nao houver slots configurados.
+- `NFE_SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES`: offset de fuso do agendamento noturno de NF-e (padrao `-180`, UTC-3).
+- `NFE_SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS`: intervalo de verificacao do agendamento noturno de NF-e (padrao `60000`).
 - `ENABLE_SWAGGER`: habilita docs em `/api/docs` (`false` recomendado em producao).
 - `SYNC_AUTO_RUN_ENABLED`: habilita ciclo automatico de sync em background (padrao `true`).
 - `SYNC_AUTO_RUN_INTERVAL_MS`: intervalo entre ciclos automaticos (padrao `30000`).
@@ -186,6 +194,26 @@ Valores aceitos:
 - No modo diario, por padrao o ciclo processa ate `SYNC_DAILY_MAX_NSU_PER_RUN` NSUs por lote. Se todos os NSUs consultados tiverem documento, agenda nova execucao curta (`SYNC_DAILY_SUCCESS_COOLDOWN_MS`) antes de continuar.
 - A busca noturna (`SYNC_NIGHTLY_SWEEP_*`) ativa modo diario para todos os clientes cadastrados e dispara varredura incremental a partir do ultimo NSU salvo.
 - O painel permite ligar/desligar a rotina e marcar individualmente os horarios `18:00`, `20:00`, `22:00`, `00:00`, `02:00`, `04:00` e `06:00`.
+
+## Sincronizacao de NF-e
+
+- `POST /nfe/sync/ativar`: habilita a busca de NF-e para um cliente sem informar estabelecimento, CNPJ de consulta ou NSU manualmente. O backend resolve os estabelecimentos ativos do cliente, consulta o `maxNSU` atual de cada CNPJ e grava esse valor como base para buscar apenas as proximas NF-e.
+- `POST /nfe/sync/ativar-todos`: executa o mesmo processo em lote para todos os clientes ativos.
+- `POST /nfe/sync/pausar`: pausa os controles de NF-e do cliente informado.
+- `POST /nfe/sync/rodar-agora`: executa a distribuicao apenas para um cliente especifico.
+- `POST /nfe/sync/rodar-agora-geral`: executa a distribuicao para todos os controles ativos de NF-e.
+- `GET /nfe/sync/status?clienteId=UUID`: lista os controles de NF-e do cliente.
+- `GET /nfe/sync/scheduler-status`: mostra o status do ciclo automatico e da busca noturna de NF-e.
+- `PUT /nfe/sync/scheduler-settings`: atualiza a configuracao da busca noturna de NF-e.
+
+### Comportamento operacional da NF-e
+
+- O modo operacional recomendado da NF-e nao tenta reconstruir historico remoto por data.
+- Na primeira ativacao, cada controle e criado a partir do `maxNSU` atual retornado pela distribuicao DF-e.
+- Isso evita varrer todo o historico antigo do contribuinte e faz a base seguir apenas com futuras entradas e saidas.
+- Controles ja existentes sao apenas reativados, sem resetar o NSU salvo.
+- O ciclo automatico de NF-e usa `NFE_SYNC_AUTO_RUN_*`.
+- A busca noturna de NF-e usa `NFE_SYNC_NIGHTLY_SWEEP_*` e, a cada slot configurado, garante controles ativos para clientes elegiveis antes de rodar a distribuicao incremental.
 
 ## Importacao de XML
 

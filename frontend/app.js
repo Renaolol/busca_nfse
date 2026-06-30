@@ -98,6 +98,7 @@ const state = {
   nfeSyncControls: [],
   nfeDocuments: [],
   nfeDashboardStats: null,
+  nfeSchedulerStatus: null,
   nfeManualResult: null,
   nfeSearch: {
     hasSearched: false,
@@ -282,6 +283,7 @@ async function hydrateFromApi() {
     nfeSyncByClient,
     dashboardStats,
     nfeDashboardStats,
+    nfeSchedulerStatus,
     nfseDocs,
     nfeDocs,
     auditRows,
@@ -294,6 +296,7 @@ async function hydrateFromApi() {
     fetchJsonByClientId(clientIds, (clientId) => `/nfe/sync/status?clienteId=${encodeURIComponent(clientId)}`, []),
     apiRequest('/nfse/dashboard-stats').catch(() => null),
     apiRequest('/nfe/dashboard-stats').catch(() => null),
+    apiRequest('/nfe/sync/scheduler-status').catch(() => null),
     apiRequest('/nfse').catch(() => []),
     apiRequest('/nfe').catch(() => []),
     apiRequest('/auditoria').catch(() => []),
@@ -323,6 +326,7 @@ async function hydrateFromApi() {
   state.nfeDocuments = nfeDocuments;
   state.nfeSyncControls = nfeSyncControls;
   state.nfeDashboardStats = nfeDashboardStats;
+  state.nfeSchedulerStatus = nfeSchedulerStatus;
   state.alerts = applyResolvedAlertState(alerts);
   state.establishmentsByClient = establishmentsByClient;
   state.syncByClient = syncByClient;
@@ -638,6 +642,36 @@ function onDocumentClick(event) {
     }
     case 'nfe-sync-refresh': {
       void refreshApiData();
+      return;
+    }
+    case 'nfe-enable-auto-search': {
+      void enableNfeSearchForAllClients();
+      return;
+    }
+    case 'nfe-disable-auto-search': {
+      void disableNfeSearchForAllClients();
+      return;
+    }
+    case 'nfe-run-now': {
+      void runNfeSearchNow();
+      return;
+    }
+    case 'nfe-client-enable': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      if (!clientId) {
+        return;
+      }
+      void enableNfeSearchForClient(clientId);
+      return;
+    }
+    case 'nfe-client-pause': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      if (!clientId) {
+        return;
+      }
+      void pauseNfeSync({
+        clienteId: clientId
+      });
       return;
     }
     case 'nfe-sync-clear-filters': {
@@ -1879,6 +1913,7 @@ function renderRunningExecutionCard() {
 
 function renderNfeSyncPage() {
   const controls = getFilteredNfeSyncControls();
+  const clientRows = getNfeSyncClientRows(controls);
   const syncStats = getNfeSyncStats();
   const statusOptions = uniqueValues(state.nfeSyncControls.map((control) => control.status));
   const ambienteOptions = uniqueValues(state.nfeSyncControls.map((control) => control.ambiente));
@@ -1888,158 +1923,22 @@ function renderNfeSyncPage() {
     <section class="page-section">
       ${renderPageHeader({
         title: 'Buscas NF-e',
-        description: 'Gerencie sincronizacao, consultas manuais por NSU/chave e acompanhe o armazenamento das NF-e.',
-        actions: [actionButton('Atualizar painel', 'nfe-sync-refresh', 'secondary')]
+        description: 'Ligue a busca por cliente ou em lote. O sistema captura o NSU atual como base e segue apenas com as proximas NF-e de entrada e saida.',
+        actions: [
+          actionButton('Ligar todos os clientes', 'nfe-enable-auto-search', 'primary'),
+          actionButton('Rodar busca agora', 'nfe-run-now', 'secondary'),
+          actionButton('Pausar todos', 'nfe-disable-auto-search', 'secondary')
+        ]
       })}
 
       <section class="stats-grid">
-        ${statCard('search', 'Controles ativos', String(syncStats.ativos), 'sincronizando distribuicao', 'success')}
+        ${statCard('search', 'Controles ativos', String(syncStats.ativos), 'buscando NF-e futuras', 'success')}
         ${statCard('clock', 'Controles pausados', String(syncStats.pausados), 'aguardando retomada', 'neutral')}
         ${statCard('alert', 'Controles com erro', String(syncStats.erros), 'revisar certificado ou API', 'danger')}
         ${statCard('file', 'NF-e no banco', String(nfeStats.totalNfe), `${nfeStats.xmlsCompletos} XML(s) completos`, 'info')}
       </section>
 
-      <section class="split-grid">
-        <article class="card">
-          <h3 class="card-title">Habilitar busca de NF-e</h3>
-          <p class="card-subtitle">Cria ou reativa controles por cliente. Se nenhum estabelecimento for escolhido, todos os ativos do cliente entram na busca.</p>
-          <form id="nfeSyncStartForm" class="form-grid" style="margin-top:12px;">
-            <label class="field">
-              Cliente
-              <select name="clienteId" required>
-                <option value="">Selecione</option>
-                ${renderOptions(state.clients.map((client) => client.id), '', mapClientOptions())}
-              </select>
-            </label>
-            <label class="field">
-              Estabelecimento
-              <select name="scope">
-                <option value="">Todos os estabelecimentos ativos</option>
-                ${renderNfeScopeOptions()}
-              </select>
-            </label>
-            <label class="field">
-              Ambiente
-              <select name="ambiente">${renderOptions(['producao', 'homologacao'], 'producao', {
-                producao: 'Producao',
-                homologacao: 'Homologacao'
-              })}</select>
-            </label>
-            <label class="field">
-              NSU inicial
-              <input name="nsuInicial" inputmode="numeric" placeholder="1" />
-            </label>
-            <label class="field" style="grid-column: span 2;">
-              CNPJ de consulta
-              <input name="cnpjConsulta" placeholder="Usar CNPJ do estabelecimento quando vazio" />
-            </label>
-            <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
-              <button class="btn primary" type="submit">Habilitar busca</button>
-            </div>
-          </form>
-        </article>
-
-        <article class="card">
-          <h3 class="card-title">Rodar sincronizacao agora</h3>
-          <p class="card-subtitle">Executa a distribuicao para controles ativos sem esperar o agendamento automatico.</p>
-          <form id="nfeSyncRunNowForm" class="form-grid" style="margin-top:12px;">
-            <label class="field">
-              Cliente
-              <select name="clienteId" required>
-                <option value="">Selecione</option>
-                ${renderOptions(state.clients.map((client) => client.id), '', mapClientOptions())}
-              </select>
-            </label>
-            <label class="field">
-              Estabelecimento
-              <select name="scope">
-                <option value="">Todos os controles ativos do cliente</option>
-                ${renderNfeScopeOptions()}
-              </select>
-            </label>
-            <label class="field">
-              Ambiente
-              <select name="ambiente">${renderOptions(['producao', 'homologacao'], 'producao', {
-                producao: 'Producao',
-                homologacao: 'Homologacao'
-              })}</select>
-            </label>
-            <label class="field">
-              Limite de controles
-              <input name="limitControles" type="number" min="1" value="10" />
-            </label>
-            <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
-              <button class="btn primary" type="submit">Executar agora</button>
-            </div>
-          </form>
-        </article>
-      </section>
-
-      <section class="split-grid">
-        <article class="card">
-          <h3 class="card-title">Consultar NSU especifico</h3>
-          <form id="nfeQueryNsuForm" class="form-grid" style="margin-top:12px;">
-            <label class="field" style="grid-column: span 2;">
-              Estabelecimento
-              <select name="scope" required>
-                <option value="">Selecione</option>
-                ${renderNfeScopeOptions()}
-              </select>
-            </label>
-            <label class="field">
-              Ambiente
-              <select name="ambiente">${renderOptions(['producao', 'homologacao'], 'producao', {
-                producao: 'Producao',
-                homologacao: 'Homologacao'
-              })}</select>
-            </label>
-            <label class="field">
-              NSU
-              <input name="nsu" required inputmode="numeric" />
-            </label>
-            <label class="field-inline" style="grid-column: span 2;">
-              <input name="persistir" type="checkbox" checked />
-              <span>Persistir documentos retornados</span>
-            </label>
-            <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
-              <button class="btn secondary" type="submit">Consultar NSU</button>
-            </div>
-          </form>
-        </article>
-
-        <article class="card">
-          <h3 class="card-title">Consultar chave de acesso</h3>
-          <form id="nfeQueryChaveForm" class="form-grid" style="margin-top:12px;">
-            <label class="field" style="grid-column: span 2;">
-              Estabelecimento
-              <select name="scope" required>
-                <option value="">Selecione</option>
-                ${renderNfeScopeOptions()}
-              </select>
-            </label>
-            <label class="field">
-              Ambiente
-              <select name="ambiente">${renderOptions(['producao', 'homologacao'], 'producao', {
-                producao: 'Producao',
-                homologacao: 'Homologacao'
-              })}</select>
-            </label>
-            <label class="field">
-              Chave de acesso
-              <input name="chaveAcesso" required maxlength="44" />
-            </label>
-            <label class="field-inline" style="grid-column: span 2;">
-              <input name="persistir" type="checkbox" checked />
-              <span>Persistir documentos retornados</span>
-            </label>
-            <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
-              <button class="btn secondary" type="submit">Consultar chave</button>
-            </div>
-          </form>
-        </article>
-      </section>
-
-      ${renderNfeManualResultCard()}
+      ${renderNfeSchedulerStatusCard()}
 
       <article class="card filter-card">
         <h3 class="card-title">Filtros dos controles</h3>
@@ -2068,6 +1967,64 @@ function renderNfeSyncPage() {
       </article>
 
       <article class="card">
+        <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+          <div>
+            <h3 class="card-title">Busca simplificada por cliente</h3>
+            <p class="card-subtitle">Ao ligar a busca, o backend resolve os estabelecimentos ativos do cliente, captura o NSU atual e passa a sincronizar apenas as proximas NF-e.</p>
+          </div>
+          <button class="btn secondary" type="button" data-action="nfe-sync-refresh">Atualizar painel</button>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Cliente</th>
+                <th>CNPJ</th>
+                <th>Controles</th>
+                <th>Ultima execucao</th>
+                <th>Ult. NSU base</th>
+                <th>Documentos</th>
+                <th>Status</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderTableRowsOrState({
+                key: 'nfeSync',
+                colSpan: 8,
+                rowsHtml: clientRows
+                  .map((row) => {
+                    return `<tr>
+                      <td>${escapeHtml(row.cliente)}</td>
+                      <td>${escapeHtml(formatCnpj(row.cnpj))}</td>
+                      <td>${escapeHtml(String(row.totalControles))}</td>
+                      <td>${escapeHtml(formatDateTime(row.ultimaExecucao))}</td>
+                      <td>${escapeHtml(row.ultimoNsuConsultado)}</td>
+                      <td>${escapeHtml(String(row.totalDocumentosBaixados))}</td>
+                      <td>
+                        ${statusBadge(row.statusLabel, row.statusTone)}
+                        <span class="row-sub">${escapeHtml(row.statusDetail)}</span>
+                      </td>
+                      <td>
+                        <div class="table-actions">
+                          <button class="icon-btn" data-action="nfe-client-enable" data-client-id="${row.clientId}">Ligar busca</button>
+                          <button class="icon-btn" data-action="nfe-client-pause" data-client-id="${row.clientId}">Pausar</button>
+                          <button class="icon-btn" data-action="navigate" data-route="/xmls-nfe">Ver XMLs</button>
+                        </div>
+                      </td>
+                    </tr>`;
+                  })
+                  .join(''),
+                emptyMessage: 'Nenhum cliente encontrado para os filtros informados.'
+              })}
+            </tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="card">
+        <h3 class="card-title">Detalhamento tecnico por estabelecimento</h3>
+        <p class="card-subtitle">Visao detalhada dos controles realmente mantidos pelo backend para distribuicao DF-e.</p>
         <div class="table-wrap">
           <table>
             <thead>
@@ -2124,6 +2081,50 @@ function renderNfeSyncPage() {
         </div>
       </article>
     </section>
+  `;
+}
+
+function renderNfeSchedulerStatusCard() {
+  const scheduler = state.nfeSchedulerStatus;
+  if (!scheduler) {
+    return `
+      <article class="card">
+        <h3 class="card-title">Rotina automatica NF-e</h3>
+        <p class="card-subtitle">Status do agendador ainda nao carregado do backend.</p>
+      </article>
+    `;
+  }
+
+  const autoSync = scheduler.autoSync || {};
+  const nightlySweep = scheduler.nightlySweep || {};
+  const autoTone = autoSync.running ? 'info' : autoSync.enabled ? 'success' : 'neutral';
+  const nightlyTone = nightlySweep.running ? 'info' : nightlySweep.enabled ? 'success' : 'neutral';
+
+  return `
+    <article class="card scheduler-strip">
+      <div class="scheduler-item">
+        <div class="scheduler-heading">
+          <span class="scheduler-dot ${autoTone}"></span>
+          <strong>Ciclo automatico NF-e</strong>
+        </div>
+        ${statusBadge(autoSync.running ? 'Executando agora' : autoSync.enabled ? 'Ativo' : 'Inativo', autoTone)}
+        <p>Processa controles ativos em segundo plano sem depender de acao manual.</p>
+        <small>Intervalo: ${escapeHtml(formatDurationMs(autoSync.intervalMs || 0))}</small>
+      </div>
+      <div class="scheduler-item">
+        <div class="scheduler-heading">
+          <span class="scheduler-dot ${nightlyTone}"></span>
+          <strong>Busca noturna NF-e</strong>
+        </div>
+        ${statusBadge(nightlySweep.running ? 'Executando agora' : nightlySweep.enabled ? 'Ativa' : 'Inativa', nightlyTone)}
+        <p>${escapeHtml(
+          nightlySweep.activeSlots?.length
+            ? `Slots ativos: ${nightlySweep.activeSlots.join(', ')}`
+            : 'Nenhum horario ativo configurado.'
+        )}</p>
+        <small>Proxima execucao: ${escapeHtml(formatDateTime(nightlySweep.nextRunAt || ''))}</small>
+      </div>
+    </article>
   `;
 }
 
@@ -4258,6 +4259,126 @@ function getNfeDashboardStats() {
         0
     )
   };
+}
+
+function getNfeSyncClientRows(controls = state.nfeSyncControls) {
+  return state.clients.map((client) => {
+    const rows = (Array.isArray(controls) ? controls : []).filter((control) => control.clientId === client.id);
+    const activeCount = rows.filter((control) => control.status === 'ativo').length;
+    const pausedCount = rows.filter((control) => control.status === 'pausado').length;
+    const errorCount = rows.filter((control) => String(control.status || '').startsWith('erro')).length;
+    const latestControl = [...rows].sort((a, b) => Date.parse(b.ultimaExecucao || 0) - Date.parse(a.ultimaExecucao || 0))[0] || null;
+    const totalDocuments = rows.reduce((sum, control) => sum + Number(control.totalDocumentosBaixados || 0), 0);
+    let statusLabel = 'Nao inicializada';
+    let statusTone = 'neutral';
+    let statusDetail = 'Nenhum controle de NF-e criado ainda.';
+
+    if (errorCount > 0) {
+      statusLabel = 'Com erro';
+      statusTone = 'danger';
+      statusDetail = `${errorCount} controle(s) com erro.`;
+    } else if (activeCount > 0) {
+      statusLabel = 'Ligada';
+      statusTone = 'success';
+      statusDetail = `${activeCount} controle(s) ativo(s).`;
+    } else if (pausedCount > 0) {
+      statusLabel = 'Pausada';
+      statusTone = 'neutral';
+      statusDetail = `${pausedCount} controle(s) pausado(s).`;
+    }
+
+    return {
+      clientId: client.id,
+      cliente: client.razaoSocial,
+      cnpj: client.cnpj,
+      totalControles: rows.length,
+      ultimaExecucao: latestControl?.ultimaExecucao || null,
+      ultimoNsuConsultado: latestControl?.ultimoNsuConsultado || '-',
+      totalDocumentosBaixados: totalDocuments,
+      statusLabel,
+      statusTone,
+      statusDetail
+    };
+  });
+}
+
+async function enableNfeSearchForAllClients() {
+  try {
+    const result = await apiRequest('/nfe/sync/ativar-todos', {
+      method: 'POST',
+      body: {}
+    });
+    pushToast(
+      `NF-e ligada para ${Number(result?.clientesComSucesso || 0)} cliente(s). Controles preparados: ${Number(result?.controlesCriadosOuReativados || 0)}.`,
+      Number(result?.falhas || 0) > 0 ? 'error' : 'success'
+    );
+    await refreshApiData();
+  } catch (error) {
+    pushToast(`Falha ao ligar busca de NF-e em lote: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function enableNfeSearchForClient(clientId) {
+  try {
+    const result = await apiRequest('/nfe/sync/ativar', {
+      method: 'POST',
+      body: {
+        clienteId: clientId
+      }
+    });
+    pushToast(
+      `NF-e ligada para o cliente: ${Number(result?.controlesCriadosOuReativados || 0)} controle(s) preparado(s).`,
+      Number(result?.falhas || 0) > 0 ? 'error' : 'success'
+    );
+    await refreshApiData();
+  } catch (error) {
+    pushToast(`Falha ao ligar busca de NF-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function disableNfeSearchForAllClients() {
+  const clientIds = [...new Set(state.nfeSyncControls.map((control) => control.clientId).filter(Boolean))];
+  if (!clientIds.length) {
+    pushToast('Nao ha controles de NF-e ativos para pausar.', 'info');
+    return;
+  }
+
+  let success = 0;
+  let failure = 0;
+  for (const clientId of clientIds) {
+    try {
+      await apiRequest('/nfe/sync/pausar', {
+        method: 'POST',
+        body: {
+          clienteId: clientId
+        }
+      });
+      success += 1;
+    } catch {
+      failure += 1;
+    }
+  }
+
+  await refreshApiData();
+  pushToast(
+    `Busca de NF-e pausada para ${success} cliente(s)${failure ? `, com ${failure} falha(s)` : ''}.`,
+    failure ? 'error' : 'success'
+  );
+}
+
+async function runNfeSearchNow() {
+  try {
+    const result = await apiRequest('/nfe/sync/rodar-agora-geral', {
+      method: 'POST'
+    });
+    pushToast(
+      `Busca de NF-e executada: ${Number(result?.processed || 0)} controle(s), ${Number(result?.documentsSaved || 0)} documento(s) salvo(s).`,
+      'success'
+    );
+    await refreshApiData();
+  } catch (error) {
+    pushToast(`Falha ao executar busca de NF-e: ${toErrorMessage(error)}`, 'error');
+  }
 }
 
 function getFilteredRuns() {

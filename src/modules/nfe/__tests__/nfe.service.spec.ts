@@ -8,7 +8,8 @@ import { NfeXmlParserService } from '../nfe-xml-parser.service';
 describe('NfeService', () => {
   const prisma = {
     cliente: {
-      findUnique: jest.fn()
+      findUnique: jest.fn(),
+      findMany: jest.fn()
     },
     clienteEstabelecimento: {
       findUnique: jest.fn(),
@@ -25,7 +26,9 @@ describe('NfeService', () => {
       upsert: jest.fn()
     },
     nfeSyncControle: {
+      findFirst: jest.fn(),
       findMany: jest.fn(),
+      create: jest.fn(),
       upsert: jest.fn(),
       updateMany: jest.fn(),
       update: jest.fn()
@@ -53,6 +56,7 @@ describe('NfeService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.cliente.findUnique.mockResolvedValue({ id: 'cliente-1' });
+    prisma.cliente.findMany.mockResolvedValue([{ id: 'cliente-1', ativo: true, createdAt: new Date('2026-06-29T00:00:00.000Z') }]);
     prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
       id: 'estab-1',
       clienteId: 'cliente-1',
@@ -72,7 +76,9 @@ describe('NfeService', () => {
       id: 'doc-1',
       ...args.create
     }));
+    prisma.nfeSyncControle.findFirst.mockResolvedValue(null);
     prisma.nfeSyncControle.findMany.mockResolvedValue([]);
+    prisma.nfeSyncControle.create.mockResolvedValue({});
     prisma.nfeSyncControle.upsert.mockResolvedValue({});
     prisma.nfeSyncControle.updateMany.mockResolvedValue({ count: 1 });
     prisma.nfeSyncControle.update.mockResolvedValue({});
@@ -160,6 +166,44 @@ describe('NfeService', () => {
     expect(result).toEqual({ controlesCriadosOuAtualizados: 1 });
   });
 
+  it('ativa sync no NSU atual sem importar historico', async () => {
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documentos localizados',
+      ultNsu: 12n,
+      maxNsu: 99n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.ativarSyncNoNsuAtual({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledWith({
+      cnpjConsulta: '12345678000199',
+      ultNsu: 0n,
+      ambiente: NfeAmbiente.producao,
+      certificateId: 'cert-1'
+    });
+    expect(prisma.nfeSyncControle.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ultimoNsuConsultado: 99n,
+          maxNsu: 99n,
+          status: NfeSyncStatus.ativo
+        })
+      })
+    );
+    expect(result.controlesInicializados).toBe(1);
+    expect(result.controlesReativados).toBe(0);
+    expect(result.falhas).toBe(0);
+  });
+
   it('roda distribuicao e persiste NF-e sincronizada', async () => {
     prisma.nfeSyncControle.findMany.mockResolvedValue([
       {
@@ -231,6 +275,44 @@ describe('NfeService', () => {
     expect(result).toEqual({
       processed: 1,
       documentsSaved: 1
+    });
+  });
+
+  it('roda execucao global apenas com controles ativos', async () => {
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 10n,
+        ultimoNsuDistribuido: 10n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '137',
+      xMotivo: 'Sem novos documentos',
+      ultNsu: 10n,
+      maxNsu: 10n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.runNowGlobal();
+
+    expect(prisma.nfeSyncControle.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: NfeSyncStatus.ativo
+        })
+      })
+    );
+    expect(result).toEqual({
+      processed: 1,
+      documentsSaved: 0
     });
   });
 
