@@ -267,7 +267,6 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
           : `<consChNFe><chNFe>${this.onlyDigits(params.consulta.chaveAcesso)}</chNFe></consChNFe>`;
 
     return [
-      `<?xml version="1.0" encoding="utf-8"?>`,
       `<distDFeInt xmlns="${RealNfeDistribuicaoClient.XML_NAMESPACE}" versao="${RealNfeDistribuicaoClient.LAYOUT_VERSION}">`,
       `<tpAmb>${tpAmb}</tpAmb>`,
       `<cUFAutor>${RealNfeDistribuicaoClient.AN_CUF}</cUFAutor>`,
