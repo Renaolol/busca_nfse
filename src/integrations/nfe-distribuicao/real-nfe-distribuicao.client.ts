@@ -6,7 +6,7 @@ import type { IncomingHttpHeaders } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { gunzipSync } from 'node:zlib';
+import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocalStorageService } from '../../modules/storage/storage.service';
 import { CryptoService } from '../../modules/shared/crypto.service';
@@ -300,6 +300,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
             'Content-Type': `application/soap+xml; charset=utf-8; action="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}/nfeDistDFeInteresse"`,
             SOAPAction: `${RealNfeDistribuicaoClient.SOAP_NAMESPACE}/nfeDistDFeInteresse`,
             Accept: 'application/soap+xml, text/xml, application/xml',
+            'Accept-Encoding': 'gzip, deflate, br',
             'Content-Length': Buffer.byteLength(envelope, 'utf8')
           },
           ...tlsOptions,
@@ -312,10 +313,11 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
             chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
           });
           res.on('end', () => {
+            const payload = Buffer.concat(chunks);
             resolve({
               statusCode: res.statusCode ?? 0,
               headers: res.headers,
-              body: Buffer.concat(chunks).toString('utf8')
+              body: this.decodeHttpResponseBody(res.headers, payload)
             });
           });
         }
@@ -346,7 +348,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
 
     const innerXml = this.extractSoapResultXml(body);
     if (!innerXml) {
-      throw new Error('Resposta SOAP da distribuicao NF-e sem retDistDFeInt reconhecivel');
+      throw new Error(`Resposta SOAP da distribuicao NF-e sem retDistDFeInt reconhecivel. Preview: ${this.previewBody(body)}`);
     }
 
     const cStat = this.extractFirstTagText(innerXml, 'cStat');
@@ -365,18 +367,52 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
   }
 
   private extractSoapResultXml(soapXml: string): string | null {
-    const direct = soapXml.match(/<retDistDFeInt\b[\s\S]*?<\/retDistDFeInt>/i)?.[0];
+    const normalizedSoapXml = this.decodeXmlEntities(soapXml);
+    const direct = normalizedSoapXml.match(/<(?:\w+:)?retDistDFeInt\b[\s\S]*?<\/(?:\w+:)?retDistDFeInt>/i)?.[0];
     if (direct) {
       return direct;
     }
 
-    const wrapped = soapXml.match(/<nfeDistDFeInteresseResult\b[^>]*>([\s\S]*?)<\/nfeDistDFeInteresseResult>/i)?.[1];
+    const wrapped = normalizedSoapXml.match(
+      /<(?:\w+:)?nfeDistDFeInteresseResult\b[^>]*>([\s\S]*?)<\/(?:\w+:)?nfeDistDFeInteresseResult>/i
+    )?.[1];
     if (!wrapped) {
       return null;
     }
 
     const decoded = this.decodeXmlEntities(wrapped);
-    return decoded.match(/<retDistDFeInt\b[\s\S]*?<\/retDistDFeInt>/i)?.[0] ?? null;
+    return decoded.match(/<(?:\w+:)?retDistDFeInt\b[\s\S]*?<\/(?:\w+:)?retDistDFeInt>/i)?.[0] ?? null;
+  }
+
+  private decodeHttpResponseBody(headers: IncomingHttpHeaders, payload: Buffer): string {
+    const encodingHeader = Array.isArray(headers['content-encoding']) ? headers['content-encoding'][0] : headers['content-encoding'];
+    const encoding = String(encodingHeader || '')
+      .split(',')
+      .map((value) => value.trim().toLowerCase())
+      .find(Boolean);
+
+    try {
+      if (encoding === 'gzip' || encoding === 'x-gzip') {
+        return gunzipSync(payload).toString('utf8');
+      }
+
+      if (encoding === 'deflate') {
+        return inflateSync(payload).toString('utf8');
+      }
+
+      if (encoding === 'br') {
+        return brotliDecompressSync(payload).toString('utf8');
+      }
+    } catch {
+      return payload.toString('utf8');
+    }
+
+    return payload.toString('utf8');
+  }
+
+  private previewBody(body: string): string {
+    const compact = String(body || '').replace(/\s+/g, ' ').trim();
+    return compact ? compact.slice(0, 240) : '(vazio)';
   }
 
   private extractDocuments(retXml: string): NfeDistribuicaoDocument[] {

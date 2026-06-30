@@ -142,4 +142,60 @@ describe('RealNfeDistribuicaoClient', () => {
       '<consChNFe><chNFe>35260612345678000199550010000001231000001231</chNFe></consChNFe>'
     );
   });
+
+  it('extrai retDistDFeInt com namespace no payload SOAP escapado', () => {
+    const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
+      parseSoapResponse(body: string): {
+        cStat?: string;
+        xMotivo?: string;
+        ultNsu: bigint;
+        maxNsu: bigint;
+        documents: Array<{
+          nsu?: bigint;
+          schema: string;
+          xml: string;
+          chaveAcesso?: string;
+        }>;
+      };
+    };
+
+    const soap = `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
+  <soap:Body>
+    <ns2:nfeDistDFeInteresseResponse xmlns:ns2="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe">
+      <ns2:nfeDistDFeInteresseResult>&lt;ns3:retDistDFeInt xmlns:ns3="http://www.portalfiscal.inf.br/nfe" versao="1.01"&gt;&lt;ns3:cStat&gt;137&lt;/ns3:cStat&gt;&lt;ns3:xMotivo&gt;Nenhum documento localizado&lt;/ns3:xMotivo&gt;&lt;ns3:ultNSU&gt;000000000000051&lt;/ns3:ultNSU&gt;&lt;ns3:maxNSU&gt;000000000000051&lt;/ns3:maxNSU&gt;&lt;/ns3:retDistDFeInt&gt;</ns2:nfeDistDFeInteresseResult>
+    </ns2:nfeDistDFeInteresseResponse>
+  </soap:Body>
+</soap:Envelope>`;
+
+    const result = client.parseSoapResponse(soap);
+
+    expect(result.cStat).toBe('137');
+    expect(result.xMotivo).toBe('Nenhum documento localizado');
+    expect(result.ultNsu).toBe(51n);
+    expect(result.maxNsu).toBe(51n);
+    expect(result.documents).toEqual([]);
+  });
+
+  it('descompacta resposta HTTP gzip antes de parsear o SOAP', () => {
+    const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
+      decodeHttpResponseBody(
+        headers: Record<string, string>,
+        payload: Buffer
+      ): string;
+    };
+
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope">
+  <soap:Body>
+    <nfeDistDFeInteresseResponse xmlns="http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe">
+      <nfeDistDFeInteresseResult>&lt;retDistDFeInt xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01"&gt;&lt;cStat&gt;137&lt;/cStat&gt;&lt;xMotivo&gt;Nenhum documento localizado&lt;/xMotivo&gt;&lt;ultNSU&gt;000000000000051&lt;/ultNSU&gt;&lt;maxNSU&gt;000000000000051&lt;/maxNSU&gt;&lt;/retDistDFeInt&gt;</nfeDistDFeInteresseResult>
+    </nfeDistDFeInteresseResponse>
+  </soap:Body>
+</soap:Envelope>`;
+
+    const body = client.decodeHttpResponseBody({ 'content-encoding': 'gzip' }, gzipSync(Buffer.from(xml, 'utf8')));
+
+    expect(body).toBe(xml);
+  });
 });
