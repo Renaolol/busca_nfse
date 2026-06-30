@@ -4400,8 +4400,11 @@ async function enableNfeSearchForAllClients() {
       method: 'POST',
       body: {}
     });
+    const failureDetails = extractNfeActivationFailureMessages(result?.detalhes);
     pushToast(
-      `NF-e ligada para ${Number(result?.clientesComSucesso || 0)} cliente(s). Controles preparados: ${Number(result?.controlesCriadosOuReativados || 0)}.`,
+      `NF-e ligada para ${Number(result?.clientesComSucesso || 0)} cliente(s). Controles preparados: ${Number(result?.controlesCriadosOuReativados || 0)}.${
+        failureDetails ? ` ${failureDetails}` : ''
+      }`,
       Number(result?.falhas || 0) > 0 ? 'error' : 'success'
     );
     await refreshApiData();
@@ -4418,14 +4421,33 @@ async function enableNfeSearchForClient(clientId) {
         clienteId: clientId
       }
     });
+    const failureDetails = extractNfeActivationFailureMessages(result?.detalhes);
     pushToast(
-      `NF-e ligada para o cliente: ${Number(result?.controlesCriadosOuReativados || 0)} controle(s) preparado(s).`,
+      `NF-e ligada para o cliente: ${Number(result?.controlesCriadosOuReativados || 0)} controle(s) preparado(s).${
+        failureDetails ? ` ${failureDetails}` : ''
+      }`,
       Number(result?.falhas || 0) > 0 ? 'error' : 'success'
     );
     await refreshApiData();
   } catch (error) {
     pushToast(`Falha ao ligar busca de NF-e: ${toErrorMessage(error)}`, 'error');
   }
+}
+
+function extractNfeActivationFailureMessages(details) {
+  const rows = Array.isArray(details) ? details : [];
+  const messages = rows
+    .filter((item) => item?.status === 'falha' && item?.mensagem)
+    .map((item) => String(item.mensagem).trim())
+    .filter(Boolean);
+
+  if (!messages.length) {
+    return '';
+  }
+
+  const uniqueMessages = [...new Set(messages)];
+  const preview = uniqueMessages.slice(0, 2).join(' | ');
+  return `Motivo: ${preview}${uniqueMessages.length > 2 ? ' | ...' : ''}`;
 }
 
 async function disableNfeSearchForAllClients() {
