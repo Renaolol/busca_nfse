@@ -221,9 +221,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
+        const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
         const currentNsuResult = await this.distribuicaoClient.distribuirPorNsu({
           cnpjConsulta,
-          cUfAutor: this.resolveCUfAutorFromEstablishment(establishment),
+          cUfAutor,
           ultNsu: 0n,
           ambiente,
           certificateId: certificate.id
@@ -601,9 +602,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         control.estabelecimentoId,
         control.cnpjConsulta
       );
+      const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
       const result = await this.distribuicaoClient.distribuirPorNsu({
         cnpjConsulta: control.cnpjConsulta,
-        cUfAutor: this.resolveCUfAutorFromEstablishment(establishment),
+        cUfAutor,
         ultNsu: control.ultimoNsuConsultado,
         ambiente: control.ambiente,
         certificateId: certificate.id
@@ -665,9 +667,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
     const cnpjConsulta = establishment.cnpj;
     const certificate = await this.findActiveCertificateOrThrow(dto.clienteId, dto.estabelecimentoId, cnpjConsulta);
+    const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
     const result = await this.distribuicaoClient.consultarPorNsu({
       cnpjConsulta,
-      cUfAutor: this.resolveCUfAutorFromEstablishment(establishment),
+      cUfAutor,
       nsu: BigInt(dto.nsu),
       ambiente,
       certificateId: certificate.id
@@ -690,9 +693,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
     const cnpjConsulta = establishment.cnpj;
     const certificate = await this.findActiveCertificateOrThrow(dto.clienteId, dto.estabelecimentoId, cnpjConsulta);
+    const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
     const result = await this.distribuicaoClient.consultarPorChave({
       cnpjConsulta,
-      cUfAutor: this.resolveCUfAutorFromEstablishment(establishment),
+      cUfAutor,
       chaveAcesso: dto.chaveAcesso,
       ambiente,
       certificateId: certificate.id
@@ -1253,7 +1257,15 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private resolveCUfAutorFromEstablishment(establishment: { municipioCodigoIbge?: string | null }): string | undefined {
+  private resolveCUfAutorFromEstablishment(establishment: {
+    municipioCodigoIbge?: string | null;
+    cnpj?: string | null;
+  }): string | undefined {
+    const configured = String(process.env.NFE_DISTRIBUICAO_CUF_AUTOR || '').replace(/\D/g, '');
+    if (configured.length === 2) {
+      return configured;
+    }
+
     const digits = String(establishment?.municipioCodigoIbge || '').replace(/\D/g, '');
     return digits.length >= 2 ? digits.slice(0, 2) : undefined;
   }
