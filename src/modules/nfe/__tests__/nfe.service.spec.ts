@@ -349,7 +349,7 @@ describe('NfeService', () => {
     });
   });
 
-  it('roda execucao global apenas com controles ativos', async () => {
+  it('roda execucao global com controles ativos e em erro_api para permitir retentativa', async () => {
     prisma.nfeSyncControle.findMany.mockResolvedValue([
       {
         id: 'ctrl-1',
@@ -377,7 +377,9 @@ describe('NfeService', () => {
     expect(prisma.nfeSyncControle.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          status: NfeSyncStatus.ativo
+          status: {
+            in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api]
+          }
         })
       })
     );

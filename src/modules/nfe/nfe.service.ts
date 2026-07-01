@@ -585,7 +585,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }): Promise<{ processed: number; documentsSaved: number }> {
     const controls = await this.prisma.nfeSyncControle.findMany({
       where: {
-        status: NfeSyncStatus.ativo,
+        status: {
+          in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api]
+        },
         ...(params.clienteId ? { clienteId: params.clienteId } : {}),
         ...(params.ambiente ? { ambiente: params.ambiente } : {}),
         ...(params.estabelecimentoId ? { estabelecimentoId: params.estabelecimentoId } : {})
