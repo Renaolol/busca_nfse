@@ -2306,6 +2306,8 @@ function renderNfeSearchSummary() {
   }
 
   const client = findClientById(query.cliente);
+  const filteredDocs = getFilteredNfeDocuments();
+  const totalValue = sumListedDocumentValues(filteredDocs);
   const periodText =
     query.emissaoInicio || query.emissaoFim
       ? `${formatDate(query.emissaoInicio || '')} ate ${formatDate(query.emissaoFim || '')}`
@@ -2316,7 +2318,8 @@ function renderNfeSearchSummary() {
         <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
         <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
         <span>Tipo: <strong>${escapeHtml(query.tipo || 'Todos')}</strong></span>
-        <span>Resultado: <strong>${escapeHtml(String(state.nfeSearch.results.length))} NF-e</strong></span>
+        <span>Resultado: <strong>${escapeHtml(String(filteredDocs.length))} NF-e</strong></span>
+        <span>Valor somado: <strong>${escapeHtml(formatCurrency(totalValue))}</strong></span>
         <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.nfeSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
       </div>
     </article>
@@ -2324,8 +2327,16 @@ function renderNfeSearchSummary() {
 }
 
 function renderNfeDocumentsTableCard(docs) {
+  const totalValue = sumListedDocumentValues(docs);
+
   return `
     <article class="card">
+      <div class="xml-batch-bar">
+        <div>
+          <h3 class="card-title">NF-e encontradas</h3>
+          <p class="card-subtitle">${escapeHtml(String(docs.length))} documento(s) na listagem. Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
+        </div>
+      </div>
       <div class="table-wrap">
         <table>
           <thead>
@@ -2497,6 +2508,8 @@ function renderXmlSearchSummary() {
   }
 
   const client = findClientById(query.cliente);
+  const filteredXmls = getFilteredXmls();
+  const totalValue = sumListedDocumentValues(filteredXmls);
   const periodText =
     query.emissaoInicio || query.emissaoFim
       ? `${formatDate(query.emissaoInicio || '')} ate ${formatDate(query.emissaoFim || '')}`
@@ -2506,7 +2519,8 @@ function renderXmlSearchSummary() {
       <div class="progress-meta">
         <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
         <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
-        <span>Resultado: <strong>${escapeHtml(String(state.xmlSearch.results.length))} XML(s)</strong></span>
+        <span>Resultado: <strong>${escapeHtml(String(filteredXmls.length))} XML(s)</strong></span>
+        <span>Valor somado: <strong>${escapeHtml(formatCurrency(totalValue))}</strong></span>
         <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.xmlSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
       </div>
     </article>
@@ -2518,13 +2532,14 @@ function renderXmlsTableCard(xmls) {
   const selectedVisibleCount = selectableXmls.filter((xml) => state.selectedXmlIds.has(xml.id)).length;
   const allVisibleSelected = selectableXmls.length > 0 && selectedVisibleCount === selectableXmls.length;
   const batchDisabled = selectedVisibleCount > 0 ? '' : 'disabled';
+  const totalValue = sumListedDocumentValues(xmls);
 
   return `
     <article class="card">
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">Arquivos encontrados</h3>
-          <p class="card-subtitle">${selectedVisibleCount} selecionado(s) nesta listagem.</p>
+          <p class="card-subtitle">${selectedVisibleCount} selecionado(s) nesta listagem. Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
         </div>
         <div class="table-actions">
           <button class="btn secondary" type="button" data-action="xmls-batch-download" data-tipo-arquivo="xml" ${batchDisabled}>Baixar XMLs</button>
@@ -7096,6 +7111,10 @@ function formatCurrency(value) {
     style: 'currency',
     currency: 'BRL'
   }).format(Number.isFinite(numeric) ? numeric : 0);
+}
+
+function sumListedDocumentValues(items) {
+  return (Array.isArray(items) ? items : []).reduce((sum, item) => sum + toNumber(item?.valor), 0);
 }
 
 function formatInteger(value) {
