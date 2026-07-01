@@ -909,6 +909,148 @@ describe('SyncService', () => {
     expect(prisma.nfseSyncControle.update.mock.calls.at(-1)?.[0].data.ultimoNsuConsultado).toBeUndefined();
   });
 
+  it('reprocessa NSU com retry quando ADN retorna timeout temporario', async () => {
+    const sleepSpy = jest.spyOn(service as any, 'sleep').mockImplementation(async () => undefined);
+
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        nsuInicial: 1n,
+        ultimoNsuConsultado: 1n,
+        ultimoNsuComDocumento: 0n,
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-01T00:00:00.000Z')
+      }
+    ]);
+    (adnClient.getDFeByNsu as jest.Mock)
+      .mockResolvedValueOnce({
+        nsu: 1n,
+        hasDocument: false,
+        statusCode: 0,
+        message: 'Timeout ao consultar API ADN',
+        rawResponse: {}
+      })
+      .mockResolvedValueOnce({
+        nsu: 1n,
+        hasDocument: true,
+        chaveAcesso: '42110092206960810000176000000000000126062205552016',
+        xml: '<NFSe><chaveAcesso>42110092206960810000176000000000000126062205552016</chaveAcesso><numeroNFSe>1</numeroNFSe></NFSe>',
+        statusCode: 200,
+        rawResponse: {}
+      });
+    parser.parse.mockReturnValue({
+      chaveAcesso: '42110092206960810000176000000000000126062205552016',
+      numeroNfse: '1',
+      dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+      status: '100',
+      cnpjPrestador: '12345678000199'
+    });
+
+    const result = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(2);
+    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(
+      expect.objectContaining({
+        nsusAvaliados: 1,
+        nsusConsultados: 2,
+        documentosSalvos: 1,
+        falhas: 0,
+        interrompidoPorRateLimit: false
+      })
+    );
+    expect(sleepSpy).toHaveBeenCalled();
+  });
+
+  it('continua reprocessamento apos esgotar retries de timeout em um NSU', async () => {
+    const previousRetryCount = process.env.SYNC_PAST_NSU_RETRY_COUNT;
+    const previousRetryDelay = process.env.SYNC_PAST_NSU_RETRY_DELAY_MS;
+    process.env.SYNC_PAST_NSU_RETRY_COUNT = '1';
+    process.env.SYNC_PAST_NSU_RETRY_DELAY_MS = '1';
+    service = buildService();
+
+    const sleepSpy = jest.spyOn(service as any, 'sleep').mockImplementation(async () => undefined);
+
+    try {
+      prisma.nfseSyncControle.findMany.mockResolvedValue([
+        {
+          id: 'ctrl-1',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          cnpjConsulta: '12345678000199',
+          ambiente: Ambiente.producao,
+          nsuInicial: 2n,
+          ultimoNsuConsultado: 2n,
+          ultimoNsuComDocumento: 0n,
+          createdAt: new Date('2026-06-01T00:00:00.000Z'),
+          updatedAt: new Date('2026-06-01T00:00:00.000Z')
+        }
+      ]);
+      (adnClient.getDFeByNsu as jest.Mock)
+        .mockResolvedValueOnce({
+          nsu: 1n,
+          hasDocument: false,
+          statusCode: 0,
+          message: 'Timeout ao consultar API ADN',
+          rawResponse: {}
+        })
+        .mockResolvedValueOnce({
+          nsu: 1n,
+          hasDocument: false,
+          statusCode: 0,
+          message: 'Timeout ao consultar API ADN',
+          rawResponse: {}
+        })
+        .mockResolvedValueOnce({
+          nsu: 2n,
+          hasDocument: true,
+          chaveAcesso: '42110092206960810000176000000000000226062205552016',
+          xml: '<NFSe><chaveAcesso>42110092206960810000176000000000000226062205552016</chaveAcesso><numeroNFSe>2</numeroNFSe></NFSe>',
+          statusCode: 200,
+          rawResponse: {}
+        });
+      parser.parse.mockReturnValue({
+        chaveAcesso: '42110092206960810000176000000000000226062205552016',
+        numeroNfse: '2',
+        dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+        status: '100',
+        cnpjPrestador: '12345678000199'
+      });
+
+      const result = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+
+      expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(3);
+      expect(prisma.nfseDocumento.upsert).toHaveBeenCalledTimes(1);
+      expect(prisma.nfseSyncLog.create).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            status: 'erro_api',
+            nsuConsultado: 1n,
+            mensagem: 'Timeout ao consultar API ADN'
+          })
+        })
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          nsusAvaliados: 2,
+          nsusConsultados: 3,
+          documentosSalvos: 1,
+          falhas: 1,
+          interrompidoPorRateLimit: false
+        })
+      );
+      expect(sleepSpy).toHaveBeenCalled();
+    } finally {
+      restoreEnv('SYNC_PAST_NSU_RETRY_COUNT', previousRetryCount);
+      restoreEnv('SYNC_PAST_NSU_RETRY_DELAY_MS', previousRetryDelay);
+      service = buildService();
+    }
+  });
+
   it('em modo diario interrompe o ciclo apos primeiro documento e agenda cooldown de sucesso', async () => {
     const previousStop = process.env.SYNC_DAILY_STOP_ON_FIRST_DOCUMENT;
     process.env.SYNC_DAILY_STOP_ON_FIRST_DOCUMENT = 'true';

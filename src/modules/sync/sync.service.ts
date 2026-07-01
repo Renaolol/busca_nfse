@@ -89,6 +89,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   private readonly dailySyncStopOnFirstDocument = process.env.SYNC_DAILY_STOP_ON_FIRST_DOCUMENT === 'true';
   private readonly dailySyncSuccessCooldownMs = this.parsePositiveNumberEnv('SYNC_DAILY_SUCCESS_COOLDOWN_MS', 120000);
   private readonly adnRequestIntervalMs = this.parsePositiveNumberEnv('SYNC_ADN_REQUEST_INTERVAL_MS', 5000);
+  private readonly pastNsuRetryCount = this.parseBoundedIntegerEnv('SYNC_PAST_NSU_RETRY_COUNT', 2, 0, 10);
+  private readonly pastNsuRetryDelayMs = this.parsePositiveNumberEnv('SYNC_PAST_NSU_RETRY_DELAY_MS', 5000);
   private readonly apiRetryJitterMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_JITTER_MS', 60000);
   private readonly rateLimitGlobalCooldownMs = this.parsePositiveNumberEnv('SYNC_ADN_RATE_LIMIT_COOLDOWN_MS', 300000);
   private readonly controlClaimTtlMs = this.parsePositiveNumberEnv('SYNC_CONTROL_CLAIM_TTL_MS', 10 * 60 * 1000);
@@ -598,15 +600,14 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        await this.waitForAdnRequestSlot();
-        const dfeResult = await this.adnClient.getDFeByNsu({
+        const { result: dfeResult, attempts } = await this.fetchPastNsuWithRetries({
           cnpjConsulta: control.cnpjConsulta,
           nsu,
           ambiente: this.toNfseAmbiente(control.ambiente),
           certificateId: certificate.id
         });
-        detail.nsusConsultados += 1;
-        result.nsusConsultados += 1;
+        detail.nsusConsultados += attempts;
+        result.nsusConsultados += attempts;
 
         if (this.isCertificateDecryptError(dfeResult)) {
           const message =
@@ -641,8 +642,13 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             isRateLimitError ? 'rate_limit' : 'erro_api',
             message
           );
-          shouldStopAll = true;
-          break;
+
+          if (isRateLimitError) {
+            shouldStopAll = true;
+            break;
+          }
+
+          continue;
         }
 
         const documents = this.getResultDocuments(dfeResult, nsu).filter(
@@ -1718,6 +1724,40 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     this.lastAdnRequestAtMs = Date.now();
   }
 
+  private async fetchPastNsuWithRetries(params: {
+    cnpjConsulta: string;
+    nsu: bigint;
+    ambiente: NfseAmbiente;
+    certificateId: string;
+  }): Promise<{ result: AdnDFeResult; attempts: number }> {
+    const maxAttempts = this.pastNsuRetryCount + 1;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      await this.waitForAdnRequestSlot();
+      const result = await this.adnClient.getDFeByNsu(params);
+
+      if (!this.shouldRetryPastNsuRequest(result) || attempt === maxAttempts) {
+        return { result, attempts: attempt };
+      }
+
+      this.logger.warn(
+        `Reprocessamento ADN falhou temporariamente para o NSU ${params.nsu.toString()} do CNPJ ${params.cnpjConsulta}; tentativa ${attempt} de ${maxAttempts}. Nova tentativa em ${this.pastNsuRetryDelayMs}ms.`
+      );
+      await this.sleep(this.pastNsuRetryDelayMs);
+    }
+
+    return {
+      result: {
+        nsu: params.nsu,
+        hasDocument: false,
+        statusCode: 0,
+        message: 'Falha temporaria ao consultar ADN',
+        rawResponse: null
+      },
+      attempts: maxAttempts
+    };
+  }
+
   private computeRetryDate(rateLimited: boolean): Date {
     const nowMs = Date.now();
     const jitterMs = rateLimited ? Math.floor(Math.random() * this.apiRetryJitterMs) : 0;
@@ -1764,6 +1804,10 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     return result.statusCode >= 500;
+  }
+
+  private shouldRetryPastNsuRequest(result: AdnDFeResult): boolean {
+    return this.mustRetryWithoutAdvancingNsu(result) && result.statusCode !== 429 && !this.isCertificateDecryptError(result);
   }
 
   private isCertificateDecryptError(result: AdnDFeResult): boolean {
