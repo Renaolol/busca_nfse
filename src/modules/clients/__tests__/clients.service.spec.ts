@@ -17,6 +17,9 @@ describe('ClientsService', () => {
       findFirst: jest.Mock;
       update: jest.Mock;
     };
+    nfeSyncControle: {
+      updateMany: jest.Mock;
+    };
   };
 
   beforeEach(() => {
@@ -32,6 +35,9 @@ describe('ClientsService', () => {
         create: jest.fn(),
         findFirst: jest.fn(),
         update: jest.fn()
+      },
+      nfeSyncControle: {
+        updateMany: jest.fn()
       }
     };
 
@@ -69,7 +75,8 @@ describe('ClientsService', () => {
     expect(prisma.cliente.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         cnpj: '12345678000190',
-        responsavelInterno: 'Equipe Fiscal'
+        responsavelInterno: 'Equipe Fiscal',
+        nfeHabilitado: true
       })
     });
     expect(prisma.clienteEstabelecimento.create).toHaveBeenCalledWith({
@@ -137,5 +144,36 @@ describe('ClientsService', () => {
     prisma.cliente.findUnique.mockResolvedValue(null);
 
     await expect(service.update('cliente-inexistente', {})).rejects.toThrow(NotFoundException);
+  });
+
+  it('pausa controles de NF-e ao desabilitar o cliente para rotinas de NF-e', async () => {
+    prisma.cliente.findUnique.mockResolvedValue({
+      id: 'cliente-1',
+      razaoSocial: 'Cliente Teste',
+      cnpj: '12345678000190'
+    });
+    prisma.cliente.update.mockResolvedValue({
+      id: 'cliente-1',
+      nfeHabilitado: false
+    });
+
+    await service.setNfeEnabled('cliente-1', false);
+
+    expect(prisma.cliente.update).toHaveBeenCalledWith({
+      where: { id: 'cliente-1' },
+      data: { nfeHabilitado: false }
+    });
+    expect(prisma.nfeSyncControle.updateMany).toHaveBeenCalledWith({
+      where: {
+        clienteId: 'cliente-1',
+        status: {
+          in: ['ativo', 'erro_api']
+        }
+      },
+      data: {
+        status: 'pausado',
+        ultimaMensagem: 'Busca de NF-e pausada no cadastro do cliente'
+      }
+    });
   });
 });

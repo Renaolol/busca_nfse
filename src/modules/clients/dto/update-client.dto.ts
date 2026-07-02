@@ -52,4 +52,9 @@ export class UpdateClientDto {
   @IsOptional()
   @IsBoolean()
   ativo?: boolean;
+
+  @ApiPropertyOptional({ description: 'Controla se o cliente participa das rotinas de busca de NF-e' })
+  @IsOptional()
+  @IsBoolean()
+  nfeHabilitado?: boolean;
 }

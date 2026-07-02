@@ -55,8 +55,10 @@ describe('NfeService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    prisma.cliente.findUnique.mockResolvedValue({ id: 'cliente-1' });
-    prisma.cliente.findMany.mockResolvedValue([{ id: 'cliente-1', ativo: true, createdAt: new Date('2026-06-29T00:00:00.000Z') }]);
+    prisma.cliente.findUnique.mockResolvedValue({ id: 'cliente-1', nfeHabilitado: true });
+    prisma.cliente.findMany.mockResolvedValue([
+      { id: 'cliente-1', ativo: true, nfeHabilitado: true, createdAt: new Date('2026-06-29T00:00:00.000Z') }
+    ]);
     prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
       id: 'estab-1',
       clienteId: 'cliente-1',
@@ -275,6 +277,20 @@ describe('NfeService', () => {
     );
   });
 
+  it('bloqueia ativacao quando o cliente esta com busca de NF-e desabilitada', async () => {
+    prisma.cliente.findUnique.mockResolvedValue({
+      id: 'cliente-1',
+      nfeHabilitado: false
+    });
+
+    await expect(
+      service.ativarSyncNoNsuAtual({
+        clienteId: 'cliente-1',
+        ambiente: NfeAmbiente.producao
+      })
+    ).rejects.toThrow('Cliente com busca de NF-e desabilitada no cadastro');
+  });
+
   it('roda distribuicao e persiste NF-e sincronizada', async () => {
     prisma.nfeSyncControle.findMany.mockResolvedValue([
       {
@@ -377,6 +393,10 @@ describe('NfeService', () => {
     expect(prisma.nfeSyncControle.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
+          cliente: {
+            ativo: true,
+            nfeHabilitado: true
+          },
           status: {
             in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api]
           }

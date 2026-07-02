@@ -175,7 +175,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     falhas: number;
     detalhes: Array<{ estabelecimentoId: string; cnpjConsulta: string; status: 'inicializado' | 'reativado' | 'falha'; mensagem: string }>;
   }> {
-    await this.ensureClient(dto.clienteId);
+    await this.ensureClientEligibleForNfeSync(dto.clienteId);
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
     const establishments = await this.resolveTargetEstablishments(dto.clienteId);
     const detalhes: Array<{
@@ -315,7 +315,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }> {
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
     const clients = await this.prisma.cliente.findMany({
-      where: { ativo: true },
+      where: {
+        ativo: true,
+        nfeHabilitado: true
+      },
       orderBy: { createdAt: 'asc' }
     });
     const detalhes: Array<{ clienteId: string; sucesso: boolean; mensagem: string }> = [];
@@ -499,7 +502,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async iniciarSync(dto: StartNfeSyncDto): Promise<{ controlesCriadosOuAtualizados: number }> {
-    await this.ensureClient(dto.clienteId);
+    await this.ensureClientEligibleForNfeSync(dto.clienteId);
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
     const controls = await this.resolveTargetEstablishments(dto.clienteId, dto.estabelecimentoId);
     const nsuInicial = dto.nsuInicial ? BigInt(dto.nsuInicial) : 1n;
@@ -562,7 +565,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async runNow(dto: RunNfeSyncDto): Promise<{ processed: number; documentsSaved: number }> {
-    await this.ensureClient(dto.clienteId);
+    await this.ensureClientEligibleForNfeSync(dto.clienteId);
     return this.runNowInternal({
       clienteId: dto.clienteId,
       ambiente: dto.ambiente,
@@ -585,6 +588,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }): Promise<{ processed: number; documentsSaved: number }> {
     const controls = await this.prisma.nfeSyncControle.findMany({
       where: {
+        cliente: {
+          ativo: true,
+          nfeHabilitado: true
+        },
         status: {
           in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api]
         },
@@ -989,6 +996,17 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const found = await this.prisma.cliente.findUnique({ where: { id: clienteId } });
     if (!found) {
       throw new NotFoundException('Cliente nao encontrado');
+    }
+  }
+
+  private async ensureClientEligibleForNfeSync(clienteId: string): Promise<void> {
+    const found = await this.prisma.cliente.findUnique({ where: { id: clienteId } });
+    if (!found) {
+      throw new NotFoundException('Cliente nao encontrado');
+    }
+
+    if (!found.nfeHabilitado) {
+      throw new BadRequestException('Cliente com busca de NF-e desabilitada no cadastro');
     }
   }
 

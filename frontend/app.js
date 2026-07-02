@@ -434,6 +434,14 @@ function onDocumentClick(event) {
       void toggleClientSearchStatus(clientId);
       return;
     }
+    case 'client-toggle-nfe-search': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      if (!clientId) {
+        return;
+      }
+      void toggleClientNfeSearchStatus(clientId);
+      return;
+    }
     case 'clients-toggle-all': {
       const checked = actionNode.checked;
       const filtered = getFilteredClients();
@@ -990,7 +998,7 @@ function onDocumentSubmit(event) {
     }
     case 'clientSearchConfigForm': {
       event.preventDefault();
-      pushToast('Configuracao de busca salva.', 'success');
+      void submitClientSearchConfigForm(target);
       return;
     }
     case 'settingsGeralForm':
@@ -1332,7 +1340,7 @@ function renderClientsPage() {
     <section class="page-section">
       ${renderPageHeader({
         title: 'Clientes',
-        description: 'Gerencie clientes monitorados para busca automatica de NFS-e.',
+        description: 'Gerencie clientes monitorados para busca automatica de NFS-e e NF-e.',
         actions: [
           actionButton('Novo cliente', 'open-new-client-modal', 'primary'),
           actionButton('Importar clientes', 'open-import-client-modal', 'secondary')
@@ -1395,6 +1403,7 @@ function renderClientsPage() {
                 <th>NSU base NF-e</th>
                 <th>Certificado</th>
                 <th>Busca NFS-e</th>
+                <th>Busca NF-e</th>
                 <th>Ultima busca</th>
                 <th>XMLs encontrados</th>
                 <th>Status</th>
@@ -1404,7 +1413,7 @@ function renderClientsPage() {
             <tbody>
               ${renderTableRowsOrState({
                 key: 'clients',
-                colSpan: 11,
+                colSpan: 12,
                 rowsHtml: clients
                   .map((client) => {
                     const establishmentSummary = getClientEstablishmentSummary(client.id);
@@ -1430,6 +1439,7 @@ function renderClientsPage() {
                           <span class="row-sub">${client.certificadoValidade ? `Validade: ${escapeHtml(formatDate(client.certificadoValidade))}` : 'Sem certificado'}</span>
                         </td>
                         <td>${renderClientSearchActivation(client)}</td>
+                        <td>${renderClientNfeSearchActivation(client)}</td>
                         <td>${escapeHtml(formatDateTime(client.ultimaBusca))}</td>
                         <td>${escapeHtml(String(client.xmlsEncontrados))}</td>
                         <td>${statusBadge(client.statusOperacional, toneFromStatus(client.statusOperacional))}</td>
@@ -1439,6 +1449,7 @@ function renderClientsPage() {
                             <button class="icon-btn" data-action="client-edit" data-client-id="${client.id}">Editar</button>
                             <button class="icon-btn" data-action="client-reprocess" data-client-id="${client.id}">Reprocessar busca</button>
                             <button class="icon-btn" data-action="client-toggle-search" data-client-id="${client.id}">${client.buscaAtiva ? 'Pausar busca' : 'Habilitar busca'}</button>
+                            <button class="icon-btn" data-action="client-toggle-nfe-search" data-client-id="${client.id}">${client.buscaNfeAtiva !== false ? 'Pausar NF-e' : 'Habilitar NF-e'}</button>
                           </div>
                         </td>
                       </tr>
@@ -1485,6 +1496,7 @@ function renderClientDetailsPage(clientId) {
         </div>
         <div class="page-actions">
           ${statusBadge(client.buscaAtiva ? 'Busca habilitada' : 'Busca pausada', client.buscaAtiva ? 'success' : 'neutral')}
+          ${statusBadge(client.buscaNfeAtiva !== false ? 'NF-e habilitada' : 'NF-e pausada', client.buscaNfeAtiva !== false ? 'info' : 'neutral')}
           ${statusBadge(client.certificadoStatus === 'Valido' ? 'Certificado valido' : `Certificado ${client.certificadoStatus.toLowerCase()}`, toneFromCertificateStatus(client.certificadoStatus))}
           ${statusBadge(`Ultima busca: ${formatRelativeDate(client.ultimaBusca)} as ${formatHour(client.ultimaBusca)}`, 'info')}
         </div>
@@ -1503,6 +1515,7 @@ function renderClientDetailsPage(clientId) {
               ${detailItem('Estabelecimento', establishmentSummary.detail)}
               ${detailItem('NSU base NF-e', nfeBaseSummary.displayValue)}
               ${detailItem('Controles NF-e', nfeBaseSummary.controlsLabel)}
+              ${detailItem('Busca NF-e', client.buscaNfeAtiva !== false ? 'Habilitada' : 'Pausada')}
               ${detailItem('Responsavel interno', client.responsavelInterno)}
               ${detailItem('Status do cliente', client.buscaStatus)}
             </div>
@@ -1611,9 +1624,14 @@ function renderClientDetailsPage(clientId) {
           <article class="card">
             <h3 class="card-title">Configuracao da busca</h3>
             <form id="clientSearchConfigForm" class="form-grid" style="grid-template-columns:1fr; margin-top:12px;">
+              <input type="hidden" name="clientId" value="${escapeHtml(client.id)}" />
               <label class="field-inline">
                 <input name="buscaAtiva" type="checkbox" ${client.buscaAtiva ? 'checked' : ''} />
                 <span>Cliente habilitado para rotina</span>
+              </label>
+              <label class="field-inline">
+                <input name="buscaNfeAtiva" type="checkbox" ${client.buscaNfeAtiva !== false ? 'checked' : ''} />
+                <span>Cliente habilitado para rotinas de NF-e</span>
               </label>
               <label class="field">
                 Horario preferencial
@@ -2011,6 +2029,7 @@ function renderNfeSyncPage() {
                 colSpan: 8,
                 rowsHtml: clientRows
                   .map((row) => {
+                    const disabledActions = row.nfeEnabled ? '' : 'disabled';
                     return `<tr>
                       <td>${escapeHtml(row.cliente)}</td>
                       <td>${escapeHtml(formatCnpj(row.cnpj))}</td>
@@ -2024,8 +2043,8 @@ function renderNfeSyncPage() {
                       </td>
                       <td>
                         <div class="table-actions">
-                          <button class="icon-btn" data-action="nfe-client-enable" data-client-id="${row.clientId}">Ligar busca</button>
-                          <button class="icon-btn" data-action="nfe-client-pause" data-client-id="${row.clientId}">Pausar</button>
+                          <button class="icon-btn" data-action="nfe-client-enable" data-client-id="${row.clientId}" ${disabledActions}>Ligar busca</button>
+                          <button class="icon-btn" data-action="nfe-client-pause" data-client-id="${row.clientId}" ${disabledActions}>Pausar</button>
                           <button class="icon-btn" data-action="navigate" data-route="/xmls-nfe">Ver XMLs</button>
                         </div>
                       </td>
@@ -2989,7 +3008,7 @@ function renderClientFormModal() {
       <div class="modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <h3 class="modal-title">${state.modal.mode === 'edit' ? 'Editar cliente' : 'Novo cliente'}</h3>
-          <p class="modal-subtitle">Preencha os dados cadastrais e o status de busca automatica.</p>
+          <p class="modal-subtitle">Preencha os dados cadastrais e defina separadamente as rotinas de NFS-e e NF-e.</p>
         </div>
         <form id="clientForm">
           <div class="modal-body">
@@ -3027,6 +3046,10 @@ function renderClientFormModal() {
               <label class="field-inline" style="grid-column: span 2;">
                 <input name="buscaAtiva" type="checkbox" ${client?.buscaAtiva ?? true ? 'checked' : ''} />
                 <span>Cliente habilitado para rotina</span>
+              </label>
+              <label class="field-inline" style="grid-column: span 2;">
+                <input name="buscaNfeAtiva" type="checkbox" ${client?.buscaNfeAtiva ?? true ? 'checked' : ''} />
+                <span>Cliente habilitado para busca de NF-e</span>
               </label>
             </div>
           </div>
@@ -3582,6 +3605,19 @@ function renderClientSearchActivation(client) {
   `;
 }
 
+function renderClientNfeSearchActivation(client) {
+  const label = client.buscaNfeAtiva !== false ? 'Habilitada' : 'Pausada';
+  const tone = client.buscaNfeAtiva !== false ? 'info' : 'neutral';
+  const detail = client.buscaNfeAtiva !== false ? 'participa da distribuicao DF-e' : 'excluida das rotinas de NF-e';
+
+  return `
+    <div class="stack-mini">
+      ${statusBadge(label, tone)}
+      <span class="row-sub">${escapeHtml(detail)}</span>
+    </div>
+  `;
+}
+
 function statusBadge(text, tone, extraClass = '') {
   const normalizedTone = ['success', 'warning', 'danger', 'info', 'neutral'].includes(tone) ? tone : 'neutral';
   return `<span class="chip ${normalizedTone} ${extraClass}">${escapeHtml(text)}</span>`;
@@ -3776,6 +3812,37 @@ async function toggleClientSearchStatus(clientId) {
   render();
 }
 
+async function toggleClientNfeSearchStatus(clientId) {
+  const client = findClientById(clientId);
+  if (!client) {
+    return;
+  }
+
+  if (state.dataSource === 'api') {
+    const active = client.buscaNfeAtiva === false;
+    try {
+      await apiRequest(`/clientes/${clientId}/nfe/${active ? 'ativar' : 'pausar'}`, {
+        method: 'POST'
+      });
+      pushToast(
+        `Busca de NF-e ${active ? 'habilitada' : 'pausada'} para ${client.razaoSocial}.`,
+        active ? 'success' : 'info'
+      );
+      await refreshApiData();
+    } catch (error) {
+      pushToast(`Falha ao atualizar busca de NF-e: ${toErrorMessage(error)}`, 'error');
+    }
+    return;
+  }
+
+  client.buscaNfeAtiva = client.buscaNfeAtiva === false;
+  pushToast(
+    `Busca de NF-e ${client.buscaNfeAtiva ? 'habilitada' : 'pausada'} para ${client.razaoSocial}.`,
+    client.buscaNfeAtiva ? 'success' : 'info'
+  );
+  render();
+}
+
 async function bulkUpdateClientSearch(active) {
   if (state.selectedClientIds.size === 0) {
     pushToast('Selecione clientes para aplicacao em massa.', 'error');
@@ -3829,7 +3896,8 @@ async function submitClientForm(form) {
     municipio: String(formData.get('municipio') || '').trim(),
     uf: String(formData.get('uf') || '').trim().toUpperCase(),
     responsavelInterno: String(formData.get('responsavelInterno') || '').trim(),
-    buscaAtiva: formData.get('buscaAtiva') === 'on'
+    buscaAtiva: formData.get('buscaAtiva') === 'on',
+    buscaNfeAtiva: formData.get('buscaNfeAtiva') === 'on'
   };
 
   if (payload.cnpj.length !== 14) {
@@ -3845,7 +3913,8 @@ async function submitClientForm(form) {
       inscricaoMunicipal: payload.inscricaoMunicipal || undefined,
       municipioNome: payload.municipio || undefined,
       responsavelInterno: payload.responsavelInterno || undefined,
-      ativo: payload.buscaAtiva
+      ativo: payload.buscaAtiva,
+      nfeHabilitado: payload.buscaNfeAtiva
     };
 
     const responsavelEmail = sanitizeEmail(payload.responsavelInterno);
@@ -3909,6 +3978,42 @@ async function submitClientForm(form) {
   }
 
   closeModal();
+  render();
+}
+
+async function submitClientSearchConfigForm(form) {
+  const formData = new FormData(form);
+  const clientId = String(formData.get('clientId') || '').trim();
+  const client = findClientById(clientId);
+  if (!client) {
+    pushToast('Cliente nao encontrado.', 'error');
+    return;
+  }
+
+  const buscaAtiva = formData.get('buscaAtiva') === 'on';
+  const buscaNfeAtiva = formData.get('buscaNfeAtiva') === 'on';
+
+  if (state.dataSource === 'api') {
+    try {
+      await apiRequest(`/clientes/${clientId}`, {
+        method: 'PATCH',
+        body: {
+          ativo: buscaAtiva,
+          nfeHabilitado: buscaNfeAtiva
+        }
+      });
+      pushToast('Configuracao de busca salva.', 'success');
+      await refreshApiData();
+    } catch (error) {
+      pushToast(`Falha ao salvar configuracao: ${toErrorMessage(error)}`, 'error');
+    }
+    return;
+  }
+
+  client.buscaAtiva = buscaAtiva;
+  client.buscaStatus = buscaAtiva ? 'Ativo' : 'Inativo';
+  client.buscaNfeAtiva = buscaNfeAtiva;
+  pushToast('Configuracao de busca salva.', 'success');
   render();
 }
 
@@ -4305,7 +4410,11 @@ function getNfeSyncClientRows(controls = state.nfeSyncControls) {
     let statusTone = 'neutral';
     let statusDetail = 'Nenhum controle de NF-e criado ainda.';
 
-    if (errorCount > 0) {
+    if (client.buscaNfeAtiva === false) {
+      statusLabel = 'Desabilitada';
+      statusTone = 'neutral';
+      statusDetail = 'Cliente excluido das rotinas de NF-e.';
+    } else if (errorCount > 0) {
       statusLabel = 'Com erro';
       statusTone = 'danger';
       statusDetail = `${errorCount} controle(s) com erro.`;
@@ -4327,6 +4436,7 @@ function getNfeSyncClientRows(controls = state.nfeSyncControls) {
       ultimaExecucao: latestControl?.ultimaExecucao || null,
       ultimoNsuConsultado: latestControl?.ultimoNsuConsultado || '-',
       totalDocumentosBaixados: totalDocuments,
+      nfeEnabled: client.buscaNfeAtiva !== false,
       statusLabel,
       statusTone,
       statusDetail
@@ -4371,12 +4481,13 @@ function getClientEstablishmentSummary(clientId) {
 }
 
 function getClientNfeBaseSummary(clientId, controls = state.nfeSyncControls) {
+  const client = findClientById(clientId);
   const rows = (Array.isArray(controls) ? controls : []).filter((control) => control.clientId === clientId);
 
   if (!rows.length) {
     return {
       displayValue: 'Nao inicializado',
-      detail: 'Ative a busca para capturar o NSU atual',
+      detail: client?.buscaNfeAtiva === false ? 'Busca de NF-e desabilitada para este cliente' : 'Ative a busca para capturar o NSU atual',
       controlsLabel: 'Nenhum controle criado'
     };
   }
@@ -6053,6 +6164,7 @@ function buildClientsFromApi(apiClients, establishmentsByClient, certificatesByC
     const primaryEstablishment = establishments.find((item) => item.ativo) || establishments[0] || null;
     const certificateSummary = summarizeCertificateStatus(certs);
     const buscaStatus = deriveClientSearchStatus(controles, Boolean(client.ativo));
+    const buscaNfeAtiva = client.nfeHabilitado !== false;
 
     return {
       id: client.id,
@@ -6064,6 +6176,7 @@ function buildClientsFromApi(apiClients, establishmentsByClient, certificatesByC
       uf: '-',
       responsavelInterno: client.responsavelInterno || client.emailResponsavel || '-',
       buscaAtiva: buscaStatus === 'Ativo',
+      buscaNfeAtiva,
       buscaStatus,
       ultimaBusca: latestLog?.createdAt || latestControl?.ultimaExecucao || client.updatedAt || client.createdAt,
       xmlsEncontrados: totalNfseByClient[client.id] ?? fallbackTotalNfseByClient[client.id] ?? 0,

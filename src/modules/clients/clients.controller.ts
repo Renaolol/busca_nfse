@@ -47,4 +47,16 @@ export class ClientsController {
   pause(@Param('id') id: string) {
     return this.clientsService.setActive(id, false);
   }
+
+  @Post(':id/nfe/ativar')
+  @Roles('admin')
+  activateNfe(@Param('id') id: string) {
+    return this.clientsService.setNfeEnabled(id, true);
+  }
+
+  @Post(':id/nfe/pausar')
+  @Roles('admin')
+  pauseNfe(@Param('id') id: string) {
+    return this.clientsService.setNfeEnabled(id, false);
+  }
 }

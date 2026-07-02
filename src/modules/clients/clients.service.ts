@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Cliente, ClienteEstabelecimento } from '@prisma/client';
+import { Cliente, ClienteEstabelecimento, NfeSyncStatus } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
@@ -22,7 +22,8 @@ export class ClientsService {
           responsavelInterno: dto.responsavelInterno,
           emailResponsavel: dto.emailResponsavel,
           telefone: dto.telefone,
-          ativo: dto.ativo ?? true
+          ativo: dto.ativo ?? true,
+          nfeHabilitado: dto.nfeHabilitado ?? true
         }
       });
 
@@ -79,7 +80,8 @@ export class ClientsService {
           responsavelInterno: dto.responsavelInterno,
           emailResponsavel: dto.emailResponsavel,
           telefone: dto.telefone,
-          ativo: dto.ativo
+          ativo: dto.ativo,
+          nfeHabilitado: dto.nfeHabilitado
         }
       });
 
@@ -101,6 +103,21 @@ export class ClientsService {
         });
       }
 
+      if (dto.nfeHabilitado === false) {
+        await tx.nfeSyncControle.updateMany({
+          where: {
+            clienteId: id,
+            status: {
+              in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api]
+            }
+          },
+          data: {
+            status: NfeSyncStatus.pausado,
+            ultimaMensagem: 'Busca de NF-e pausada no cadastro do cliente'
+          }
+        });
+      }
+
       return updatedClient;
     });
   }
@@ -110,6 +127,34 @@ export class ClientsService {
     return this.prisma.cliente.update({
       where: { id },
       data: { ativo }
+    });
+  }
+
+  async setNfeEnabled(id: string, nfeHabilitado: boolean): Promise<Cliente> {
+    await this.findOne(id);
+
+    return this.prisma.$transaction(async (tx) => {
+      const client = await tx.cliente.update({
+        where: { id },
+        data: { nfeHabilitado }
+      });
+
+      if (!nfeHabilitado) {
+        await tx.nfeSyncControle.updateMany({
+          where: {
+            clienteId: id,
+            status: {
+              in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api]
+            }
+          },
+          data: {
+            status: NfeSyncStatus.pausado,
+            ultimaMensagem: 'Busca de NF-e pausada no cadastro do cliente'
+          }
+        });
+      }
+
+      return client;
     });
   }
 }

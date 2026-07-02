@@ -50,4 +50,9 @@ export class CreateClientDto {
   @IsOptional()
   @IsBoolean()
   ativo?: boolean;
+
+  @ApiPropertyOptional({ default: true, description: 'Controla se o cliente participa das rotinas de busca de NF-e' })
+  @IsOptional()
+  @IsBoolean()
+  nfeHabilitado?: boolean;
 }

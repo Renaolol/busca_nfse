@@ -66,6 +66,7 @@ model Cliente {
   emailResponsavel   String?  @map("email_responsavel") @db.VarChar(255)
   telefone           String?  @db.VarChar(30)
   ativo              Boolean  @default(true)
+  nfeHabilitado      Boolean  @default(true) @map("nfe_habilitado")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 
