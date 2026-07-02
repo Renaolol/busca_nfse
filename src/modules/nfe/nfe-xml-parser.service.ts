@@ -18,10 +18,27 @@ export interface ParsedNfe {
   contentType: 'resumo' | 'completo';
 }
 
+export interface InspectedNfeXml {
+  chaveAcesso?: string;
+  numeroNfe?: string;
+  serie?: string;
+  modelo?: string;
+}
+
 @Injectable()
 export class NfeXmlParserService {
+  inspect(xml: string): InspectedNfeXml {
+    return {
+      chaveAcesso: this.extractChaveAcesso(xml),
+      numeroNfe: this.extract(xml, ['nNF']),
+      serie: this.extract(xml, ['serie']),
+      modelo: this.extract(xml, ['mod'])
+    };
+  }
+
   parse(xml: string): ParsedNfe {
-    const chaveAcesso = this.extractChaveAcesso(xml);
+    const inspected = this.inspect(xml);
+    const chaveAcesso = inspected.chaveAcesso;
     if (!chaveAcesso) {
       throw new Error('Nao foi possivel localizar chave de acesso no XML da NF-e');
     }
@@ -31,9 +48,9 @@ export class NfeXmlParserService {
 
     return {
       chaveAcesso,
-      numeroNfe: this.extract(xml, ['nNF']),
-      serie: this.extract(xml, ['serie']),
-      modelo: this.extract(xml, ['mod']),
+      numeroNfe: inspected.numeroNfe,
+      serie: inspected.serie,
+      modelo: inspected.modelo,
       dataEmissao: this.parseDate(this.extract(xml, ['dhEmi', 'dEmi'])),
       dataAutorizacao: this.parseDate(this.extract(xml, ['dhRecbto', 'dhAut'])),
       status: this.extract(xml, ['cStat', 'cSitNFe', 'xMotivo']),

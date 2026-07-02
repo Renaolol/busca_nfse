@@ -640,6 +640,9 @@ describe('NfeService', () => {
           cnpjConsulta: '12345678000199',
           catalogoId: 11,
           chaveAcesso: '35260612345678000199550010000001231000001231',
+          numeroNfe: '123',
+          serie: '1',
+          modelo: '55',
           mensagem: 'Falha ao salvar XML no storage'
         }
       ]
@@ -652,6 +655,67 @@ describe('NfeService', () => {
         })
       })
     );
+  });
+
+  it('retorna numero da NF-e no detalhe da falha quando o XML nao possui chave de acesso', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 10n,
+        ultimoNsuDistribuido: 10n,
+        maxNsu: 10n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 22,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: undefined,
+        dataEmissao: '2026-06-29',
+        xmlBase64: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe>
+      <ide><mod>55</mod><serie>3</serie><nNF>987</nNF><dhEmi>2026-06-29T10:00:00-03:00</dhEmi></ide>
+      <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
+    </infNFe>
+  </NFe>
+</nfeProc>`,
+          'utf8'
+        ).toString('base64')
+      }
+    ]);
+
+    const result = await service.runNowGlobal();
+
+    expect(result).toEqual({
+      processed: 1,
+      documentsSaved: 0,
+      failures: 1,
+      failureDetails: [
+        {
+          kind: 'documento',
+          clientId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: NfeAmbiente.producao,
+          cnpjConsulta: '12345678000199',
+          catalogoId: 22,
+          chaveAcesso: undefined,
+          numeroNfe: '987',
+          serie: '3',
+          modelo: '55',
+          mensagem: 'Nao foi possivel localizar chave de acesso no XML da NF-e'
+        }
+      ]
+    });
   });
 
   it('lista NF-e recebidas por cnpjConsulta', async () => {

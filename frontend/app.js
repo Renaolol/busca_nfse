@@ -2238,7 +2238,8 @@ function renderNfeLastRunPanel() {
                     <th>Cliente</th>
                     <th>Estabelecimento</th>
                     <th>CNPJ consulta</th>
-                    <th>Catalogo</th>
+                    <th>ID catalogo</th>
+                    <th>Numero NF-e</th>
                     <th>Chave</th>
                     <th>Origem</th>
                     <th>Mensagem</th>
@@ -2256,6 +2257,7 @@ function renderNfeLastRunPanel() {
                         )}</td>
                         <td>${escapeHtml(formatCnpj(failure.cnpjConsulta || ''))}</td>
                         <td>${escapeHtml(failure.catalogoId ? String(failure.catalogoId) : '-')}</td>
+                        <td>${escapeHtml(formatNfeFailureNumber(failure))}</td>
                         <td>${escapeHtml(failure.chaveAcesso || '-')}</td>
                         <td>${escapeHtml(failure.kind === 'controle' ? 'Controle' : 'XML')}</td>
                         <td>${escapeHtml(failure.mensagem || '-')}</td>
@@ -6962,6 +6964,21 @@ function findEstablishmentById(establishmentId) {
   }
 
   return null;
+}
+
+function formatNfeFailureNumber(failure) {
+  const numero = String(failure?.numeroNfe || '').trim();
+  const serie = String(failure?.serie || '').trim();
+
+  if (numero && serie) {
+    return `${numero} / serie ${serie}`;
+  }
+
+  if (numero) {
+    return numero;
+  }
+
+  return '-';
 }
 
 function findCertificateById(certId) {

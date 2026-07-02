@@ -57,4 +57,26 @@ describe('NfeXmlParserService', () => {
       contentType: 'resumo'
     });
   });
+
+  it('inspeciona numero da NF-e mesmo sem chave de acesso valida', () => {
+    const inspected = service.inspect(`<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe>
+      <ide>
+        <mod>55</mod>
+        <serie>7</serie>
+        <nNF>456</nNF>
+      </ide>
+    </infNFe>
+  </NFe>
+</nfeProc>`);
+
+    expect(inspected).toEqual({
+      chaveAcesso: undefined,
+      numeroNfe: '456',
+      serie: '7',
+      modelo: '55'
+    });
+  });
 });

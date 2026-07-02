@@ -53,6 +53,9 @@ type NfeSyncRunFailureDetail = {
   cnpjConsulta: string;
   catalogoId?: number;
   chaveAcesso?: string;
+  numeroNfe?: string;
+  serie?: string;
+  modelo?: string;
   mensagem: string;
 };
 
@@ -693,6 +696,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const detalhes: Array<{
       catalogoId: number;
       chaveAcesso?: string;
+      numeroNfe?: string;
+      serie?: string;
+      modelo?: string;
       cnpjEmpresa: string;
       status: 'persistido' | 'ignorado_sem_vinculo' | 'falha';
       mensagem: string;
@@ -702,6 +708,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       maxCatalogoIdEncontrado = Math.max(maxCatalogoIdEncontrado, document.catalogoId);
       const cnpjEmpresa = this.normalizeCnpj(document.cnpjEmpresa);
       const establishment = cnpjEmpresa ? establishmentByCnpj.get(cnpjEmpresa) : undefined;
+      const xml = this.decodeXml(document.xmlBase64);
+      const inspectedXml = this.parser.inspect(xml);
 
       if (!establishment) {
         ignoradosSemVinculo += 1;
@@ -711,6 +719,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         detalhes.push({
           catalogoId: document.catalogoId,
           chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
+          numeroNfe: inspectedXml.numeroNfe,
+          serie: inspectedXml.serie,
+          modelo: inspectedXml.modelo,
           cnpjEmpresa: cnpjEmpresa ?? '',
           status: 'ignorado_sem_vinculo',
           mensagem: 'CNPJ da Dominio nao possui estabelecimento ativo vinculado neste cliente'
@@ -726,7 +737,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           cnpjConsulta: establishment.cnpj,
           document: {
             schema: 'dominio_xml',
-            xml: this.decodeXml(document.xmlBase64),
+            xml,
             chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso)
           },
           origem: NfeDocumentoOrigem.importacao_xml
@@ -738,6 +749,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         detalhes.push({
           catalogoId: document.catalogoId,
           chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
+          numeroNfe: inspectedXml.numeroNfe,
+          serie: inspectedXml.serie,
+          modelo: inspectedXml.modelo,
           cnpjEmpresa: cnpjEmpresa ?? '',
           status: 'persistido',
           mensagem: 'XML importado com sucesso'
@@ -750,6 +764,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         detalhes.push({
           catalogoId: document.catalogoId,
           chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
+          numeroNfe: inspectedXml.numeroNfe,
+          serie: inspectedXml.serie,
+          modelo: inspectedXml.modelo,
           cnpjEmpresa: cnpjEmpresa ?? '',
           status: 'falha',
           mensagem: this.toErrorMessage(error)
@@ -999,6 +1016,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
               cnpjConsulta: control.cnpjConsulta,
               catalogoId: detail.catalogoId,
               chaveAcesso: detail.chaveAcesso,
+              numeroNfe: detail.numeroNfe,
+              serie: detail.serie,
+              modelo: detail.modelo,
               mensagem: detail.mensagem
             }))
         );
