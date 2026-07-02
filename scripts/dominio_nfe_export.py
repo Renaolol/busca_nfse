@@ -53,13 +53,13 @@ SELECT TOP {payload['limit']}
        emp.cgce_emp AS cnpj_empresa,
        cat.CHAVE AS chave_acesso,
        cat.DATA_EMISSAO AS data_emissao,
-       xml.CONTEUDO_XML AS conteudo_xml
+       nfe_xml.CONTEUDO_XML AS conteudo_xml
   FROM bethadba.EFATENDIMENTO_NFE_CATALOGO cat
-  JOIN bethadba.EFATENDIMENTO_NFE_XML xml
-    ON xml.I_CATALOGO = cat.ID
+  JOIN bethadba.EFATENDIMENTO_NFE_XML nfe_xml
+    ON nfe_xml.I_CATALOGO = cat.ID
   JOIN bethadba.geempre emp
     ON emp.codi_emp = cat.CODI_EMP
- WHERE xml.CONTEUDO_XML IS NOT NULL
+ WHERE nfe_xml.CONTEUDO_XML IS NOT NULL
    AND emp.cgce_emp IN ({','.join('?' for _ in cnpjs)})
 """
 
