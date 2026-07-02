@@ -295,10 +295,13 @@ Observacoes:
 ### Importacao de NF-e via Dominio
 
 - Configure `DOMINIO_NFE_SOURCE_MODE=real` para habilitar o adapter real.
+- Configure `NFE_SYNC_SOURCE_MODE=dominio` se quiser que as rotinas do painel `Buscas NF-e` (`Ligar`, `Ligar todos` e `Rodar agora`) passem a importar da base da Dominio em vez de consultar distribuicao DF-e.
 - Configure `DOMINIO_ODBC_CONNECTION_STRING` com a string ODBC completa da Dominio, por exemplo: `DSN=ContabilPBI;UID=PBI;PWD=Pbi`.
 - Opcionalmente configure `DOMINIO_PYTHON_BIN` quando o executavel Python nao estiver disponivel como `python`.
+- Opcionalmente configure `NFE_DOMINIO_IMPORT_LIMIT_PER_RUN` para limitar quantos registros por controle sao lidos em cada execucao automatica/manual do painel.
 - O importador usa o script `scripts/dominio_nfe_export.py`, que depende de `pyodbc` no host onde a API estiver rodando.
 - A vinculacao com o cliente local ocorre por CNPJ do estabelecimento ativo; nao foi necessario adicionar coluna de codigo da empresa da Dominio no schema.
+- Quando `NFE_SYNC_SOURCE_MODE=dominio`, o backend reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, evitando reler o historico inteiro a cada execucao.
 - `GET /nfe` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, periodo, status e `somenteXmlCompleto`.
 - Quando `NFE_DISTRIBUICAO_CLIENT_MODE=real`, o sistema consulta `distNSU`, `consNSU` e `consChNFe`, descompacta `docZip` e armazena resumos `resNFe` e XMLs completos retornados pelo Ambiente Nacional.
 

@@ -61,6 +61,8 @@ describe('NfeService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    delete process.env.NFE_SYNC_SOURCE_MODE;
+    delete process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN;
     prisma.cliente.findUnique.mockResolvedValue({ id: 'cliente-1', nfeHabilitado: true });
     prisma.cliente.findMany.mockResolvedValue([
       { id: 'cliente-1', ativo: true, nfeHabilitado: true, createdAt: new Date('2026-06-29T00:00:00.000Z') }
@@ -363,6 +365,31 @@ describe('NfeService', () => {
     ).rejects.toThrow('Cliente com busca de NF-e desabilitada no cadastro');
   });
 
+  it('ativa controles via Dominio sem consultar certificado ou NSU', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+
+    const result = await service.ativarSyncNoNsuAtual({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(distribuicaoClient.distribuirPorNsu).not.toHaveBeenCalled();
+    expect(prisma.certificado.findFirst).not.toHaveBeenCalled();
+    expect(prisma.nfeSyncControle.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          cnpjConsulta: '12345678000199',
+          status: NfeSyncStatus.ativo,
+          ultimaMensagem: 'Busca de NF-e via banco Dominio habilitada'
+        })
+      })
+    );
+    expect(result.controlesInicializados).toBe(1);
+    expect(result.falhas).toBe(0);
+  });
+
   it('roda distribuicao e persiste NF-e sincronizada', async () => {
     prisma.nfeSyncControle.findMany.mockResolvedValue([
       {
@@ -428,6 +455,76 @@ describe('NfeService', () => {
           ultimoNsuConsultado: 11n,
           ultimoNsuDistribuido: 11n,
           maxNsu: 99n
+        })
+      })
+    );
+    expect(result).toEqual({
+      processed: 1,
+      documentsSaved: 1
+    });
+  });
+
+  it('roda importacao via Dominio usando cursor salvo no controle', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN = '300';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 10n,
+        ultimoNsuDistribuido: 10n,
+        maxNsu: 10n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 11,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        dataEmissao: '2026-06-29',
+        xmlBase64: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe35260612345678000199550010000001231000001231">
+      <ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>2026-06-29T10:00:00-03:00</dhEmi></ide>
+      <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
+      <dest><CNPJ>99888777000166</CNPJ><xNome>Cliente Teste</xNome></dest>
+      <total><ICMSTot><vNF>150.00</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat><dhRecbto>2026-06-29T10:00:01-03:00</dhRecbto></infProt></protNFe>
+</nfeProc>`,
+          'utf8'
+        ).toString('base64')
+      }
+    ]);
+
+    const result = await service.runNowGlobal();
+
+    expect(dominioXmlSource.listDocuments).toHaveBeenCalledWith({
+      cnpjs: ['12345678000199'],
+      limit: 300,
+      dataEmissaoInicio: undefined,
+      dataEmissaoFim: undefined,
+      chavesAcesso: undefined,
+      catalogoIdMinExclusive: 10,
+      sortDirection: 'asc'
+    });
+    expect(distribuicaoClient.distribuirPorNsu).not.toHaveBeenCalled();
+    expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ctrl-1' },
+        data: expect.objectContaining({
+          ultimoNsuConsultado: 11n,
+          ultimoNsuDistribuido: 11n,
+          maxNsu: 11n,
+          status: NfeSyncStatus.ativo
         })
       })
     );

@@ -14,6 +14,8 @@ export interface DominioNfeXmlSource {
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
     chavesAcesso?: string[];
+    catalogoIdMinExclusive?: number;
+    sortDirection?: 'asc' | 'desc';
   }): Promise<DominioNfeXmlRecord[]>;
 }
 

@@ -43,6 +43,8 @@ type NfeNightlySweepSlot = {
   minute: number;
 };
 
+type NfeSyncSourceMode = 'distribuicao' | 'dominio';
+
 @Injectable()
 export class NfeService implements OnModuleInit, OnModuleDestroy {
   private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
@@ -112,6 +114,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   schedulerStatus(): {
+    sourceMode: NfeSyncSourceMode;
     autoSync: {
       enabled: boolean;
       running: boolean;
@@ -132,6 +135,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     };
   } {
     return {
+      sourceMode: this.getSyncSourceMode(),
       autoSync: {
         enabled: this.autoSyncEnabled,
         running: this.autoSyncRunning,
@@ -178,6 +182,13 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     falhas: number;
     detalhes: Array<{ estabelecimentoId: string; cnpjConsulta: string; status: 'inicializado' | 'reativado' | 'falha'; mensagem: string }>;
   }> {
+    if (this.isDominioSyncSource()) {
+      return this.prepareDominioControls({
+        clienteId: dto.clienteId,
+        ambiente: dto.ambiente ?? NfeAmbiente.producao
+      });
+    }
+
     await this.ensureClientEligibleForNfeSync(dto.clienteId);
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
     const establishments = await this.resolveTargetEstablishments(dto.clienteId);
@@ -316,6 +327,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     falhas: number;
     detalhes: Array<{ clienteId: string; sucesso: boolean; mensagem: string }>;
   }> {
+    if (this.isDominioSyncSource()) {
+      return this.prepareDominioControlsForAll(dto);
+    }
+
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
     const clients = await this.prisma.cliente.findMany({
       where: {
@@ -506,98 +521,27 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   async importFromDominio(dto: ImportNfeFromDominioDto) {
     await this.ensureClient(dto.clienteId);
-    const ambiente = dto.ambiente ?? NfeAmbiente.producao;
-    const establishments = await this.resolveTargetEstablishments(dto.clienteId, dto.estabelecimentoId);
-    const establishmentByCnpj = new Map(
-      establishments
-        .map((establishment) => {
-          const cnpj = this.normalizeCnpj(establishment.cnpj);
-          return cnpj ? [cnpj, establishment] : null;
-        })
-        .filter((entry): entry is [string, (typeof establishments)[number]] => entry !== null)
-    );
-
-    const documents = await this.dominioXmlSource.listDocuments({
-      cnpjs: Array.from(establishmentByCnpj.keys()),
+    return this.importFromDominioInternal({
+      clienteId: dto.clienteId,
+      estabelecimentoId: dto.estabelecimentoId,
+      ambiente: dto.ambiente ?? NfeAmbiente.producao,
       limit: dto.limit,
       dataEmissaoInicio: dto.dataEmissaoInicio,
       dataEmissaoFim: dto.dataEmissaoFim,
-      chavesAcesso: dto.chavesAcesso?.map((value) => this.normalizeChaveAcesso(value)).filter((value): value is string => Boolean(value))
+      chavesAcesso: dto.chavesAcesso
     });
-
-    let xmlsPersistidos = 0;
-    let falhas = 0;
-    let ignoradosSemVinculo = 0;
-    const detalhes: Array<{
-      catalogoId: number;
-      chaveAcesso?: string;
-      cnpjEmpresa: string;
-      status: 'persistido' | 'ignorado_sem_vinculo' | 'falha';
-      mensagem: string;
-    }> = [];
-
-    for (const document of documents) {
-      const cnpjEmpresa = this.normalizeCnpj(document.cnpjEmpresa);
-      const establishment = cnpjEmpresa ? establishmentByCnpj.get(cnpjEmpresa) : undefined;
-
-      if (!establishment) {
-        ignoradosSemVinculo += 1;
-        detalhes.push({
-          catalogoId: document.catalogoId,
-          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
-          cnpjEmpresa: cnpjEmpresa ?? '',
-          status: 'ignorado_sem_vinculo',
-          mensagem: 'CNPJ da Dominio nao possui estabelecimento ativo vinculado neste cliente'
-        });
-        continue;
-      }
-
-      try {
-        await this.persistDocument({
-          clienteId: dto.clienteId,
-          estabelecimentoId: establishment.id,
-          ambiente,
-          cnpjConsulta: establishment.cnpj,
-          document: {
-            schema: 'dominio_xml',
-            xml: this.decodeXml(document.xmlBase64),
-            chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso)
-          },
-          origem: NfeDocumentoOrigem.importacao_xml
-        });
-        xmlsPersistidos += 1;
-        detalhes.push({
-          catalogoId: document.catalogoId,
-          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
-          cnpjEmpresa: cnpjEmpresa ?? '',
-          status: 'persistido',
-          mensagem: 'XML importado com sucesso'
-        });
-      } catch (error) {
-        falhas += 1;
-        detalhes.push({
-          catalogoId: document.catalogoId,
-          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
-          cnpjEmpresa: cnpjEmpresa ?? '',
-          status: 'falha',
-          mensagem: this.toErrorMessage(error)
-        });
-      }
-    }
-
-    return {
-      ambiente,
-      estabelecimentosConsultados: establishments.length,
-      cnpjsConsultados: Array.from(establishmentByCnpj.keys()),
-      xmlsEncontrados: documents.length,
-      xmlsPersistidos,
-      ignoradosSemVinculo,
-      falhas,
-      detalhes
-    };
   }
 
   async iniciarSync(dto: StartNfeSyncDto): Promise<{ controlesCriadosOuAtualizados: number }> {
+    if (this.isDominioSyncSource()) {
+      const result = await this.prepareDominioControls({
+        clienteId: dto.clienteId,
+        estabelecimentoId: dto.estabelecimentoId,
+        ambiente: dto.ambiente ?? NfeAmbiente.producao
+      });
+      return { controlesCriadosOuAtualizados: result.controlesCriadosOuReativados };
+    }
+
     await this.ensureClientEligibleForNfeSync(dto.clienteId);
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
     const controls = await this.resolveTargetEstablishments(dto.clienteId, dto.estabelecimentoId);
@@ -662,6 +606,15 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   async runNow(dto: RunNfeSyncDto): Promise<{ processed: number; documentsSaved: number }> {
     await this.ensureClientEligibleForNfeSync(dto.clienteId);
+    if (this.isDominioSyncSource()) {
+      return this.runNowViaDominio({
+        clienteId: dto.clienteId,
+        ambiente: dto.ambiente,
+        estabelecimentoId: dto.estabelecimentoId,
+        limitControles: dto.limitControles
+      });
+    }
+
     return this.runNowInternal({
       clienteId: dto.clienteId,
       ambiente: dto.ambiente,
@@ -671,9 +624,385 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async runNowGlobal(): Promise<{ processed: number; documentsSaved: number }> {
+    if (this.isDominioSyncSource()) {
+      return this.runNowViaDominio({
+        limitControles: 50
+      });
+    }
+
     return this.runNowInternal({
       limitControles: 50
     });
+  }
+
+  private async importFromDominioInternal(params: {
+    clienteId: string;
+    estabelecimentoId?: string;
+    ambiente: NfeAmbiente;
+    limit?: number;
+    dataEmissaoInicio?: string;
+    dataEmissaoFim?: string;
+    chavesAcesso?: string[];
+    catalogoIdMinExclusive?: number;
+    sortDirection?: 'asc' | 'desc';
+  }) {
+    const establishments = await this.resolveTargetEstablishments(params.clienteId, params.estabelecimentoId);
+    const establishmentByCnpj = new Map(
+      establishments
+        .map((establishment) => {
+          const cnpj = this.normalizeCnpj(establishment.cnpj);
+          return cnpj ? [cnpj, establishment] : null;
+        })
+        .filter((entry): entry is [string, (typeof establishments)[number]] => entry !== null)
+    );
+
+    const documents = await this.dominioXmlSource.listDocuments({
+      cnpjs: Array.from(establishmentByCnpj.keys()),
+      limit: params.limit,
+      dataEmissaoInicio: params.dataEmissaoInicio,
+      dataEmissaoFim: params.dataEmissaoFim,
+      chavesAcesso: params.chavesAcesso?.map((value) => this.normalizeChaveAcesso(value)).filter((value): value is string => Boolean(value)),
+      catalogoIdMinExclusive: params.catalogoIdMinExclusive,
+      sortDirection: params.sortDirection
+    });
+
+    let xmlsPersistidos = 0;
+    let falhas = 0;
+    let ignoradosSemVinculo = 0;
+    let cursorAtualizadoAte = params.catalogoIdMinExclusive ?? 0;
+    let maxCatalogoIdEncontrado = params.catalogoIdMinExclusive ?? 0;
+    let travarCursor = false;
+    const detalhes: Array<{
+      catalogoId: number;
+      chaveAcesso?: string;
+      cnpjEmpresa: string;
+      status: 'persistido' | 'ignorado_sem_vinculo' | 'falha';
+      mensagem: string;
+    }> = [];
+
+    for (const document of documents) {
+      maxCatalogoIdEncontrado = Math.max(maxCatalogoIdEncontrado, document.catalogoId);
+      const cnpjEmpresa = this.normalizeCnpj(document.cnpjEmpresa);
+      const establishment = cnpjEmpresa ? establishmentByCnpj.get(cnpjEmpresa) : undefined;
+
+      if (!establishment) {
+        ignoradosSemVinculo += 1;
+        if (params.sortDirection === 'asc') {
+          travarCursor = true;
+        }
+        detalhes.push({
+          catalogoId: document.catalogoId,
+          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
+          cnpjEmpresa: cnpjEmpresa ?? '',
+          status: 'ignorado_sem_vinculo',
+          mensagem: 'CNPJ da Dominio nao possui estabelecimento ativo vinculado neste cliente'
+        });
+        continue;
+      }
+
+      try {
+        await this.persistDocument({
+          clienteId: params.clienteId,
+          estabelecimentoId: establishment.id,
+          ambiente: params.ambiente,
+          cnpjConsulta: establishment.cnpj,
+          document: {
+            schema: 'dominio_xml',
+            xml: this.decodeXml(document.xmlBase64),
+            chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso)
+          },
+          origem: NfeDocumentoOrigem.importacao_xml
+        });
+        xmlsPersistidos += 1;
+        if (params.sortDirection === 'asc' && !travarCursor) {
+          cursorAtualizadoAte = document.catalogoId;
+        }
+        detalhes.push({
+          catalogoId: document.catalogoId,
+          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
+          cnpjEmpresa: cnpjEmpresa ?? '',
+          status: 'persistido',
+          mensagem: 'XML importado com sucesso'
+        });
+      } catch (error) {
+        falhas += 1;
+        if (params.sortDirection === 'asc') {
+          travarCursor = true;
+        }
+        detalhes.push({
+          catalogoId: document.catalogoId,
+          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
+          cnpjEmpresa: cnpjEmpresa ?? '',
+          status: 'falha',
+          mensagem: this.toErrorMessage(error)
+        });
+      }
+    }
+
+    return {
+      ambiente: params.ambiente,
+      estabelecimentosConsultados: establishments.length,
+      cnpjsConsultados: Array.from(establishmentByCnpj.keys()),
+      xmlsEncontrados: documents.length,
+      xmlsPersistidos,
+      ignoradosSemVinculo,
+      falhas,
+      cursorAtualizadoAte,
+      maxCatalogoIdEncontrado,
+      detalhes
+    };
+  }
+
+  private async prepareDominioControls(params: {
+    clienteId: string;
+    estabelecimentoId?: string;
+    ambiente: NfeAmbiente;
+  }): Promise<{
+    clienteId: string;
+    ambiente: NfeAmbiente;
+    controlesCriadosOuReativados: number;
+    controlesInicializados: number;
+    controlesReativados: number;
+    falhas: number;
+    detalhes: Array<{ estabelecimentoId: string; cnpjConsulta: string; status: 'inicializado' | 'reativado' | 'falha'; mensagem: string }>;
+  }> {
+    await this.ensureClientEligibleForNfeSync(params.clienteId);
+    const establishments = await this.resolveTargetEstablishments(params.clienteId, params.estabelecimentoId);
+    const detalhes: Array<{
+      estabelecimentoId: string;
+      cnpjConsulta: string;
+      status: 'inicializado' | 'reativado' | 'falha';
+      mensagem: string;
+    }> = [];
+    let controlesInicializados = 0;
+    let controlesReativados = 0;
+    let falhas = 0;
+
+    for (const establishment of establishments) {
+      const cnpjConsulta = establishment.cnpj;
+
+      try {
+        const existing = await this.prisma.nfeSyncControle.findFirst({
+          where: {
+            clienteId: params.clienteId,
+            estabelecimentoId: establishment.id,
+            cnpjConsulta,
+            ambiente: params.ambiente
+          }
+        });
+
+        if (existing) {
+          const isDominioControl = String(existing.ultimaMensagem || '').toLowerCase().includes('banco dominio');
+          await this.prisma.nfeSyncControle.update({
+            where: { id: existing.id },
+            data: {
+              status: NfeSyncStatus.ativo,
+              ultimaExecucao: new Date(),
+              ultimaMensagem: 'Busca de NF-e via banco Dominio reativada',
+              ...(isDominioControl
+                ? {}
+                : {
+                    ultimoNsuConsultado: 0n,
+                    ultimoNsuDistribuido: 0n,
+                    maxNsu: 0n
+                  })
+            }
+          });
+          controlesReativados += 1;
+          detalhes.push({
+            estabelecimentoId: establishment.id,
+            cnpjConsulta,
+            status: 'reativado',
+            mensagem: isDominioControl
+              ? 'Controle existente reativado para importacao via banco Dominio'
+              : 'Controle existente convertido para importacao via banco Dominio'
+          });
+          continue;
+        }
+
+        await this.prisma.nfeSyncControle.create({
+          data: {
+            clienteId: params.clienteId,
+            estabelecimentoId: establishment.id,
+            cnpjConsulta,
+            ambiente: params.ambiente,
+            status: NfeSyncStatus.ativo,
+            ultimaExecucao: new Date(),
+            ultimaMensagem: 'Busca de NF-e via banco Dominio habilitada'
+          }
+        });
+        controlesInicializados += 1;
+        detalhes.push({
+          estabelecimentoId: establishment.id,
+          cnpjConsulta,
+          status: 'inicializado',
+          mensagem: 'Controle criado para importacao via banco Dominio'
+        });
+      } catch (error) {
+        falhas += 1;
+        detalhes.push({
+          estabelecimentoId: establishment.id,
+          cnpjConsulta,
+          status: 'falha',
+          mensagem: this.toErrorMessage(error)
+        });
+      }
+    }
+
+    return {
+      clienteId: params.clienteId,
+      ambiente: params.ambiente,
+      controlesCriadosOuReativados: controlesInicializados + controlesReativados,
+      controlesInicializados,
+      controlesReativados,
+      falhas,
+      detalhes
+    };
+  }
+
+  private async prepareDominioControlsForAll(
+    dto: EnableAllNfeSyncDto = {}
+  ): Promise<{
+    ambiente: NfeAmbiente;
+    clientesProcessados: number;
+    clientesComSucesso: number;
+    controlesCriadosOuReativados: number;
+    controlesInicializados: number;
+    controlesReativados: number;
+    falhas: number;
+    detalhes: Array<{ clienteId: string; sucesso: boolean; mensagem: string }>;
+  }> {
+    const ambiente = dto.ambiente ?? NfeAmbiente.producao;
+    const clients = await this.prisma.cliente.findMany({
+      where: {
+        ativo: true,
+        nfeHabilitado: true
+      },
+      orderBy: { createdAt: 'asc' }
+    });
+    const detalhes: Array<{ clienteId: string; sucesso: boolean; mensagem: string }> = [];
+    let clientesComSucesso = 0;
+    let controlesCriadosOuReativados = 0;
+    let controlesInicializados = 0;
+    let controlesReativados = 0;
+    let falhas = 0;
+
+    for (const client of clients) {
+      try {
+        const result = await this.prepareDominioControls({
+          clienteId: client.id,
+          ambiente
+        });
+        const activated = result.controlesCriadosOuReativados;
+        const hasSuccess = activated > 0 && result.falhas < result.detalhes.length;
+        if (hasSuccess) {
+          clientesComSucesso += 1;
+        }
+        controlesCriadosOuReativados += result.controlesCriadosOuReativados;
+        controlesInicializados += result.controlesInicializados;
+        controlesReativados += result.controlesReativados;
+        falhas += result.falhas;
+        detalhes.push({
+          clienteId: client.id,
+          sucesso: hasSuccess,
+          mensagem: `${result.controlesCriadosOuReativados} controle(s) preparados para banco Dominio; ${result.falhas} falha(s)`
+        });
+      } catch (error) {
+        falhas += 1;
+        detalhes.push({
+          clienteId: client.id,
+          sucesso: false,
+          mensagem: this.toErrorMessage(error)
+        });
+      }
+    }
+
+    return {
+      ambiente,
+      clientesProcessados: clients.length,
+      clientesComSucesso,
+      controlesCriadosOuReativados,
+      controlesInicializados,
+      controlesReativados,
+      falhas,
+      detalhes
+    };
+  }
+
+  private async runNowViaDominio(params: {
+    clienteId?: string;
+    ambiente?: NfeAmbiente;
+    estabelecimentoId?: string;
+    limitControles?: number;
+  }): Promise<{ processed: number; documentsSaved: number }> {
+    const controls = await this.prisma.nfeSyncControle.findMany({
+      where: {
+        cliente: {
+          ativo: true,
+          nfeHabilitado: true
+        },
+        status: {
+          in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api]
+        },
+        ...(params.clienteId ? { clienteId: params.clienteId } : {}),
+        ...(params.ambiente ? { ambiente: params.ambiente } : {}),
+        ...(params.estabelecimentoId ? { estabelecimentoId: params.estabelecimentoId } : {})
+      },
+      orderBy: { updatedAt: 'asc' },
+      take: params.limitControles ?? 10
+    });
+    let documentsSaved = 0;
+    const limitPorControle = this.parsePositiveNumberEnv('NFE_DOMINIO_IMPORT_LIMIT_PER_RUN', 500);
+
+    for (const control of controls) {
+      try {
+        const result = await this.importFromDominioInternal({
+          clienteId: control.clienteId,
+          estabelecimentoId: control.estabelecimentoId,
+          ambiente: control.ambiente,
+          limit: limitPorControle,
+          catalogoIdMinExclusive: this.toSafeCatalogoCursor(control.ultimoNsuConsultado),
+          sortDirection: 'asc'
+        });
+        const cursorAtualizado = BigInt(result.cursorAtualizadoAte);
+        const maxCatalogoEncontrado = BigInt(result.maxCatalogoIdEncontrado);
+        documentsSaved += result.xmlsPersistidos;
+
+        await this.prisma.nfeSyncControle.update({
+          where: { id: control.id },
+          data: {
+            status: result.falhas > 0 ? NfeSyncStatus.erro_api : NfeSyncStatus.ativo,
+            ultimoNsuConsultado: cursorAtualizado,
+            ultimoNsuDistribuido: cursorAtualizado,
+            maxNsu: maxCatalogoEncontrado > 0n ? maxCatalogoEncontrado : control.maxNsu,
+            ultimaExecucao: new Date(),
+            ultimaMensagem:
+              result.falhas > 0
+                ? `Importacao via banco Dominio executada com ${result.falhas} falha(s)`
+                : result.xmlsPersistidos > 0
+                  ? `Importacao via banco Dominio salvou ${result.xmlsPersistidos} XML(s)`
+                  : 'Importacao via banco Dominio sem novos XMLs',
+            totalDocumentosBaixados: {
+              increment: result.xmlsPersistidos
+            }
+          }
+        });
+      } catch (error) {
+        await this.prisma.nfeSyncControle.update({
+          where: { id: control.id },
+          data: {
+            status: NfeSyncStatus.erro_api,
+            ultimaExecucao: new Date(),
+            ultimaMensagem: `Falha na importacao via banco Dominio: ${this.toErrorMessage(error)}`
+          }
+        });
+      }
+    }
+
+    return {
+      processed: controls.length,
+      documentsSaved
+    };
   }
 
   private async runNowInternal(params: {
@@ -1390,6 +1719,27 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     if (documentClientId !== clienteId) {
       throw new NotFoundException('NF-e nao encontrada para o cliente informado');
     }
+  }
+
+  private getSyncSourceMode(): NfeSyncSourceMode {
+    return String(process.env.NFE_SYNC_SOURCE_MODE || '').trim().toLowerCase() === 'dominio' ? 'dominio' : 'distribuicao';
+  }
+
+  private isDominioSyncSource(): boolean {
+    return this.getSyncSourceMode() === 'dominio';
+  }
+
+  private toSafeCatalogoCursor(value?: bigint | null): number {
+    if (!value || value <= 0n) {
+      return 0;
+    }
+
+    const asNumber = Number(value);
+    if (!Number.isSafeInteger(asNumber) || asNumber < 0) {
+      throw new Error(`Cursor da Dominio fora do intervalo seguro: ${value.toString()}`);
+    }
+
+    return asNumber;
   }
 
   private decodeXml(xmlBase64: string): string {

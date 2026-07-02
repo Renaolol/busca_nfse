@@ -51,6 +51,8 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - As rotas manuais permitem testar o ambiente real e recuperar documentos pontuais sem depender do ciclo incremental.
 - A importacao via Dominio consulta `bethadba.EFATENDIMENTO_NFE_CATALOGO` + `bethadba.EFATENDIMENTO_NFE_XML` e faz o vinculo local pelo CNPJ de `bethadba.geempre.cgce_emp`.
 - O adapter real da Dominio fica desacoplado em `src/integrations/dominio-nfe` e usa `pyodbc` via script Python para evitar acoplamento de driver nativo ao build Node.
+- Quando `NFE_SYNC_SOURCE_MODE=dominio`, as rotas operacionais `POST /nfe/sync/ativar`, `POST /nfe/sync/ativar-todos`, `POST /nfe/sync/rodar-agora` e `POST /nfe/sync/rodar-agora-geral` deixam de consultar NSU e passam a importar incrementalmente da base Dominio.
+- Nesse modo, `nfe_sync_controle.ultimo_nsu_consultado` passa a guardar o ultimo `EFATENDIMENTO_NFE_CATALOGO.ID` importado com sucesso para cada `cliente/cnpj/ambiente`.
 
 ## Operacao recomendada
 

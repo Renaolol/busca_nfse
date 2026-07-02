@@ -22,6 +22,8 @@ def parse_payload():
     payload['limit'] = int(payload.get('limit') or 200)
     if payload['limit'] <= 0:
         payload['limit'] = 200
+    payload['catalogoIdMinExclusive'] = int(payload.get('catalogoIdMinExclusive') or 0)
+    payload['sortDirection'] = 'asc' if str(payload.get('sortDirection') or '').lower() == 'asc' else 'desc'
     return payload
 
 
@@ -63,6 +65,10 @@ SELECT TOP {payload['limit']}
 
     params = list(cnpjs)
 
+    if payload['catalogoIdMinExclusive'] > 0:
+        query += "   AND cat.ID > ?\n"
+        params.append(payload['catalogoIdMinExclusive'])
+
     if payload.get('dataEmissaoInicio'):
         query += "   AND cat.DATA_EMISSAO >= ?\n"
         params.append(payload['dataEmissaoInicio'])
@@ -76,7 +82,10 @@ SELECT TOP {payload['limit']}
         query += f"   AND cat.CHAVE IN ({','.join('?' for _ in chaves)})\n"
         params.extend(chaves)
 
-    query += " ORDER BY cat.DATA_EMISSAO DESC, cat.ID DESC"
+    if payload['sortDirection'] == 'asc':
+        query += " ORDER BY cat.ID ASC"
+    else:
+        query += " ORDER BY cat.DATA_EMISSAO DESC, cat.ID DESC"
     return query, params
 
 

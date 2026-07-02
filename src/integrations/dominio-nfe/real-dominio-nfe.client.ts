@@ -24,6 +24,8 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
     chavesAcesso?: string[];
+    catalogoIdMinExclusive?: number;
+    sortDirection?: 'asc' | 'desc';
   }): Promise<DominioNfeXmlRecord[]> {
     if (!this.connectionString) {
       throw new Error('DOMINIO_ODBC_CONNECTION_STRING nao configurada para importar XMLs da Dominio');
@@ -35,7 +37,9 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
       limit: params.limit,
       dataEmissaoInicio: params.dataEmissaoInicio,
       dataEmissaoFim: params.dataEmissaoFim,
-      chavesAcesso: params.chavesAcesso
+      chavesAcesso: params.chavesAcesso,
+      catalogoIdMinExclusive: params.catalogoIdMinExclusive,
+      sortDirection: params.sortDirection
     });
 
     const records = await this.runPythonScript(payload);
