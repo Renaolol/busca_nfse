@@ -9,6 +9,7 @@ import {
 } from '@prisma/client';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { DOMINIO_NFE_XML_SOURCE, DominioNfeXmlSource } from '../../integrations/dominio-nfe/dominio-nfe.types';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -18,6 +19,7 @@ import {
   NfeDistribuicaoResult
 } from '../../integrations/nfe-distribuicao/nfe-distribuicao.types';
 import { DashboardNfeStatsQueryDto } from './dto/dashboard-stats.dto';
+import { ImportNfeFromDominioDto } from './dto/import-dominio.dto';
 import { EnableAllNfeSyncDto } from './dto/enable-all-sync.dto';
 import { EnableNfeSyncDto } from './dto/enable-sync.dto';
 import { ImportNfeXmlDto } from './dto/import-xml.dto';
@@ -71,7 +73,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     private readonly prisma: PrismaService,
     private readonly parser: NfeXmlParserService,
     private readonly storage: LocalStorageService,
-    @Inject(NFE_DISTRIBUICAO_CLIENT) private readonly distribuicaoClient: NfeDistribuicaoClient
+    @Inject(NFE_DISTRIBUICAO_CLIENT) private readonly distribuicaoClient: NfeDistribuicaoClient,
+    @Inject(DOMINIO_NFE_XML_SOURCE) private readonly dominioXmlSource: DominioNfeXmlSource
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -499,6 +502,99 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     });
 
     return persisted;
+  }
+
+  async importFromDominio(dto: ImportNfeFromDominioDto) {
+    await this.ensureClient(dto.clienteId);
+    const ambiente = dto.ambiente ?? NfeAmbiente.producao;
+    const establishments = await this.resolveTargetEstablishments(dto.clienteId, dto.estabelecimentoId);
+    const establishmentByCnpj = new Map(
+      establishments
+        .map((establishment) => {
+          const cnpj = this.normalizeCnpj(establishment.cnpj);
+          return cnpj ? [cnpj, establishment] : null;
+        })
+        .filter((entry): entry is [string, (typeof establishments)[number]] => entry !== null)
+    );
+
+    const documents = await this.dominioXmlSource.listDocuments({
+      cnpjs: Array.from(establishmentByCnpj.keys()),
+      limit: dto.limit,
+      dataEmissaoInicio: dto.dataEmissaoInicio,
+      dataEmissaoFim: dto.dataEmissaoFim,
+      chavesAcesso: dto.chavesAcesso?.map((value) => this.normalizeChaveAcesso(value)).filter((value): value is string => Boolean(value))
+    });
+
+    let xmlsPersistidos = 0;
+    let falhas = 0;
+    let ignoradosSemVinculo = 0;
+    const detalhes: Array<{
+      catalogoId: number;
+      chaveAcesso?: string;
+      cnpjEmpresa: string;
+      status: 'persistido' | 'ignorado_sem_vinculo' | 'falha';
+      mensagem: string;
+    }> = [];
+
+    for (const document of documents) {
+      const cnpjEmpresa = this.normalizeCnpj(document.cnpjEmpresa);
+      const establishment = cnpjEmpresa ? establishmentByCnpj.get(cnpjEmpresa) : undefined;
+
+      if (!establishment) {
+        ignoradosSemVinculo += 1;
+        detalhes.push({
+          catalogoId: document.catalogoId,
+          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
+          cnpjEmpresa: cnpjEmpresa ?? '',
+          status: 'ignorado_sem_vinculo',
+          mensagem: 'CNPJ da Dominio nao possui estabelecimento ativo vinculado neste cliente'
+        });
+        continue;
+      }
+
+      try {
+        await this.persistDocument({
+          clienteId: dto.clienteId,
+          estabelecimentoId: establishment.id,
+          ambiente,
+          cnpjConsulta: establishment.cnpj,
+          document: {
+            schema: 'dominio_xml',
+            xml: this.decodeXml(document.xmlBase64),
+            chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso)
+          },
+          origem: NfeDocumentoOrigem.importacao_xml
+        });
+        xmlsPersistidos += 1;
+        detalhes.push({
+          catalogoId: document.catalogoId,
+          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
+          cnpjEmpresa: cnpjEmpresa ?? '',
+          status: 'persistido',
+          mensagem: 'XML importado com sucesso'
+        });
+      } catch (error) {
+        falhas += 1;
+        detalhes.push({
+          catalogoId: document.catalogoId,
+          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
+          cnpjEmpresa: cnpjEmpresa ?? '',
+          status: 'falha',
+          mensagem: this.toErrorMessage(error)
+        });
+      }
+    }
+
+    return {
+      ambiente,
+      estabelecimentosConsultados: establishments.length,
+      cnpjsConsultados: Array.from(establishmentByCnpj.keys()),
+      xmlsEncontrados: documents.length,
+      xmlsPersistidos,
+      ignoradosSemVinculo,
+      falhas,
+      detalhes
+    };
   }
 
   async iniciarSync(dto: StartNfeSyncDto): Promise<{ controlesCriadosOuAtualizados: number }> {
@@ -1296,6 +1392,22 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private decodeXml(xmlBase64: string): string {
+    const buffer = Buffer.from(xmlBase64, 'base64');
+    const declarationPreview = buffer.toString('latin1', 0, Math.min(buffer.length, 256));
+    const declaredEncoding = declarationPreview.match(/encoding=["']([^"']+)["']/i)?.[1]?.trim().toLowerCase();
+
+    if (declaredEncoding && ['iso-8859-1', 'latin1', 'windows-1252'].includes(declaredEncoding)) {
+      return buffer.toString('latin1');
+    }
+
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+    } catch {
+      return buffer.toString('latin1');
+    }
+  }
+
   private normalizeCnpj(value?: string | null): string | undefined {
     if (!value) {
       return undefined;
@@ -1303,6 +1415,15 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
     const digits = value.replace(/\D/g, '');
     return digits || undefined;
+  }
+
+  private normalizeChaveAcesso(value?: string | null): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const digits = value.replace(/\D/g, '');
+    return digits.length === 44 ? digits : undefined;
   }
 
   private toDecimal(value?: string): Prisma.Decimal | undefined {

@@ -1,4 +1,5 @@
 import { NfeAmbiente, NfeSyncStatus, NfeTipoRelacao, Prisma } from '@prisma/client';
+import { DominioNfeXmlSource } from '../../../integrations/dominio-nfe/dominio-nfe.types';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { NfeDistribuicaoClient } from '../../../integrations/nfe-distribuicao/nfe-distribuicao.types';
 import { LocalStorageService } from '../../storage/storage.service';
@@ -46,11 +47,16 @@ describe('NfeService', () => {
     consultarPorChave: jest.fn()
   };
 
+  const dominioXmlSource: DominioNfeXmlSource = {
+    listDocuments: jest.fn()
+  };
+
   const service = new NfeService(
     prisma as unknown as PrismaService,
     new NfeXmlParserService(),
     storage as unknown as LocalStorageService,
-    distribuicaoClient
+    distribuicaoClient,
+    dominioXmlSource
   );
 
   beforeEach(() => {
@@ -87,6 +93,7 @@ describe('NfeService', () => {
     prisma.nfeSyncControle.updateMany.mockResolvedValue({ count: 1 });
     prisma.nfeSyncControle.update.mockResolvedValue({});
     storage.putObject.mockResolvedValue(undefined);
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([]);
   });
 
   it('retorna estatisticas agregadas do dashboard por cliente', async () => {
@@ -148,6 +155,71 @@ describe('NfeService', () => {
     expect(result.fileName).toBe('NFE-35260612345678000199550010000001231000001231.xml');
     expect(result.contentType).toBe('application/xml');
     expect(result.contentBase64).toBe(Buffer.from('<xml>conteudo</xml>', 'utf8').toString('base64'));
+  });
+
+  it('importa XMLs da Dominio vinculando estabelecimento por CNPJ', async () => {
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 10,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        dataEmissao: '2026-06-29',
+        xmlBase64: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <protNFe>
+    <infProt>
+      <chNFe>35260612345678000199550010000001231000001231</chNFe>
+      <dhRecbto>2026-06-29T10:00:00-03:00</dhRecbto>
+      <cStat>100</cStat>
+    </infProt>
+  </protNFe>
+  <NFe>
+    <infNFe Id="NFe35260612345678000199550010000001231000001231">
+      <ide>
+        <mod>55</mod>
+        <serie>1</serie>
+        <nNF>123</nNF>
+        <dhEmi>2026-06-29T09:55:00-03:00</dhEmi>
+      </ide>
+      <emit>
+        <CNPJ>12345678000199</CNPJ>
+        <xNome>Empresa Emitente</xNome>
+      </emit>
+      <dest>
+        <CNPJ>99887766000155</CNPJ>
+        <xNome>Empresa Destinataria</xNome>
+      </dest>
+      <total>
+        <ICMSTot>
+          <vNF>150.00</vNF>
+        </ICMSTot>
+      </total>
+    </infNFe>
+  </NFe>
+</nfeProc>`,
+          'utf8'
+        ).toString('base64')
+      }
+    ]);
+
+    const result = await service.importFromDominio({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(dominioXmlSource.listDocuments).toHaveBeenCalledWith({
+      cnpjs: ['12345678000199'],
+      limit: undefined,
+      dataEmissaoInicio: undefined,
+      dataEmissaoFim: undefined,
+      chavesAcesso: undefined
+    });
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledTimes(1);
+    expect(result.xmlsEncontrados).toBe(1);
+    expect(result.xmlsPersistidos).toBe(1);
+    expect(result.falhas).toBe(0);
   });
 
   it('inicia controles de sync reaproveitando certificados', async () => {

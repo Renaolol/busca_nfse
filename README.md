@@ -275,6 +275,7 @@ Rotas principais:
 - `GET /nfe/:id/xml`
 - `GET /nfe/dashboard-stats`
 - `GET /nfe/sync/status?clienteId=...`
+- `POST /nfe/importar-dominio`
 - `POST /nfe/importar-xml`
 - `POST /nfe/sync/iniciar`
 - `POST /nfe/sync/pausar`
@@ -289,6 +290,15 @@ Observacoes:
 - `POST /nfe/sync/consultar-nsu` consulta um NSU pontual via `consNSU`, com opcao de persistir o documento retornado.
 - `POST /nfe/sync/consultar-chave` consulta uma NF-e especifica via `consChNFe`, com opcao de persistir o retorno.
 - A deduplicacao de NF-e tambem ocorre por `ambiente + chave_acesso`.
+- `POST /nfe/importar-dominio` consulta a base da Dominio via ODBC, relaciona `bethadba.geempre.cgce_emp` com `cliente_estabelecimentos.cnpj` e reaproveita o mesmo pipeline de persistencia/deduplicacao do endpoint manual.
+
+### Importacao de NF-e via Dominio
+
+- Configure `DOMINIO_NFE_SOURCE_MODE=real` para habilitar o adapter real.
+- Configure `DOMINIO_ODBC_CONNECTION_STRING` com a string ODBC completa da Dominio, por exemplo: `DSN=ContabilPBI;UID=PBI;PWD=Pbi`.
+- Opcionalmente configure `DOMINIO_PYTHON_BIN` quando o executavel Python nao estiver disponivel como `python`.
+- O importador usa o script `scripts/dominio_nfe_export.py`, que depende de `pyodbc` no host onde a API estiver rodando.
+- A vinculacao com o cliente local ocorre por CNPJ do estabelecimento ativo; nao foi necessario adicionar coluna de codigo da empresa da Dominio no schema.
 - `GET /nfe` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, periodo, status e `somenteXmlCompleto`.
 - Quando `NFE_DISTRIBUICAO_CLIENT_MODE=real`, o sistema consulta `distNSU`, `consNSU` e `consChNFe`, descompacta `docZip` e armazena resumos `resNFe` e XMLs completos retornados pelo Ambiente Nacional.
 

@@ -7,6 +7,7 @@ import {
   DashboardNfeStatsQueryDto,
   DashboardNfeStatsResponseDto
 } from './dto/dashboard-stats.dto';
+import { ImportNfeFromDominioDto } from './dto/import-dominio.dto';
 import { EnableAllNfeSyncDto } from './dto/enable-all-sync.dto';
 import { EnableNfeSyncDto } from './dto/enable-sync.dto';
 import { DownloadNfeDocumentDto } from './dto/download-document.dto';
@@ -69,6 +70,12 @@ export class NfeController {
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   importXml(@Body() dto: ImportNfeXmlDto) {
     return this.nfeService.importXml(dto);
+  }
+
+  @Post('importar-dominio')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  importFromDominio(@Body() dto: ImportNfeFromDominioDto) {
+    return this.nfeService.importFromDominio(dto);
   }
 
   @Post('sync/iniciar')

@@ -26,6 +26,7 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - `GET /nfe/:id/xml`
 - `GET /nfe/dashboard-stats`
 - `GET /nfe/sync/status?clienteId=...`
+- `POST /nfe/importar-dominio`
 - `POST /nfe/importar-xml`
 - `POST /nfe/sync/iniciar`
 - `POST /nfe/sync/ativar`
@@ -48,6 +49,8 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - As URLs acima seguem a relacao oficial de servicos web do portal da NF-e e podem ser sobrescritas por env var.
 - O fluxo atual implementa `distNSU`, `consNSU` e `consChNFe`.
 - As rotas manuais permitem testar o ambiente real e recuperar documentos pontuais sem depender do ciclo incremental.
+- A importacao via Dominio consulta `bethadba.EFATENDIMENTO_NFE_CATALOGO` + `bethadba.EFATENDIMENTO_NFE_XML` e faz o vinculo local pelo CNPJ de `bethadba.geempre.cgce_emp`.
+- O adapter real da Dominio fica desacoplado em `src/integrations/dominio-nfe` e usa `pyodbc` via script Python para evitar acoplamento de driver nativo ao build Node.
 
 ## Operacao recomendada
 
