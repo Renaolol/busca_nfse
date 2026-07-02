@@ -45,6 +45,24 @@ type NfeNightlySweepSlot = {
 
 type NfeSyncSourceMode = 'distribuicao' | 'dominio';
 
+type NfeSyncRunFailureDetail = {
+  kind: 'documento' | 'controle';
+  clientId: string;
+  estabelecimentoId: string;
+  ambiente: NfeAmbiente;
+  cnpjConsulta: string;
+  catalogoId?: number;
+  chaveAcesso?: string;
+  mensagem: string;
+};
+
+type NfeSyncRunResult = {
+  processed: number;
+  documentsSaved: number;
+  failures: number;
+  failureDetails: NfeSyncRunFailureDetail[];
+};
+
 @Injectable()
 export class NfeService implements OnModuleInit, OnModuleDestroy {
   private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
@@ -604,7 +622,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async runNow(dto: RunNfeSyncDto): Promise<{ processed: number; documentsSaved: number }> {
+  async runNow(dto: RunNfeSyncDto): Promise<NfeSyncRunResult> {
     await this.ensureClientEligibleForNfeSync(dto.clienteId);
     if (this.isDominioSyncSource()) {
       return this.runNowViaDominio({
@@ -623,7 +641,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
-  async runNowGlobal(): Promise<{ processed: number; documentsSaved: number }> {
+  async runNowGlobal(): Promise<NfeSyncRunResult> {
     if (this.isDominioSyncSource()) {
       return this.runNowViaDominio({
         limitControles: 50
@@ -934,7 +952,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     ambiente?: NfeAmbiente;
     estabelecimentoId?: string;
     limitControles?: number;
-  }): Promise<{ processed: number; documentsSaved: number }> {
+  }): Promise<NfeSyncRunResult> {
     const controls = await this.prisma.nfeSyncControle.findMany({
       where: {
         cliente: {
@@ -952,6 +970,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       take: params.limitControles ?? 10
     });
     let documentsSaved = 0;
+    let failures = 0;
+    const failureDetails: NfeSyncRunFailureDetail[] = [];
     const limitPorControle = this.parsePositiveNumberEnv('NFE_DOMINIO_IMPORT_LIMIT_PER_RUN', 500);
 
     for (const control of controls) {
@@ -967,6 +987,21 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         const cursorAtualizado = BigInt(result.cursorAtualizadoAte);
         const maxCatalogoEncontrado = BigInt(result.maxCatalogoIdEncontrado);
         documentsSaved += result.xmlsPersistidos;
+        failures += result.falhas;
+        failureDetails.push(
+          ...result.detalhes
+            .filter((detail) => detail.status === 'falha')
+            .map((detail) => ({
+              kind: 'documento' as const,
+              clientId: control.clienteId,
+              estabelecimentoId: control.estabelecimentoId,
+              ambiente: control.ambiente,
+              cnpjConsulta: control.cnpjConsulta,
+              catalogoId: detail.catalogoId,
+              chaveAcesso: detail.chaveAcesso,
+              mensagem: detail.mensagem
+            }))
+        );
 
         await this.prisma.nfeSyncControle.update({
           where: { id: control.id },
@@ -978,7 +1013,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             ultimaExecucao: new Date(),
             ultimaMensagem:
               result.falhas > 0
-                ? `Importacao via banco Dominio executada com ${result.falhas} falha(s)`
+              ? `Importacao via banco Dominio executada com ${result.falhas} falha(s)`
                 : result.xmlsPersistidos > 0
                   ? `Importacao via banco Dominio salvou ${result.xmlsPersistidos} XML(s)`
                   : 'Importacao via banco Dominio sem novos XMLs',
@@ -988,6 +1023,15 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           }
         });
       } catch (error) {
+        failures += 1;
+        failureDetails.push({
+          kind: 'controle',
+          clientId: control.clienteId,
+          estabelecimentoId: control.estabelecimentoId,
+          ambiente: control.ambiente,
+          cnpjConsulta: control.cnpjConsulta,
+          mensagem: this.toErrorMessage(error)
+        });
         await this.prisma.nfeSyncControle.update({
           where: { id: control.id },
           data: {
@@ -1001,7 +1045,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
     return {
       processed: controls.length,
-      documentsSaved
+      documentsSaved,
+      failures,
+      failureDetails
     };
   }
 
@@ -1010,7 +1056,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     ambiente?: NfeAmbiente;
     estabelecimentoId?: string;
     limitControles?: number;
-  }): Promise<{ processed: number; documentsSaved: number }> {
+  }): Promise<NfeSyncRunResult> {
     const controls = await this.prisma.nfeSyncControle.findMany({
       where: {
         cliente: {
@@ -1091,7 +1137,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
     return {
       processed: controls.length,
-      documentsSaved
+      documentsSaved,
+      failures: 0,
+      failureDetails: []
     };
   }
 

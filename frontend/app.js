@@ -99,6 +99,7 @@ const state = {
   nfeDocuments: [],
   nfeDashboardStats: null,
   nfeSchedulerStatus: null,
+  nfeLastRunReport: null,
   nfeSearch: {
     hasSearched: false,
     results: [],
@@ -699,6 +700,14 @@ function onDocumentClick(event) {
         ambiente,
         limitControles: 1
       });
+      return;
+    }
+    case 'nfe-open-client-xmls': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      if (!clientId) {
+        return;
+      }
+      void openNfeDocumentsForClient(clientId);
       return;
     }
     case 'nfe-sync-pause-control': {
@@ -1976,6 +1985,7 @@ function renderNfeSyncPage() {
       </section>
 
       ${renderNfeSchedulerStatusCard()}
+      ${sourceMode === 'dominio' ? renderNfeLastRunPanel() : ''}
 
       <article class="card filter-card">
         <h3 class="card-title">Filtros dos controles</h3>
@@ -2046,7 +2056,7 @@ function renderNfeSyncPage() {
                         <div class="table-actions">
                           <button class="icon-btn" data-action="nfe-client-enable" data-client-id="${row.clientId}">${escapeHtml(clientEnableLabel)}</button>
                           <button class="icon-btn" data-action="nfe-client-pause" data-client-id="${row.clientId}">Pausar</button>
-                          <button class="icon-btn" data-action="navigate" data-route="/xmls-nfe">Ver XMLs</button>
+                          <button class="icon-btn" data-action="nfe-open-client-xmls" data-client-id="${row.clientId}">Ver XMLs</button>
                         </div>
                       </td>
                     </tr>`;
@@ -2118,6 +2128,76 @@ function renderNfeSyncPage() {
         </div>
       </article>
     </section>
+  `;
+}
+
+function renderNfeLastRunPanel() {
+  const report = state.nfeLastRunReport;
+  const failures = Array.isArray(report?.failureDetails) ? report.failureDetails : [];
+
+  if (!report) {
+    return `
+      <article class="card">
+        <h3 class="card-title">Painel de falhas da importacao</h3>
+        <p class="card-subtitle">O painel e preenchido quando voce roda a importacao manualmente pela tela de Buscas NF-e.</p>
+      </article>
+    `;
+  }
+
+  return `
+    <article class="card">
+      <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+        <div>
+          <h3 class="card-title">Painel de falhas da importacao</h3>
+          <p class="card-subtitle">Ultima execucao manual em ${escapeHtml(formatDateTime(report.executedAt))}.</p>
+        </div>
+        <div class="progress-meta">
+          <span>Controles: <strong>${escapeHtml(String(report.processed || 0))}</strong></span>
+          <span>XMLs salvos: <strong>${escapeHtml(String(report.documentsSaved || 0))}</strong></span>
+          <span>Falhas: <strong>${escapeHtml(String(report.failures || 0))}</strong></span>
+        </div>
+      </div>
+      ${
+        failures.length
+          ? `<div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Cliente</th>
+                    <th>Estabelecimento</th>
+                    <th>CNPJ consulta</th>
+                    <th>Catalogo</th>
+                    <th>Chave</th>
+                    <th>Origem</th>
+                    <th>Mensagem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${failures
+                    .map((failure) => {
+                      const client = findClientById(failure.clientId);
+                      const establishment = findEstablishmentById(failure.estabelecimentoId);
+                      return `<tr>
+                        <td>${escapeHtml(client?.razaoSocial || failure.clientId || '-')}</td>
+                        <td>${escapeHtml(
+                          establishment?.razaoSocial || establishment?.municipioNome || failure.estabelecimentoId || '-'
+                        )}</td>
+                        <td>${escapeHtml(formatCnpj(failure.cnpjConsulta || ''))}</td>
+                        <td>${escapeHtml(failure.catalogoId ? String(failure.catalogoId) : '-')}</td>
+                        <td>${escapeHtml(failure.chaveAcesso || '-')}</td>
+                        <td>${escapeHtml(failure.kind === 'controle' ? 'Controle' : 'XML')}</td>
+                        <td>${escapeHtml(failure.mensagem || '-')}</td>
+                      </tr>`;
+                    })
+                    .join('')}
+                </tbody>
+              </table>
+            </div>`
+          : report.failures > 0
+            ? `<div class="table-state error">A execucao registrou falhas, mas o backend nao retornou detalhes suficientes para listar cada item.</div>`
+            : `<div class="table-state">Nenhuma falha registrada na ultima importacao manual.</div>`
+      }
+    </article>
   `;
 }
 
@@ -4600,9 +4680,13 @@ async function runNfeSearchNow() {
     const result = await apiRequest('/nfe/sync/rodar-agora-geral', {
       method: 'POST'
     });
+    state.nfeLastRunReport = buildNfeRunReport(result);
     pushToast(
-      `${getNfeSourceMode() === 'dominio' ? 'Importacao de NF-e executada' : 'Busca de NF-e executada'}: ${Number(result?.processed || 0)} controle(s), ${Number(result?.documentsSaved || 0)} documento(s) salvo(s).`,
-      'success'
+      buildNfeRunToastMessage(
+        getNfeSourceMode() === 'dominio' ? 'Importacao de NF-e executada' : 'Busca de NF-e executada',
+        result
+      ),
+      Number(result?.failures || 0) > 0 ? 'error' : 'success'
     );
     await refreshApiData();
   } catch (error) {
@@ -4669,14 +4753,35 @@ async function runNfeSyncNow(payload) {
       method: 'POST',
       body: payload
     });
+    state.nfeLastRunReport = buildNfeRunReport(response);
     pushToast(
-      `${getNfeSourceMode() === 'dominio' ? 'Importacao NF-e executada' : 'Sincronizacao NF-e executada'}: ${response?.processed || 0} controle(s), ${response?.documentsSaved || 0} documento(s) salvo(s).`,
-      'success'
+      buildNfeRunToastMessage(
+        getNfeSourceMode() === 'dominio' ? 'Importacao NF-e executada' : 'Sincronizacao NF-e executada',
+        response
+      ),
+      Number(response?.failures || 0) > 0 ? 'error' : 'success'
     );
     await refreshApiData();
   } catch (error) {
     pushToast(`Falha ao executar sincronizacao NF-e: ${toErrorMessage(error)}`, 'error');
   }
+}
+
+function buildNfeRunReport(response) {
+  return {
+    executedAt: new Date().toISOString(),
+    processed: Number(response?.processed || 0),
+    documentsSaved: Number(response?.documentsSaved || 0),
+    failures: Number(response?.failures || 0),
+    failureDetails: Array.isArray(response?.failureDetails) ? response.failureDetails : []
+  };
+}
+
+function buildNfeRunToastMessage(prefix, response) {
+  const failures = Number(response?.failures || 0);
+  return `${prefix}: ${Number(response?.processed || 0)} controle(s), ${Number(response?.documentsSaved || 0)} documento(s) salvo(s).${
+    failures ? ` ${failures} falha(s) registrada(s) no painel.` : ''
+  }`;
 }
 
 async function pauseNfeSync(payload) {
@@ -4710,6 +4815,23 @@ async function applyNfeDocsFilters(form) {
     ambiente: String(data.get('ambiente') || 'Todos')
   };
 
+  await executeNfeDocsSearch();
+}
+
+async function openNfeDocumentsForClient(clientId) {
+  if (!findClientById(clientId)) {
+    pushToast('Cliente nao encontrado para abrir os XMLs de NF-e.', 'error');
+    return;
+  }
+
+  resetNfeDocsSearch();
+  state.filters.nfeDocs.cliente = clientId;
+  navigate('/xmls-nfe');
+  render();
+  await executeNfeDocsSearch();
+}
+
+async function executeNfeDocsSearch() {
   if (!state.filters.nfeDocs.cliente) {
     resetNfeDocsSearch();
     pushToast('Selecione uma empresa para buscar NF-e.', 'error');
@@ -6757,6 +6879,21 @@ function findClientById(clientId) {
     return null;
   }
   return state.clients.find((client) => client.id === clientId) || null;
+}
+
+function findEstablishmentById(establishmentId) {
+  if (!establishmentId) {
+    return null;
+  }
+
+  for (const rows of Object.values(state.establishmentsByClient || {})) {
+    const establishment = (Array.isArray(rows) ? rows : []).find((item) => item?.id === establishmentId);
+    if (establishment) {
+      return establishment;
+    }
+  }
+
+  return null;
 }
 
 function findCertificateById(certId) {

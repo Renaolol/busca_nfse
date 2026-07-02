@@ -460,7 +460,9 @@ describe('NfeService', () => {
     );
     expect(result).toEqual({
       processed: 1,
-      documentsSaved: 1
+      documentsSaved: 1,
+      failures: 0,
+      failureDetails: []
     });
   });
 
@@ -530,7 +532,9 @@ describe('NfeService', () => {
     );
     expect(result).toEqual({
       processed: 1,
-      documentsSaved: 1
+      documentsSaved: 1,
+      failures: 0,
+      failureDetails: []
     });
   });
 
@@ -574,8 +578,80 @@ describe('NfeService', () => {
     );
     expect(result).toEqual({
       processed: 1,
-      documentsSaved: 0
+      documentsSaved: 0,
+      failures: 0,
+      failureDetails: []
     });
+  });
+
+  it('retorna detalhes das falhas de importacao via Dominio para o painel', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 10n,
+        ultimoNsuDistribuido: 10n,
+        maxNsu: 10n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    storage.putObject.mockRejectedValueOnce(new Error('Falha ao salvar XML no storage'));
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 11,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        dataEmissao: '2026-06-29',
+        xmlBase64: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe35260612345678000199550010000001231000001231">
+      <ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>2026-06-29T10:00:00-03:00</dhEmi></ide>
+      <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
+      <dest><CNPJ>99888777000166</CNPJ><xNome>Cliente Teste</xNome></dest>
+      <total><ICMSTot><vNF>150.00</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat><dhRecbto>2026-06-29T10:00:01-03:00</dhRecbto></infProt></protNFe>
+</nfeProc>`,
+          'utf8'
+        ).toString('base64')
+      }
+    ]);
+
+    const result = await service.runNowGlobal();
+
+    expect(result).toEqual({
+      processed: 1,
+      documentsSaved: 0,
+      failures: 1,
+      failureDetails: [
+        {
+          kind: 'documento',
+          clientId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: NfeAmbiente.producao,
+          cnpjConsulta: '12345678000199',
+          catalogoId: 11,
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          mensagem: 'Falha ao salvar XML no storage'
+        }
+      ]
+    });
+    expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ctrl-1' },
+        data: expect.objectContaining({
+          status: NfeSyncStatus.erro_api
+        })
+      })
+    );
   });
 
   it('lista NF-e recebidas por cnpjConsulta', async () => {
