@@ -48,15 +48,15 @@ def build_query(payload):
 
     query = f"""
 SELECT TOP {payload['limit']}
-       cat.ID AS catalogo_id,
+       cat.I_CATALOGO AS catalogo_id,
        cat.CODI_EMP AS codigo_empresa,
        emp.cgce_emp AS cnpj_empresa,
        cat.CHAVE AS chave_acesso,
-       cat.DATA_EMISSAO AS data_emissao,
+       cat.EMISSAO AS data_emissao,
        nfe_xml.CONTEUDO_XML AS conteudo_xml
   FROM bethadba.EFATENDIMENTO_NFE_CATALOGO cat
   JOIN bethadba.EFATENDIMENTO_NFE_XML nfe_xml
-    ON nfe_xml.I_CATALOGO = cat.ID
+    ON nfe_xml.I_CATALOGO = cat.I_CATALOGO
   JOIN bethadba.geempre emp
     ON emp.codi_emp = cat.CODI_EMP
  WHERE nfe_xml.CONTEUDO_XML IS NOT NULL
@@ -66,15 +66,15 @@ SELECT TOP {payload['limit']}
     params = list(cnpjs)
 
     if payload['catalogoIdMinExclusive'] > 0:
-        query += "   AND cat.ID > ?\n"
+        query += "   AND cat.I_CATALOGO > ?\n"
         params.append(payload['catalogoIdMinExclusive'])
 
     if payload.get('dataEmissaoInicio'):
-        query += "   AND cat.DATA_EMISSAO >= ?\n"
+        query += "   AND cat.EMISSAO >= ?\n"
         params.append(payload['dataEmissaoInicio'])
 
     if payload.get('dataEmissaoFim'):
-        query += "   AND cat.DATA_EMISSAO <= ?\n"
+        query += "   AND cat.EMISSAO <= ?\n"
         params.append(payload['dataEmissaoFim'])
 
     chaves = payload.get('chavesAcesso') or []
@@ -83,9 +83,9 @@ SELECT TOP {payload['limit']}
         params.extend(chaves)
 
     if payload['sortDirection'] == 'asc':
-        query += " ORDER BY cat.ID ASC"
+        query += " ORDER BY cat.I_CATALOGO ASC"
     else:
-        query += " ORDER BY cat.DATA_EMISSAO DESC, cat.ID DESC"
+        query += " ORDER BY cat.EMISSAO DESC, cat.I_CATALOGO DESC"
     return query, params
 
 
