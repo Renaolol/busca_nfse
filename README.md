@@ -55,6 +55,14 @@ Para rodar como servico Windows e acessar pela rede interna com hostname, consul
 
 - `docs/windows-service.md`
 
+## Documentacao recomendada
+
+- `docs/architecture.md`
+- `docs/sync-flow.md`
+- `docs/nfe-distribuicao.md`
+- `docs/troubleshooting.md`
+- `docs/operational-review-2026-07.md`
+
 ## Desenvolvimento sem container da API
 
 1. Suba apenas a infraestrutura:
@@ -205,6 +213,8 @@ Valores aceitos:
 - `GET /nfe/sync/status?clienteId=UUID`: lista os controles de NF-e do cliente.
 - `GET /nfe/sync/scheduler-status`: mostra o status do ciclo automatico e da busca noturna de NF-e.
 - `PUT /nfe/sync/scheduler-settings`: atualiza a configuracao da busca noturna de NF-e.
+- `POST /clientes/:id/nfe/ativar`: habilita o cliente para as rotinas de NF-e.
+- `POST /clientes/:id/nfe/pausar`: desabilita o cliente para as rotinas de NF-e e pausa controles existentes.
 
 ### Comportamento operacional da NF-e
 
@@ -212,8 +222,11 @@ Valores aceitos:
 - Na primeira ativacao, cada controle e criado a partir do `maxNSU` atual retornado pela distribuicao DF-e.
 - Isso evita varrer todo o historico antigo do contribuinte e faz a base seguir apenas com futuras entradas e saidas.
 - Controles ja existentes sao apenas reativados, sem resetar o NSU salvo.
+- A elegibilidade do cliente para NF-e agora e controlada por `clientes.nfe_habilitado`, separada do status geral do cliente.
+- Cliente com NF-e desabilitada nao aparece no painel de `Buscas NF-e`, nao entra na ativacao em lote e nao participa do ciclo automatico/global.
 - O ciclo automatico de NF-e usa `NFE_SYNC_AUTO_RUN_*`.
 - A busca noturna de NF-e usa `NFE_SYNC_NIGHTLY_SWEEP_*` e, a cada slot configurado, garante controles ativos para clientes elegiveis antes de rodar a distribuicao incremental.
+- Se outro ERP/robo tambem consome `NFeDistribuicaoDFe` para o mesmo interessado/CNPJ, a recomendacao operacional e deixar apenas um consumidor ativo por cliente. Use `nfe_habilitado=false` quando o cliente ja possui outro capturador em producao.
 
 ## Importacao de XML
 
@@ -325,6 +338,7 @@ Nos endpoints por `id` de certificado vinculado (`GET/POST/PATCH/DELETE /certifi
 Tambem permite consultar por CNPJ base e alternar entre NFS-e emitidas e recebidas.
 Na tabela de resultados, os botoes `XML` e `DANFSE` fazem download direto dos arquivos.
 Na tela `XMLs Armazenados`, a listagem inicia vazia; selecione empresa e periodo de emissao e clique em `Buscar XMLs` para consultar os documentos no banco. Depois da consulta, `Exportar listagem` gera um CSV da listagem atual.
+Na tela `Clientes`, a coluna `Busca NF-e`, o checkbox do detalhe do cliente e o modal `Editar cliente` controlam a flag operacional `nfe_habilitado`.
 As operacoes por ID em certificado vinculado e NFS-e usam `clienteId` como escopo (query string) para evitar acesso cruzado entre clientes; certificados avulsos omitem esse parametro.
 Quando houver pendencias (sem certificado, sem sync ou sem notas), o painel exibe mensagens explicativas.
 

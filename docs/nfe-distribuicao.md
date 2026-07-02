@@ -28,10 +28,15 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - `GET /nfe/sync/status?clienteId=...`
 - `POST /nfe/importar-xml`
 - `POST /nfe/sync/iniciar`
+- `POST /nfe/sync/ativar`
+- `POST /nfe/sync/ativar-todos`
 - `POST /nfe/sync/pausar`
 - `POST /nfe/sync/rodar-agora`
+- `POST /nfe/sync/rodar-agora-geral`
 - `POST /nfe/sync/consultar-nsu`
 - `POST /nfe/sync/consultar-chave`
+- `POST /clientes/:id/nfe/ativar`
+- `POST /clientes/:id/nfe/pausar`
 
 ## Observacoes
 
@@ -43,3 +48,15 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - As URLs acima seguem a relacao oficial de servicos web do portal da NF-e e podem ser sobrescritas por env var.
 - O fluxo atual implementa `distNSU`, `consNSU` e `consChNFe`.
 - As rotas manuais permitem testar o ambiente real e recuperar documentos pontuais sem depender do ciclo incremental.
+
+## Operacao recomendada
+
+- A distribuicao DF-e deve ter um consumidor coordenado por interessado/CNPJ.
+- Se outro ERP, robo fiscal ou integrador tambem estiver consumindo a mesma trilha de NSU do cliente, a captura concorrente pode gerar divergencia operacional entre sistemas.
+- Para esses casos, desabilite a NF-e do cliente no proprio cadastro (`nfe_habilitado=false`) e mantenha apenas um consumidor ativo para aquele interessado.
+- O painel `Buscas NF-e` mostra somente clientes habilitados para NF-e; a tela `Clientes` e o ponto de controle dessa flag.
+
+## Referencias oficiais
+
+- Portal NF-e - MOC 7.0: `https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=LrBx7WT9PuA%3D`
+- Portal NF-e - NT 2014.002 Web Service de Distribuicao de DF-e: `https://www.nfe.fazenda.gov.br/PORTAl/exibirArquivo.aspx?conteudo=C/xkRclIh74%3D`

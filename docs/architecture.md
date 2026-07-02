@@ -22,6 +22,17 @@ A aplicacao segue arquitetura backend-first:
 4. Persistencia em PostgreSQL
 5. Armazenamento de XML/PDF via provider de storage (implementacao local no MVP)
 6. API interna com validacoes de escopo por `clienteId` nos endpoints multi-tenant
+7. Frontend operacional interno servido pela propria API em `frontend/app.js`
+
+## Regras de elegibilidade operacional
+
+- `clientes.ativo` controla a elegibilidade geral do cliente no sistema.
+- `clientes.nfe_habilitado` controla especificamente a participacao do cliente nas rotinas de NF-e.
+- NFS-e e NF-e compartilham cadastro de cliente, estabelecimento e certificado, mas possuem filas, controles e politica operacional independentes.
+- Quando `nfe_habilitado=false`, o cliente deixa de participar de:
+  - ativacao automatica/global de NF-e,
+  - ciclo automatico/global de distribuicao NF-e,
+  - painel operacional `Buscas NF-e`.
 
 ## Modulos
 
@@ -35,3 +46,8 @@ A aplicacao segue arquitetura backend-first:
 - `storage`
 - `jobs`
 - `health`
+
+## Pontos arquiteturais que merecem atencao
+
+- O frontend atual e funcional, mas esta concentrado majoritariamente em um unico arquivo (`frontend/app.js`), o que aumenta risco de regressao em manutencoes visuais e operacionais.
+- O dominio de NFS-e possui trilha de logs de sincronizacao mais madura do que o dominio de NF-e; hoje o troubleshooting de NF-e depende mais do estado dos controles e dos logs gerais da aplicacao.

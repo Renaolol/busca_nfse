@@ -37,6 +37,22 @@
   - `SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES`
   - logs da aplicacao contendo `Busca noturna`.
 
+## NF-e nao aparece no painel ou nao captura novas notas
+
+- Confirmar se o cliente esta com `nfe_habilitado=true`.
+  - A flag pode ser alterada em `Clientes` ou via `POST /clientes/:id/nfe/ativar` / `POST /clientes/:id/nfe/pausar`.
+- Se o cliente estiver desabilitado para NF-e, ele nao aparece em `Buscas NF-e`, nao entra no lote `ativar-todos` e nao participa de `rodar-agora-geral`.
+- Se houver outro ERP/robo consumindo `NFeDistribuicaoDFe` para o mesmo interessado/CNPJ, evitar consumidores concorrentes.
+  - Recomendacao: manter apenas um capturador ativo por cliente.
+  - Se necessario, deixar este app desabilitado para NF-e naquele cliente.
+- Se o backend foi atualizado e a flag ainda nao existe no banco, aplicar migration antes de subir o servico:
+
+```bash
+npm run prisma:deploy
+```
+
+- Se `prisma:deploy` falhar com erro de conexao no PostgreSQL, subir/verificar o banco antes de reiniciar a API.
+
 ## Erro de escopo (`clienteId`)
 
 - Em endpoints por `id` de NFS-e e logs (`/nfse/:id...`, `/sync/logs`), `clienteId` e obrigatorio.
