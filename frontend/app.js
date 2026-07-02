@@ -45,7 +45,7 @@ const pageMeta = {
   },
   'buscas-nfe': {
     title: 'Buscas NF-e',
-    description: 'Gerencie a sincronizacao de NF-e de compra e venda via distribuicao DFe.'
+    description: 'Gerencie a importacao de XMLs de NF-e por cliente e acompanhe os controles de captura.'
   },
   'xmls-nfe': {
     title: 'XMLs NF-e',
@@ -99,7 +99,6 @@ const state = {
   nfeDocuments: [],
   nfeDashboardStats: null,
   nfeSchedulerStatus: null,
-  nfeManualResult: null,
   nfeSearch: {
     hasSearched: false,
     results: [],
@@ -961,26 +960,6 @@ function onDocumentSubmit(event) {
       applyNfeSyncFilters(target);
       return;
     }
-    case 'nfeSyncStartForm': {
-      event.preventDefault();
-      void submitNfeSyncStartForm(target);
-      return;
-    }
-    case 'nfeSyncRunNowForm': {
-      event.preventDefault();
-      void submitNfeSyncRunNowForm(target);
-      return;
-    }
-    case 'nfeQueryNsuForm': {
-      event.preventDefault();
-      void submitNfeQueryNsuForm(target);
-      return;
-    }
-    case 'nfeQueryChaveForm': {
-      event.preventDefault();
-      void submitNfeQueryChaveForm(target);
-      return;
-    }
     case 'xmlsFilterForm': {
       event.preventDefault();
       void applyXmlFilters(target);
@@ -1340,7 +1319,7 @@ function renderClientsPage() {
     <section class="page-section">
       ${renderPageHeader({
         title: 'Clientes',
-        description: 'Gerencie clientes monitorados para busca automatica de NFS-e e NF-e.',
+        description: 'Gerencie clientes monitorados para rotinas automatizadas de NFS-e e importacao de NF-e.',
         actions: [
           actionButton('Novo cliente', 'open-new-client-modal', 'primary'),
           actionButton('Importar clientes', 'open-import-client-modal', 'secondary')
@@ -1400,7 +1379,7 @@ function renderClientsPage() {
                 <th>Cliente</th>
                 <th>Municipio</th>
                 <th>Estabelecimento</th>
-                <th>NSU base NF-e</th>
+                <th>Cursor NF-e</th>
                 <th>Certificado</th>
                 <th>Busca NFS-e</th>
                 <th>Busca NF-e</th>
@@ -1513,7 +1492,7 @@ function renderClientDetailsPage(clientId) {
               ${detailItem('Inscricao municipal', client.inscricaoMunicipal || '-')}
               ${detailItem('Municipio', `${client.municipio} / ${client.uf}`)}
               ${detailItem('Estabelecimento', establishmentSummary.detail)}
-              ${detailItem('NSU base NF-e', nfeBaseSummary.displayValue)}
+              ${detailItem('Cursor NF-e', nfeBaseSummary.displayValue)}
               ${detailItem('Controles NF-e', nfeBaseSummary.controlsLabel)}
               ${detailItem('Busca NF-e', client.buscaNfeAtiva !== false ? 'Habilitada' : 'Pausada')}
               ${detailItem('Responsavel interno', client.responsavelInterno)}
@@ -1954,23 +1933,45 @@ function renderNfeSyncPage() {
   const statusOptions = uniqueValues(controls.map((control) => control.status));
   const ambienteOptions = uniqueValues(controls.map((control) => control.ambiente));
   const nfeStats = getNfeDashboardStats();
+  const sourceMode = getNfeSourceMode();
+  const queueLabel = sourceMode === 'dominio' ? 'prontos para importar XMLs' : 'buscando NF-e futuras';
+  const errorLabel = sourceMode === 'dominio' ? 'revisar conexao, cursor ou XMLs' : 'revisar certificado ou API';
+  const overviewDescription =
+    sourceMode === 'dominio'
+      ? 'Ligue a importacao por cliente ou em lote. O backend consulta o banco da Dominio, salva os XMLs no storage local e segue apenas com os registros novos.'
+      : 'Ligue a busca por cliente ou em lote. O sistema captura o NSU atual como base e segue apenas com as proximas NF-e de entrada e saida.';
+  const simplifiedSubtitle =
+    sourceMode === 'dominio'
+      ? 'Ao ligar a importacao, o backend resolve os estabelecimentos ativos do cliente e passa a acompanhar novos XMLs no banco da Dominio.'
+      : 'Ao ligar a busca, o backend resolve os estabelecimentos ativos do cliente, captura o NSU atual e passa a sincronizar apenas as proximas NF-e.';
+  const detailSubtitle =
+    sourceMode === 'dominio'
+      ? 'Visao detalhada dos controles usados pelo backend para importar XMLs e manter o cursor incremental por estabelecimento.'
+      : 'Visao detalhada dos controles realmente mantidos pelo backend para distribuicao DF-e.';
+  const clientCursorLabel = sourceMode === 'dominio' ? 'Ult. cursor' : 'Ult. NSU base';
+  const controlCursorLabel = sourceMode === 'dominio' ? 'Cursor atual' : 'Ult. NSU consultado';
+  const controlProgressLabel = sourceMode === 'dominio' ? 'Cursor salvo' : 'Ult. NSU distribuido';
+  const controlMaxLabel = sourceMode === 'dominio' ? 'Maior catalogo' : 'Max NSU';
+  const globalRunLabel = sourceMode === 'dominio' ? 'Rodar importacao agora' : 'Rodar busca agora';
+  const clientEnableLabel = sourceMode === 'dominio' ? 'Ligar importacao' : 'Ligar busca';
+  const rowRunLabel = sourceMode === 'dominio' ? 'Importar agora' : 'Rodar agora';
 
   return `
     <section class="page-section">
       ${renderPageHeader({
         title: 'Buscas NF-e',
-        description: 'Ligue a busca por cliente ou em lote. O sistema captura o NSU atual como base e segue apenas com as proximas NF-e de entrada e saida.',
+        description: overviewDescription,
         actions: [
           actionButton('Ligar todos os clientes', 'nfe-enable-auto-search', 'primary'),
-          actionButton('Rodar busca agora', 'nfe-run-now', 'secondary'),
+          actionButton(globalRunLabel, 'nfe-run-now', 'secondary'),
           actionButton('Pausar todos', 'nfe-disable-auto-search', 'secondary')
         ]
       })}
 
       <section class="stats-grid">
-        ${statCard('search', 'Controles ativos', String(syncStats.ativos), 'buscando NF-e futuras', 'success')}
+        ${statCard('search', 'Controles ativos', String(syncStats.ativos), queueLabel, 'success')}
         ${statCard('clock', 'Controles pausados', String(syncStats.pausados), 'aguardando retomada', 'neutral')}
-        ${statCard('alert', 'Controles com erro', String(syncStats.erros), 'revisar certificado ou API', 'danger')}
+        ${statCard('alert', 'Controles com erro', String(syncStats.erros), errorLabel, 'danger')}
         ${statCard('file', 'NF-e no banco', String(nfeStats.totalNfe), `${nfeStats.xmlsCompletos} XML(s) completos`, 'info')}
       </section>
 
@@ -2006,7 +2007,7 @@ function renderNfeSyncPage() {
         <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
           <div>
             <h3 class="card-title">Busca simplificada por cliente</h3>
-            <p class="card-subtitle">Ao ligar a busca, o backend resolve os estabelecimentos ativos do cliente, captura o NSU atual e passa a sincronizar apenas as proximas NF-e.</p>
+            <p class="card-subtitle">${escapeHtml(simplifiedSubtitle)}</p>
           </div>
           <button class="btn secondary" type="button" data-action="nfe-sync-refresh">Atualizar painel</button>
         </div>
@@ -2018,7 +2019,7 @@ function renderNfeSyncPage() {
                 <th>CNPJ</th>
                 <th>Controles</th>
                 <th>Ultima execucao</th>
-                <th>Ult. NSU base</th>
+                <th>${escapeHtml(clientCursorLabel)}</th>
                 <th>Documentos</th>
                 <th>Status</th>
                 <th>Acoes</th>
@@ -2043,7 +2044,7 @@ function renderNfeSyncPage() {
                       </td>
                       <td>
                         <div class="table-actions">
-                          <button class="icon-btn" data-action="nfe-client-enable" data-client-id="${row.clientId}">Ligar busca</button>
+                          <button class="icon-btn" data-action="nfe-client-enable" data-client-id="${row.clientId}">${escapeHtml(clientEnableLabel)}</button>
                           <button class="icon-btn" data-action="nfe-client-pause" data-client-id="${row.clientId}">Pausar</button>
                           <button class="icon-btn" data-action="navigate" data-route="/xmls-nfe">Ver XMLs</button>
                         </div>
@@ -2060,7 +2061,7 @@ function renderNfeSyncPage() {
 
       <article class="card">
         <h3 class="card-title">Detalhamento tecnico por estabelecimento</h3>
-        <p class="card-subtitle">Visao detalhada dos controles realmente mantidos pelo backend para distribuicao DF-e.</p>
+        <p class="card-subtitle">${escapeHtml(detailSubtitle)}</p>
         <div class="table-wrap">
           <table>
             <thead>
@@ -2069,9 +2070,9 @@ function renderNfeSyncPage() {
                 <th>Estabelecimento</th>
                 <th>CNPJ consulta</th>
                 <th>Ambiente</th>
-                <th>Ult. NSU consultado</th>
-                <th>Ult. NSU distribuido</th>
-                <th>Max NSU</th>
+                <th>${escapeHtml(controlCursorLabel)}</th>
+                <th>${escapeHtml(controlProgressLabel)}</th>
+                <th>${escapeHtml(controlMaxLabel)}</th>
                 <th>Documentos</th>
                 <th>Ultima execucao</th>
                 <th>Status</th>
@@ -2103,7 +2104,7 @@ function renderNfeSyncPage() {
                       </td>
                       <td>
                         <div class="table-actions">
-                          <button class="icon-btn" data-action="nfe-sync-run-control" data-client-id="${control.clientId}" data-estabelecimento-id="${control.estabelecimentoId}" data-ambiente="${control.ambiente}">Rodar agora</button>
+                          <button class="icon-btn" data-action="nfe-sync-run-control" data-client-id="${control.clientId}" data-estabelecimento-id="${control.estabelecimentoId}" data-ambiente="${control.ambiente}">${escapeHtml(rowRunLabel)}</button>
                           <button class="icon-btn" data-action="nfe-sync-pause-control" data-client-id="${control.clientId}" data-ambiente="${control.ambiente}">Pausar</button>
                         </div>
                       </td>
@@ -2133,6 +2134,7 @@ function renderNfeSchedulerStatusCard() {
 
   const autoSync = scheduler.autoSync || {};
   const nightlySweep = scheduler.nightlySweep || {};
+  const sourceMode = getNfeSourceMode();
   const autoTone = autoSync.running ? 'info' : autoSync.enabled ? 'success' : 'neutral';
   const nightlyTone = nightlySweep.running ? 'info' : nightlySweep.enabled ? 'success' : 'neutral';
 
@@ -2140,11 +2142,27 @@ function renderNfeSchedulerStatusCard() {
     <article class="card scheduler-strip">
       <div class="scheduler-item">
         <div class="scheduler-heading">
+          <span class="scheduler-dot info"></span>
+          <strong>Origem da captura</strong>
+        </div>
+        ${statusBadge(sourceMode === 'dominio' ? 'Banco Dominio' : 'Distribuicao DF-e', 'info')}
+        <p>${
+          sourceMode === 'dominio'
+            ? 'Os controles ativos importam XMLs diretamente do banco da Dominio e salvam os arquivos no storage local.'
+            : 'Os controles ativos consultam a distribuicao DF-e e persistem os documentos retornados.'
+        }</p>
+      </div>
+      <div class="scheduler-item">
+        <div class="scheduler-heading">
           <span class="scheduler-dot ${autoTone}"></span>
           <strong>Ciclo automatico NF-e</strong>
         </div>
         ${statusBadge(autoSync.running ? 'Executando agora' : autoSync.enabled ? 'Ativo' : 'Inativo', autoTone)}
-        <p>Processa controles ativos em segundo plano sem depender de acao manual.</p>
+        <p>${
+          sourceMode === 'dominio'
+            ? 'Processa controles ativos em segundo plano para importar novos XMLs sem depender de acao manual.'
+            : 'Processa controles ativos em segundo plano sem depender de acao manual.'
+        }</p>
         <small>Intervalo: ${escapeHtml(formatDurationMs(autoSync.intervalMs || 0))}</small>
       </div>
       <div class="scheduler-item">
@@ -2160,59 +2178,6 @@ function renderNfeSchedulerStatusCard() {
         )}</p>
         <small>Proxima execucao: ${escapeHtml(formatDateTime(nightlySweep.nextRunAt || ''))}</small>
       </div>
-    </article>
-  `;
-}
-
-function renderNfeManualResultCard() {
-  const result = state.nfeManualResult;
-  if (!result) {
-    return '';
-  }
-
-  const documentos = Array.isArray(result.documentos) ? result.documentos : [];
-  return `
-    <article class="card" style="box-shadow:none; border-style:dashed;">
-      <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">
-        <div>
-          <h3 class="card-title">Resultado da ultima consulta manual</h3>
-          <p class="card-subtitle">${escapeHtml(result.tipo || 'Consulta')} concluida com retorno ${escapeHtml(String(result.cStat || result.statusCode || '-'))}.</p>
-        </div>
-        ${statusBadge(result.documentosEncontrados > 0 ? 'Documentos localizados' : 'Sem documentos', result.documentosEncontrados > 0 ? 'success' : 'warning')}
-      </div>
-      <div class="progress-meta" style="margin-top:10px;">
-        <span>Mensagem: <strong>${escapeHtml(result.xMotivo || '-')}</strong></span>
-        <span>Encontrados: <strong>${escapeHtml(String(result.documentosEncontrados || 0))}</strong></span>
-        <span>Persistidos: <strong>${escapeHtml(String(result.documentosPersistidos || 0))}</strong></span>
-        <span>Ult NSU: <strong>${escapeHtml(result.ultNsu || '-')}</strong></span>
-        <span>Max NSU: <strong>${escapeHtml(result.maxNsu || '-')}</strong></span>
-      </div>
-      ${
-        documentos.length
-          ? `<div class="table-wrap" style="margin-top:12px;">
-              <table>
-                <thead>
-                  <tr>
-                    <th>NSU</th>
-                    <th>Schema</th>
-                    <th>Chave de acesso</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${documentos
-                    .map((doc) => {
-                      return `<tr>
-                        <td>${escapeHtml(doc.nsu || '-')}</td>
-                        <td>${escapeHtml(doc.schema || '-')}</td>
-                        <td>${escapeHtml(doc.chaveAcesso || '-')}</td>
-                      </tr>`;
-                    })
-                    .join('')}
-                </tbody>
-              </table>
-            </div>`
-          : ''
-      }
     </article>
   `;
 }
@@ -3608,7 +3573,13 @@ function renderClientSearchActivation(client) {
 function renderClientNfeSearchActivation(client) {
   const label = client.buscaNfeAtiva !== false ? 'Habilitada' : 'Pausada';
   const tone = client.buscaNfeAtiva !== false ? 'info' : 'neutral';
-  const detail = client.buscaNfeAtiva !== false ? 'participa da distribuicao DF-e' : 'excluida das rotinas de NF-e';
+  const sourceMode = getNfeSourceMode();
+  const detail =
+    client.buscaNfeAtiva !== false
+      ? sourceMode === 'dominio'
+        ? 'participa da importacao via banco Dominio'
+        : 'participa da distribuicao DF-e'
+      : 'excluida das rotinas de NF-e';
 
   return `
     <div class="stack-mini">
@@ -4491,13 +4462,19 @@ function getClientEstablishmentSummary(clientId) {
 }
 
 function getClientNfeBaseSummary(clientId, controls = state.nfeSyncControls) {
+  const sourceMode = getNfeSourceMode();
   const client = findClientById(clientId);
   const rows = (Array.isArray(controls) ? controls : []).filter((control) => control.clientId === clientId);
 
   if (!rows.length) {
     return {
       displayValue: 'Nao inicializado',
-      detail: client?.buscaNfeAtiva === false ? 'Busca de NF-e desabilitada para este cliente' : 'Ative a busca para capturar o NSU atual',
+      detail:
+        client?.buscaNfeAtiva === false
+          ? 'Busca de NF-e desabilitada para este cliente'
+          : sourceMode === 'dominio'
+            ? 'Ative a importacao para iniciar a leitura incremental do banco da Dominio'
+            : 'Ative a busca para capturar o NSU atual',
       controlsLabel: 'Nenhum controle criado'
     };
   }
@@ -4519,9 +4496,11 @@ function getClientNfeBaseSummary(clientId, controls = state.nfeSyncControls) {
       ? formatInteger(distinctNsuValues[0])
       : formatInteger(latestControl?.ultimoNsuConsultado || distinctNsuValues[0] || '0');
   const detail =
-    distinctNsuValues.length > 1
-      ? `${rows.length} controle(s) com NSUs independentes`
-      : `${rows.length} controle(s) configurado(s) para NF-e`;
+    sourceMode === 'dominio'
+      ? `${rows.length} controle(s) com cursores independentes por estabelecimento`
+      : distinctNsuValues.length > 1
+        ? `${rows.length} controle(s) com NSUs independentes`
+        : `${rows.length} controle(s) configurado(s) para NF-e`;
 
   return {
     displayValue,
@@ -4538,7 +4517,7 @@ async function enableNfeSearchForAllClients() {
     });
     const failureDetails = extractNfeActivationFailureMessages(result?.detalhes);
     pushToast(
-      `NF-e ligada para ${Number(result?.clientesComSucesso || 0)} cliente(s). Controles preparados: ${Number(result?.controlesCriadosOuReativados || 0)}.${
+      `${getNfeSourceMode() === 'dominio' ? 'Importacao NF-e ligada' : 'NF-e ligada'} para ${Number(result?.clientesComSucesso || 0)} cliente(s). Controles preparados: ${Number(result?.controlesCriadosOuReativados || 0)}.${
         failureDetails ? ` ${failureDetails}` : ''
       }`,
       Number(result?.falhas || 0) > 0 ? 'error' : 'success'
@@ -4559,7 +4538,7 @@ async function enableNfeSearchForClient(clientId) {
     });
     const failureDetails = extractNfeActivationFailureMessages(result?.detalhes);
     pushToast(
-      `NF-e ligada para o cliente: ${Number(result?.controlesCriadosOuReativados || 0)} controle(s) preparado(s).${
+      `${getNfeSourceMode() === 'dominio' ? 'Importacao NF-e ligada' : 'NF-e ligada'} para o cliente: ${Number(result?.controlesCriadosOuReativados || 0)} controle(s) preparado(s).${
         failureDetails ? ` ${failureDetails}` : ''
       }`,
       Number(result?.falhas || 0) > 0 ? 'error' : 'success'
@@ -4622,7 +4601,7 @@ async function runNfeSearchNow() {
       method: 'POST'
     });
     pushToast(
-      `Busca de NF-e executada: ${Number(result?.processed || 0)} controle(s), ${Number(result?.documentsSaved || 0)} documento(s) salvo(s).`,
+      `${getNfeSourceMode() === 'dominio' ? 'Importacao de NF-e executada' : 'Busca de NF-e executada'}: ${Number(result?.processed || 0)} controle(s), ${Number(result?.documentsSaved || 0)} documento(s) salvo(s).`,
       'success'
     );
     await refreshApiData();
@@ -4684,68 +4663,6 @@ function refreshRunningExecution() {
   render();
 }
 
-async function submitNfeSyncStartForm(form) {
-  const data = new FormData(form);
-  const clienteId = String(data.get('clienteId') || '').trim();
-  const ambiente = String(data.get('ambiente') || 'producao');
-  const nsuInicial = String(data.get('nsuInicial') || '').trim();
-  const cnpjConsulta = normalizeDigits(String(data.get('cnpjConsulta') || ''));
-  const scope = parseNfeScopeValue(String(data.get('scope') || ''));
-
-  if (!clienteId) {
-    pushToast('Selecione um cliente para habilitar a busca de NF-e.', 'error');
-    return;
-  }
-  if (scope.clienteId && scope.clienteId !== clienteId) {
-    pushToast('O estabelecimento selecionado nao pertence ao cliente informado.', 'error');
-    return;
-  }
-
-  try {
-    const response = await apiRequest('/nfe/sync/iniciar', {
-      method: 'POST',
-      body: {
-        clienteId,
-        ambiente,
-        estabelecimentoId: scope.estabelecimentoId || undefined,
-        nsuInicial: nsuInicial || undefined,
-        cnpjConsulta: cnpjConsulta || undefined
-      }
-    });
-    pushToast(
-      `${response?.controlesCriadosOuAtualizados || 0} controle(s) de NF-e criado(s) ou reativado(s).`,
-      'success'
-    );
-    await refreshApiData();
-  } catch (error) {
-    pushToast(`Falha ao habilitar busca de NF-e: ${toErrorMessage(error)}`, 'error');
-  }
-}
-
-async function submitNfeSyncRunNowForm(form) {
-  const data = new FormData(form);
-  const clienteId = String(data.get('clienteId') || '').trim();
-  const ambiente = String(data.get('ambiente') || 'producao');
-  const limitControles = Number(data.get('limitControles') || 10);
-  const scope = parseNfeScopeValue(String(data.get('scope') || ''));
-
-  if (!clienteId) {
-    pushToast('Selecione um cliente para executar a sincronizacao.', 'error');
-    return;
-  }
-  if (scope.clienteId && scope.clienteId !== clienteId) {
-    pushToast('O estabelecimento selecionado nao pertence ao cliente informado.', 'error');
-    return;
-  }
-
-  await runNfeSyncNow({
-    clienteId,
-    ambiente,
-    estabelecimentoId: scope.estabelecimentoId || undefined,
-    limitControles: Number.isFinite(limitControles) && limitControles > 0 ? limitControles : 10
-  });
-}
-
 async function runNfeSyncNow(payload) {
   try {
     const response = await apiRequest('/nfe/sync/rodar-agora', {
@@ -4753,7 +4670,7 @@ async function runNfeSyncNow(payload) {
       body: payload
     });
     pushToast(
-      `Sincronizacao NF-e executada: ${response?.processed || 0} controle(s), ${response?.documentsSaved || 0} documento(s) salvo(s).`,
+      `${getNfeSourceMode() === 'dominio' ? 'Importacao NF-e executada' : 'Sincronizacao NF-e executada'}: ${response?.processed || 0} controle(s), ${response?.documentsSaved || 0} documento(s) salvo(s).`,
       'success'
     );
     await refreshApiData();
@@ -4772,80 +4689,6 @@ async function pauseNfeSync(payload) {
     await refreshApiData();
   } catch (error) {
     pushToast(`Falha ao pausar busca de NF-e: ${toErrorMessage(error)}`, 'error');
-  }
-}
-
-async function submitNfeQueryNsuForm(form) {
-  const data = new FormData(form);
-  const scope = parseNfeScopeValue(String(data.get('scope') || ''));
-  const nsu = String(data.get('nsu') || '').trim();
-
-  if (!scope.clienteId || !scope.estabelecimentoId) {
-    pushToast('Selecione um estabelecimento para consultar o NSU.', 'error');
-    return;
-  }
-
-  if (!nsu) {
-    pushToast('Informe o NSU desejado.', 'error');
-    return;
-  }
-
-  try {
-    const result = await apiRequest('/nfe/sync/consultar-nsu', {
-      method: 'POST',
-      body: {
-        clienteId: scope.clienteId,
-        estabelecimentoId: scope.estabelecimentoId,
-        ambiente: String(data.get('ambiente') || 'producao'),
-        nsu,
-        persistir: data.get('persistir') === 'on'
-      }
-    });
-    state.nfeManualResult = {
-      ...result,
-      tipo: `Consulta NSU ${nsu}`
-    };
-    pushToast(`Consulta do NSU ${nsu} concluida.`, 'success');
-    await refreshApiData();
-  } catch (error) {
-    pushToast(`Falha ao consultar NSU: ${toErrorMessage(error)}`, 'error');
-  }
-}
-
-async function submitNfeQueryChaveForm(form) {
-  const data = new FormData(form);
-  const scope = parseNfeScopeValue(String(data.get('scope') || ''));
-  const chaveAcesso = normalizeDigits(String(data.get('chaveAcesso') || ''));
-
-  if (!scope.clienteId || !scope.estabelecimentoId) {
-    pushToast('Selecione um estabelecimento para consultar a chave.', 'error');
-    return;
-  }
-
-  if (chaveAcesso.length !== 44) {
-    pushToast('Informe uma chave de acesso com 44 digitos.', 'error');
-    return;
-  }
-
-  try {
-    const result = await apiRequest('/nfe/sync/consultar-chave', {
-      method: 'POST',
-      body: {
-        clienteId: scope.clienteId,
-        estabelecimentoId: scope.estabelecimentoId,
-        ambiente: String(data.get('ambiente') || 'producao'),
-        chaveAcesso,
-        persistir: data.get('persistir') === 'on'
-      }
-    });
-    state.nfeManualResult = {
-      ...result,
-      tipo: `Consulta chave ${chaveAcesso}`
-    };
-    pushToast('Consulta por chave concluida.', 'success');
-    await refreshApiData();
-  } catch (error) {
-    pushToast(`Falha ao consultar chave: ${toErrorMessage(error)}`, 'error');
   }
 }
 
@@ -6948,25 +6791,8 @@ function mapClientOptions() {
   }, {});
 }
 
-function renderNfeScopeOptions() {
-  return state.clients
-    .flatMap((client) => {
-      const establishments = Array.isArray(state.establishmentsByClient?.[client.id]) ? state.establishmentsByClient[client.id] : [];
-      return establishments.map((establishment) => {
-        const value = `${client.id}::${establishment.id}`;
-        const label = `${client.razaoSocial} - ${establishment.razaoSocial || establishment.municipioNome || establishment.cnpj} (${formatCnpj(establishment.cnpj)})`;
-        return `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
-      });
-    })
-    .join('');
-}
-
-function parseNfeScopeValue(value) {
-  const [clienteId = '', estabelecimentoId = ''] = String(value || '').split('::');
-  return {
-    clienteId,
-    estabelecimentoId
-  };
+function getNfeSourceMode() {
+  return state.nfeSchedulerStatus?.sourceMode === 'dominio' ? 'dominio' : 'distribuicao';
 }
 
 function mapNfeSyncStatusOptions(statuses) {
