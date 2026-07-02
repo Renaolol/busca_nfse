@@ -1947,11 +1947,12 @@ function renderRunningExecutionCard() {
 }
 
 function renderNfeSyncPage() {
+  const nfeEligibleClients = getNfeEligibleClients();
   const controls = getFilteredNfeSyncControls();
-  const clientRows = getNfeSyncClientRows(controls);
+  const clientRows = getNfeSyncClientRows(controls, nfeEligibleClients);
   const syncStats = getNfeSyncStats();
-  const statusOptions = uniqueValues(state.nfeSyncControls.map((control) => control.status));
-  const ambienteOptions = uniqueValues(state.nfeSyncControls.map((control) => control.ambiente));
+  const statusOptions = uniqueValues(controls.map((control) => control.status));
+  const ambienteOptions = uniqueValues(controls.map((control) => control.ambiente));
   const nfeStats = getNfeDashboardStats();
 
   return `
@@ -1980,7 +1981,7 @@ function renderNfeSyncPage() {
         <form id="nfeSyncFilterForm" class="form-grid">
           <label class="field">
             Cliente
-            <select name="cliente">${renderOptions(['Todos', ...state.clients.map((client) => client.id)], state.filters.nfeSync.cliente, mapClientOptions())}</select>
+            <select name="cliente">${renderOptions(['Todos', ...nfeEligibleClients.map((client) => client.id)], state.filters.nfeSync.cliente, mapClientOptions())}</select>
           </label>
           <label class="field">
             Status
@@ -2029,7 +2030,6 @@ function renderNfeSyncPage() {
                 colSpan: 8,
                 rowsHtml: clientRows
                   .map((row) => {
-                    const disabledActions = row.nfeEnabled ? '' : 'disabled';
                     return `<tr>
                       <td>${escapeHtml(row.cliente)}</td>
                       <td>${escapeHtml(formatCnpj(row.cnpj))}</td>
@@ -2043,8 +2043,8 @@ function renderNfeSyncPage() {
                       </td>
                       <td>
                         <div class="table-actions">
-                          <button class="icon-btn" data-action="nfe-client-enable" data-client-id="${row.clientId}" ${disabledActions}>Ligar busca</button>
-                          <button class="icon-btn" data-action="nfe-client-pause" data-client-id="${row.clientId}" ${disabledActions}>Pausar</button>
+                          <button class="icon-btn" data-action="nfe-client-enable" data-client-id="${row.clientId}">Ligar busca</button>
+                          <button class="icon-btn" data-action="nfe-client-pause" data-client-id="${row.clientId}">Pausar</button>
                           <button class="icon-btn" data-action="navigate" data-route="/xmls-nfe">Ver XMLs</button>
                         </div>
                       </td>
@@ -4362,8 +4362,13 @@ function applyNfeSyncFilters(form) {
 
 function getFilteredNfeSyncControls() {
   const { cliente, status, ambiente } = state.filters.nfeSync;
+  const enabledClientIds = new Set(getNfeEligibleClients().map((client) => client.id));
 
   return state.nfeSyncControls.filter((control) => {
+    if (!enabledClientIds.has(control.clientId)) {
+      return false;
+    }
+
     const matchesClient = cliente === 'Todos' || control.clientId === cliente;
     const matchesStatus = status === 'Todos' || control.status === status;
     const matchesAmbiente = ambiente === 'Todos' || control.ambiente === ambiente;
@@ -4372,8 +4377,14 @@ function getFilteredNfeSyncControls() {
 }
 
 function getNfeSyncStats() {
+  const enabledClientIds = new Set(getNfeEligibleClients().map((client) => client.id));
+
   return state.nfeSyncControls.reduce(
     (acc, control) => {
+      if (!enabledClientIds.has(control.clientId)) {
+        return acc;
+      }
+
       if (control.status === 'ativo') {
         acc.ativos += 1;
       } else if (control.status === 'pausado') {
@@ -4387,6 +4398,10 @@ function getNfeSyncStats() {
   );
 }
 
+function getNfeEligibleClients() {
+  return state.clients.filter((client) => client.buscaNfeAtiva !== false);
+}
+
 function getNfeDashboardStats() {
   return {
     totalNfe: Number(state.nfeDashboardStats?.totalNfe || state.nfeDocuments.length || 0),
@@ -4398,8 +4413,8 @@ function getNfeDashboardStats() {
   };
 }
 
-function getNfeSyncClientRows(controls = state.nfeSyncControls) {
-  return state.clients.map((client) => {
+function getNfeSyncClientRows(controls = state.nfeSyncControls, clients = getNfeEligibleClients()) {
+  return clients.map((client) => {
     const rows = (Array.isArray(controls) ? controls : []).filter((control) => control.clientId === client.id);
     const activeCount = rows.filter((control) => control.status === 'ativo').length;
     const pausedCount = rows.filter((control) => control.status === 'pausado').length;
@@ -4410,11 +4425,7 @@ function getNfeSyncClientRows(controls = state.nfeSyncControls) {
     let statusTone = 'neutral';
     let statusDetail = 'Nenhum controle de NF-e criado ainda.';
 
-    if (client.buscaNfeAtiva === false) {
-      statusLabel = 'Desabilitada';
-      statusTone = 'neutral';
-      statusDetail = 'Cliente excluido das rotinas de NF-e.';
-    } else if (errorCount > 0) {
+    if (errorCount > 0) {
       statusLabel = 'Com erro';
       statusTone = 'danger';
       statusDetail = `${errorCount} controle(s) com erro.`;
@@ -4436,7 +4447,6 @@ function getNfeSyncClientRows(controls = state.nfeSyncControls) {
       ultimaExecucao: latestControl?.ultimaExecucao || null,
       ultimoNsuConsultado: latestControl?.ultimoNsuConsultado || '-',
       totalDocumentosBaixados: totalDocuments,
-      nfeEnabled: client.buscaNfeAtiva !== false,
       statusLabel,
       statusTone,
       statusDetail
