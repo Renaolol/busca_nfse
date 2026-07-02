@@ -11,6 +11,7 @@ import {
   IsString,
   IsUUID,
   Length,
+  Matches,
   Max,
   Min
 } from 'class-validator';
@@ -54,5 +55,15 @@ export class ImportNfeFromDominioDto {
   @ArrayMaxSize(500)
   @IsString({ each: true })
   @Length(44, 44, { each: true })
+  @Matches(/^\d{44}$/, { each: true })
   chavesAcesso?: string[];
+
+  @ApiPropertyOptional({ description: 'Lista opcional de IDs de catalogo da Dominio para importacao pontual', type: [Number] })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(500)
+  @Type(() => Number)
+  @IsInt({ each: true })
+  @Min(1, { each: true })
+  catalogoIds?: number[];
 }

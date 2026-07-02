@@ -276,6 +276,7 @@ Rotas principais:
 - `GET /nfe/dashboard-stats`
 - `GET /nfe/sync/status?clienteId=...`
 - `POST /nfe/importar-dominio`
+- `POST /nfe/dominio/xml`
 - `POST /nfe/importar-xml`
 - `POST /nfe/sync/iniciar`
 - `POST /nfe/sync/pausar`
@@ -291,6 +292,8 @@ Observacoes:
 - `POST /nfe/sync/consultar-chave` consulta uma NF-e especifica via `consChNFe`, com opcao de persistir o retorno.
 - A deduplicacao de NF-e tambem ocorre por `ambiente + chave_acesso`.
 - `POST /nfe/importar-dominio` consulta a base da Dominio via ODBC, relaciona `bethadba.geempre.cgce_emp` com `cliente_estabelecimentos.cnpj` e reaproveita o mesmo pipeline de persistencia/deduplicacao do endpoint manual.
+- `POST /nfe/importar-dominio` tambem aceita `catalogoIds` para reimportacao pontual de XMLs ja localizados pela Dominio.
+- `POST /nfe/dominio/xml` retorna o XML bruto de um `catalogoId` da Dominio para visualizacao interna sem depender de persistencia previa.
 
 ### Importacao de NF-e via Dominio
 
@@ -302,6 +305,7 @@ Observacoes:
 - O importador usa o script `scripts/dominio_nfe_export.py`, que depende de `pyodbc` no host onde a API estiver rodando.
 - A vinculacao com o cliente local ocorre por CNPJ do estabelecimento ativo; nao foi necessario adicionar coluna de codigo da empresa da Dominio no schema.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio`, o backend reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, evitando reler o historico inteiro a cada execucao.
+- O painel da ultima importacao consegue abrir o XML bruto do catalogo e disparar reimportacao pontual ou em lote usando esses `catalogoIds`.
 - `GET /nfe` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, periodo, status e `somenteXmlCompleto`.
 - Quando `NFE_DISTRIBUICAO_CLIENT_MODE=real`, o sistema consulta `distNSU`, `consNSU` e `consChNFe`, descompacta `docZip` e armazena resumos `resNFe` e XMLs completos retornados pelo Ambiente Nacional.
 

@@ -770,6 +770,32 @@ function onDocumentClick(event) {
       void downloadNfeXmlById(nfeId);
       return;
     }
+    case 'nfe-last-run-view-xml': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      const catalogoId = Number(actionNode.getAttribute('data-catalogo-id') || '0');
+      if (!clientId || !Number.isInteger(catalogoId) || catalogoId <= 0) {
+        return;
+      }
+      void openDominioNfeXmlViewer(clientId, catalogoId);
+      return;
+    }
+    case 'nfe-last-run-import-item': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      const catalogoId = Number(actionNode.getAttribute('data-catalogo-id') || '0');
+      if (!clientId || !Number.isInteger(catalogoId) || catalogoId <= 0) {
+        return;
+      }
+      void importDominioNfeLastRunItems([{ clientId, catalogoId }]);
+      return;
+    }
+    case 'nfe-last-run-import-all': {
+      void importAllDominioNfeLastRunItems();
+      return;
+    }
+    case 'dominio-nfe-download-modal': {
+      void downloadDominioNfeModalXml();
+      return;
+    }
     case 'nfe-docs-sort': {
       const key = actionNode.getAttribute('data-sort-key');
       if (!key) {
@@ -2212,7 +2238,11 @@ function renderNfeSyncPage() {
 
 function renderNfeLastRunPanel() {
   const report = state.nfeLastRunReport;
-  const failures = Array.isArray(report?.failureDetails) ? report.failureDetails : [];
+  const rows = Array.isArray(report?.executionDetails)
+    ? report.executionDetails
+    : Array.isArray(report?.failureDetails)
+      ? report.failureDetails
+      : [];
 
   if (!report) {
     return `
@@ -2229,8 +2259,11 @@ function renderNfeLastRunPanel() {
         <span>Falhas: <strong>${escapeHtml(String(report.failures || 0))}</strong></span>
       </div>
     </div>
+    <div class="table-actions" style="margin-bottom:12px;">
+      <button class="btn secondary" type="button" data-action="nfe-last-run-import-all" ${rows.length ? '' : 'disabled'}>Importar todos os itens</button>
+    </div>
     ${
-      failures.length
+      rows.length
         ? `<div class="table-wrap">
               <table>
                 <thead>
@@ -2238,29 +2271,43 @@ function renderNfeLastRunPanel() {
                     <th>Cliente</th>
                     <th>Estabelecimento</th>
                     <th>CNPJ consulta</th>
+                    <th>Status</th>
                     <th>ID catalogo</th>
                     <th>Numero NF-e</th>
                     <th>Chave</th>
                     <th>Origem</th>
                     <th>Mensagem</th>
+                    <th>Acoes</th>
                   </tr>
                 </thead>
                 <tbody>
-                  ${failures
-                    .map((failure) => {
-                      const client = findClientById(failure.clientId);
-                      const establishment = findEstablishmentById(failure.estabelecimentoId);
+                  ${rows
+                    .map((row) => {
+                      const client = findClientById(row.clientId);
+                      const establishment = findEstablishmentById(row.estabelecimentoId);
+                      const canHandleXml = row.kind === 'documento' && Number(row.catalogoId) > 0;
                       return `<tr>
-                        <td>${escapeHtml(client?.razaoSocial || failure.clientId || '-')}</td>
+                        <td>${escapeHtml(client?.razaoSocial || row.clientId || '-')}</td>
                         <td>${escapeHtml(
-                          establishment?.razaoSocial || establishment?.municipioNome || failure.estabelecimentoId || '-'
+                          establishment?.razaoSocial || establishment?.municipioNome || row.estabelecimentoId || '-'
                         )}</td>
-                        <td>${escapeHtml(formatCnpj(failure.cnpjConsulta || ''))}</td>
-                        <td>${escapeHtml(failure.catalogoId ? String(failure.catalogoId) : '-')}</td>
-                        <td>${escapeHtml(formatNfeFailureNumber(failure))}</td>
-                        <td>${escapeHtml(failure.chaveAcesso || '-')}</td>
-                        <td>${escapeHtml(failure.kind === 'controle' ? 'Controle' : 'XML')}</td>
-                        <td>${escapeHtml(failure.mensagem || '-')}</td>
+                        <td>${escapeHtml(formatCnpj(row.cnpjConsulta || ''))}</td>
+                        <td>${statusBadge(mapNfeRunItemStatusLabel(row.status), toneFromNfeRunItemStatus(row.status))}</td>
+                        <td>${escapeHtml(row.catalogoId ? String(row.catalogoId) : '-')}</td>
+                        <td>${escapeHtml(formatNfeFailureNumber(row))}</td>
+                        <td>${escapeHtml(row.chaveAcesso || '-')}</td>
+                        <td>${escapeHtml(row.kind === 'controle' ? 'Controle' : 'XML')}</td>
+                        <td>${escapeHtml(row.mensagem || '-')}</td>
+                        <td>
+                          ${
+                            canHandleXml
+                              ? `<div class="table-actions">
+                                  <button class="icon-btn" data-action="nfe-last-run-view-xml" data-client-id="${row.clientId}" data-catalogo-id="${row.catalogoId}">Ver XML</button>
+                                  <button class="icon-btn" data-action="nfe-last-run-import-item" data-client-id="${row.clientId}" data-catalogo-id="${row.catalogoId}">Importar</button>
+                                </div>`
+                              : '<span class="row-sub">-</span>'
+                          }
+                        </td>
                       </tr>`;
                     })
                     .join('')}
@@ -2269,7 +2316,7 @@ function renderNfeLastRunPanel() {
             </div>`
         : report.failures > 0
           ? `<div class="table-state error">A execucao registrou falhas, mas o backend nao retornou detalhes suficientes para listar cada item.</div>`
-          : `<div class="table-state">Nenhuma falha registrada na ultima importacao manual.</div>`
+          : `<div class="table-state">Nenhum item detalhado foi retornado para a ultima importacao manual.</div>`
     }
   `;
 }
@@ -3066,6 +3113,8 @@ function renderModal() {
       return renderNfeDetailsModal(state.modal.nfeId);
     case 'nfe-view':
       return renderNfeViewerModal(state.modal.nfeId);
+    case 'dominio-nfe-view':
+      return renderDominioNfeViewerModal();
     case 'xml-details':
       return renderXmlDetailsModal(state.modal.xmlId);
     case 'xml-view':
@@ -3382,6 +3431,35 @@ function renderNfeViewerModal(nfeId) {
         <div class="modal-footer">
           <button class="btn secondary" data-action="close-modal">Fechar</button>
           <button class="btn primary" data-action="nfe-download" data-nfe-id="${doc.id}">Baixar XML</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderDominioNfeViewerModal() {
+  if (state.modal?.kind !== 'dominio-nfe-view') {
+    return '';
+  }
+
+  const payload = state.modal.payload || null;
+  if (!payload?.xml) {
+    return '';
+  }
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Visualizador XML - Dominio ${escapeHtml(payload.numeroNfe || payload.catalogoId || '')}</h3>
+          <p class="modal-subtitle">Catalogo ${escapeHtml(String(payload.catalogoId || '-'))}${payload.chaveAcesso ? ` - chave ${escapeHtml(payload.chaveAcesso)}` : ''}</p>
+        </div>
+        <div class="modal-body">
+          <pre class="xml-viewer">${escapeHtml(formatXml(payload.xml))}</pre>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="close-modal">Fechar</button>
+          <button class="btn primary" data-action="dominio-nfe-download-modal">Baixar XML</button>
         </div>
       </div>
     </div>
@@ -4843,6 +4921,7 @@ function buildNfeRunReport(response) {
     processed: Number(response?.processed || 0),
     documentsSaved: Number(response?.documentsSaved || 0),
     failures: Number(response?.failures || 0),
+    executionDetails: Array.isArray(response?.executionDetails) ? response.executionDetails : [],
     failureDetails: Array.isArray(response?.failureDetails) ? response.failureDetails : []
   };
 }
@@ -4852,6 +4931,192 @@ function buildNfeRunToastMessage(prefix, response) {
   return `${prefix}: ${Number(response?.processed || 0)} controle(s), ${Number(response?.documentsSaved || 0)} documento(s) salvo(s).${
     failures ? ` ${failures} falha(s) registrada(s) no painel.` : ''
   }`;
+}
+
+function mapNfeRunItemStatusLabel(status) {
+  switch (status) {
+    case 'persistido':
+      return 'Importado';
+    case 'ignorado_sem_vinculo':
+      return 'Sem vinculo';
+    case 'falha':
+      return 'Falha';
+    default:
+      return status || '-';
+  }
+}
+
+function toneFromNfeRunItemStatus(status) {
+  switch (status) {
+    case 'persistido':
+      return 'success';
+    case 'ignorado_sem_vinculo':
+      return 'warning';
+    case 'falha':
+      return 'danger';
+    default:
+      return 'neutral';
+  }
+}
+
+async function openDominioNfeXmlViewer(clientId, catalogoId) {
+  try {
+    const payload = await apiRequest('/nfe/dominio/xml', {
+      method: 'POST',
+      body: {
+        clienteId: clientId,
+        catalogoId
+      }
+    });
+    openModal({
+      kind: 'dominio-nfe-view',
+      payload
+    });
+  } catch (error) {
+    pushToast(`Falha ao carregar XML do catalogo ${catalogoId}: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function downloadDominioNfeModalXml() {
+  if (state.modal?.kind !== 'dominio-nfe-view' || !state.modal.payload?.xml) {
+    return;
+  }
+
+  const payload = state.modal.payload;
+  const blob = new Blob([payload.xml], { type: 'application/xml' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = payload.fileName || `DOMINIO-NFE-${payload.catalogoId || 'xml'}.xml`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  pushToast(`Download do XML do catalogo ${payload.catalogoId || '-'} iniciado.`, 'success');
+}
+
+function getLastRunDocumentItems() {
+  const report = state.nfeLastRunReport;
+  const rows = Array.isArray(report?.executionDetails)
+    ? report.executionDetails
+    : Array.isArray(report?.failureDetails)
+      ? report.failureDetails
+      : [];
+
+  return rows.filter((row) => row?.kind === 'documento' && Number(row.catalogoId) > 0);
+}
+
+async function importAllDominioNfeLastRunItems() {
+  const items = getLastRunDocumentItems().map((row) => ({
+    clientId: row.clientId,
+    catalogoId: Number(row.catalogoId)
+  }));
+
+  if (!items.length) {
+    pushToast('Nao ha itens do catalogo disponiveis para importar nesta execucao.', 'info');
+    return;
+  }
+
+  await importDominioNfeLastRunItems(items);
+}
+
+async function importDominioNfeLastRunItems(items) {
+  const normalizedItems = (Array.isArray(items) ? items : [])
+    .map((item) => ({
+      clientId: String(item?.clientId || ''),
+      catalogoId: Number(item?.catalogoId || 0)
+    }))
+    .filter((item) => item.clientId && Number.isInteger(item.catalogoId) && item.catalogoId > 0);
+
+  if (!normalizedItems.length) {
+    pushToast('Nenhum item valido foi informado para importacao.', 'error');
+    return;
+  }
+
+  const grouped = normalizedItems.reduce((acc, item) => {
+    if (!acc[item.clientId]) {
+      acc[item.clientId] = [];
+    }
+    acc[item.clientId].push(item.catalogoId);
+    return acc;
+  }, {});
+
+  let imported = 0;
+  let failures = 0;
+
+  for (const [clientId, catalogoIds] of Object.entries(grouped)) {
+    try {
+      const uniqueCatalogoIds = [...new Set(catalogoIds)];
+      const response = await apiRequest('/nfe/importar-dominio', {
+        method: 'POST',
+        body: {
+          clienteId: clientId,
+          catalogoIds: uniqueCatalogoIds,
+          limit: uniqueCatalogoIds.length
+        }
+      });
+      imported += Number(response?.xmlsPersistidos || 0);
+      failures += Number(response?.falhas || 0);
+      mergeDominioImportResultIntoLastRunReport(clientId, response);
+    } catch (error) {
+      failures += catalogoIds.length;
+      pushToast(`Falha ao importar catalogos do cliente: ${toErrorMessage(error)}`, 'error');
+    }
+  }
+
+  pushToast(
+    `Reimportacao concluida: ${imported} XML(s) importado(s)${failures ? `, ${failures} falha(s)` : ''}.`,
+    failures ? 'error' : 'success'
+  );
+  await refreshApiData();
+}
+
+function mergeDominioImportResultIntoLastRunReport(clientId, response) {
+  if (!state.nfeLastRunReport || !Array.isArray(state.nfeLastRunReport.executionDetails)) {
+    return;
+  }
+
+  const details = Array.isArray(response?.detalhes) ? response.detalhes : [];
+  if (!details.length) {
+    return;
+  }
+
+  const byCatalogoId = new Map(
+    details.map((detail) => [
+      Number(detail?.catalogoId || 0),
+      {
+        status: detail?.status || 'falha',
+        mensagem: detail?.mensagem || '',
+        chaveAcesso: detail?.chaveAcesso || '',
+        numeroNfe: detail?.numeroNfe || '',
+        serie: detail?.serie || '',
+        modelo: detail?.modelo || ''
+      }
+    ])
+  );
+
+  state.nfeLastRunReport.executionDetails = state.nfeLastRunReport.executionDetails.map((row) => {
+    if (row.clientId !== clientId || row.kind !== 'documento') {
+      return row;
+    }
+    const updated = byCatalogoId.get(Number(row.catalogoId || 0));
+    if (!updated) {
+      return row;
+    }
+    return {
+      ...row,
+      status: updated.status,
+      mensagem: updated.mensagem,
+      chaveAcesso: updated.chaveAcesso || row.chaveAcesso,
+      numeroNfe: updated.numeroNfe || row.numeroNfe,
+      serie: updated.serie || row.serie,
+      modelo: updated.modelo || row.modelo
+    };
+  });
+
+  state.nfeLastRunReport.failureDetails = state.nfeLastRunReport.executionDetails.filter((row) => row.status === 'falha');
+  state.nfeLastRunReport.failures = state.nfeLastRunReport.failureDetails.length;
+  render();
 }
 
 async function pauseNfeSync(payload) {

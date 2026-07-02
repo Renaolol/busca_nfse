@@ -24,6 +24,7 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
     chavesAcesso?: string[];
+    catalogoIds?: number[];
     catalogoIdMinExclusive?: number;
     sortDirection?: 'asc' | 'desc';
   }): Promise<DominioNfeXmlRecord[]> {
@@ -38,6 +39,7 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
       dataEmissaoInicio: params.dataEmissaoInicio,
       dataEmissaoFim: params.dataEmissaoFim,
       chavesAcesso: params.chavesAcesso,
+      catalogoIds: params.catalogoIds,
       catalogoIdMinExclusive: params.catalogoIdMinExclusive,
       sortDirection: params.sortDirection
     });

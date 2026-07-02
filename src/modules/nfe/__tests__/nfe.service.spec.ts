@@ -216,7 +216,10 @@ describe('NfeService', () => {
       limit: undefined,
       dataEmissaoInicio: undefined,
       dataEmissaoFim: undefined,
-      chavesAcesso: undefined
+      chavesAcesso: undefined,
+      catalogoIds: [],
+      catalogoIdMinExclusive: undefined,
+      sortDirection: undefined
     });
     expect(prisma.nfeDocumento.upsert).toHaveBeenCalledTimes(1);
     expect(result.xmlsEncontrados).toBe(1);
@@ -462,6 +465,7 @@ describe('NfeService', () => {
       processed: 1,
       documentsSaved: 1,
       failures: 0,
+      executionDetails: [],
       failureDetails: []
     });
   });
@@ -515,6 +519,7 @@ describe('NfeService', () => {
       dataEmissaoInicio: undefined,
       dataEmissaoFim: undefined,
       chavesAcesso: undefined,
+      catalogoIds: [],
       catalogoIdMinExclusive: 10,
       sortDirection: 'asc'
     });
@@ -534,6 +539,22 @@ describe('NfeService', () => {
       processed: 1,
       documentsSaved: 1,
       failures: 0,
+      executionDetails: [
+        {
+          kind: 'documento',
+          status: 'persistido',
+          clientId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: NfeAmbiente.producao,
+          cnpjConsulta: '12345678000199',
+          catalogoId: 11,
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          numeroNfe: '123',
+          serie: '1',
+          modelo: '55',
+          mensagem: 'XML importado com sucesso'
+        }
+      ],
       failureDetails: []
     });
   });
@@ -580,6 +601,7 @@ describe('NfeService', () => {
       processed: 1,
       documentsSaved: 0,
       failures: 0,
+      executionDetails: [],
       failureDetails: []
     });
   });
@@ -631,9 +653,26 @@ describe('NfeService', () => {
       processed: 1,
       documentsSaved: 0,
       failures: 1,
+      executionDetails: [
+        {
+          kind: 'documento',
+          status: 'falha',
+          clientId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: NfeAmbiente.producao,
+          cnpjConsulta: '12345678000199',
+          catalogoId: 11,
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          numeroNfe: '123',
+          serie: '1',
+          modelo: '55',
+          mensagem: 'Falha ao salvar XML no storage'
+        }
+      ],
       failureDetails: [
         {
           kind: 'documento',
+          status: 'falha',
           clientId: 'cliente-1',
           estabelecimentoId: 'estab-1',
           ambiente: NfeAmbiente.producao,
@@ -700,9 +739,26 @@ describe('NfeService', () => {
       processed: 1,
       documentsSaved: 0,
       failures: 1,
+      executionDetails: [
+        {
+          kind: 'documento',
+          status: 'falha',
+          clientId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: NfeAmbiente.producao,
+          cnpjConsulta: '12345678000199',
+          catalogoId: 22,
+          chaveAcesso: undefined,
+          numeroNfe: '987',
+          serie: '3',
+          modelo: '55',
+          mensagem: 'Nao foi possivel localizar chave de acesso no XML da NF-e'
+        }
+      ],
       failureDetails: [
         {
           kind: 'documento',
+          status: 'falha',
           clientId: 'cliente-1',
           estabelecimentoId: 'estab-1',
           ambiente: NfeAmbiente.producao,
@@ -716,6 +772,54 @@ describe('NfeService', () => {
         }
       ]
     });
+  });
+
+  it('busca XML bruto da Dominio por ID de catalogo', async () => {
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 77,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: undefined,
+        dataEmissao: '2026-06-29',
+        xmlBase64: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe>
+      <ide><mod>55</mod><serie>9</serie><nNF>321</nNF></ide>
+    </infNFe>
+  </NFe>
+</nfeProc>`,
+          'utf8'
+        ).toString('base64')
+      }
+    ]);
+
+    const result = await service.getDominioXml({
+      clienteId: 'cliente-1',
+      catalogoId: 77
+    });
+
+    expect(dominioXmlSource.listDocuments).toHaveBeenCalledWith({
+      cnpjs: ['12345678000199'],
+      limit: 10,
+      dataEmissaoInicio: undefined,
+      dataEmissaoFim: undefined,
+      chavesAcesso: undefined,
+      catalogoIds: [77],
+      catalogoIdMinExclusive: undefined,
+      sortDirection: undefined
+    });
+    expect(result).toMatchObject({
+      catalogoId: 77,
+      numeroNfe: '321',
+      serie: '9',
+      modelo: '55',
+      fileName: 'DOMINIO-NFE-77.xml',
+      contentType: 'application/xml'
+    });
+    expect(result.xml).toContain('<nNF>321</nNF>');
   });
 
   it('lista NF-e recebidas por cnpjConsulta', async () => {

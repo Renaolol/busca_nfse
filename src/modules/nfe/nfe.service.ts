@@ -19,6 +19,7 @@ import {
   NfeDistribuicaoResult
 } from '../../integrations/nfe-distribuicao/nfe-distribuicao.types';
 import { DashboardNfeStatsQueryDto } from './dto/dashboard-stats.dto';
+import { GetDominioNfeXmlDto } from './dto/dominio-xml.dto';
 import { ImportNfeFromDominioDto } from './dto/import-dominio.dto';
 import { EnableAllNfeSyncDto } from './dto/enable-all-sync.dto';
 import { EnableNfeSyncDto } from './dto/enable-sync.dto';
@@ -47,6 +48,7 @@ type NfeSyncSourceMode = 'distribuicao' | 'dominio';
 
 type NfeSyncRunFailureDetail = {
   kind: 'documento' | 'controle';
+  status: 'persistido' | 'ignorado_sem_vinculo' | 'falha';
   clientId: string;
   estabelecimentoId: string;
   ambiente: NfeAmbiente;
@@ -63,6 +65,7 @@ type NfeSyncRunResult = {
   processed: number;
   documentsSaved: number;
   failures: number;
+  executionDetails: NfeSyncRunFailureDetail[];
   failureDetails: NfeSyncRunFailureDetail[];
 };
 
@@ -549,8 +552,39 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       limit: dto.limit,
       dataEmissaoInicio: dto.dataEmissaoInicio,
       dataEmissaoFim: dto.dataEmissaoFim,
-      chavesAcesso: dto.chavesAcesso
+      chavesAcesso: dto.chavesAcesso,
+      catalogoIds: dto.catalogoIds
     });
+  }
+
+  async getDominioXml(dto: GetDominioNfeXmlDto) {
+    await this.ensureClient(dto.clienteId);
+
+    const records = await this.loadDominioDocumentsForClient({
+      clienteId: dto.clienteId,
+      estabelecimentoId: dto.estabelecimentoId,
+      catalogoIds: [dto.catalogoId],
+      limit: 10
+    });
+    const record = records.find((item) => item.catalogoId === dto.catalogoId);
+    if (!record) {
+      throw new NotFoundException('XML nao encontrado no banco Dominio para o catalogo informado');
+    }
+
+    const xml = this.decodeXml(record.xmlBase64);
+    const inspected = this.parser.inspect(xml);
+
+    return {
+      catalogoId: record.catalogoId,
+      chaveAcesso: this.normalizeChaveAcesso(record.chaveAcesso) ?? inspected.chaveAcesso,
+      numeroNfe: inspected.numeroNfe,
+      serie: inspected.serie,
+      modelo: inspected.modelo,
+      fileName: `DOMINIO-NFE-${record.catalogoId}.xml`,
+      contentType: 'application/xml',
+      contentBase64: Buffer.from(xml, 'utf8').toString('base64'),
+      xml
+    };
   }
 
   async iniciarSync(dto: StartNfeSyncDto): Promise<{ controlesCriadosOuAtualizados: number }> {
@@ -664,6 +698,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
     chavesAcesso?: string[];
+    catalogoIds?: number[];
     catalogoIdMinExclusive?: number;
     sortDirection?: 'asc' | 'desc';
   }) {
@@ -677,12 +712,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         .filter((entry): entry is [string, (typeof establishments)[number]] => entry !== null)
     );
 
-    const documents = await this.dominioXmlSource.listDocuments({
-      cnpjs: Array.from(establishmentByCnpj.keys()),
+    const documents = await this.loadDominioDocumentsForClient({
+      clienteId: params.clienteId,
+      estabelecimentoId: params.estabelecimentoId,
       limit: params.limit,
       dataEmissaoInicio: params.dataEmissaoInicio,
       dataEmissaoFim: params.dataEmissaoFim,
-      chavesAcesso: params.chavesAcesso?.map((value) => this.normalizeChaveAcesso(value)).filter((value): value is string => Boolean(value)),
+      chavesAcesso: params.chavesAcesso,
+      catalogoIds: params.catalogoIds,
       catalogoIdMinExclusive: params.catalogoIdMinExclusive,
       sortDirection: params.sortDirection
     });
@@ -786,6 +823,36 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       maxCatalogoIdEncontrado,
       detalhes
     };
+  }
+
+  private async loadDominioDocumentsForClient(params: {
+    clienteId: string;
+    estabelecimentoId?: string;
+    limit?: number;
+    dataEmissaoInicio?: string;
+    dataEmissaoFim?: string;
+    chavesAcesso?: string[];
+    catalogoIds?: number[];
+    catalogoIdMinExclusive?: number;
+    sortDirection?: 'asc' | 'desc';
+  }) {
+    const establishments = await this.resolveTargetEstablishments(params.clienteId, params.estabelecimentoId);
+    const cnpjs = establishments
+      .map((establishment) => this.normalizeCnpj(establishment.cnpj))
+      .filter((value): value is string => Boolean(value));
+
+    return this.dominioXmlSource.listDocuments({
+      cnpjs,
+      limit: params.limit,
+      dataEmissaoInicio: params.dataEmissaoInicio,
+      dataEmissaoFim: params.dataEmissaoFim,
+      chavesAcesso: params.chavesAcesso?.map((value) => this.normalizeChaveAcesso(value)).filter((value): value is string => Boolean(value)),
+      catalogoIds: (params.catalogoIds || [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0),
+      catalogoIdMinExclusive: params.catalogoIdMinExclusive,
+      sortDirection: params.sortDirection
+    });
   }
 
   private async prepareDominioControls(params: {
@@ -988,6 +1055,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     });
     let documentsSaved = 0;
     let failures = 0;
+    const executionDetails: NfeSyncRunFailureDetail[] = [];
     const failureDetails: NfeSyncRunFailureDetail[] = [];
     const limitPorControle = this.parsePositiveNumberEnv('NFE_DOMINIO_IMPORT_LIMIT_PER_RUN', 500);
 
@@ -1005,11 +1073,28 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         const maxCatalogoEncontrado = BigInt(result.maxCatalogoIdEncontrado);
         documentsSaved += result.xmlsPersistidos;
         failures += result.falhas;
+        executionDetails.push(
+          ...result.detalhes.map((detail) => ({
+            kind: 'documento' as const,
+            status: detail.status,
+            clientId: control.clienteId,
+            estabelecimentoId: control.estabelecimentoId,
+            ambiente: control.ambiente,
+            cnpjConsulta: control.cnpjConsulta,
+            catalogoId: detail.catalogoId,
+            chaveAcesso: detail.chaveAcesso,
+            numeroNfe: detail.numeroNfe,
+            serie: detail.serie,
+            modelo: detail.modelo,
+            mensagem: detail.mensagem
+          }))
+        );
         failureDetails.push(
           ...result.detalhes
             .filter((detail) => detail.status === 'falha')
             .map((detail) => ({
               kind: 'documento' as const,
+              status: 'falha' as const,
               clientId: control.clienteId,
               estabelecimentoId: control.estabelecimentoId,
               ambiente: control.ambiente,
@@ -1044,8 +1129,18 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         });
       } catch (error) {
         failures += 1;
+        executionDetails.push({
+          kind: 'controle',
+          status: 'falha',
+          clientId: control.clienteId,
+          estabelecimentoId: control.estabelecimentoId,
+          ambiente: control.ambiente,
+          cnpjConsulta: control.cnpjConsulta,
+          mensagem: this.toErrorMessage(error)
+        });
         failureDetails.push({
           kind: 'controle',
+          status: 'falha',
           clientId: control.clienteId,
           estabelecimentoId: control.estabelecimentoId,
           ambiente: control.ambiente,
@@ -1067,6 +1162,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       processed: controls.length,
       documentsSaved,
       failures,
+      executionDetails,
       failureDetails
     };
   }
@@ -1159,6 +1255,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       processed: controls.length,
       documentsSaved,
       failures: 0,
+      executionDetails: [],
       failureDetails: []
     };
   }

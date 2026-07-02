@@ -19,6 +19,7 @@ def parse_payload():
     payload = json.loads(raw)
     payload['cnpjs'] = [normalize_digits(item) for item in payload.get('cnpjs', []) if normalize_digits(item)]
     payload['chavesAcesso'] = [normalize_digits(item) for item in payload.get('chavesAcesso', []) if normalize_digits(item)]
+    payload['catalogoIds'] = [int(item) for item in payload.get('catalogoIds', []) if str(item).strip()]
     payload['limit'] = int(payload.get('limit') or 200)
     if payload['limit'] <= 0:
         payload['limit'] = 200
@@ -81,6 +82,11 @@ SELECT TOP {payload['limit']}
     if chaves:
         query += f"   AND cat.CHAVE IN ({','.join('?' for _ in chaves)})\n"
         params.extend(chaves)
+
+    catalogo_ids = payload.get('catalogoIds') or []
+    if catalogo_ids:
+        query += f"   AND cat.I_CATALOGO IN ({','.join('?' for _ in catalogo_ids)})\n"
+        params.extend(catalogo_ids)
 
     if payload['sortDirection'] == 'asc':
         query += " ORDER BY cat.I_CATALOGO ASC"
