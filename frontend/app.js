@@ -100,6 +100,13 @@ const state = {
   nfeDashboardStats: null,
   nfeSchedulerStatus: null,
   nfeLastRunReport: null,
+  nfeSyncSections: {
+    scheduler: true,
+    failures: false,
+    filters: false,
+    simplified: true,
+    technical: false
+  },
   nfeSearch: {
     hasSearched: false,
     results: [],
@@ -376,6 +383,14 @@ function onDocumentClick(event) {
     case 'toggle-sidebar': {
       state.mobileSidebarOpen = !state.mobileSidebarOpen;
       render();
+      return;
+    }
+    case 'toggle-nfe-sync-section': {
+      const sectionKey = actionNode.getAttribute('data-section-key');
+      if (!sectionKey) {
+        return;
+      }
+      toggleNfeSyncSection(sectionKey);
       return;
     }
     case 'close-modal': {
@@ -1934,6 +1949,39 @@ function renderRunningExecutionCard() {
   `;
 }
 
+function isNfeSyncSectionOpen(sectionKey, defaultOpen = true) {
+  const value = state.nfeSyncSections?.[sectionKey];
+  return typeof value === 'boolean' ? value : defaultOpen;
+}
+
+function toggleNfeSyncSection(sectionKey) {
+  const current = isNfeSyncSectionOpen(sectionKey, true);
+  state.nfeSyncSections = {
+    ...state.nfeSyncSections,
+    [sectionKey]: !current
+  };
+  render();
+}
+
+function renderCollapsibleCard({ sectionKey, title, subtitle = '', contentHtml, defaultOpen = true, className = '' }) {
+  const isOpen = isNfeSyncSectionOpen(sectionKey, defaultOpen);
+
+  return `
+    <article class="card collapsible-card ${className} ${isOpen ? 'open' : 'closed'}">
+      <button class="collapse-trigger" type="button" data-action="toggle-nfe-sync-section" data-section-key="${escapeHtml(sectionKey)}" aria-expanded="${isOpen ? 'true' : 'false'}">
+        <div class="collapse-heading">
+          <div>
+            <h3 class="card-title">${escapeHtml(title)}</h3>
+            ${subtitle ? `<p class="card-subtitle">${escapeHtml(subtitle)}</p>` : ''}
+          </div>
+          <span class="collapse-indicator" aria-hidden="true">${isOpen ? '-' : '+'}</span>
+        </div>
+      </button>
+      ${isOpen ? `<div class="collapse-body">${contentHtml}</div>` : ''}
+    </article>
+  `;
+}
+
 function renderNfeSyncPage() {
   const nfeEligibleClients = getNfeEligibleClients();
   const controls = getFilteredNfeSyncControls();
@@ -1964,6 +2012,140 @@ function renderNfeSyncPage() {
   const globalRunLabel = sourceMode === 'dominio' ? 'Rodar importacao agora' : 'Rodar busca agora';
   const clientEnableLabel = sourceMode === 'dominio' ? 'Ligar importacao' : 'Ligar busca';
   const rowRunLabel = sourceMode === 'dominio' ? 'Importar agora' : 'Rodar agora';
+  const filtersContent = `
+    <form id="nfeSyncFilterForm" class="form-grid">
+      <label class="field">
+        Cliente
+        <select name="cliente">${renderOptions(['Todos', ...nfeEligibleClients.map((client) => client.id)], state.filters.nfeSync.cliente, mapClientOptions())}</select>
+      </label>
+      <label class="field">
+        Status
+        <select name="status">${renderOptions(['Todos', ...statusOptions], state.filters.nfeSync.status, mapNfeSyncStatusOptions(statusOptions))}</select>
+      </label>
+      <label class="field">
+        Ambiente
+        <select name="ambiente">${renderOptions(['Todos', ...ambienteOptions], state.filters.nfeSync.ambiente, {
+          Todos: 'Todos',
+          producao: 'Producao',
+          homologacao: 'Homologacao'
+        })}</select>
+      </label>
+      <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
+        <button class="btn primary" type="submit">Filtrar</button>
+        <button class="btn secondary" type="button" data-action="nfe-sync-clear-filters">Limpar</button>
+      </div>
+    </form>
+  `;
+  const simplifiedContent = `
+    <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+      <div>
+        <p class="card-subtitle">${escapeHtml(simplifiedSubtitle)}</p>
+      </div>
+      <button class="btn secondary" type="button" data-action="nfe-sync-refresh">Atualizar painel</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>CNPJ</th>
+            <th>Controles</th>
+            <th>Ultima execucao</th>
+            <th>${escapeHtml(clientCursorLabel)}</th>
+            <th>Documentos</th>
+            <th>Status</th>
+            <th>Acoes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${renderTableRowsOrState({
+            key: 'nfeSync',
+            colSpan: 8,
+            rowsHtml: clientRows
+              .map((row) => {
+                return `<tr>
+                  <td>${escapeHtml(row.cliente)}</td>
+                  <td>${escapeHtml(formatCnpj(row.cnpj))}</td>
+                  <td>${escapeHtml(String(row.totalControles))}</td>
+                  <td>${escapeHtml(formatDateTime(row.ultimaExecucao))}</td>
+                  <td>${escapeHtml(row.ultimoNsuConsultado)}</td>
+                  <td>${escapeHtml(String(row.totalDocumentosBaixados))}</td>
+                  <td>
+                    ${statusBadge(row.statusLabel, row.statusTone)}
+                    <span class="row-sub">${escapeHtml(row.statusDetail)}</span>
+                  </td>
+                  <td>
+                    <div class="table-actions">
+                      <button class="icon-btn" data-action="nfe-client-enable" data-client-id="${row.clientId}">${escapeHtml(clientEnableLabel)}</button>
+                      <button class="icon-btn" data-action="nfe-client-pause" data-client-id="${row.clientId}">Pausar</button>
+                      <button class="icon-btn" data-action="nfe-open-client-xmls" data-client-id="${row.clientId}">Ver XMLs</button>
+                    </div>
+                  </td>
+                </tr>`;
+              })
+              .join(''),
+            emptyMessage: 'Nenhum cliente encontrado para os filtros informados.'
+          })}
+        </tbody>
+      </table>
+    </div>
+  `;
+  const technicalContent = `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Cliente</th>
+            <th>Estabelecimento</th>
+            <th>CNPJ consulta</th>
+            <th>Ambiente</th>
+            <th>${escapeHtml(controlCursorLabel)}</th>
+            <th>${escapeHtml(controlProgressLabel)}</th>
+            <th>${escapeHtml(controlMaxLabel)}</th>
+            <th>Documentos</th>
+            <th>Ultima execucao</th>
+            <th>Status</th>
+            <th>Acoes</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${renderTableRowsOrState({
+            key: 'nfeSync',
+            colSpan: 11,
+            rowsHtml: controls
+              .map((control) => {
+                return `<tr>
+                  <td>${escapeHtml(control.cliente)}</td>
+                  <td>
+                    <span class="row-title">${escapeHtml(control.estabelecimento)}</span>
+                    <span class="row-sub">${escapeHtml(formatCnpj(control.cnpjEstabelecimento))}</span>
+                  </td>
+                  <td>${escapeHtml(formatCnpj(control.cnpjConsulta))}</td>
+                  <td>${statusBadge(mapNfeAmbienteLabel(control.ambiente), control.ambiente === 'producao' ? 'success' : 'warning')}</td>
+                  <td>${escapeHtml(control.ultimoNsuConsultado)}</td>
+                  <td>${escapeHtml(control.ultimoNsuDistribuido)}</td>
+                  <td>${escapeHtml(control.maxNsu)}</td>
+                  <td>${escapeHtml(String(control.totalDocumentosBaixados))}</td>
+                  <td>${escapeHtml(formatDateTime(control.ultimaExecucao))}</td>
+                  <td>
+                    ${statusBadge(mapNfeSyncStatusLabel(control.status), toneFromNfeSyncStatus(control.status))}
+                    <span class="row-sub">${escapeHtml(control.ultimaMensagem || '-')}</span>
+                  </td>
+                  <td>
+                    <div class="table-actions">
+                      <button class="icon-btn" data-action="nfe-sync-run-control" data-client-id="${control.clientId}" data-estabelecimento-id="${control.estabelecimentoId}" data-ambiente="${control.ambiente}">${escapeHtml(rowRunLabel)}</button>
+                      <button class="icon-btn" data-action="nfe-sync-pause-control" data-client-id="${control.clientId}" data-ambiente="${control.ambiente}">Pausar</button>
+                    </div>
+                  </td>
+                </tr>`;
+              })
+              .join(''),
+            emptyMessage: 'Nenhum controle de sincronizacao de NF-e encontrado.'
+          })}
+        </tbody>
+      </table>
+    </div>
+  `;
 
   return `
     <section class="page-section">
@@ -1984,149 +2166,46 @@ function renderNfeSyncPage() {
         ${statCard('file', 'NF-e no banco', String(nfeStats.totalNfe), `${nfeStats.xmlsCompletos} XML(s) completos`, 'info')}
       </section>
 
-      ${renderNfeSchedulerStatusCard()}
-      ${sourceMode === 'dominio' ? renderNfeLastRunPanel() : ''}
-
-      <article class="card filter-card">
-        <h3 class="card-title">Filtros dos controles</h3>
-        <form id="nfeSyncFilterForm" class="form-grid">
-          <label class="field">
-            Cliente
-            <select name="cliente">${renderOptions(['Todos', ...nfeEligibleClients.map((client) => client.id)], state.filters.nfeSync.cliente, mapClientOptions())}</select>
-          </label>
-          <label class="field">
-            Status
-            <select name="status">${renderOptions(['Todos', ...statusOptions], state.filters.nfeSync.status, mapNfeSyncStatusOptions(statusOptions))}</select>
-          </label>
-          <label class="field">
-            Ambiente
-            <select name="ambiente">${renderOptions(['Todos', ...ambienteOptions], state.filters.nfeSync.ambiente, {
-              Todos: 'Todos',
-              producao: 'Producao',
-              homologacao: 'Homologacao'
-            })}</select>
-          </label>
-          <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
-            <button class="btn primary" type="submit">Filtrar</button>
-            <button class="btn secondary" type="button" data-action="nfe-sync-clear-filters">Limpar</button>
-          </div>
-        </form>
-      </article>
-
-      <article class="card">
-        <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
-          <div>
-            <h3 class="card-title">Busca simplificada por cliente</h3>
-            <p class="card-subtitle">${escapeHtml(simplifiedSubtitle)}</p>
-          </div>
-          <button class="btn secondary" type="button" data-action="nfe-sync-refresh">Atualizar painel</button>
-        </div>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Cliente</th>
-                <th>CNPJ</th>
-                <th>Controles</th>
-                <th>Ultima execucao</th>
-                <th>${escapeHtml(clientCursorLabel)}</th>
-                <th>Documentos</th>
-                <th>Status</th>
-                <th>Acoes</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${renderTableRowsOrState({
-                key: 'nfeSync',
-                colSpan: 8,
-                rowsHtml: clientRows
-                  .map((row) => {
-                    return `<tr>
-                      <td>${escapeHtml(row.cliente)}</td>
-                      <td>${escapeHtml(formatCnpj(row.cnpj))}</td>
-                      <td>${escapeHtml(String(row.totalControles))}</td>
-                      <td>${escapeHtml(formatDateTime(row.ultimaExecucao))}</td>
-                      <td>${escapeHtml(row.ultimoNsuConsultado)}</td>
-                      <td>${escapeHtml(String(row.totalDocumentosBaixados))}</td>
-                      <td>
-                        ${statusBadge(row.statusLabel, row.statusTone)}
-                        <span class="row-sub">${escapeHtml(row.statusDetail)}</span>
-                      </td>
-                      <td>
-                        <div class="table-actions">
-                          <button class="icon-btn" data-action="nfe-client-enable" data-client-id="${row.clientId}">${escapeHtml(clientEnableLabel)}</button>
-                          <button class="icon-btn" data-action="nfe-client-pause" data-client-id="${row.clientId}">Pausar</button>
-                          <button class="icon-btn" data-action="nfe-open-client-xmls" data-client-id="${row.clientId}">Ver XMLs</button>
-                        </div>
-                      </td>
-                    </tr>`;
-                  })
-                  .join(''),
-                emptyMessage: 'Nenhum cliente encontrado para os filtros informados.'
-              })}
-            </tbody>
-          </table>
-        </div>
-      </article>
-
-      <article class="card">
-        <h3 class="card-title">Detalhamento tecnico por estabelecimento</h3>
-        <p class="card-subtitle">${escapeHtml(detailSubtitle)}</p>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Cliente</th>
-                <th>Estabelecimento</th>
-                <th>CNPJ consulta</th>
-                <th>Ambiente</th>
-                <th>${escapeHtml(controlCursorLabel)}</th>
-                <th>${escapeHtml(controlProgressLabel)}</th>
-                <th>${escapeHtml(controlMaxLabel)}</th>
-                <th>Documentos</th>
-                <th>Ultima execucao</th>
-                <th>Status</th>
-                <th>Acoes</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${renderTableRowsOrState({
-                key: 'nfeSync',
-                colSpan: 11,
-                rowsHtml: controls
-                  .map((control) => {
-                    return `<tr>
-                      <td>${escapeHtml(control.cliente)}</td>
-                      <td>
-                        <span class="row-title">${escapeHtml(control.estabelecimento)}</span>
-                        <span class="row-sub">${escapeHtml(formatCnpj(control.cnpjEstabelecimento))}</span>
-                      </td>
-                      <td>${escapeHtml(formatCnpj(control.cnpjConsulta))}</td>
-                      <td>${statusBadge(mapNfeAmbienteLabel(control.ambiente), control.ambiente === 'producao' ? 'success' : 'warning')}</td>
-                      <td>${escapeHtml(control.ultimoNsuConsultado)}</td>
-                      <td>${escapeHtml(control.ultimoNsuDistribuido)}</td>
-                      <td>${escapeHtml(control.maxNsu)}</td>
-                      <td>${escapeHtml(String(control.totalDocumentosBaixados))}</td>
-                      <td>${escapeHtml(formatDateTime(control.ultimaExecucao))}</td>
-                      <td>
-                        ${statusBadge(mapNfeSyncStatusLabel(control.status), toneFromNfeSyncStatus(control.status))}
-                        <span class="row-sub">${escapeHtml(control.ultimaMensagem || '-')}</span>
-                      </td>
-                      <td>
-                        <div class="table-actions">
-                          <button class="icon-btn" data-action="nfe-sync-run-control" data-client-id="${control.clientId}" data-estabelecimento-id="${control.estabelecimentoId}" data-ambiente="${control.ambiente}">${escapeHtml(rowRunLabel)}</button>
-                          <button class="icon-btn" data-action="nfe-sync-pause-control" data-client-id="${control.clientId}" data-ambiente="${control.ambiente}">Pausar</button>
-                        </div>
-                      </td>
-                    </tr>`;
-                  })
-                  .join(''),
-                emptyMessage: 'Nenhum controle de sincronizacao de NF-e encontrado.'
-              })}
-            </tbody>
-          </table>
-        </div>
-      </article>
+      ${renderCollapsibleCard({
+        sectionKey: 'scheduler',
+        title: 'Rotina automatica NF-e',
+        subtitle: 'Status da origem da captura e dos ciclos automaticos do backend.',
+        contentHtml: renderNfeSchedulerStatusCard(),
+        defaultOpen: true
+      })}
+      ${
+        sourceMode === 'dominio'
+          ? renderCollapsibleCard({
+              sectionKey: 'failures',
+              title: 'Painel de falhas da importacao',
+              subtitle: 'Mostra a ultima execucao manual feita nesta tela.',
+              contentHtml: renderNfeLastRunPanel(),
+              defaultOpen: false
+            })
+          : ''
+      }
+      ${renderCollapsibleCard({
+        sectionKey: 'filters',
+        title: 'Filtros dos controles',
+        subtitle: 'Use os filtros apenas quando precisar refinar a listagem.',
+        contentHtml: filtersContent,
+        defaultOpen: false,
+        className: 'filter-card'
+      })}
+      ${renderCollapsibleCard({
+        sectionKey: 'simplified',
+        title: 'Busca simplificada por cliente',
+        subtitle: simplifiedSubtitle,
+        contentHtml: simplifiedContent,
+        defaultOpen: true
+      })}
+      ${renderCollapsibleCard({
+        sectionKey: 'technical',
+        title: 'Detalhamento tecnico por estabelecimento',
+        subtitle: detailSubtitle,
+        contentHtml: technicalContent,
+        defaultOpen: false
+      })}
     </section>
   `;
 }
@@ -2137,29 +2216,22 @@ function renderNfeLastRunPanel() {
 
   if (!report) {
     return `
-      <article class="card">
-        <h3 class="card-title">Painel de falhas da importacao</h3>
-        <p class="card-subtitle">O painel e preenchido quando voce roda a importacao manualmente pela tela de Buscas NF-e.</p>
-      </article>
+      <p class="card-subtitle" style="margin:0;">O painel e preenchido quando voce roda a importacao manualmente pela tela de Buscas NF-e.</p>
     `;
   }
 
   return `
-    <article class="card">
-      <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
-        <div>
-          <h3 class="card-title">Painel de falhas da importacao</h3>
-          <p class="card-subtitle">Ultima execucao manual em ${escapeHtml(formatDateTime(report.executedAt))}.</p>
-        </div>
-        <div class="progress-meta">
-          <span>Controles: <strong>${escapeHtml(String(report.processed || 0))}</strong></span>
-          <span>XMLs salvos: <strong>${escapeHtml(String(report.documentsSaved || 0))}</strong></span>
-          <span>Falhas: <strong>${escapeHtml(String(report.failures || 0))}</strong></span>
-        </div>
+    <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
+      <p class="card-subtitle" style="margin:0;">Ultima execucao manual em ${escapeHtml(formatDateTime(report.executedAt))}.</p>
+      <div class="progress-meta">
+        <span>Controles: <strong>${escapeHtml(String(report.processed || 0))}</strong></span>
+        <span>XMLs salvos: <strong>${escapeHtml(String(report.documentsSaved || 0))}</strong></span>
+        <span>Falhas: <strong>${escapeHtml(String(report.failures || 0))}</strong></span>
       </div>
-      ${
-        failures.length
-          ? `<div class="table-wrap">
+    </div>
+    ${
+      failures.length
+        ? `<div class="table-wrap">
               <table>
                 <thead>
                   <tr>
@@ -2193,11 +2265,10 @@ function renderNfeLastRunPanel() {
                 </tbody>
               </table>
             </div>`
-          : report.failures > 0
-            ? `<div class="table-state error">A execucao registrou falhas, mas o backend nao retornou detalhes suficientes para listar cada item.</div>`
-            : `<div class="table-state">Nenhuma falha registrada na ultima importacao manual.</div>`
-      }
-    </article>
+        : report.failures > 0
+          ? `<div class="table-state error">A execucao registrou falhas, mas o backend nao retornou detalhes suficientes para listar cada item.</div>`
+          : `<div class="table-state">Nenhuma falha registrada na ultima importacao manual.</div>`
+    }
   `;
 }
 
@@ -2205,10 +2276,7 @@ function renderNfeSchedulerStatusCard() {
   const scheduler = state.nfeSchedulerStatus;
   if (!scheduler) {
     return `
-      <article class="card">
-        <h3 class="card-title">Rotina automatica NF-e</h3>
-        <p class="card-subtitle">Status do agendador ainda nao carregado do backend.</p>
-      </article>
+      <p class="card-subtitle" style="margin:0;">Status do agendador ainda nao carregado do backend.</p>
     `;
   }
 
@@ -2219,7 +2287,7 @@ function renderNfeSchedulerStatusCard() {
   const nightlyTone = nightlySweep.running ? 'info' : nightlySweep.enabled ? 'success' : 'neutral';
 
   return `
-    <article class="card scheduler-strip">
+    <div class="scheduler-strip">
       <div class="scheduler-item">
         <div class="scheduler-heading">
           <span class="scheduler-dot info"></span>
@@ -2258,7 +2326,7 @@ function renderNfeSchedulerStatusCard() {
         )}</p>
         <small>Proxima execucao: ${escapeHtml(formatDateTime(nightlySweep.nextRunAt || ''))}</small>
       </div>
-    </article>
+    </div>
   `;
 }
 

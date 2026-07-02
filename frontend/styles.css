@@ -381,6 +381,60 @@ textarea:focus-visible,
   font-size: 0.83rem;
 }
 
+.collapsible-card {
+  padding: 16px 18px;
+}
+
+.collapse-trigger {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.collapse-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.collapse-heading > div {
+  min-width: 0;
+}
+
+.collapse-trigger:hover .card-title,
+.collapse-trigger:hover .collapse-indicator {
+  color: var(--accent-dark);
+}
+
+.collapse-indicator {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  color: var(--text-secondary);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  flex: 0 0 auto;
+  transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease;
+}
+
+.collapse-trigger:hover .collapse-indicator {
+  border-color: var(--accent-dark);
+  background: #fff9dd;
+}
+
+.collapse-body {
+  margin-top: 14px;
+}
+
 .summary-bar {
   display: flex;
   justify-content: space-between;
