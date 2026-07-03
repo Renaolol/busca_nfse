@@ -754,6 +754,10 @@ function onDocumentClick(event) {
       render();
       return;
     }
+    case 'nfe-docs-run-now-client': {
+      void runNfeSyncForCurrentDocumentsClient();
+      return;
+    }
     case 'nfe-export-list': {
       exportNfeListToCsv();
       return;
@@ -2430,6 +2434,7 @@ function renderNfeDocumentsPage() {
     state.nfeSearch.hasSearched || state.tableState.nfeDocs === 'loading' || state.tableState.nfeDocs === 'error';
   const statusOptions = uniqueValues(state.nfeDocuments.map((doc) => doc.statusFiscal).filter(Boolean));
   const schemaOptions = uniqueValues(state.nfeDocuments.map((doc) => doc.schemaDoc).filter(Boolean));
+  const selectedClientId = state.filters.nfeDocs.cliente && state.filters.nfeDocs.cliente !== 'Todos' ? state.filters.nfeDocs.cliente : '';
 
   return `
     <section class="page-section">
@@ -2504,6 +2509,7 @@ function renderNfeDocumentsPage() {
           <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
             <button class="btn primary" type="submit">Buscar NF-e</button>
             <button class="btn secondary" type="button" data-action="nfe-docs-clear-filters">Limpar</button>
+            <button class="btn secondary" type="button" data-action="nfe-docs-run-now-client" ${selectedClientId ? '' : 'disabled'}>Rodar busca do cliente</button>
           </div>
         </form>
       </article>
@@ -4928,6 +4934,10 @@ async function disableNfeSearchForAllClients() {
 
 async function runNfeSearchNow() {
   try {
+    pushToast(
+      `${getNfeSourceMode() === 'dominio' ? 'Importacao' : 'Busca'} de NF-e iniciada para todos os controles ativos. Aguarde a conclusao.`,
+      'info'
+    );
     const result = await apiRequest('/nfe/sync/rodar-agora-geral', {
       method: 'POST'
     });
@@ -5000,6 +5010,13 @@ function refreshRunningExecution() {
 
 async function runNfeSyncNow(payload) {
   try {
+    const client = payload?.clienteId ? findClientById(payload.clienteId) : null;
+    pushToast(
+      `${
+        getNfeSourceMode() === 'dominio' ? 'Importacao' : 'Busca'
+      } de NF-e iniciada${client ? ` para ${client.razaoSocial}` : ''}. Aguarde a conclusao da operacao.`,
+      'info'
+    );
     const response = await apiRequest('/nfe/sync/rodar-agora', {
       method: 'POST',
       body: payload
@@ -5275,6 +5292,16 @@ async function openNfeDocumentsForClient(clientId) {
   await executeNfeDocsSearch();
 }
 
+async function runNfeSyncForCurrentDocumentsClient() {
+  const clientId = state.filters.nfeDocs.cliente && state.filters.nfeDocs.cliente !== 'Todos' ? state.filters.nfeDocs.cliente : '';
+  if (!clientId) {
+    pushToast('Selecione uma empresa para rodar a busca de NF-e.', 'error');
+    return;
+  }
+
+  await runNfeSyncNow({ clienteId: clientId });
+}
+
 async function recoverPastNsusForCurrentXmlClient() {
   const clientId = state.filters.xmls.cliente && state.filters.xmls.cliente !== 'Todos' ? state.filters.xmls.cliente : '';
   if (!clientId) {
@@ -5294,6 +5321,10 @@ async function runPastNsuRecovery(clientId = null) {
   }
 
   if (state.dataSource !== 'api') {
+    pushToast(
+      `Recuperacao de NSUs iniciada para ${selectedClient?.razaoSocial || 'todos os clientes'}. Aguarde a conclusao da operacao.`,
+      'info'
+    );
     startExecutionMonitor('Recuperacao', selectedClient ? 1 : state.clients.length || 1, 'Recuperando NSUs passados (mock)...');
     state.executionMonitor.currentClientName = selectedClient?.razaoSocial || 'Todos os clientes';
     finishExecutionMonitor('Recuperacao mock finalizada.');
@@ -5302,6 +5333,10 @@ async function runPastNsuRecovery(clientId = null) {
   }
 
   try {
+    pushToast(
+      `Recuperacao de NSUs iniciada para ${selectedClient?.razaoSocial || 'todos os clientes'}. Esta operacao pode demorar.`,
+      'info'
+    );
     startExecutionMonitor(
       'Recuperacao',
       selectedClient ? 1 : state.clients.length || 1,
