@@ -163,6 +163,9 @@ const state = {
       certificado: 'Todos',
       municipio: 'Todos'
     },
+    certificates: {
+      query: ''
+    },
     runs: {
       periodo: '30',
       cliente: 'Todos',
@@ -598,6 +601,11 @@ function onDocumentClick(event) {
       });
       return;
     }
+    case 'certificates-clear-filters': {
+      resetCertificatesFilters();
+      render();
+      return;
+    }
     case 'open-run-details': {
       const runId = actionNode.getAttribute('data-run-id');
       if (!runId) {
@@ -1007,6 +1015,11 @@ function onDocumentSubmit(event) {
     case 'runsFilterForm': {
       event.preventDefault();
       applyRunsFilters(target);
+      return;
+    }
+    case 'certificatesFilterForm': {
+      event.preventDefault();
+      applyCertificatesFilters(target);
       return;
     }
     case 'nfeSyncFilterForm': {
@@ -1736,6 +1749,24 @@ function renderCertificatesPage() {
         ${statCard('alert', 'Vencidos', String(counts.vencidos), 'risco imediato', 'danger')}
         ${statCard('users', 'Sem cliente vinculado', String(counts.semVinculo), 'pendente de associacao', 'neutral')}
       </section>
+
+      <article class="card filter-card">
+        <h3 class="card-title">Filtro</h3>
+        <form id="certificatesFilterForm" class="form-grid">
+          <label class="field" style="grid-column: span 2;">
+            Buscar por nome ou CNPJ
+            <input
+              name="query"
+              value="${escapeHtml(state.filters.certificates.query)}"
+              placeholder="Digite o nome do cliente, apelido do certificado ou CNPJ"
+            />
+          </label>
+          <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
+            <button class="btn primary" type="submit">Filtrar</button>
+            <button class="btn secondary" type="button" data-action="certificates-clear-filters">Limpar</button>
+          </div>
+        </form>
+      </article>
 
       <article class="card">
         <div class="table-wrap">
@@ -4253,7 +4284,37 @@ async function submitClientSearchConfigForm(form) {
 }
 
 function getFilteredCertificates() {
-  return [...state.certificates].sort((a, b) => a.diasRestantes - b.diasRestantes);
+  const query = String(state.filters.certificates.query || '').trim().toLowerCase();
+  const digitsQuery = normalizeDigits(query);
+
+  return [...state.certificates]
+    .filter((cert) => {
+      if (!query) {
+        return true;
+      }
+
+      const searchableName = `${cert.cliente || ''} ${cert.apelido || ''}`.toLowerCase();
+      const searchableCnpj = normalizeDigits(cert.cnpj || '');
+
+      return searchableName.includes(query) || (digitsQuery && searchableCnpj.includes(digitsQuery));
+    })
+    .sort((a, b) => a.diasRestantes - b.diasRestantes);
+}
+
+function applyCertificatesFilters(form) {
+  const data = new FormData(form);
+  state.filters.certificates = {
+    query: String(data.get('query') || '').trim()
+  };
+  state.tableState.certificates = 'data';
+  render();
+}
+
+function resetCertificatesFilters() {
+  state.filters.certificates = {
+    query: ''
+  };
+  state.tableState.certificates = 'data';
 }
 
 async function simulateCertificateTest(certificateId) {
