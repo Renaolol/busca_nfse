@@ -889,6 +889,10 @@ function onDocumentClick(event) {
       updateXmlSort(key);
       return;
     }
+    case 'xmls-recover-past-nsus': {
+      void recoverPastNsusForCurrentXmlClient();
+      return;
+    }
     case 'alerts-mark-selected': {
       markSelectedAlertsResolved();
       return;
@@ -2665,6 +2669,7 @@ function renderXmlsPage() {
     state.xmlSearch.hasSearched || state.tableState.xmls === 'loading' || state.tableState.xmls === 'error';
   const xmlSearchSummary =
     state.xmlSearch.hasSearched && state.tableState.xmls !== 'loading' ? renderXmlSearchSummary() : '';
+  const selectedClientId = state.filters.xmls.cliente && state.filters.xmls.cliente !== 'Todos' ? state.filters.xmls.cliente : '';
 
   return `
     <section class="page-section">
@@ -2723,6 +2728,7 @@ function renderXmlsPage() {
           <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
             <button class="btn primary" type="submit">Buscar XMLs</button>
             <button class="btn secondary" type="button" data-action="xmls-clear-filters">Limpar</button>
+            <button class="btn secondary" type="button" data-action="xmls-recover-past-nsus" ${selectedClientId ? '' : 'disabled'}>Reprocessar NSUs do cliente</button>
           </div>
         </form>
       </article>
@@ -5269,6 +5275,71 @@ async function openNfeDocumentsForClient(clientId) {
   await executeNfeDocsSearch();
 }
 
+async function recoverPastNsusForCurrentXmlClient() {
+  const clientId = state.filters.xmls.cliente && state.filters.xmls.cliente !== 'Todos' ? state.filters.xmls.cliente : '';
+  if (!clientId) {
+    pushToast('Selecione uma empresa para reprocessar os NSUs.', 'error');
+    return;
+  }
+
+  await runPastNsuRecovery(clientId);
+}
+
+async function runPastNsuRecovery(clientId = null) {
+  const selectedClient = clientId ? findClientById(clientId) : null;
+
+  if (clientId && !selectedClient) {
+    pushToast('Cliente nao encontrado para reprocessamento de NSUs.', 'error');
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    startExecutionMonitor('Recuperacao', selectedClient ? 1 : state.clients.length || 1, 'Recuperando NSUs passados (mock)...');
+    state.executionMonitor.currentClientName = selectedClient?.razaoSocial || 'Todos os clientes';
+    finishExecutionMonitor('Recuperacao mock finalizada.');
+    pushToast('Recuperacao de NSUs passados iniciada (mock).', 'success');
+    return;
+  }
+
+  try {
+    startExecutionMonitor(
+      'Recuperacao',
+      selectedClient ? 1 : state.clients.length || 1,
+      'Reprocessando NSUs ja consultados. Notas existentes serao ignoradas...'
+    );
+    state.executionMonitor.currentClientName = selectedClient?.razaoSocial || 'Todos os controles';
+    state.executionMonitor.updatedAt = new Date().toISOString();
+    render();
+
+    const result = await apiRequest('/sync/reprocessar-nsus-passados', {
+      method: 'POST',
+      body: clientId ? { clienteId: clientId } : {},
+      timeoutMs: 10 * 60 * 1000
+    });
+
+    state.executionMonitor.total = Number(result?.controlesEncontrados || state.executionMonitor.total || 0);
+    state.executionMonitor.processed = Number(result?.controlesProcessados || 0);
+    state.executionMonitor.successful = Number(result?.documentosSalvos || 0);
+    state.executionMonitor.failed = Number(result?.falhas || 0);
+    state.executionMonitor.message = 'Recuperacao concluida. Atualizando painel...';
+    state.executionMonitor.updatedAt = new Date().toISOString();
+    render();
+
+    await refreshApiData();
+    finishExecutionMonitor(
+      `Recuperacao finalizada. NSUs consultados: ${Number(result?.nsusConsultados || 0)}. XMLs salvos: ${Number(result?.documentosSalvos || 0)}. Ja existentes: ${Number(result?.nsusIgnoradosComDocumento || 0) + Number(result?.documentosIgnoradosExistentes || 0)}.`
+    );
+    pushToast(
+      `Recuperacao concluida: ${Number(result?.documentosSalvos || 0)} XML(s) salvo(s), ${Number(result?.nsusConsultados || 0)} NSU(s) consultado(s).`,
+      Number(result?.falhas || 0) > 0 ? 'error' : 'success'
+    );
+  } catch (error) {
+    state.executionMonitor.failed += 1;
+    finishExecutionMonitor('Recuperacao de NSUs finalizada com falha.');
+    pushToast(`Falha ao recuperar NSUs passados: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
 async function executeNfeDocsSearch() {
   if (!state.filters.nfeDocs.cliente) {
     resetNfeDocsSearch();
@@ -5848,56 +5919,7 @@ async function executeConfirmAction(payload) {
       return;
     }
     case 'recover-past-nsus': {
-      const selectedClient = payload.clientId ? findClientById(payload.clientId) : null;
-      if (state.dataSource !== 'api') {
-        startExecutionMonitor(
-          'Recuperacao',
-          selectedClient ? 1 : state.clients.length || 1,
-          'Recuperando NSUs passados (mock)...'
-        );
-        state.executionMonitor.currentClientName = selectedClient?.razaoSocial || 'Todos os clientes';
-        finishExecutionMonitor('Recuperacao mock finalizada.');
-        pushToast('Recuperacao de NSUs passados iniciada (mock).', 'success');
-        return;
-      }
-
-      try {
-        startExecutionMonitor(
-          'Recuperacao',
-          selectedClient ? 1 : state.clients.length || 1,
-          'Reprocessando NSUs ja consultados. Notas existentes serao ignoradas...'
-        );
-        state.executionMonitor.currentClientName = selectedClient?.razaoSocial || 'Todos os controles';
-        state.executionMonitor.updatedAt = new Date().toISOString();
-        render();
-
-        const result = await apiRequest('/sync/reprocessar-nsus-passados', {
-          method: 'POST',
-          body: payload.clientId ? { clienteId: payload.clientId } : {},
-          timeoutMs: 10 * 60 * 1000
-        });
-
-        state.executionMonitor.total = Number(result?.controlesEncontrados || state.executionMonitor.total || 0);
-        state.executionMonitor.processed = Number(result?.controlesProcessados || 0);
-        state.executionMonitor.successful = Number(result?.documentosSalvos || 0);
-        state.executionMonitor.failed = Number(result?.falhas || 0);
-        state.executionMonitor.message = 'Recuperacao concluida. Atualizando painel...';
-        state.executionMonitor.updatedAt = new Date().toISOString();
-        render();
-
-        await refreshApiData();
-        finishExecutionMonitor(
-          `Recuperacao finalizada. NSUs consultados: ${Number(result?.nsusConsultados || 0)}. XMLs salvos: ${Number(result?.documentosSalvos || 0)}. Ja existentes: ${Number(result?.nsusIgnoradosComDocumento || 0) + Number(result?.documentosIgnoradosExistentes || 0)}.`
-        );
-        pushToast(
-          `Recuperacao concluida: ${Number(result?.documentosSalvos || 0)} XML(s) salvo(s), ${Number(result?.nsusConsultados || 0)} NSU(s) consultado(s).`,
-          Number(result?.falhas || 0) > 0 ? 'error' : 'success'
-        );
-      } catch (error) {
-        state.executionMonitor.failed += 1;
-        finishExecutionMonitor('Recuperacao de NSUs finalizada com falha.');
-        pushToast(`Falha ao recuperar NSUs passados: ${toErrorMessage(error)}`, 'error');
-      }
+      await runPastNsuRecovery(payload.clientId || null);
       return;
     }
     case 'replace-certificate': {
