@@ -312,6 +312,55 @@ describe('NfeService', () => {
     );
   });
 
+  it('redireciona XML de evento de cancelamento nacional da Dominio para o armazenamento de NFS-e e vincula pela chave', async () => {
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 525833,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '07261210000182',
+        chaveAcesso: undefined,
+        dataEmissao: '2026-05-11',
+        xmlBase64: Buffer.from(
+          `<evento versao="1.01" xmlns="http://www.sped.fazenda.gov.br/nfse"><infEvento Id="EVT42110092207261210000182000000000046126053882314271101101001"><verAplic>SefinNacional_1.6.0</verAplic><ambGer>2</ambGer><nSeqEvento>1</nSeqEvento><dhProc>2026-05-11T16:33:45-03:00</dhProc><nDFSe>0</nDFSe><pedRegEvento xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00"><infPedReg Id="PRE42110092207261210000182000000000046126053882314271101101"><tpAmb>1</tpAmb><verAplic>1.00</verAplic><dhEvento>2026-05-11T16:33:43-03:00</dhEvento><CNPJAutor>07261210000182</CNPJAutor><chNFSe>42110092207261210000182000000000046126053882314271</chNFSe><e101101><xDesc>Cancelamento de NFS-e</xDesc><cMotivo>9</cMotivo><xMotivo>Cancelamento por motivos diversos</xMotivo></e101101></infPedReg></pedRegEvento></infEvento></evento>`,
+          'utf8'
+        ).toString('base64')
+      }
+    ]);
+    prisma.clienteEstabelecimento.findMany.mockResolvedValueOnce([
+      {
+        id: 'estab-1',
+        clienteId: 'cliente-1',
+        cnpj: '07261210000182',
+        municipioCodigoIbge: '4204202',
+        createdAt: new Date('2026-06-29T00:00:00.000Z')
+      }
+    ]);
+
+    const result = await service.importFromDominio({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(nfseService.importXml).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      xml: expect.stringContaining('<evento'),
+      ambiente: 'producao'
+    });
+    expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
+    expect(result.xmlsPersistidos).toBe(1);
+    expect(result.falhas).toBe(0);
+    expect(result.detalhes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          catalogoId: 525833,
+          status: 'persistido',
+          mensagem: 'XML da Dominio identificado como NFS-e e importado com sucesso no armazenamento de servicos'
+        })
+      ])
+    );
+  });
+
   it('ignora XML de baixa financeira da Dominio sem contar como falha nem tentar importar', async () => {
     (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
       {

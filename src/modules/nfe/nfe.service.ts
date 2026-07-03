@@ -909,7 +909,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       /<(?:\w+:)?CompNfse\b/i.test(xml) ||
       /<(?:\w+:)?Nfse\b/i.test(xml) ||
       /<(?:\w+:)?NFSe\b/i.test(xml) ||
-      /abrasf\.org\.br\/nfse/i.test(xml)
+      /abrasf\.org\.br\/nfse/i.test(xml) ||
+      (/sped\.fazenda\.gov\.br\/nfse/i.test(xml) &&
+        (/<(?:\w+:)?(?:evento|procEvento)\b/i.test(xml) ||
+          /<(?:\w+:)?pedRegEvento\b/i.test(xml) ||
+          /<(?:\w+:)?infEvento\b/i.test(xml) ||
+          /<(?:\w+:)?chNFSe\b/i.test(xml)))
     );
   }
 
