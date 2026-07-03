@@ -2575,7 +2575,6 @@ function renderNfeDocumentsTableCard(docs) {
         <table>
           <thead>
             <tr>
-              ${renderNfeSortHeader('chaveAcesso', 'Chave')}
               ${renderNfeSortHeader('numeroNfe', 'Numero')}
               ${renderNfeSortHeader('cliente', 'Cliente')}
               ${renderNfeSortHeader('tipo', 'Tipo')}
@@ -2591,14 +2590,10 @@ function renderNfeDocumentsTableCard(docs) {
           <tbody>
             ${renderTableRowsOrState({
               key: 'nfeDocs',
-              colSpan: 11,
+              colSpan: 10,
               rowsHtml: docs
                 .map((doc) => {
                   return `<tr>
-                    <td>
-                      <span class="row-title">${escapeHtml(doc.chaveAcesso)}</span>
-                      <span class="row-sub">${escapeHtml(doc.schemaDoc || '-')}</span>
-                    </td>
                     <td>${escapeHtml(doc.numeroNfe || '-')}</td>
                     <td>${escapeHtml(doc.cliente)}</td>
                     <td>${statusBadge(doc.tipo, doc.tipo === 'Emitida' ? 'success' : doc.tipo === 'Recebida' ? 'info' : 'neutral')}</td>
