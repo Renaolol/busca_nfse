@@ -13,7 +13,6 @@ const navItems = [
   { key: 'buscas', label: 'Buscas NFS-e', icon: 'search', route: '/buscas' },
   { key: 'xmls', label: 'XMLs Armazenados', icon: 'file', route: '/xmls' },
   { key: 'buscas-nfe', label: 'Buscas NF-e', icon: 'search', route: '/buscas-nfe' },
-  { key: 'xmls-nfe', label: 'XMLs NF-e', icon: 'file', route: '/xmls-nfe' },
   { key: 'alertas', label: 'Alertas', icon: 'alert', route: '/alertas' },
   { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' }
 ];
@@ -21,7 +20,7 @@ const navItems = [
 const pageMeta = {
   dashboard: {
     title: 'Dashboard',
-    description: 'Visao geral da operacao noturna de busca e armazenamento de NFS-e.'
+    description: 'Visao geral da operacao de busca e armazenamento de NFS-e e NF-e.'
   },
   clientes: {
     title: 'Clientes',
@@ -41,15 +40,15 @@ const pageMeta = {
   },
   xmls: {
     title: 'XMLs Armazenados',
-    description: 'Consulte os arquivos XML de NFS-e salvos no servidor interno.'
+    description: 'Consulte XMLs armazenados de NFS-e e NF-e no servidor interno.'
   },
   'buscas-nfe': {
     title: 'Buscas NF-e',
     description: 'Gerencie a importacao de XMLs de NF-e por cliente e acompanhe os controles de captura.'
   },
   'xmls-nfe': {
-    title: 'XMLs NF-e',
-    description: 'Consulte XMLs completos e resumos de NF-e armazenados no servidor interno.'
+    title: 'XMLs Armazenados',
+    description: 'Consulte XMLs armazenados de NFS-e e NF-e no servidor interno.'
   },
   alertas: {
     title: 'Alertas',
@@ -725,6 +724,11 @@ function onDocumentClick(event) {
       void openNfeDocumentsForClient(clientId);
       return;
     }
+    case 'stored-docs-switch': {
+      const docType = actionNode.getAttribute('data-doc-type');
+      navigate(docType === 'nfe' ? '/xmls-nfe' : '/xmls');
+      return;
+    }
     case 'nfe-sync-pause-control': {
       const clientId = actionNode.getAttribute('data-client-id');
       const ambiente = actionNode.getAttribute('data-ambiente') || 'producao';
@@ -1219,6 +1223,7 @@ function renderDashboardPage() {
   const lastRun = state.searchRuns[0] || null;
   const summaryTone = lastRun?.resumoStatus === 'Erro' ? 'danger' : lastRun?.resumoStatus === 'Aviso' ? 'warning' : 'success';
   const dashboardStats = getDashboardStats();
+  const nfeStats = getNfeDashboardStats();
   const certsExpiring = state.certificates.filter((cert) => cert.status === 'A vencer').length;
   const latestSearchRows = [...state.clients]
     .sort((a, b) => Date.parse(b.ultimaBusca || 0) - Date.parse(a.ultimaBusca || 0))
@@ -1239,8 +1244,10 @@ function renderDashboardPage() {
 
       <section class="stats-grid">
         ${statCard('users', 'Clientes monitorados', String(dashboardStats.totalClients), `${dashboardStats.activeClients} com busca habilitada`, 'neutral')}
-        ${statCard('file', 'NFS-e encontradas', String(dashboardStats.totalNfse), 'total no banco local', 'neutral')}
-        ${statCard('folder', 'XMLs armazenados', String(dashboardStats.storedXmls), 'salvos no servidor interno', 'success')}
+        ${statCard('file', 'NFS-e no banco', String(dashboardStats.totalNfse), 'documentos de servico armazenados', 'neutral')}
+        ${statCard('folder', 'XMLs NFS-e', String(dashboardStats.storedXmls), 'arquivos salvos no servidor interno', 'success')}
+        ${statCard('file', 'NF-e no banco', String(nfeStats.totalNfe), 'documentos de compra e venda armazenados', 'info')}
+        ${statCard('folder', 'XMLs NF-e', String(nfeStats.xmlsCompletos), 'XMLs completos disponiveis no storage', 'info')}
         ${statCard('alert', 'Falhas', String(dashboardStats.clientsWithErrors), 'clientes com erro', 'danger')}
         ${statCard('shield', 'Certificados a vencer', String(certsExpiring), 'nos proximos 30 dias', 'warning')}
       </section>
@@ -1257,7 +1264,7 @@ function renderDashboardPage() {
                   <th>CNPJ</th>
                   <th>Municipio</th>
                   <th>Ultima busca</th>
-                  <th>XMLs</th>
+                  <th>NFS-e</th>
                   <th>Status</th>
                 </tr>
               </thead>
@@ -2392,10 +2399,12 @@ function renderNfeDocumentsPage() {
   return `
     <section class="page-section">
       ${renderPageHeader({
-        title: 'XMLs NF-e',
-        description: 'Consulte XMLs completos e resumos das NF-e de compra e venda armazenados no servidor.',
+        title: 'XMLs Armazenados',
+        description: 'Consulte XMLs armazenados de NFS-e e NF-e no servidor interno.',
         actions: [actionButton('Exportar listagem', 'nfe-export-list', 'secondary')]
       })}
+
+      ${renderStoredDocumentsTypeSwitcher('nfe')}
 
       <article class="card filter-card">
         <h3 class="card-title">Consulta de NF-e</h3>
@@ -2600,6 +2609,25 @@ function renderNfeSortHeader(key, label) {
   `;
 }
 
+function renderStoredDocumentsTypeSwitcher(activeType) {
+  const isNfse = activeType !== 'nfe';
+
+  return `
+    <article class="card" style="padding-bottom:18px;">
+      <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+        <div>
+          <h3 class="card-title">Tipo de documento</h3>
+          <p class="card-subtitle">Selecione o tipo de nota para pesquisar. Os filtros mudam conforme o documento escolhido.</p>
+        </div>
+        <div class="table-actions">
+          <button class="btn ${isNfse ? 'primary' : 'secondary'}" type="button" data-action="stored-docs-switch" data-doc-type="nfse">NFS-e</button>
+          <button class="btn ${isNfse ? 'secondary' : 'primary'}" type="button" data-action="stored-docs-switch" data-doc-type="nfe">NF-e</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
 function renderXmlsPage() {
   const xmls = getFilteredXmls();
   const xmlSearchCanShowTable =
@@ -2611,12 +2639,14 @@ function renderXmlsPage() {
     <section class="page-section">
       ${renderPageHeader({
         title: 'XMLs Armazenados',
-        description: 'Consulte os arquivos XML de NFS-e salvos no servidor interno.',
+        description: 'Consulte XMLs armazenados de NFS-e e NF-e no servidor interno.',
         actions: [actionButton('Exportar listagem', 'xml-export-list', 'secondary')]
       })}
 
+      ${renderStoredDocumentsTypeSwitcher('nfse')}
+
       <article class="card filter-card">
-        <h3 class="card-title">Consulta de XMLs</h3>
+        <h3 class="card-title">Consulta de NFS-e</h3>
         <p class="card-subtitle">Selecione uma empresa. Se nao informar datas, a listagem busca todos os XMLs armazenados desse cliente.</p>
         <form id="xmlsFilterForm" class="form-grid">
           <label class="field">
@@ -3941,6 +3971,9 @@ function resolvePageMeta() {
 function resolveNavKeyByRoute(routeName) {
   if (routeName === 'client-details') {
     return 'clientes';
+  }
+  if (routeName === 'xmls-nfe') {
+    return 'xmls';
   }
   return routeName;
 }
