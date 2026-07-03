@@ -343,6 +343,87 @@ describe('NfseService', () => {
     });
   });
 
+  it('importa XML de NFS-e com nsu nulo para nao colidir com defaults legados do banco', async () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse>
+    <InfNfse>
+      <Numero>267</Numero>
+      <CodigoVerificacao>42110092206960810000176000000000026726041826944060</CodigoVerificacao>
+      <DataEmissao>2026-04-29T16:00:58-03:00</DataEmissao>
+      <PrestadorServico>
+        <IdentificacaoPrestador>
+          <CpfCnpj>
+            <Cnpj>06960810000176</Cnpj>
+          </CpfCnpj>
+        </IdentificacaoPrestador>
+        <RazaoSocial>GCONT GESTAO CONTABIL E EMPRESARIAL LTDA</RazaoSocial>
+      </PrestadorServico>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <Competencia>2026-04-29T00:00:00</Competencia>
+          <Servico>
+            <Valores>
+              <ValorServicos>8890.00</ValorServicos>
+            </Valores>
+            <ItemListaServico>1719</ItemListaServico>
+            <Discriminacao>HONORARIOS</Discriminacao>
+          </Servico>
+          <Tomador>
+            <IdentificacaoTomador>
+              <CpfCnpj>
+                <Cnpj>20714171000190</Cnpj>
+              </CpfCnpj>
+            </IdentificacaoTomador>
+            <RazaoSocial>P2 PRE FABRICADOS LTDA</RazaoSocial>
+          </Tomador>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`;
+
+    prisma.nfseDocumento.findUnique.mockResolvedValue(null);
+    prisma.nfseDocumento.upsert.mockResolvedValue({
+      id: 'doc-267',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: Ambiente.producao,
+      nsu: null,
+      chaveAcesso: '42110092206960810000176000000000026726041826944060',
+      numeroNfse: '267',
+      origem: 'importacao_xml',
+      xmlPath: 'nfse/producao/06960810000176/2026/04/xml/42110092206960810000176000000000026726041826944060.xml',
+      danfsePath: 'nfse/producao/06960810000176/2026/04/danfse/42110092206960810000176000000000026726041826944060.pdf'
+    });
+    storage.putObject.mockResolvedValue('/tmp/nfse-file');
+
+    const result = await service.importXml({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      xml,
+      ambiente: 'producao'
+    });
+
+    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          nsu: null
+        }),
+        create: expect.objectContaining({
+          nsu: null,
+          chaveAcesso: '42110092206960810000176000000000026726041826944060',
+          numeroNfse: '267'
+        })
+      })
+    );
+    expect(result).toMatchObject({
+      id: 'doc-267',
+      chaveAcesso: '42110092206960810000176000000000026726041826944060',
+      tipo: 'nfse'
+    });
+  });
+
   it('importa XML de evento de cancelamento e vincula a NFS-e relacionada', async () => {
     const eventXml = `<?xml version="1.0" encoding="utf-8"?>
 <evento versao="1.01" xmlns="http://www.sped.fazenda.gov.br/nfse">
@@ -435,9 +516,13 @@ describe('NfseService', () => {
           }
         },
         update: expect.objectContaining({
+          nsu: null,
           status: 'cancelada',
           dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
           danfsePath: null
+        }),
+        create: expect.objectContaining({
+          nsu: null
         })
       })
     );

@@ -340,6 +340,7 @@ export class NfseService {
       update: {
         clienteId: dto.clienteId,
         estabelecimentoId: dto.estabelecimentoId,
+        nsu: null,
         numeroNfse: parsed.numeroNfse,
         serie: parsed.serie,
         dataEmissao: parsed.dataEmissao,
@@ -368,6 +369,7 @@ export class NfseService {
         clienteId: dto.clienteId,
         estabelecimentoId: dto.estabelecimentoId,
         ambiente,
+        nsu: null,
         chaveAcesso: parsed.chaveAcesso,
         numeroNfse: parsed.numeroNfse,
         serie: parsed.serie,
@@ -424,12 +426,14 @@ export class NfseService {
       update: {
         clienteId: params.clienteId,
         estabelecimentoId: params.estabelecimentoId,
+        nsu: null,
         ...cancelamentoData
       },
       create: {
         clienteId: params.clienteId,
         estabelecimentoId: params.estabelecimentoId,
         ambiente: params.ambiente,
+        nsu: null,
         chaveAcesso: params.evento.chaveAcesso,
         ...cancelamentoData,
         origem: params.origem
