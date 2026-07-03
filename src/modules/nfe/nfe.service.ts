@@ -49,7 +49,7 @@ type NfeSyncSourceMode = 'distribuicao' | 'dominio';
 
 type NfeSyncRunFailureDetail = {
   kind: 'documento' | 'controle';
-  status: 'persistido' | 'ignorado_sem_vinculo' | 'falha';
+  status: 'persistido' | 'ignorado_sem_vinculo' | 'ignorado_xml_nao_fiscal' | 'falha';
   clientId: string;
   estabelecimentoId: string;
   ambiente: NfeAmbiente;
@@ -739,7 +739,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       serie?: string;
       modelo?: string;
       cnpjEmpresa: string;
-      status: 'persistido' | 'ignorado_sem_vinculo' | 'falha';
+      status: 'persistido' | 'ignorado_sem_vinculo' | 'ignorado_xml_nao_fiscal' | 'falha';
       mensagem: string;
     }> = [];
 
@@ -749,6 +749,23 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       const establishment = cnpjEmpresa ? establishmentByCnpj.get(cnpjEmpresa) : undefined;
       const xml = this.decodeXml(document.xmlBase64);
       const inspectedXml = this.parser.inspect(xml);
+
+      if (this.isIgnorableDominioXml(xml)) {
+        if (params.sortDirection === 'asc' && !travarCursor) {
+          cursorAtualizadoAte = document.catalogoId;
+        }
+        detalhes.push({
+          catalogoId: document.catalogoId,
+          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso),
+          numeroNfe: inspectedXml.numeroNfe,
+          serie: inspectedXml.serie,
+          modelo: inspectedXml.modelo,
+          cnpjEmpresa: cnpjEmpresa ?? '',
+          status: 'ignorado_xml_nao_fiscal',
+          mensagem: 'XML da Dominio ignorado por se tratar de baixa financeira, sem documento fiscal para importar'
+        });
+        continue;
+      }
 
       if (!establishment) {
         ignoradosSemVinculo += 1;
@@ -894,6 +911,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       /<(?:\w+:)?NFSe\b/i.test(xml) ||
       /abrasf\.org\.br\/nfse/i.test(xml)
     );
+  }
+
+  private isIgnorableDominioXml(xml: string): boolean {
+    return /<(?:\w+:)?Baixas\b/i.test(xml) || /<(?:\w+:)?infBaixas\b/i.test(xml);
   }
 
   private async prepareDominioControls(params: {

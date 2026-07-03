@@ -312,6 +312,42 @@ describe('NfeService', () => {
     );
   });
 
+  it('ignora XML de baixa financeira da Dominio sem contar como falha nem tentar importar', async () => {
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 521572,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: undefined,
+        dataEmissao: '2026-05-04',
+        xmlBase64: Buffer.from(
+          `<Baixas><infBaixas versao="1.00"><parcela><cnpj>08560957000102</cnpj><tipo>1</tipo><especie>55</especie><serie>2</serie><numero>959</numero><datavencimento>2026-05-03</datavencimento><datapagamento>2026-05-04</datapagamento><valorrecebido>64.47</valorrecebido><fornecedor>59358635000108</fornecedor><historico>PAG. DUPLICATA COMAND MAC IMPORTS LTDA 959</historico><titulo>959-1</titulo></parcela></infBaixas></Baixas>`,
+          'utf8'
+        ).toString('base64')
+      }
+    ]);
+
+    const result = await service.importFromDominio({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
+    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(nfseService.importXml).not.toHaveBeenCalled();
+    expect(result.xmlsPersistidos).toBe(0);
+    expect(result.falhas).toBe(0);
+    expect(result.detalhes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          catalogoId: 521572,
+          status: 'ignorado_xml_nao_fiscal',
+          mensagem: 'XML da Dominio ignorado por se tratar de baixa financeira, sem documento fiscal para importar'
+        })
+      ])
+    );
+  });
+
   it('inicia controles de sync reaproveitando certificados', async () => {
     const result = await service.iniciarSync({
       clienteId: 'cliente-1',

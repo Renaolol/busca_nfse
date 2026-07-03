@@ -2285,7 +2285,10 @@ function renderNfeLastRunPanel() {
                     .map((row) => {
                       const client = findClientById(row.clientId);
                       const establishment = findEstablishmentById(row.estabelecimentoId);
-                      const canHandleXml = row.kind === 'documento' && Number(row.catalogoId) > 0;
+                      const canHandleXml =
+                        row.kind === 'documento' &&
+                        Number(row.catalogoId) > 0 &&
+                        row.status !== 'ignorado_xml_nao_fiscal';
                       return `<tr>
                         <td>${escapeHtml(client?.razaoSocial || row.clientId || '-')}</td>
                         <td>${escapeHtml(
@@ -4939,6 +4942,8 @@ function mapNfeRunItemStatusLabel(status) {
       return 'Importado';
     case 'ignorado_sem_vinculo':
       return 'Sem vinculo';
+    case 'ignorado_xml_nao_fiscal':
+      return 'Ignorado';
     case 'falha':
       return 'Falha';
     default:
@@ -4952,6 +4957,8 @@ function toneFromNfeRunItemStatus(status) {
       return 'success';
     case 'ignorado_sem_vinculo':
       return 'warning';
+    case 'ignorado_xml_nao_fiscal':
+      return 'neutral';
     case 'falha':
       return 'danger';
     default:
@@ -5003,7 +5010,9 @@ function getLastRunDocumentItems() {
       ? report.failureDetails
       : [];
 
-  return rows.filter((row) => row?.kind === 'documento' && Number(row.catalogoId) > 0);
+  return rows.filter(
+    (row) => row?.kind === 'documento' && Number(row.catalogoId) > 0 && row.status !== 'ignorado_xml_nao_fiscal'
+  );
 }
 
 async function importAllDominioNfeLastRunItems() {
