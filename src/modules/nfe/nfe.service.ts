@@ -12,6 +12,7 @@ import { dirname } from 'node:path';
 import { DOMINIO_NFE_XML_SOURCE, DominioNfeXmlSource } from '../../integrations/dominio-nfe/dominio-nfe.types';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NfseService } from '../nfse/nfse.service';
 import {
   NFE_DISTRIBUICAO_CLIENT,
   NfeDistribuicaoClient,
@@ -98,6 +99,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly prisma: PrismaService,
     private readonly parser: NfeXmlParserService,
+    private readonly nfseService: NfseService,
     private readonly storage: LocalStorageService,
     @Inject(NFE_DISTRIBUICAO_CLIENT) private readonly distribuicaoClient: NfeDistribuicaoClient,
     @Inject(DOMINIO_NFE_XML_SOURCE) private readonly dominioXmlSource: DominioNfeXmlSource
@@ -767,18 +769,26 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       }
 
       try {
-        await this.persistDocument({
+        const routedToNfse = await this.tryImportDominioAsNfse({
           clienteId: params.clienteId,
           estabelecimentoId: establishment.id,
           ambiente: params.ambiente,
-          cnpjConsulta: establishment.cnpj,
-          document: {
-            schema: 'dominio_xml',
-            xml,
-            chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso)
-          },
-          origem: NfeDocumentoOrigem.importacao_xml
+          xml
         });
+        if (!routedToNfse) {
+          await this.persistDocument({
+            clienteId: params.clienteId,
+            estabelecimentoId: establishment.id,
+            ambiente: params.ambiente,
+            cnpjConsulta: establishment.cnpj,
+            document: {
+              schema: 'dominio_xml',
+              xml,
+              chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso)
+            },
+            origem: NfeDocumentoOrigem.importacao_xml
+          });
+        }
         xmlsPersistidos += 1;
         if (params.sortDirection === 'asc' && !travarCursor) {
           cursorAtualizadoAte = document.catalogoId;
@@ -791,7 +801,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           modelo: inspectedXml.modelo,
           cnpjEmpresa: cnpjEmpresa ?? '',
           status: 'persistido',
-          mensagem: 'XML importado com sucesso'
+          mensagem: routedToNfse
+            ? 'XML da Dominio identificado como NFS-e e importado com sucesso no armazenamento de servicos'
+            : 'XML importado com sucesso'
         });
       } catch (error) {
         falhas += 1;
@@ -853,6 +865,35 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       catalogoIdMinExclusive: params.catalogoIdMinExclusive,
       sortDirection: params.sortDirection
     });
+  }
+
+  private async tryImportDominioAsNfse(params: {
+    clienteId: string;
+    estabelecimentoId: string;
+    ambiente: NfeAmbiente;
+    xml: string;
+  }): Promise<boolean> {
+    if (!this.looksLikeNfseXml(params.xml)) {
+      return false;
+    }
+
+    await this.nfseService.importXml({
+      clienteId: params.clienteId,
+      estabelecimentoId: params.estabelecimentoId,
+      xml: params.xml,
+      ambiente: params.ambiente === NfeAmbiente.homologacao ? 'producao_restrita' : 'producao'
+    });
+
+    return true;
+  }
+
+  private looksLikeNfseXml(xml: string): boolean {
+    return (
+      /<(?:\w+:)?CompNfse\b/i.test(xml) ||
+      /<(?:\w+:)?Nfse\b/i.test(xml) ||
+      /<(?:\w+:)?NFSe\b/i.test(xml) ||
+      /abrasf\.org\.br\/nfse/i.test(xml)
+    );
   }
 
   private async prepareDominioControls(params: {

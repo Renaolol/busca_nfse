@@ -3,6 +3,7 @@ import { DominioNfeXmlSource } from '../../../integrations/dominio-nfe/dominio-n
 import { PrismaService } from '../../../prisma/prisma.service';
 import { NfeDistribuicaoClient } from '../../../integrations/nfe-distribuicao/nfe-distribuicao.types';
 import { LocalStorageService } from '../../storage/storage.service';
+import type { NfseService as NfseModuleService } from '../../nfse/nfse.service';
 import { NfeService } from '../nfe.service';
 import { NfeXmlParserService } from '../nfe-xml-parser.service';
 
@@ -41,6 +42,10 @@ describe('NfeService', () => {
     putObject: jest.fn()
   };
 
+  const nfseService = {
+    importXml: jest.fn()
+  };
+
   const distribuicaoClient: NfeDistribuicaoClient = {
     distribuirPorNsu: jest.fn(),
     consultarPorNsu: jest.fn(),
@@ -54,6 +59,7 @@ describe('NfeService', () => {
   const service = new NfeService(
     prisma as unknown as PrismaService,
     new NfeXmlParserService(),
+    nfseService as unknown as NfseModuleService,
     storage as unknown as LocalStorageService,
     distribuicaoClient,
     dominioXmlSource
@@ -94,6 +100,14 @@ describe('NfeService', () => {
     prisma.nfeSyncControle.upsert.mockResolvedValue({});
     prisma.nfeSyncControle.updateMany.mockResolvedValue({ count: 1 });
     prisma.nfeSyncControle.update.mockResolvedValue({});
+    nfseService.importXml.mockResolvedValue({
+      id: 'nfse-1',
+      chaveAcesso: '42167012244454248000106000000000002924081114719252',
+      tipo: 'nfse',
+      origem: 'importacao_xml',
+      xmlPath: 'nfse/producao/123/2026/06/xml/a.xml',
+      danfsePath: 'nfse/producao/123/2026/06/danfse/a.pdf'
+    });
     storage.putObject.mockResolvedValue(undefined);
     (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([]);
   });
@@ -225,6 +239,77 @@ describe('NfeService', () => {
     expect(result.xmlsEncontrados).toBe(1);
     expect(result.xmlsPersistidos).toBe(1);
     expect(result.falhas).toBe(0);
+  });
+
+  it('redireciona XML ABRASF da Dominio para o armazenamento de NFS-e sem passar pelo pipeline de NF-e', async () => {
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 528449,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: undefined,
+        dataEmissao: '2024-04-12',
+        xmlBase64: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse>
+    <InfNfse>
+      <Numero>554172</Numero>
+      <CodigoVerificacao>42024041210792305000137000000055417226051211387771</CodigoVerificacao>
+      <DataEmissao>2024-04-12T10:10:08</DataEmissao>
+      <PrestadorServico>
+        <IdentificacaoPrestador>
+          <Cnpj>12345678000199</Cnpj>
+        </IdentificacaoPrestador>
+        <RazaoSocial>Prestador Teste</RazaoSocial>
+      </PrestadorServico>
+      <TomadorServico>
+        <IdentificacaoTomador>
+          <CpfCnpj>
+            <Cnpj>99887766000155</Cnpj>
+          </CpfCnpj>
+        </IdentificacaoTomador>
+        <RazaoSocial>Tomador Teste</RazaoSocial>
+      </TomadorServico>
+      <Servico>
+        <Valores>
+          <ValorServicos>250.00</ValorServicos>
+          <ValorIss>5.00</ValorIss>
+          <Aliquota>0.0200</Aliquota>
+        </Valores>
+        <Discriminacao>Servico de entrada antigo</Discriminacao>
+      </Servico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`,
+          'utf8'
+        ).toString('base64')
+      }
+    ]);
+
+    const result = await service.importFromDominio({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(nfseService.importXml).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      xml: expect.stringContaining('<CompNfse'),
+      ambiente: 'producao'
+    });
+    expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
+    expect(result.xmlsPersistidos).toBe(1);
+    expect(result.falhas).toBe(0);
+    expect(result.detalhes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          catalogoId: 528449,
+          status: 'persistido',
+          mensagem: 'XML da Dominio identificado como NFS-e e importado com sucesso no armazenamento de servicos'
+        })
+      ])
+    );
   });
 
   it('inicia controles de sync reaproveitando certificados', async () => {
