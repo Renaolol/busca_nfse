@@ -40,6 +40,36 @@ describe('NfseService', () => {
     jest.clearAllMocks();
   });
 
+  it('pagina a listagem de NFS-e armazenadas', async () => {
+    prisma.nfseDocumento.count.mockResolvedValueOnce(245);
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      page: 3,
+      pageSize: 100
+    });
+
+    expect(prisma.nfseDocumento.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        AND: expect.arrayContaining([{ clienteId: 'cliente-1' }])
+      })
+    });
+    expect(prisma.nfseDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 200,
+        take: 100
+      })
+    );
+    expect(result).toEqual({
+      items: [],
+      total: 245,
+      page: 3,
+      pageSize: 100,
+      totalPages: 3
+    });
+  });
+
   it('retorna estatisticas agregadas do dashboard por cliente', async () => {
     prisma.nfseDocumento.count.mockResolvedValueOnce(512).mockResolvedValueOnce(492);
     prisma.nfseDocumento.groupBy

@@ -317,6 +317,7 @@ Observacoes:
 - O frontend agora expõe um menu dedicado `XMLs CT-e`, paralelo a `XMLs NFS-e` e `XMLs NF-e`, com filtros, visualizacao do XML e download por cliente.
 - `GET /nfe` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, periodo, status e `somenteXmlCompleto`.
 - `GET /cte` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, numero, chave, ambiente, periodo, status e `somenteXmlCompleto`.
+- `GET /nfse`, `GET /nfe` e `GET /cte` agora sao paginados. Aceitam `page` e `pageSize` (padrao `100`, maximo `200`) e retornam `{ items, total, page, pageSize, totalPages }`.
 - Quando `NFE_DISTRIBUICAO_CLIENT_MODE=real`, o sistema consulta `distNSU`, `consNSU` e `consChNFe`, descompacta `docZip` e armazena resumos `resNFe` e XMLs completos retornados pelo Ambiente Nacional.
 
 ## Guia de layout do DANFSE

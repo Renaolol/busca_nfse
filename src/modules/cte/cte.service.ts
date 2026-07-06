@@ -18,6 +18,7 @@ export class CteService {
     const where = this.buildBaseWhere(query);
     const cnpjConsulta = this.normalizeCnpj(query.cnpjConsulta);
     const andConditions = this.getAndConditions(where);
+    const { page, pageSize, skip } = this.resolvePagination(query);
 
     if (cnpjConsulta) {
       const tipoRelacao = query.tipoRelacao ?? 'ambas';
@@ -33,13 +34,25 @@ export class CteService {
       }
     }
 
-    const documents = await this.prisma.nfeDocumento.findMany({
-      where,
-      orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
-      take: 500
-    });
+    const [total, documents] = await Promise.all([
+      this.prisma.nfeDocumento.count({ where }),
+      this.prisma.nfeDocumento.findMany({
+        where,
+        orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
+        skip,
+        take: pageSize
+      })
+    ]);
 
-    return Promise.all(documents.map((document) => this.enrichDocument(document)));
+    const items = await Promise.all(documents.map((document) => this.enrichDocument(document)));
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize))
+    };
   }
 
   async getDashboardStats(query: DashboardCteStatsQueryDto) {
@@ -148,6 +161,13 @@ export class CteService {
       andConditions.push({ cnpjDestinatario });
     }
 
+    const cnpj = this.normalizeCnpj(query.cnpj);
+    if (cnpj) {
+      andConditions.push({
+        OR: [{ cnpjEmitente: cnpj }, { cnpjDestinatario: cnpj }]
+      });
+    }
+
     if (query.status) {
       andConditions.push({ status: query.status });
     }
@@ -196,6 +216,10 @@ export class CteService {
 
     if (query.somenteXmlCompleto) {
       andConditions.push({ xmlCompletoDisponivel: true });
+    }
+
+    if (query.somenteResumos) {
+      andConditions.push({ xmlCompletoDisponivel: false });
     }
 
     return where;
@@ -295,5 +319,15 @@ export class CteService {
 
     const digits = value.replace(/\D/g, '');
     return digits || undefined;
+  }
+
+  private resolvePagination(query: QueryCteDto): { page: number; pageSize: number; skip: number } {
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = Math.max(1, Math.min(200, query.pageSize ?? 100));
+    return {
+      page,
+      pageSize,
+      skip: (page - 1) * pageSize
+    };
   }
 }

@@ -417,24 +417,40 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   async findAll(query: QueryNfeDto) {
     const where = this.buildBaseWhere(query);
     const cnpjConsulta = this.normalizeCnpj(query.cnpjConsulta);
+    const andConditions = this.getAndConditions(where);
+    const { page, pageSize, skip } = this.resolvePagination(query);
 
     if (cnpjConsulta) {
       const tipoRelacao = query.tipoRelacao ?? 'ambas';
 
       if (tipoRelacao === 'emitidas') {
-        where.cnpjEmitente = cnpjConsulta;
+        andConditions.push({ cnpjEmitente: cnpjConsulta });
       } else if (tipoRelacao === 'recebidas') {
-        where.cnpjDestinatario = cnpjConsulta;
+        andConditions.push({ cnpjDestinatario: cnpjConsulta });
       } else {
-        where.OR = [{ cnpjEmitente: cnpjConsulta }, { cnpjDestinatario: cnpjConsulta }];
+        andConditions.push({
+          OR: [{ cnpjEmitente: cnpjConsulta }, { cnpjDestinatario: cnpjConsulta }]
+        });
       }
     }
 
-    return this.prisma.nfeDocumento.findMany({
-      where,
-      orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
-      take: 500
-    });
+    const [total, items] = await Promise.all([
+      this.prisma.nfeDocumento.count({ where }),
+      this.prisma.nfeDocumento.findMany({
+        where,
+        orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
+        skip,
+        take: pageSize
+      })
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize))
+    };
   }
 
   async getDashboardStats(query: DashboardNfeStatsQueryDto) {
@@ -1574,50 +1590,111 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   private buildBaseWhere(query: QueryNfeDto): Prisma.NfeDocumentoWhereInput {
     const where: Prisma.NfeDocumentoWhereInput = {
-      NOT: this.getCteSchemaDocFilters()
+      NOT: this.getCteSchemaDocFilters(),
+      AND: []
     };
+    const andConditions = this.getAndConditions(where);
 
     if (query.clienteId) {
-      where.clienteId = query.clienteId;
+      andConditions.push({ clienteId: query.clienteId });
     }
 
     const cnpjEmitente = this.normalizeCnpj(query.cnpjEmitente);
     if (cnpjEmitente) {
-      where.cnpjEmitente = cnpjEmitente;
+      andConditions.push({ cnpjEmitente });
     }
 
     const cnpjDestinatario = this.normalizeCnpj(query.cnpjDestinatario);
     if (cnpjDestinatario) {
-      where.cnpjDestinatario = cnpjDestinatario;
+      andConditions.push({ cnpjDestinatario });
+    }
+
+    const cnpj = this.normalizeCnpj(query.cnpj);
+    if (cnpj) {
+      andConditions.push({
+        OR: [{ cnpjEmitente: cnpj }, { cnpjDestinatario: cnpj }]
+      });
     }
 
     if (query.status) {
-      where.status = query.status;
+      andConditions.push({ status: query.status });
     }
 
     if (query.schemaDoc) {
-      where.schemaDoc = query.schemaDoc;
+      andConditions.push({ schemaDoc: query.schemaDoc });
+    }
+
+    if (query.numeroNfe) {
+      andConditions.push({
+        numeroNfe: {
+          contains: query.numeroNfe
+        }
+      });
+    }
+
+    if (query.chaveAcesso) {
+      andConditions.push({
+        chaveAcesso: {
+          contains: query.chaveAcesso
+        }
+      });
+    }
+
+    if (query.ambiente) {
+      andConditions.push({ ambiente: query.ambiente });
     }
 
     if (query.dataInicio || query.dataFim) {
-      where.dataEmissao = {
-        gte: query.dataInicio ? new Date(query.dataInicio) : undefined,
-        lte: query.dataFim ? new Date(query.dataFim) : undefined
-      };
+      andConditions.push({
+        dataEmissao: {
+          gte: query.dataInicio ? new Date(query.dataInicio) : undefined,
+          lte: query.dataFim ? new Date(query.dataFim) : undefined
+        }
+      });
     }
 
     if (query.valorMin !== undefined || query.valorMax !== undefined) {
-      where.valorTotal = {
-        gte: query.valorMin,
-        lte: query.valorMax
-      };
+      andConditions.push({
+        valorTotal: {
+          gte: query.valorMin,
+          lte: query.valorMax
+        }
+      });
     }
 
     if (query.somenteXmlCompleto) {
-      where.xmlCompletoDisponivel = true;
+      andConditions.push({ xmlCompletoDisponivel: true });
+    }
+
+    if (query.somenteResumos) {
+      andConditions.push({ xmlCompletoDisponivel: false });
     }
 
     return where;
+  }
+
+  private getAndConditions(where: Prisma.NfeDocumentoWhereInput): Prisma.NfeDocumentoWhereInput[] {
+    if (Array.isArray(where.AND)) {
+      return where.AND;
+    }
+
+    if (where.AND) {
+      return [where.AND];
+    }
+
+    const andConditions: Prisma.NfeDocumentoWhereInput[] = [];
+    where.AND = andConditions;
+    return andConditions;
+  }
+
+  private resolvePagination(query: QueryNfeDto): { page: number; pageSize: number; skip: number } {
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = Math.max(1, Math.min(200, query.pageSize ?? 100));
+    return {
+      page,
+      pageSize,
+      skip: (page - 1) * pageSize
+    };
   }
 
   private getCteSchemaDocFilters(): Prisma.NfeDocumentoWhereInput[] {

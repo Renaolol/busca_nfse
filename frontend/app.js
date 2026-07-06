@@ -3,6 +3,7 @@ const modalRoot = document.getElementById('modalRoot');
 const drawerRoot = document.getElementById('drawerRoot');
 const toastRoot = document.getElementById('toastRoot');
 const API_TIMEOUT_MS = 20000;
+const SEARCH_PAGE_SIZE = 100;
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
 
@@ -115,20 +116,32 @@ const state = {
     hasSearched: false,
     results: [],
     lastQuery: null,
-    lastSearchedAt: null
+    lastSearchedAt: null,
+    page: 1,
+    pageSize: SEARCH_PAGE_SIZE,
+    total: 0,
+    totalPages: 0
   },
   cteSearch: {
     hasSearched: false,
     results: [],
     lastQuery: null,
-    lastSearchedAt: null
+    lastSearchedAt: null,
+    page: 1,
+    pageSize: SEARCH_PAGE_SIZE,
+    total: 0,
+    totalPages: 0
   },
   xmlFiles: [],
   xmlSearch: {
     hasSearched: false,
     results: [],
     lastQuery: null,
-    lastSearchedAt: null
+    lastSearchedAt: null,
+    page: 1,
+    pageSize: SEARCH_PAGE_SIZE,
+    total: 0,
+    totalPages: 0
   },
   alerts: [],
   resolvedAlerts: loadResolvedAlertsStore(),
@@ -340,26 +353,30 @@ async function hydrateFromApi() {
     apiRequest('/nfe/dashboard-stats').catch(() => null),
     apiRequest('/cte/dashboard-stats').catch(() => null),
     apiRequest('/nfe/sync/scheduler-status').catch(() => null),
-    apiRequest('/nfse').catch(() => []),
-    apiRequest('/nfe').catch(() => []),
-    apiRequest('/cte').catch(() => []),
+    apiRequest(`/nfse?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
+    apiRequest(`/nfe?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
+    apiRequest(`/cte?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
     apiRequest('/auditoria').catch(() => []),
     apiRequest('/sync/scheduler-status').catch(() => null)
   ]);
+
+  const nfseDocsPage = normalizePaginatedResponse(nfseDocs);
+  const nfeDocsPage = normalizePaginatedResponse(nfeDocs);
+  const cteDocsPage = normalizePaginatedResponse(cteDocs);
 
   const clients = buildClientsFromApi(
     apiClients,
     establishmentsByClient,
     certificatesByClient,
     syncByClient,
-    nfseDocs,
+    nfseDocsPage.items,
     dashboardStats
   );
   const certificates = buildCertificatesFromApi(apiClients, certificatesByClient, allCertificatesRaw);
-  const xmlFiles = buildXmlFilesFromApi(nfseDocs, clients);
+  const xmlFiles = buildXmlFilesFromApi(nfseDocsPage.items, clients);
   const searchRuns = buildSearchRunsFromApi(syncByClient, clients);
-  const nfeDocuments = buildNfeDocumentsFromApi(nfeDocs, clients);
-  const cteDocuments = buildCteDocumentsFromApi(cteDocs, clients);
+  const nfeDocuments = buildNfeDocumentsFromApi(nfeDocsPage.items, clients);
+  const cteDocuments = buildCteDocumentsFromApi(cteDocsPage.items, clients);
   const nfeSyncControls = buildNfeSyncControlsFromApi(nfeSyncByClient, clients, establishmentsByClient);
   const alerts = buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, auditRows);
 
@@ -778,6 +795,15 @@ function onDocumentClick(event) {
     case 'search-type-switch': {
       const searchType = actionNode.getAttribute('data-search-type');
       navigate(searchType === 'nfe' ? '/buscas-nfe' : '/buscas');
+      return;
+    }
+    case 'search-pagination': {
+      const searchKind = actionNode.getAttribute('data-search-kind');
+      const page = Number(actionNode.getAttribute('data-page') || '1');
+      if (!searchKind || !Number.isFinite(page) || page < 1) {
+        return;
+      }
+      void changeStoredDocumentsPage(searchKind, page);
       return;
     }
     case 'nfe-sync-pause-control': {
@@ -2639,6 +2665,7 @@ function renderNfeSearchSummary() {
 
   const client = findClientById(query.cliente);
   const filteredDocs = getFilteredNfeDocuments();
+  const totalResults = Number(state.nfeSearch.total || filteredDocs.length || 0);
   const totalValue = sumListedDocumentValues(filteredDocs);
   const periodText =
     query.emissaoInicio || query.emissaoFim
@@ -2650,7 +2677,8 @@ function renderNfeSearchSummary() {
         <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
         <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
         <span>Tipo: <strong>${escapeHtml(query.tipo || 'Todos')}</strong></span>
-        <span>Resultado: <strong>${escapeHtml(String(filteredDocs.length))} NF-e</strong></span>
+        <span>Resultado: <strong>${escapeHtml(String(totalResults))} NF-e</strong></span>
+        <span>Pagina: <strong>${escapeHtml(`${state.nfeSearch.page}/${Math.max(1, state.nfeSearch.totalPages || 1)}`)}</strong></span>
         <span>Valor somado: <strong>${escapeHtml(formatCurrency(totalValue))}</strong></span>
         <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.nfeSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
       </div>
@@ -2660,13 +2688,14 @@ function renderNfeSearchSummary() {
 
 function renderNfeDocumentsTableCard(docs) {
   const totalValue = sumListedDocumentValues(docs);
+  const totalResults = Number(state.nfeSearch.total || docs.length || 0);
 
   return `
     <article class="card">
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">NF-e encontradas</h3>
-          <p class="card-subtitle">${escapeHtml(String(docs.length))} documento(s) na listagem. Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(totalResults))} documento(s). Valor total da pagina: ${escapeHtml(formatCurrency(totalValue))}.</p>
         </div>
       </div>
       <div class="table-wrap">
@@ -2719,6 +2748,7 @@ function renderNfeDocumentsTableCard(docs) {
           </tbody>
         </table>
       </div>
+      ${renderStoredDocumentsPagination('nfeDocs', state.nfeSearch)}
     </article>
   `;
 }
@@ -2854,6 +2884,7 @@ function renderCteSearchSummary() {
 
   const client = findClientById(query.cliente);
   const filteredDocs = getFilteredCteDocuments();
+  const totalResults = Number(state.cteSearch.total || filteredDocs.length || 0);
   const totalValue = sumListedDocumentValues(filteredDocs);
   const periodText =
     query.emissaoInicio || query.emissaoFim
@@ -2865,7 +2896,8 @@ function renderCteSearchSummary() {
         <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
         <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
         <span>Tipo: <strong>${escapeHtml(query.tipo || 'Todos')}</strong></span>
-        <span>Resultado: <strong>${escapeHtml(String(filteredDocs.length))} CT-e</strong></span>
+        <span>Resultado: <strong>${escapeHtml(String(totalResults))} CT-e</strong></span>
+        <span>Pagina: <strong>${escapeHtml(`${state.cteSearch.page}/${Math.max(1, state.cteSearch.totalPages || 1)}`)}</strong></span>
         <span>Valor somado: <strong>${escapeHtml(formatCurrency(totalValue))}</strong></span>
         <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.cteSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
       </div>
@@ -2875,13 +2907,14 @@ function renderCteSearchSummary() {
 
 function renderCteDocumentsTableCard(docs) {
   const totalValue = sumListedDocumentValues(docs);
+  const totalResults = Number(state.cteSearch.total || docs.length || 0);
 
   return `
     <article class="card">
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">CT-e encontrados</h3>
-          <p class="card-subtitle">${escapeHtml(String(docs.length))} documento(s) na listagem. Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(totalResults))} documento(s). Valor total da pagina: ${escapeHtml(formatCurrency(totalValue))}.</p>
         </div>
       </div>
       <div class="table-wrap">
@@ -2934,7 +2967,30 @@ function renderCteDocumentsTableCard(docs) {
           </tbody>
         </table>
       </div>
+      ${renderStoredDocumentsPagination('cteDocs', state.cteSearch)}
     </article>
+  `;
+}
+
+function renderStoredDocumentsPagination(searchKind, searchState) {
+  const currentPage = Math.max(1, Number(searchState?.page || 1));
+  const totalPages = Math.max(1, Number(searchState?.totalPages || 1));
+  const total = Number(searchState?.total || 0);
+
+  if (!total || totalPages <= 1) {
+    return '';
+  }
+
+  return `
+    <div class="xml-batch-bar" style="padding-top:16px; border-top:1px solid #ececf2; margin-top:16px;">
+      <div>
+        <p class="card-subtitle" style="margin:0;">Pagina ${escapeHtml(String(currentPage))} de ${escapeHtml(String(totalPages))}. Total encontrado: ${escapeHtml(String(total))}.</p>
+      </div>
+      <div class="table-actions">
+        <button class="btn secondary" type="button" data-action="search-pagination" data-search-kind="${escapeHtml(searchKind)}" data-page="${escapeHtml(String(currentPage - 1))}" ${currentPage <= 1 ? 'disabled' : ''}>Pagina anterior</button>
+        <button class="btn secondary" type="button" data-action="search-pagination" data-search-kind="${escapeHtml(searchKind)}" data-page="${escapeHtml(String(currentPage + 1))}" ${currentPage >= totalPages ? 'disabled' : ''}>Proxima pagina</button>
+      </div>
+    </div>
   `;
 }
 
@@ -3097,6 +3153,7 @@ function renderXmlSearchSummary() {
 
   const client = findClientById(query.cliente);
   const filteredXmls = getFilteredXmls();
+  const totalResults = Number(state.xmlSearch.total || filteredXmls.length || 0);
   const totalValue = sumListedDocumentValues(filteredXmls);
   const periodText =
     query.emissaoInicio || query.emissaoFim
@@ -3107,7 +3164,8 @@ function renderXmlSearchSummary() {
       <div class="progress-meta">
         <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
         <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
-        <span>Resultado: <strong>${escapeHtml(String(filteredXmls.length))} XML(s)</strong></span>
+        <span>Resultado: <strong>${escapeHtml(String(totalResults))} XML(s)</strong></span>
+        <span>Pagina: <strong>${escapeHtml(`${state.xmlSearch.page}/${Math.max(1, state.xmlSearch.totalPages || 1)}`)}</strong></span>
         <span>Valor somado: <strong>${escapeHtml(formatCurrency(totalValue))}</strong></span>
         <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.xmlSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
       </div>
@@ -3121,13 +3179,14 @@ function renderXmlsTableCard(xmls) {
   const allVisibleSelected = selectableXmls.length > 0 && selectedVisibleCount === selectableXmls.length;
   const batchDisabled = selectedVisibleCount > 0 ? '' : 'disabled';
   const totalValue = sumListedDocumentValues(xmls);
+  const totalResults = Number(state.xmlSearch.total || xmls.length || 0);
 
   return `
     <article class="card">
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">Arquivos encontrados</h3>
-          <p class="card-subtitle">${selectedVisibleCount} selecionado(s) nesta listagem. Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(xmls.length))} de ${escapeHtml(String(totalResults))} XML(s). ${selectedVisibleCount} selecionado(s) nesta pagina. Valor total da pagina: ${escapeHtml(formatCurrency(totalValue))}.</p>
         </div>
         <div class="table-actions">
           <button class="btn secondary" type="button" data-action="xmls-batch-download" data-tipo-arquivo="xml" ${batchDisabled}>Baixar XMLs</button>
@@ -3187,6 +3246,7 @@ function renderXmlsTableCard(xmls) {
           </tbody>
         </table>
       </div>
+      ${renderStoredDocumentsPagination('xmls', state.xmlSearch)}
     </article>
   `;
 }
@@ -5822,7 +5882,7 @@ async function runPastNsuRecovery(clientId = null) {
   }
 }
 
-async function executeNfeDocsSearch() {
+async function executeNfeDocsSearch(page = 1) {
   if (!state.filters.nfeDocs.cliente) {
     resetNfeDocsSearch();
     pushToast('Selecione uma empresa para buscar NF-e.', 'error');
@@ -5844,19 +5904,27 @@ async function executeNfeDocsSearch() {
   state.nfeSearch.hasSearched = true;
   state.nfeSearch.results = [];
   state.nfeSearch.lastQuery = { ...state.filters.nfeDocs };
+  state.nfeSearch.page = page;
+  state.nfeSearch.pageSize = SEARCH_PAGE_SIZE;
   state.tableState.nfeDocs = 'loading';
   render();
 
   try {
-    const query = buildNfeSearchQuery(state.filters.nfeDocs);
-    const docs = await apiRequest(`/nfe?${query.toString()}`);
-    const mapped = buildNfeDocumentsFromApi(Array.isArray(docs) ? docs : [], state.clients);
+    const query = buildNfeSearchQuery(state.filters.nfeDocs, page, SEARCH_PAGE_SIZE);
+    const payload = normalizePaginatedResponse(await apiRequest(`/nfe?${query.toString()}`));
+    const mapped = buildNfeDocumentsFromApi(payload.items, state.clients);
     state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mapped);
     state.nfeSearch.results = getFilteredNfeDocumentsFromSource(mapped);
     state.nfeSearch.lastSearchedAt = new Date().toISOString();
+    state.nfeSearch.total = payload.total;
+    state.nfeSearch.totalPages = payload.totalPages;
+    state.nfeSearch.page = payload.page;
+    state.nfeSearch.pageSize = payload.pageSize;
     state.tableState.nfeDocs = 'data';
   } catch (error) {
     state.nfeSearch.results = [];
+    state.nfeSearch.total = 0;
+    state.nfeSearch.totalPages = 0;
     state.tableState.nfeDocs = 'error';
     pushToast(`Falha ao buscar NF-e: ${toErrorMessage(error)}`, 'error');
   }
@@ -5864,7 +5932,7 @@ async function executeNfeDocsSearch() {
   render();
 }
 
-async function executeCteDocsSearch() {
+async function executeCteDocsSearch(page = 1) {
   if (!state.filters.cteDocs.cliente) {
     resetCteDocsSearch();
     pushToast('Selecione uma empresa para buscar CT-e.', 'error');
@@ -5886,19 +5954,27 @@ async function executeCteDocsSearch() {
   state.cteSearch.hasSearched = true;
   state.cteSearch.results = [];
   state.cteSearch.lastQuery = { ...state.filters.cteDocs };
+  state.cteSearch.page = page;
+  state.cteSearch.pageSize = SEARCH_PAGE_SIZE;
   state.tableState.cteDocs = 'loading';
   render();
 
   try {
-    const query = buildCteSearchQuery(state.filters.cteDocs);
-    const docs = await apiRequest(`/cte?${query.toString()}`);
-    const mapped = buildCteDocumentsFromApi(Array.isArray(docs) ? docs : [], state.clients);
+    const query = buildCteSearchQuery(state.filters.cteDocs, page, SEARCH_PAGE_SIZE);
+    const payload = normalizePaginatedResponse(await apiRequest(`/cte?${query.toString()}`));
+    const mapped = buildCteDocumentsFromApi(payload.items, state.clients);
     state.cteDocuments = mergeCteDocumentsById(state.cteDocuments, mapped);
     state.cteSearch.results = getFilteredCteDocumentsFromSource(mapped);
     state.cteSearch.lastSearchedAt = new Date().toISOString();
+    state.cteSearch.total = payload.total;
+    state.cteSearch.totalPages = payload.totalPages;
+    state.cteSearch.page = payload.page;
+    state.cteSearch.pageSize = payload.pageSize;
     state.tableState.cteDocs = 'data';
   } catch (error) {
     state.cteSearch.results = [];
+    state.cteSearch.total = 0;
+    state.cteSearch.totalPages = 0;
     state.tableState.cteDocs = 'error';
     pushToast(`Falha ao buscar CT-e: ${toErrorMessage(error)}`, 'error');
   }
@@ -5926,6 +6002,9 @@ async function applyXmlFilters(form) {
     state.xmlSearch.hasSearched = false;
     state.xmlSearch.results = [];
     state.xmlSearch.lastQuery = null;
+    state.xmlSearch.total = 0;
+    state.xmlSearch.totalPages = 0;
+    state.xmlSearch.page = 1;
     state.tableState.xmls = 'data';
     pushToast('Selecione uma empresa para buscar XMLs.', 'error');
     render();
@@ -5940,6 +6019,9 @@ async function applyXmlFilters(form) {
     state.xmlSearch.hasSearched = false;
     state.xmlSearch.results = [];
     state.xmlSearch.lastQuery = null;
+    state.xmlSearch.total = 0;
+    state.xmlSearch.totalPages = 0;
+    state.xmlSearch.page = 1;
     state.tableState.xmls = 'data';
     pushToast('A data inicial nao pode ser maior que a data final.', 'error');
     render();
@@ -5949,27 +6031,37 @@ async function applyXmlFilters(form) {
   state.xmlSearch.hasSearched = true;
   state.xmlSearch.results = [];
   state.xmlSearch.lastQuery = { ...state.filters.xmls };
+  state.xmlSearch.page = 1;
+  state.xmlSearch.pageSize = SEARCH_PAGE_SIZE;
   state.tableState.xmls = 'loading';
   render();
 
   if (state.dataSource !== 'api') {
     state.xmlSearch.results = getFilteredXmlsFromSource(state.xmlFiles);
     state.xmlSearch.lastSearchedAt = new Date().toISOString();
+    state.xmlSearch.total = state.xmlSearch.results.length;
+    state.xmlSearch.totalPages = state.xmlSearch.results.length ? 1 : 0;
     state.tableState.xmls = 'data';
     render();
     return;
   }
 
   try {
-    const query = buildXmlSearchQuery(state.filters.xmls);
-    const docs = await apiRequest(`/nfse?${query.toString()}`);
-    const xmls = buildXmlFilesFromApi(Array.isArray(docs) ? docs : [], state.clients);
+    const query = buildXmlSearchQuery(state.filters.xmls, 1, SEARCH_PAGE_SIZE);
+    const payload = normalizePaginatedResponse(await apiRequest(`/nfse?${query.toString()}`));
+    const xmls = buildXmlFilesFromApi(payload.items, state.clients);
     state.xmlFiles = mergeXmlFilesById(state.xmlFiles, xmls);
     state.xmlSearch.results = getFilteredXmlsFromSource(xmls);
     state.xmlSearch.lastSearchedAt = new Date().toISOString();
+    state.xmlSearch.total = payload.total;
+    state.xmlSearch.totalPages = payload.totalPages;
+    state.xmlSearch.page = payload.page;
+    state.xmlSearch.pageSize = payload.pageSize;
     state.tableState.xmls = 'data';
   } catch (error) {
     state.xmlSearch.results = [];
+    state.xmlSearch.total = 0;
+    state.xmlSearch.totalPages = 0;
     state.tableState.xmls = 'error';
     pushToast(`Falha ao buscar XMLs: ${toErrorMessage(error)}`, 'error');
   }
@@ -5977,9 +6069,11 @@ async function applyXmlFilters(form) {
   render();
 }
 
-function buildXmlSearchQuery(filters) {
+function buildXmlSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE) {
   const query = new URLSearchParams();
   query.set('clienteId', filters.cliente);
+  query.set('page', String(page));
+  query.set('pageSize', String(pageSize));
 
   if (filters.emissaoInicio) {
     query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
@@ -5995,12 +6089,38 @@ function buildXmlSearchQuery(filters) {
     query.set('tipoRelacao', filters.tipo === 'Emitida' ? 'emitidas' : 'tomadas');
   }
 
+  if (filters.cnpj) {
+    query.set('cnpj', filters.cnpj);
+  }
+
+  if (filters.numero) {
+    query.set('numeroNfse', filters.numero);
+  }
+
+  if (filters.municipio !== 'Todos') {
+    query.set('municipio', filters.municipio);
+  }
+
+  if (filters.downloadInicio) {
+    query.set('downloadInicio', `${filters.downloadInicio}T00:00:00.000Z`);
+  }
+
+  if (filters.downloadFim) {
+    query.set('downloadFim', `${filters.downloadFim}T23:59:59.999Z`);
+  }
+
+  if (filters.status !== 'Todos') {
+    query.set('statusArmazenamento', filters.status);
+  }
+
   return query;
 }
 
-function buildNfeSearchQuery(filters) {
+function buildNfeSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE) {
   const query = new URLSearchParams();
   query.set('clienteId', filters.cliente);
+  query.set('page', String(page));
+  query.set('pageSize', String(pageSize));
 
   if (filters.emissaoInicio) {
     query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
@@ -6024,8 +6144,24 @@ function buildNfeSearchQuery(filters) {
     query.set('status', filters.status);
   }
 
+  if (filters.cnpj) {
+    query.set('cnpj', filters.cnpj);
+  }
+
   if (filters.schemaDoc !== 'Todos') {
     query.set('schemaDoc', filters.schemaDoc);
+  }
+
+  if (filters.numero) {
+    query.set('numeroNfe', filters.numero);
+  }
+
+  if (filters.chave) {
+    query.set('chaveAcesso', filters.chave);
+  }
+
+  if (filters.ambiente !== 'Todos') {
+    query.set('ambiente', filters.ambiente);
   }
 
   if (filters.valorMin) {
@@ -6040,12 +6176,18 @@ function buildNfeSearchQuery(filters) {
     query.set('somenteXmlCompleto', 'true');
   }
 
+  if (filters.xmlCompleto === 'Somente resumos') {
+    query.set('somenteResumos', 'true');
+  }
+
   return query;
 }
 
-function buildCteSearchQuery(filters) {
+function buildCteSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE) {
   const query = new URLSearchParams();
   query.set('clienteId', filters.cliente);
+  query.set('page', String(page));
+  query.set('pageSize', String(pageSize));
 
   if (filters.emissaoInicio) {
     query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
@@ -6067,6 +6209,10 @@ function buildCteSearchQuery(filters) {
 
   if (filters.status !== 'Todos') {
     query.set('status', filters.status);
+  }
+
+  if (filters.cnpj) {
+    query.set('cnpj', filters.cnpj);
   }
 
   if (filters.schemaDoc !== 'Todos') {
@@ -6095,6 +6241,10 @@ function buildCteSearchQuery(filters) {
 
   if (filters.xmlCompleto === 'Somente completos') {
     query.set('somenteXmlCompleto', 'true');
+  }
+
+  if (filters.xmlCompleto === 'Somente resumos') {
+    query.set('somenteResumos', 'true');
   }
 
   return query;
@@ -6460,6 +6610,10 @@ function resetXmlSearch() {
   state.xmlSearch.results = [];
   state.xmlSearch.lastQuery = null;
   state.xmlSearch.lastSearchedAt = null;
+  state.xmlSearch.page = 1;
+  state.xmlSearch.pageSize = SEARCH_PAGE_SIZE;
+  state.xmlSearch.total = 0;
+  state.xmlSearch.totalPages = 0;
   state.tableState.xmls = 'data';
 }
 
@@ -6492,6 +6646,10 @@ function resetNfeDocsSearch() {
   state.nfeSearch.results = [];
   state.nfeSearch.lastQuery = null;
   state.nfeSearch.lastSearchedAt = null;
+  state.nfeSearch.page = 1;
+  state.nfeSearch.pageSize = SEARCH_PAGE_SIZE;
+  state.nfeSearch.total = 0;
+  state.nfeSearch.totalPages = 0;
   state.tableState.nfeDocs = 'data';
 }
 
@@ -6515,7 +6673,88 @@ function resetCteDocsSearch() {
   state.cteSearch.results = [];
   state.cteSearch.lastQuery = null;
   state.cteSearch.lastSearchedAt = null;
+  state.cteSearch.page = 1;
+  state.cteSearch.pageSize = SEARCH_PAGE_SIZE;
+  state.cteSearch.total = 0;
+  state.cteSearch.totalPages = 0;
   state.tableState.cteDocs = 'data';
+}
+
+async function changeStoredDocumentsPage(searchKind, page) {
+  if (searchKind === 'xmls') {
+    await executeXmlSearchPage(page);
+    return;
+  }
+
+  if (searchKind === 'nfeDocs') {
+    await executeNfeDocsSearch(page);
+    return;
+  }
+
+  if (searchKind === 'cteDocs') {
+    await executeCteDocsSearch(page);
+  }
+}
+
+async function executeXmlSearchPage(page = 1) {
+  if (!state.filters.xmls.cliente || state.dataSource !== 'api') {
+    return;
+  }
+
+  state.xmlSearch.hasSearched = true;
+  state.xmlSearch.results = [];
+  state.xmlSearch.page = page;
+  state.xmlSearch.pageSize = SEARCH_PAGE_SIZE;
+  state.tableState.xmls = 'loading';
+  render();
+
+  try {
+    const query = buildXmlSearchQuery(state.filters.xmls, page, SEARCH_PAGE_SIZE);
+    const payload = normalizePaginatedResponse(await apiRequest(`/nfse?${query.toString()}`));
+    const xmls = buildXmlFilesFromApi(payload.items, state.clients);
+    state.xmlFiles = mergeXmlFilesById(state.xmlFiles, xmls);
+    state.xmlSearch.results = getFilteredXmlsFromSource(xmls);
+    state.xmlSearch.lastSearchedAt = new Date().toISOString();
+    state.xmlSearch.page = payload.page;
+    state.xmlSearch.pageSize = payload.pageSize;
+    state.xmlSearch.total = payload.total;
+    state.xmlSearch.totalPages = payload.totalPages;
+    state.tableState.xmls = 'data';
+  } catch (error) {
+    state.xmlSearch.results = [];
+    state.xmlSearch.total = 0;
+    state.xmlSearch.totalPages = 0;
+    state.tableState.xmls = 'error';
+    pushToast(`Falha ao buscar XMLs: ${toErrorMessage(error)}`, 'error');
+  }
+
+  render();
+}
+
+function normalizePaginatedResponse(payload) {
+  if (Array.isArray(payload)) {
+    return {
+      items: payload,
+      total: payload.length,
+      page: 1,
+      pageSize: payload.length || SEARCH_PAGE_SIZE,
+      totalPages: payload.length ? 1 : 0
+    };
+  }
+
+  const items = Array.isArray(payload?.items) ? payload.items : [];
+  const total = Number(payload?.total ?? items.length ?? 0);
+  const page = Number(payload?.page ?? 1);
+  const pageSize = Number(payload?.pageSize ?? SEARCH_PAGE_SIZE);
+  const totalPages = Number(payload?.totalPages ?? (pageSize > 0 ? Math.ceil(total / pageSize) : 0));
+
+  return {
+    items,
+    total,
+    page,
+    pageSize,
+    totalPages
+  };
 }
 
 function applyAlertsFilters(form) {

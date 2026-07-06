@@ -2,8 +2,9 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { NfeAmbiente } from '@prisma/client';
 import { IsBoolean, IsDateString, IsEnum, IsIn, IsNumber, IsOptional, IsString, IsUUID, Length, Min } from 'class-validator';
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
-export class QueryCteDto {
+export class QueryCteDto extends PaginationQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsUUID()
@@ -85,4 +86,15 @@ export class QueryCteDto {
   @Type(() => Boolean)
   @IsBoolean()
   somenteXmlCompleto?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  somenteResumos?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  cnpj?: string;
 }

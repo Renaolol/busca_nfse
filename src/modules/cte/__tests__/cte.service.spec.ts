@@ -31,6 +31,7 @@ describe('CteService', () => {
   });
 
   it('lista CT-es usando modelo 57 como filtro base', async () => {
+    prisma.nfeDocumento.count.mockResolvedValueOnce(12);
     await service.findAll({ clienteId: 'cliente-1' });
 
     expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
@@ -45,6 +46,31 @@ describe('CteService', () => {
         })
       })
     );
+  });
+
+  it('pagina a listagem de CT-e armazenados', async () => {
+    prisma.nfeDocumento.count.mockResolvedValueOnce(241);
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      page: 2,
+      pageSize: 100
+    });
+
+    expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 100,
+        take: 100
+      })
+    );
+    expect(result).toEqual({
+      items: [],
+      total: 241,
+      page: 2,
+      pageSize: 100,
+      totalPages: 3
+    });
   });
 
   it('aplica filtros de numero, chave e ambiente na listagem de CT-e', async () => {
@@ -133,7 +159,8 @@ describe('CteService', () => {
       )
     );
 
-    const [result] = await service.findAll({ clienteId: 'cliente-1' });
+    const response = await service.findAll({ clienteId: 'cliente-1' });
+    const [result] = response.items;
 
     expect(result.numeroNfe).toBe('31969');
     expect(result.valorTotal).toBe('1450.75');

@@ -113,6 +113,36 @@ describe('NfeService', () => {
     (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([]);
   });
 
+  it('pagina a listagem de NF-e armazenadas', async () => {
+    prisma.nfeDocumento.count.mockResolvedValueOnce(275);
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      page: 2,
+      pageSize: 100
+    });
+
+    expect(prisma.nfeDocumento.count).toHaveBeenCalledWith({
+      where: expect.objectContaining({
+        AND: expect.arrayContaining([{ clienteId: 'cliente-1' }])
+      })
+    });
+    expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 100,
+        take: 100
+      })
+    );
+    expect(result).toEqual({
+      items: [],
+      total: 275,
+      page: 2,
+      pageSize: 100,
+      totalPages: 3
+    });
+  });
+
   it('retorna estatisticas agregadas do dashboard por cliente', async () => {
     prisma.nfeDocumento.count.mockResolvedValueOnce(12).mockResolvedValueOnce(9);
     prisma.nfeDocumento.groupBy
@@ -1053,8 +1083,7 @@ describe('NfeService', () => {
     expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          clienteId: 'cliente-1',
-          cnpjDestinatario: '12345678000199'
+          AND: expect.arrayContaining([{ clienteId: 'cliente-1' }, { cnpjDestinatario: '12345678000199' }])
         })
       })
     );

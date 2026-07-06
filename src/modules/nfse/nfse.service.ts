@@ -24,6 +24,7 @@ export class NfseService {
   async findAll(query: QueryNfseDto) {
     const where = this.buildBaseWhere(query);
     const cnpjConsulta = this.normalizeCnpj(query.cnpjConsulta);
+    const { page, pageSize, skip } = this.resolvePagination(query);
 
     if (cnpjConsulta) {
       const tipoRelacao = query.tipoRelacao ?? 'ambas';
@@ -37,12 +38,24 @@ export class NfseService {
       }
     }
 
-    return this.prisma.nfseDocumento.findMany({
-      where,
-      orderBy: { dataEmissao: 'desc' },
-      take: 500,
-      include: this.nfseDocumentoInclude()
-    });
+    const [total, items] = await Promise.all([
+      this.prisma.nfseDocumento.count({ where }),
+      this.prisma.nfseDocumento.findMany({
+        where,
+        orderBy: { dataEmissao: 'desc' },
+        skip,
+        take: pageSize,
+        include: this.nfseDocumentoInclude()
+      })
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      pageSize,
+      totalPages: Math.max(1, Math.ceil(total / pageSize))
+    };
   }
 
   async getDashboardStats(query: DashboardStatsQueryDto) {
@@ -171,48 +184,119 @@ export class NfseService {
   }
 
   private buildBaseWhere(query: QueryNfseDto): Prisma.NfseDocumentoWhereInput {
-    const where: Prisma.NfseDocumentoWhereInput = {};
+    const where: Prisma.NfseDocumentoWhereInput = { AND: [] };
+    const andConditions = this.getAndConditions(where);
 
     if (query.clienteId) {
-      where.clienteId = query.clienteId;
+      andConditions.push({ clienteId: query.clienteId });
     }
 
     const cnpjPrestador = this.normalizeCnpj(query.cnpjPrestador);
     if (cnpjPrestador) {
-      where.cnpjPrestador = cnpjPrestador;
+      andConditions.push({ cnpjPrestador });
     }
 
     const cnpjTomador = this.normalizeCnpj(query.cnpjTomador);
     if (cnpjTomador) {
-      where.cnpjTomador = cnpjTomador;
+      andConditions.push({ cnpjTomador });
+    }
+
+    const cnpj = this.normalizeCnpj(query.cnpj);
+    if (cnpj) {
+      andConditions.push({
+        OR: [{ cnpjPrestador: cnpj }, { cnpjTomador: cnpj }]
+      });
     }
 
     if (query.status) {
-      where.status = query.status;
+      andConditions.push({ status: query.status });
     }
 
     if (query.dataInicio || query.dataFim) {
-      where.dataEmissao = {
-        gte: query.dataInicio ? new Date(query.dataInicio) : undefined,
-        lte: query.dataFim ? new Date(query.dataFim) : undefined
-      };
+      andConditions.push({
+        dataEmissao: {
+          gte: query.dataInicio ? new Date(query.dataInicio) : undefined,
+          lte: query.dataFim ? new Date(query.dataFim) : undefined
+        }
+      });
     }
 
     if (query.competencia) {
       const [year, month] = query.competencia.split('-').map((v) => Number(v));
       if (year && month) {
-        where.competencia = new Date(Date.UTC(year, month - 1, 1));
+        andConditions.push({
+          competencia: new Date(Date.UTC(year, month - 1, 1))
+        });
       }
     }
 
     if (query.valorMin !== undefined || query.valorMax !== undefined) {
-      where.valorServico = {
-        gte: query.valorMin,
-        lte: query.valorMax
-      };
+      andConditions.push({
+        valorServico: {
+          gte: query.valorMin,
+          lte: query.valorMax
+        }
+      });
+    }
+
+    if (query.numeroNfse) {
+      andConditions.push({
+        numeroNfse: {
+          contains: query.numeroNfse
+        }
+      });
+    }
+
+    if (query.municipio) {
+      andConditions.push({ municipioPrestacaoNome: query.municipio });
+    }
+
+    if (query.downloadInicio || query.downloadFim) {
+      andConditions.push({
+        updatedAt: {
+          gte: query.downloadInicio ? new Date(query.downloadInicio) : undefined,
+          lte: query.downloadFim ? new Date(query.downloadFim) : undefined
+        }
+      });
+    }
+
+    if (query.statusArmazenamento === 'Armazenado') {
+      andConditions.push({
+        xmlPath: {
+          not: null
+        }
+      });
+    } else if (query.statusArmazenamento === 'Erro') {
+      andConditions.push({ xmlPath: null });
+    } else if (query.statusArmazenamento === 'Pendente') {
+      andConditions.push({ id: '__no-match__' });
     }
 
     return where;
+  }
+
+  private getAndConditions(where: Prisma.NfseDocumentoWhereInput): Prisma.NfseDocumentoWhereInput[] {
+    if (Array.isArray(where.AND)) {
+      return where.AND;
+    }
+
+    if (where.AND) {
+      return [where.AND];
+    }
+
+    const andConditions: Prisma.NfseDocumentoWhereInput[] = [];
+    where.AND = andConditions;
+    return andConditions;
+  }
+
+  private resolvePagination(query: QueryNfseDto): { page: number; pageSize: number; skip: number } {
+    const page = Math.max(1, query.page ?? 1);
+    const pageSize = Math.max(1, Math.min(200, query.pageSize ?? 100));
+    return {
+      page,
+      pageSize,
+      skip: (page - 1) * pageSize
+    };
   }
 
   private normalizeCnpj(value?: string | null): string | undefined {

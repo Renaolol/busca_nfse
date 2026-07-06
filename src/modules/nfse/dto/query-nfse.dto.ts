@@ -1,8 +1,9 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsDateString, IsIn, IsNumber, IsOptional, IsString, IsUUID, Length, Min } from 'class-validator';
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
-export class QueryNfseDto {
+export class QueryNfseDto extends PaginationQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsUUID()
@@ -62,4 +63,34 @@ export class QueryNfseDto {
   @IsNumber()
   @Min(0)
   valorMax?: number;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  cnpj?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  numeroNfse?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  municipio?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  downloadInicio?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsDateString()
+  downloadFim?: string;
+
+  @ApiPropertyOptional({ enum: ['Armazenado', 'Pendente', 'Erro'] })
+  @IsOptional()
+  @IsIn(['Armazenado', 'Pendente', 'Erro'])
+  statusArmazenamento?: 'Armazenado' | 'Pendente' | 'Erro';
 }

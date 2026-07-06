@@ -1,8 +1,11 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { IsBoolean, IsDateString, IsIn, IsNumber, IsOptional, IsString, IsUUID, Length, Min } from 'class-validator';
+import { NfeAmbiente } from '@prisma/client';
+import { IsEnum } from 'class-validator';
+import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 
-export class QueryNfeDto {
+export class QueryNfeDto extends PaginationQueryDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsUUID()
@@ -68,4 +71,31 @@ export class QueryNfeDto {
   @Type(() => Boolean)
   @IsBoolean()
   somenteXmlCompleto?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  somenteResumos?: boolean;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  cnpj?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  numeroNfe?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  @Length(44, 44)
+  chaveAcesso?: string;
+
+  @ApiPropertyOptional({ enum: NfeAmbiente })
+  @IsOptional()
+  @IsEnum(NfeAmbiente)
+  ambiente?: NfeAmbiente;
 }
