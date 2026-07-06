@@ -20,6 +20,7 @@ type ClassifiedStoredDocument = {
   documentType: 'nfe' | 'cte' | 'unknown';
   schemaDoc?: string;
   source?: 'xml' | 'chave_acesso';
+  reason?: string;
 };
 
 function loadEnvFile() {
@@ -77,7 +78,10 @@ function tryDecodeBase64Text(value: string): string | null {
 function classifyByChaveAcesso(chaveAcesso: string): ClassifiedStoredDocument {
   const digits = String(chaveAcesso || '').replace(/\D/g, '');
   if (digits.length !== 44) {
-    return { documentType: 'unknown' };
+    return {
+      documentType: 'unknown',
+      reason: `chave_acesso_invalida:${digits.length}`
+    };
   }
 
   const modelo = digits.slice(20, 22);
@@ -249,13 +253,51 @@ async function main() {
           report.summary.unknown += 1;
           report.unknown.push({
             ...baseItem,
-            motivo: 'Nao foi possivel classificar o XML como NF-e ou CT-e'
+            detectionSource: classified.source,
+            motivo: classified.reason ?? 'Nao foi possivel classificar o XML como NF-e ou CT-e'
           });
         } catch (error) {
+          const fallback = classifyByChaveAcesso(document.chaveAcesso);
+          if (fallback.documentType === 'cte') {
+            report.summary.cte += 1;
+            report.cte.push({
+              ...baseItem,
+              schemaDocDetectado: fallback.schemaDoc,
+              detectionSource: fallback.source,
+              motivo: `fallback apos falha de leitura: ${error instanceof Error ? error.message : String(error)}`
+            });
+
+            if (apply && fallback.schemaDoc && document.schemaDoc !== fallback.schemaDoc) {
+              await prisma.nfeDocumento.update({
+                where: { id: document.id },
+                data: { schemaDoc: fallback.schemaDoc }
+              });
+              report.summary.updated += 1;
+            }
+            continue;
+          }
+
+          if (fallback.documentType === 'nfe') {
+            report.summary.nfe += 1;
+            report.nfe.push({
+              ...baseItem,
+              schemaDocDetectado: fallback.schemaDoc,
+              detectionSource: fallback.source,
+              motivo: `fallback apos falha de leitura: ${error instanceof Error ? error.message : String(error)}`
+            });
+            continue;
+          }
+
           report.summary.unknown += 1;
           report.unknown.push({
             ...baseItem,
-            motivo: error instanceof Error ? error.message : String(error)
+            detectionSource: fallback.source,
+            motivo: [
+              error instanceof Error ? error.message : String(error),
+              fallback.reason
+            ]
+              .filter(Boolean)
+              .join(' | ')
           });
         }
       }
