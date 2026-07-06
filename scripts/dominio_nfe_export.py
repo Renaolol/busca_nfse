@@ -54,13 +54,15 @@ SELECT TOP {payload['limit']}
        emp.cgce_emp AS cnpj_empresa,
        cat.CHAVE AS chave_acesso,
        cat.EMISSAO AS data_emissao,
-       nfe_xml.CONTEUDO_XML AS conteudo_xml
+       COALESCE(nfe_xml_v2.CONTEUDO_XML, nfe_xml.CONTEUDO_XML) AS conteudo_xml
   FROM bethadba.EFATENDIMENTO_NFE_CATALOGO cat
-  JOIN bethadba.EFATENDIMENTO_NFE_XML nfe_xml
+  LEFT JOIN bethadba.EFATENDIMENTO_NFE_XML_V2 nfe_xml_v2
+    ON nfe_xml_v2.I_CATALOGO = cat.I_CATALOGO
+  LEFT JOIN bethadba.EFATENDIMENTO_NFE_XML nfe_xml
     ON nfe_xml.I_CATALOGO = cat.I_CATALOGO
   JOIN bethadba.geempre emp
     ON emp.codi_emp = cat.CODI_EMP
- WHERE nfe_xml.CONTEUDO_XML IS NOT NULL
+ WHERE COALESCE(nfe_xml_v2.CONTEUDO_XML, nfe_xml.CONTEUDO_XML) IS NOT NULL
    AND emp.cgce_emp IN ({','.join('?' for _ in cnpjs)})
 """
 
