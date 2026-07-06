@@ -184,6 +184,36 @@ describe('CertificatesService', () => {
     expect(created.anotacoes).toBe('Reserva sem vinculo inicial');
   });
 
+  it('aceita CPF como documento do titular do certificado', async () => {
+    mockedSpawnSync.mockReturnValue({
+      pid: 125,
+      output: [null, `Bag Attributes\n${SAMPLE_PEM_CERTIFICATE}\n`, ''],
+      stdout: `Bag Attributes\n${SAMPLE_PEM_CERTIFICATE}\n`,
+      stderr: '',
+      status: 0,
+      signal: null
+    } as ReturnType<typeof spawnSync>);
+
+    prisma.certificado.create.mockImplementation(({ data }: { data: Record<string, unknown> }) =>
+      Promise.resolve(buildCertificateRecord(data))
+    );
+
+    const dto: CreateCertificateDto = {
+      nome: 'Certificado CPF',
+      cnpjTitular: '12345678901',
+      arquivoBase64: Buffer.from('conteudo-pfx-fake').toString('base64'),
+      senha: 'senha-certificado'
+    };
+
+    await expect(service.create('cliente-1', dto)).resolves.toMatchObject({
+      nome: 'Certificado CPF',
+      cnpjTitular: '12345678901'
+    });
+
+    const createPayload = prisma.certificado.create.mock.calls[0][0].data as Record<string, unknown>;
+    expect(createPayload.cnpjTitular).toBe('12345678901');
+  });
+
   it('faz fallback sem -clcerts quando necessario para extrair certificado', async () => {
     mockedSpawnSync
       .mockReturnValueOnce({

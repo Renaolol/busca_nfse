@@ -211,8 +211,8 @@ export class CertificatesService {
 
     if (this.hasOwn(dto, 'cnpjTitular')) {
       const cnpjTitular = this.normalizeOptionalString(dto.cnpjTitular);
-      if (!cnpjTitular || cnpjTitular.length !== 14) {
-        throw new BadRequestException('cnpjTitular deve conter 14 digitos');
+      if (!cnpjTitular || !this.isValidTitularDocument(cnpjTitular)) {
+        throw new BadRequestException('cnpjTitular deve conter 11 digitos (CPF) ou 14 digitos (CNPJ)');
       }
       data.cnpjTitular = cnpjTitular;
     }
@@ -345,8 +345,8 @@ export class CertificatesService {
       motivos.push('Certificado vencido');
     }
 
-    if (!certificate.cnpjTitular || certificate.cnpjTitular.length !== 14) {
-      motivos.push('CNPJ titular invalido');
+    if (!certificate.cnpjTitular || !this.isValidTitularDocument(certificate.cnpjTitular)) {
+      motivos.push('Documento titular invalido');
     }
 
     return {
@@ -377,6 +377,11 @@ export class CertificatesService {
       updatedAt: certificate.updatedAt,
       arquivoCriptografadoPath: certificate.arquivoCriptografadoPath
     };
+  }
+
+  private isValidTitularDocument(documento: string): boolean {
+    const normalized = this.normalizeOptionalString(documento);
+    return Boolean(normalized && (normalized.length === 11 || normalized.length === 14));
   }
 
   private async ensureClientExists(clienteId: string): Promise<void> {

@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsDate, IsOptional, IsString, IsUUID, Length } from 'class-validator';
+import { IsDate, IsOptional, IsString, IsUUID, Matches } from 'class-validator';
 
 export class CreateCertificateDto {
   @ApiPropertyOptional({ description: 'Cliente vinculado ao certificado. Opcional para certificados avulsos.' })
@@ -12,9 +12,9 @@ export class CreateCertificateDto {
   @IsString()
   nome!: string;
 
-  @ApiProperty({ description: 'CNPJ do titular com 14 digitos' })
+  @ApiProperty({ description: 'CPF (11 digitos) ou CNPJ (14 digitos) do titular' })
   @IsString()
-  @Length(14, 14)
+  @Matches(/^\d{11}$|^\d{14}$/)
   cnpjTitular!: string;
 
   @ApiPropertyOptional()

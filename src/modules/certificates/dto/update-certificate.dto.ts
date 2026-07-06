@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsOptional, IsString, IsUUID, Length } from 'class-validator';
+import { IsOptional, IsString, IsUUID, Matches } from 'class-validator';
 
 export class UpdateCertificateDto {
   @ApiPropertyOptional({
@@ -15,10 +15,10 @@ export class UpdateCertificateDto {
   @IsString()
   nome?: string;
 
-  @ApiPropertyOptional({ description: 'CNPJ do titular com 14 digitos' })
+  @ApiPropertyOptional({ description: 'CPF (11 digitos) ou CNPJ (14 digitos) do titular' })
   @IsOptional()
   @IsString()
-  @Length(14, 14)
+  @Matches(/^\d{11}$|^\d{14}$/)
   cnpjTitular?: string;
 
   @ApiPropertyOptional({
