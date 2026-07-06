@@ -2,6 +2,7 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
+import { CteXmlParserService } from './cte-xml-parser.service';
 import { DashboardCteStatsQueryDto } from './dto/dashboard-stats.dto';
 import { QueryCteDto } from './dto/query-cte.dto';
 
@@ -9,7 +10,8 @@ import { QueryCteDto } from './dto/query-cte.dto';
 export class CteService {
   constructor(
     private readonly prisma: PrismaService,
-    private readonly storage: LocalStorageService
+    private readonly storage: LocalStorageService,
+    private readonly cteXmlParser: CteXmlParserService
   ) {}
 
   async findAll(query: QueryCteDto) {
@@ -31,11 +33,13 @@ export class CteService {
       }
     }
 
-    return this.prisma.nfeDocumento.findMany({
+    const documents = await this.prisma.nfeDocumento.findMany({
       where,
       orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
       take: 500
     });
+
+    return Promise.all(documents.map((document) => this.enrichDocument(document)));
   }
 
   async getDashboardStats(query: DashboardCteStatsQueryDto) {
@@ -103,7 +107,7 @@ export class CteService {
       throw new NotFoundException('CT-e nao encontrado');
     }
     this.assertClientScope(found.clienteId, clienteId);
-    return found;
+    return this.enrichDocument(found);
   }
 
   async getXml(id: string, clienteId: string) {
@@ -228,6 +232,54 @@ export class CteService {
 
   private isCteDocument(doc: Pick<Prisma.NfeDocumentoUncheckedCreateInput, 'modelo' | 'schemaDoc'>): boolean {
     return doc.modelo === '57' || ['CTe', 'cteProc', 'resCTe'].some((prefix) => String(doc.schemaDoc || '').startsWith(prefix));
+  }
+
+  private async enrichDocument<T extends {
+    chaveAcesso: string;
+    numeroNfe?: string | null;
+    serie?: string | null;
+    modelo?: string | null;
+    dataEmissao?: Date | null;
+    dataAutorizacao?: Date | null;
+    valorTotal?: Prisma.Decimal | null;
+    schemaDoc?: string | null;
+    xmlCompletoPath?: string | null;
+    xmlResumoPath?: string | null;
+  }>(document: T): Promise<T> {
+    if (!this.needsXmlEnrichment(document)) {
+      return document;
+    }
+
+    const storageKey = document.xmlCompletoPath ?? document.xmlResumoPath;
+    if (!storageKey) {
+      return document;
+    }
+
+    try {
+      const xml = (await this.storage.getObject(storageKey)).toString('utf8');
+      const parsed = this.cteXmlParser.parse(xml);
+
+      return {
+        ...document,
+        numeroNfe: document.numeroNfe ?? parsed.numeroCte ?? null,
+        serie: document.serie ?? parsed.serie ?? null,
+        modelo: document.modelo ?? parsed.modelo ?? null,
+        dataEmissao: document.dataEmissao ?? parsed.dataEmissao ?? null,
+        dataAutorizacao: document.dataAutorizacao ?? parsed.dataAutorizacao ?? null,
+        valorTotal: document.valorTotal ?? (parsed.valorTotal as unknown as Prisma.Decimal | null) ?? null,
+        schemaDoc: document.schemaDoc ?? parsed.schemaDoc ?? null
+      };
+    } catch {
+      return document;
+    }
+  }
+
+  private needsXmlEnrichment(document: {
+    numeroNfe?: string | null;
+    valorTotal?: Prisma.Decimal | null;
+    schemaDoc?: string | null;
+  }): boolean {
+    return !document.numeroNfe || document.valorTotal == null || !document.schemaDoc;
   }
 
   private assertClientScope(ownerClientId: string, requestedClientId: string) {

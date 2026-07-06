@@ -10,11 +10,8 @@ const navItems = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', route: '/dashboard' },
   { key: 'clientes', label: 'Clientes', icon: 'users', route: '/clientes' },
   { key: 'certificados', label: 'Certificados', icon: 'shield', route: '/certificados' },
-  { key: 'buscas', label: 'Buscas NFS-e', icon: 'search', route: '/buscas' },
-  { key: 'xmls', label: 'XMLs NFS-e', icon: 'file', route: '/xmls' },
-  { key: 'buscas-nfe', label: 'Buscas NF-e', icon: 'search', route: '/buscas-nfe' },
-  { key: 'xmls-nfe', label: 'XMLs NF-e', icon: 'file', route: '/xmls-nfe' },
-  { key: 'xmls-cte', label: 'XMLs CT-e', icon: 'file', route: '/xmls-cte' },
+  { key: 'buscas', label: 'Buscas', icon: 'search', route: '/buscas' },
+  { key: 'armazenados', label: 'Armazenados', icon: 'file', route: '/xmls' },
   { key: 'alertas', label: 'Alertas', icon: 'alert', route: '/alertas' },
   { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' }
 ];
@@ -776,6 +773,11 @@ function onDocumentClick(event) {
     case 'stored-docs-switch': {
       const docType = actionNode.getAttribute('data-doc-type');
       navigate(docType === 'nfe' ? '/xmls-nfe' : docType === 'cte' ? '/xmls-cte' : '/xmls');
+      return;
+    }
+    case 'search-type-switch': {
+      const searchType = actionNode.getAttribute('data-search-type');
+      navigate(searchType === 'nfe' ? '/buscas-nfe' : '/buscas');
       return;
     }
     case 'nfe-sync-pause-control': {
@@ -1945,6 +1947,8 @@ function renderSearchRunsPage() {
         ]
       })}
 
+      ${renderSearchTypeSwitcher('nfse')}
+
       ${renderSchedulerStatusStrip()}
       ${renderExecutionMonitorCard()}
 
@@ -2322,6 +2326,8 @@ function renderNfeSyncPage() {
           actionButton('Pausar todos', 'nfe-disable-auto-search', 'secondary')
         ]
       })}
+
+      ${renderSearchTypeSwitcher('nfe')}
 
       <section class="stats-grid">
         ${statCard('search', 'Controles ativos', String(syncStats.ativos), queueLabel, 'success')}
@@ -2968,6 +2974,26 @@ function renderStoredDocumentsTypeSwitcher(activeType) {
           <button class="btn ${isNfse ? 'primary' : 'secondary'}" type="button" data-action="stored-docs-switch" data-doc-type="nfse">NFS-e</button>
           <button class="btn ${isNfe ? 'primary' : 'secondary'}" type="button" data-action="stored-docs-switch" data-doc-type="nfe">NF-e</button>
           <button class="btn ${isCte ? 'primary' : 'secondary'}" type="button" data-action="stored-docs-switch" data-doc-type="cte">CT-e</button>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderSearchTypeSwitcher(activeType) {
+  const isNfse = activeType === 'nfse';
+  const isNfe = activeType === 'nfe';
+
+  return `
+    <article class="card" style="padding-bottom:18px;">
+      <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+        <div>
+          <h3 class="card-title">Tipo de busca</h3>
+          <p class="card-subtitle">Selecione qual fluxo de busca deseja consultar ou executar.</p>
+        </div>
+        <div class="table-actions">
+          <button class="btn ${isNfse ? 'primary' : 'secondary'}" type="button" data-action="search-type-switch" data-search-type="nfse">NFS-e</button>
+          <button class="btn ${isNfe ? 'primary' : 'secondary'}" type="button" data-action="search-type-switch" data-search-type="nfe">NF-e</button>
         </div>
       </div>
     </article>
@@ -4400,6 +4426,12 @@ function resolvePageMeta() {
 function resolveNavKeyByRoute(routeName) {
   if (routeName === 'client-details') {
     return 'clientes';
+  }
+  if (routeName === 'buscas-nfe' || routeName === 'buscas') {
+    return 'buscas';
+  }
+  if (routeName === 'xmls' || routeName === 'xmls-nfe' || routeName === 'xmls-cte') {
+    return 'armazenados';
   }
   return routeName;
 }
