@@ -11,8 +11,15 @@ type ReportItem = {
   chaveAcesso: string;
   schemaDocAtual: string | null;
   schemaDocDetectado?: string;
+  detectionSource?: 'xml' | 'chave_acesso';
   storageKey: string | null;
   motivo?: string;
+};
+
+type ClassifiedStoredDocument = {
+  documentType: 'nfe' | 'cte' | 'unknown';
+  schemaDoc?: string;
+  source?: 'xml' | 'chave_acesso';
 };
 
 function loadEnvFile() {
@@ -47,6 +54,85 @@ function parseArgs() {
     apply: args.has('--apply'),
     batchSize: 200
   };
+}
+
+function normalizeText(value: string): string {
+  return value.replace(/^\uFEFF/, '').replace(/\u0000/g, '').trim();
+}
+
+function tryDecodeBase64Text(value: string): string | null {
+  const compact = value.replace(/\s+/g, '');
+  if (!compact || compact.length % 4 !== 0 || !/^[A-Za-z0-9+/=]+$/.test(compact)) {
+    return null;
+  }
+
+  try {
+    const decoded = Buffer.from(compact, 'base64').toString('utf8');
+    return normalizeText(decoded);
+  } catch {
+    return null;
+  }
+}
+
+function classifyByChaveAcesso(chaveAcesso: string): ClassifiedStoredDocument {
+  const digits = String(chaveAcesso || '').replace(/\D/g, '');
+  if (digits.length !== 44) {
+    return { documentType: 'unknown' };
+  }
+
+  const modelo = digits.slice(20, 22);
+  if (modelo === '55') {
+    return {
+      documentType: 'nfe',
+      schemaDoc: 'NFe_v4.00',
+      source: 'chave_acesso'
+    };
+  }
+
+  if (modelo === '57') {
+    return {
+      documentType: 'cte',
+      schemaDoc: 'CTe_v4.00',
+      source: 'chave_acesso'
+    };
+  }
+
+  return { documentType: 'unknown' };
+}
+
+function classifyStoredXml(buffer: Buffer, chaveAcesso: string, parser: NfeXmlParserService): ClassifiedStoredDocument {
+  const candidates = [
+    normalizeText(buffer.toString('utf8')),
+    normalizeText(buffer.toString('utf16le')),
+    normalizeText(buffer.toString('latin1'))
+  ].filter(Boolean);
+
+  for (const candidate of candidates) {
+    const classified = parser.classify(candidate);
+    if (classified.documentType !== 'unknown') {
+      return {
+        documentType: classified.documentType,
+        schemaDoc: classified.schemaDoc,
+        source: 'xml'
+      };
+    }
+
+    const decodedBase64 = tryDecodeBase64Text(candidate);
+    if (!decodedBase64) {
+      continue;
+    }
+
+    const classifiedDecoded = parser.classify(decodedBase64);
+    if (classifiedDecoded.documentType !== 'unknown') {
+      return {
+        documentType: classifiedDecoded.documentType,
+        schemaDoc: classifiedDecoded.schemaDoc,
+        source: 'xml'
+      };
+    }
+  }
+
+  return classifyByChaveAcesso(chaveAcesso);
 }
 
 async function main() {
@@ -129,14 +215,15 @@ async function main() {
         }
 
         try {
-          const xml = await readFile(resolve(storageRootPath, storageKey), 'utf8');
-          const classified = parser.classify(xml);
+          const xmlBuffer = await readFile(resolve(storageRootPath, storageKey));
+          const classified = classifyStoredXml(xmlBuffer, document.chaveAcesso, parser);
 
           if (classified.documentType === 'cte') {
             report.summary.cte += 1;
             report.cte.push({
               ...baseItem,
-              schemaDocDetectado: classified.schemaDoc
+              schemaDocDetectado: classified.schemaDoc,
+              detectionSource: classified.source
             });
 
             if (apply && classified.schemaDoc && document.schemaDoc !== classified.schemaDoc) {
@@ -153,7 +240,8 @@ async function main() {
             report.summary.nfe += 1;
             report.nfe.push({
               ...baseItem,
-              schemaDocDetectado: classified.schemaDoc
+              schemaDocDetectado: classified.schemaDoc,
+              detectionSource: classified.source
             });
             continue;
           }
