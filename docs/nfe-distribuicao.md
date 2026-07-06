@@ -25,6 +25,10 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - `GET /nfe/:id`
 - `GET /nfe/:id/xml`
 - `GET /nfe/dashboard-stats`
+- `GET /cte`
+- `GET /cte/:id`
+- `GET /cte/:id/xml`
+- `GET /cte/dashboard-stats`
 - `GET /nfe/sync/status?clienteId=...`
 - `POST /nfe/importar-dominio`
 - `POST /nfe/dominio/xml`
@@ -61,6 +65,7 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - XMLs de CT-e (`cteProc`, `CTe`, `resCTe`, modelo `57`) sao bloqueados no modulo de NF-e. Quando vierem da Dominio, o importador os ignora explicitamente para nao contaminar `nfe_documentos`.
 - O painel da ultima importacao em `Buscas NF-e` pode abrir o XML bruto do catalogo e reimportar um item isolado ou todos os `catalogoIds` retornados na execucao manual.
 - O script `npm run nfe:separar-cte -- --apply` varre `nfe_documentos`, classifica os XMLs salvos e marca CT-es ja persistidos em `schemaDoc`, permitindo que o modulo de NF-e os exclua das listagens e do dashboard sem migration adicional.
+- O modulo `cte` reaproveita `nfe_documentos` como armazenamento, mas expoe consulta separada para documentos de transporte, incluindo `GET /cte`, `GET /cte/:id`, `GET /cte/:id/xml` e `GET /cte/dashboard-stats`.
 
 ## Operacao recomendada
 

@@ -503,7 +503,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException('NF-e nao encontrada');
     }
     this.assertClientScope(found.clienteId, clienteId);
-    if (this.isCteSchemaDoc(found.schemaDoc)) {
+    if (found.modelo === '57' || this.isCteSchemaDoc(found.schemaDoc)) {
       throw new NotFoundException('NF-e nao encontrada');
     }
     return found;
@@ -1622,6 +1622,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   private getCteSchemaDocFilters(): Prisma.NfeDocumentoWhereInput[] {
     return [
+      { modelo: '57' },
       { schemaDoc: { startsWith: 'CTe' } },
       { schemaDoc: { startsWith: 'cteProc' } },
       { schemaDoc: { startsWith: 'resCTe' } }

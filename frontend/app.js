@@ -11,8 +11,10 @@ const navItems = [
   { key: 'clientes', label: 'Clientes', icon: 'users', route: '/clientes' },
   { key: 'certificados', label: 'Certificados', icon: 'shield', route: '/certificados' },
   { key: 'buscas', label: 'Buscas NFS-e', icon: 'search', route: '/buscas' },
-  { key: 'xmls', label: 'XMLs Armazenados', icon: 'file', route: '/xmls' },
+  { key: 'xmls', label: 'XMLs NFS-e', icon: 'file', route: '/xmls' },
   { key: 'buscas-nfe', label: 'Buscas NF-e', icon: 'search', route: '/buscas-nfe' },
+  { key: 'xmls-nfe', label: 'XMLs NF-e', icon: 'file', route: '/xmls-nfe' },
+  { key: 'xmls-cte', label: 'XMLs CT-e', icon: 'file', route: '/xmls-cte' },
   { key: 'alertas', label: 'Alertas', icon: 'alert', route: '/alertas' },
   { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' }
 ];
@@ -39,16 +41,20 @@ const pageMeta = {
     description: 'Historico das rotinas automaticas e reprocessamentos manuais.'
   },
   xmls: {
-    title: 'XMLs Armazenados',
-    description: 'Consulte XMLs armazenados de NFS-e e NF-e no servidor interno.'
+    title: 'XMLs NFS-e',
+    description: 'Consulte XMLs armazenados de NFS-e no servidor interno.'
   },
   'buscas-nfe': {
     title: 'Buscas NF-e',
     description: 'Gerencie a importacao de XMLs de NF-e por cliente e acompanhe os controles de captura.'
   },
   'xmls-nfe': {
-    title: 'XMLs Armazenados',
-    description: 'Consulte XMLs armazenados de NFS-e e NF-e no servidor interno.'
+    title: 'XMLs NF-e',
+    description: 'Consulte XMLs armazenados de NF-e no servidor interno.'
+  },
+  'xmls-cte': {
+    title: 'XMLs CT-e',
+    description: 'Consulte XMLs armazenados de CT-e no servidor interno.'
   },
   alertas: {
     title: 'Alertas',
@@ -96,7 +102,9 @@ const state = {
   },
   nfeSyncControls: [],
   nfeDocuments: [],
+  cteDocuments: [],
   nfeDashboardStats: null,
+  cteDashboardStats: null,
   nfeSchedulerStatus: null,
   nfeLastRunReport: null,
   nfeSyncSections: {
@@ -107,6 +115,12 @@ const state = {
     technical: false
   },
   nfeSearch: {
+    hasSearched: false,
+    results: [],
+    lastQuery: null,
+    lastSearchedAt: null
+  },
+  cteSearch: {
     hasSearched: false,
     results: [],
     lastQuery: null,
@@ -205,6 +219,21 @@ const state = {
       xmlCompleto: 'Todos',
       ambiente: 'Todos'
     },
+    cteDocs: {
+      cliente: 'Todos',
+      tipo: 'Todos',
+      cnpj: '',
+      numero: '',
+      chave: '',
+      emissaoInicio: '',
+      emissaoFim: '',
+      status: 'Todos',
+      schemaDoc: 'Todos',
+      valorMin: '',
+      valorMax: '',
+      xmlCompleto: 'Todos',
+      ambiente: 'Todos'
+    },
     alerts: {
       severidade: 'Todos',
       tipo: 'Todos',
@@ -221,6 +250,7 @@ const state = {
     nfeSync: 'loading',
     xmls: 'loading',
     nfeDocs: 'loading',
+    cteDocs: 'loading',
     alerts: 'loading'
   },
   sort: {
@@ -229,6 +259,10 @@ const state = {
       direction: 'desc'
     },
     nfeDocs: {
+      key: 'dataEmissao',
+      direction: 'desc'
+    },
+    cteDocs: {
       key: 'dataEmissao',
       direction: 'desc'
     }
@@ -292,9 +326,11 @@ async function hydrateFromApi() {
     nfeSyncByClient,
     dashboardStats,
     nfeDashboardStats,
+    cteDashboardStats,
     nfeSchedulerStatus,
     nfseDocs,
     nfeDocs,
+    cteDocs,
     auditRows,
     schedulerStatus
   ] = await Promise.all([
@@ -305,9 +341,11 @@ async function hydrateFromApi() {
     fetchJsonByClientId(clientIds, (clientId) => `/nfe/sync/status?clienteId=${encodeURIComponent(clientId)}`, []),
     apiRequest('/nfse/dashboard-stats').catch(() => null),
     apiRequest('/nfe/dashboard-stats').catch(() => null),
+    apiRequest('/cte/dashboard-stats').catch(() => null),
     apiRequest('/nfe/sync/scheduler-status').catch(() => null),
     apiRequest('/nfse').catch(() => []),
     apiRequest('/nfe').catch(() => []),
+    apiRequest('/cte').catch(() => []),
     apiRequest('/auditoria').catch(() => []),
     apiRequest('/sync/scheduler-status').catch(() => null)
   ]);
@@ -324,6 +362,7 @@ async function hydrateFromApi() {
   const xmlFiles = buildXmlFilesFromApi(nfseDocs, clients);
   const searchRuns = buildSearchRunsFromApi(syncByClient, clients);
   const nfeDocuments = buildNfeDocumentsFromApi(nfeDocs, clients);
+  const cteDocuments = buildCteDocumentsFromApi(cteDocs, clients);
   const nfeSyncControls = buildNfeSyncControlsFromApi(nfeSyncByClient, clients, establishmentsByClient);
   const alerts = buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, auditRows);
 
@@ -333,8 +372,10 @@ async function hydrateFromApi() {
   state.runningExecution = null;
   state.xmlFiles = xmlFiles;
   state.nfeDocuments = nfeDocuments;
+  state.cteDocuments = cteDocuments;
   state.nfeSyncControls = nfeSyncControls;
   state.nfeDashboardStats = nfeDashboardStats;
+  state.cteDashboardStats = cteDashboardStats;
   state.nfeSchedulerStatus = nfeSchedulerStatus;
   state.alerts = applyResolvedAlertState(alerts);
   state.establishmentsByClient = establishmentsByClient;
@@ -734,7 +775,7 @@ function onDocumentClick(event) {
     }
     case 'stored-docs-switch': {
       const docType = actionNode.getAttribute('data-doc-type');
-      navigate(docType === 'nfe' ? '/xmls-nfe' : '/xmls');
+      navigate(docType === 'nfe' ? '/xmls-nfe' : docType === 'cte' ? '/xmls-cte' : '/xmls');
       return;
     }
     case 'nfe-sync-pause-control': {
@@ -762,6 +803,10 @@ function onDocumentClick(event) {
       exportNfeListToCsv();
       return;
     }
+    case 'cte-export-list': {
+      exportCteListToCsv();
+      return;
+    }
     case 'nfe-details': {
       const nfeId = actionNode.getAttribute('data-nfe-id');
       if (!nfeId) {
@@ -784,6 +829,43 @@ function onDocumentClick(event) {
         return;
       }
       void downloadNfeXmlById(nfeId);
+      return;
+    }
+    case 'cte-docs-clear-filters': {
+      resetCteDocsSearch();
+      render();
+      return;
+    }
+    case 'cte-docs-sort': {
+      const key = actionNode.getAttribute('data-sort-key');
+      if (!key) {
+        return;
+      }
+      updateCteSort(key);
+      return;
+    }
+    case 'cte-details': {
+      const cteId = actionNode.getAttribute('data-cte-id');
+      if (!cteId) {
+        return;
+      }
+      openModal({ kind: 'cte-details', cteId });
+      return;
+    }
+    case 'cte-view': {
+      const cteId = actionNode.getAttribute('data-cte-id');
+      if (!cteId) {
+        return;
+      }
+      void openCteViewer(cteId);
+      return;
+    }
+    case 'cte-download': {
+      const cteId = actionNode.getAttribute('data-cte-id');
+      if (!cteId) {
+        return;
+      }
+      void downloadCteXmlById(cteId);
       return;
     }
     case 'nfe-last-run-view-xml': {
@@ -1045,6 +1127,11 @@ function onDocumentSubmit(event) {
       void applyNfeDocsFilters(target);
       return;
     }
+    case 'cteDocsFilterForm': {
+      event.preventDefault();
+      void applyCteDocsFilters(target);
+      return;
+    }
     case 'alertsFilterForm': {
       event.preventDefault();
       applyAlertsFilters(target);
@@ -1208,6 +1295,8 @@ function renderCurrentPage() {
       return renderNfeSyncPage();
     case 'xmls-nfe':
       return renderNfeDocumentsPage();
+    case 'xmls-cte':
+      return renderCteDocumentsPage();
     case 'alertas':
       return renderAlertsPage();
     case 'configuracoes':
@@ -1245,6 +1334,7 @@ function renderDashboardPage() {
   const summaryTone = lastRun?.resumoStatus === 'Erro' ? 'danger' : lastRun?.resumoStatus === 'Aviso' ? 'warning' : 'success';
   const dashboardStats = getDashboardStats();
   const nfeStats = getNfeDashboardStats();
+  const cteStats = getCteDashboardStats();
   const certsExpiring = state.certificates.filter((cert) => cert.status === 'A vencer').length;
   const latestSearchRows = [...state.clients]
     .sort((a, b) => Date.parse(b.ultimaBusca || 0) - Date.parse(a.ultimaBusca || 0))
@@ -1269,6 +1359,8 @@ function renderDashboardPage() {
         ${statCard('folder', 'XMLs NFS-e', String(dashboardStats.storedXmls), 'arquivos salvos no servidor interno', 'success')}
         ${statCard('file', 'NF-e no banco', String(nfeStats.totalNfe), 'documentos de compra e venda armazenados', 'info')}
         ${statCard('folder', 'XMLs NF-e', String(nfeStats.xmlsCompletos), 'XMLs completos disponiveis no storage', 'info')}
+        ${statCard('file', 'CT-e no banco', String(cteStats.totalCte), 'documentos de transporte armazenados', 'info')}
+        ${statCard('folder', 'XMLs CT-e', String(cteStats.xmlsCompletos), 'XMLs completos de transporte no storage', 'info')}
         ${statCard('alert', 'Falhas', String(dashboardStats.clientsWithErrors), 'clientes com erro', 'danger')}
         ${statCard('shield', 'Certificados a vencer', String(certsExpiring), 'nos proximos 30 dias', 'warning')}
       </section>
@@ -2439,8 +2531,8 @@ function renderNfeDocumentsPage() {
   return `
     <section class="page-section">
       ${renderPageHeader({
-        title: 'XMLs Armazenados',
-        description: 'Consulte XMLs armazenados de NFS-e e NF-e no servidor interno.',
+        title: 'XMLs NF-e',
+        description: 'Consulte XMLs armazenados de NF-e no servidor interno.',
         actions: [actionButton('Exportar listagem', 'nfe-export-list', 'secondary')]
       })}
 
@@ -2645,8 +2737,225 @@ function renderNfeSortHeader(key, label) {
   `;
 }
 
+function renderCteDocumentsPage() {
+  const docs = getFilteredCteDocuments();
+  const canShowTable =
+    state.cteSearch.hasSearched || state.tableState.cteDocs === 'loading' || state.tableState.cteDocs === 'error';
+  const statusOptions = uniqueValues(state.cteDocuments.map((doc) => doc.statusFiscal).filter(Boolean));
+  const schemaOptions = uniqueValues(state.cteDocuments.map((doc) => doc.schemaDoc).filter(Boolean));
+
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'XMLs CT-e',
+        description: 'Consulte XMLs armazenados de CT-e no servidor interno.',
+        actions: [actionButton('Exportar listagem', 'cte-export-list', 'secondary')]
+      })}
+
+      ${renderStoredDocumentsTypeSwitcher('cte')}
+
+      <article class="card filter-card">
+        <h3 class="card-title">Consulta de CT-e</h3>
+        <p class="card-subtitle">Selecione uma empresa e refine por emissao, relacionamento e disponibilidade do XML completo.</p>
+        <form id="cteDocsFilterForm" class="form-grid">
+          <label class="field">
+            Empresa
+            <select name="cliente" required>${renderOptions(state.clients.map((client) => client.id), state.filters.cteDocs.cliente === 'Todos' ? '' : state.filters.cteDocs.cliente, mapClientOptions(), 'Selecione uma empresa')}</select>
+          </label>
+          <label class="field">
+            Tipo
+            <select name="tipo">${renderOptions(['Todos', 'Emitido', 'Recebido'], state.filters.cteDocs.tipo)}</select>
+          </label>
+          <label class="field">
+            Ambiente
+            <select name="ambiente">${renderOptions(['Todos', 'producao', 'homologacao'], state.filters.cteDocs.ambiente, {
+              Todos: 'Todos',
+              producao: 'Producao',
+              homologacao: 'Homologacao'
+            })}</select>
+          </label>
+          <label class="field">
+            Emissao inicio
+            <input name="emissaoInicio" type="date" value="${escapeHtml(state.filters.cteDocs.emissaoInicio)}" />
+          </label>
+          <label class="field">
+            Emissao fim
+            <input name="emissaoFim" type="date" value="${escapeHtml(state.filters.cteDocs.emissaoFim)}" />
+          </label>
+          <label class="field">
+            Status
+            <select name="status">${renderOptions(['Todos', ...statusOptions], state.filters.cteDocs.status)}</select>
+          </label>
+          <label class="field">
+            Schema
+            <select name="schemaDoc">${renderOptions(['Todos', ...schemaOptions], state.filters.cteDocs.schemaDoc)}</select>
+          </label>
+          <label class="field">
+            XML completo
+            <select name="xmlCompleto">${renderOptions(['Todos', 'Somente completos', 'Somente resumos'], state.filters.cteDocs.xmlCompleto)}</select>
+          </label>
+          <label class="field">
+            CNPJ
+            <input name="cnpj" value="${escapeHtml(state.filters.cteDocs.cnpj)}" />
+          </label>
+          <label class="field">
+            Numero CT-e
+            <input name="numero" value="${escapeHtml(state.filters.cteDocs.numero)}" />
+          </label>
+          <label class="field">
+            Chave de acesso
+            <input name="chave" value="${escapeHtml(state.filters.cteDocs.chave)}" maxlength="44" />
+          </label>
+          <label class="field">
+            Valor minimo
+            <input name="valorMin" type="number" min="0" step="0.01" value="${escapeHtml(state.filters.cteDocs.valorMin)}" />
+          </label>
+          <label class="field">
+            Valor maximo
+            <input name="valorMax" type="number" min="0" step="0.01" value="${escapeHtml(state.filters.cteDocs.valorMax)}" />
+          </label>
+          <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
+            <button class="btn primary" type="submit">Buscar CT-e</button>
+            <button class="btn secondary" type="button" data-action="cte-docs-clear-filters">Limpar</button>
+          </div>
+        </form>
+      </article>
+
+      ${
+        canShowTable
+          ? `${renderCteSearchSummary()}${renderCteDocumentsTableCard(docs)}`
+          : renderCteSearchEmptyState()
+      }
+    </section>
+  `;
+}
+
+function renderCteSearchEmptyState() {
+  return `
+    <article class="card">
+      <div class="table-state">
+        Selecione a empresa e os filtros desejados, depois clique em <strong>Buscar CT-e</strong>.
+      </div>
+    </article>
+  `;
+}
+
+function renderCteSearchSummary() {
+  const query = state.cteSearch.lastQuery;
+  if (!query) {
+    return '';
+  }
+
+  const client = findClientById(query.cliente);
+  const filteredDocs = getFilteredCteDocuments();
+  const totalValue = sumListedDocumentValues(filteredDocs);
+  const periodText =
+    query.emissaoInicio || query.emissaoFim
+      ? `${formatDate(query.emissaoInicio || '')} ate ${formatDate(query.emissaoFim || '')}`
+      : 'Sem filtro de emissao';
+  return `
+    <article class="card" style="box-shadow:none; border-style:dashed;">
+      <div class="progress-meta">
+        <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
+        <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
+        <span>Tipo: <strong>${escapeHtml(query.tipo || 'Todos')}</strong></span>
+        <span>Resultado: <strong>${escapeHtml(String(filteredDocs.length))} CT-e</strong></span>
+        <span>Valor somado: <strong>${escapeHtml(formatCurrency(totalValue))}</strong></span>
+        <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.cteSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
+      </div>
+    </article>
+  `;
+}
+
+function renderCteDocumentsTableCard(docs) {
+  const totalValue = sumListedDocumentValues(docs);
+
+  return `
+    <article class="card">
+      <div class="xml-batch-bar">
+        <div>
+          <h3 class="card-title">CT-e encontrados</h3>
+          <p class="card-subtitle">${escapeHtml(String(docs.length))} documento(s) na listagem. Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              ${renderCteSortHeader('numeroCte', 'Numero')}
+              ${renderCteSortHeader('cliente', 'Cliente')}
+              ${renderCteSortHeader('tipo', 'Tipo')}
+              ${renderCteSortHeader('contraparte', 'Emitente / destinatario')}
+              ${renderCteSortHeader('dataEmissao', 'Data emissao')}
+              ${renderCteSortHeader('valor', 'Valor')}
+              ${renderCteSortHeader('ambiente', 'Ambiente')}
+              ${renderCteSortHeader('arquivo', 'Arquivo')}
+              ${renderCteSortHeader('status', 'Status')}
+              <th>Acoes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderTableRowsOrState({
+              key: 'cteDocs',
+              colSpan: 10,
+              rowsHtml: docs
+                .map((doc) => {
+                  return `<tr>
+                    <td>${escapeHtml(doc.numeroCte || '-')}</td>
+                    <td>${escapeHtml(doc.cliente)}</td>
+                    <td>${statusBadge(doc.tipo, doc.tipo === 'Emitido' ? 'success' : doc.tipo === 'Recebido' ? 'info' : 'neutral')}</td>
+                    <td>
+                      <span class="row-title">${escapeHtml(doc.contraparteNome || '-')}</span>
+                      <span class="row-sub">${escapeHtml(formatCnpj(doc.contraparteCnpj || ''))}</span>
+                    </td>
+                    <td>${escapeHtml(formatDateTime(doc.dataEmissao))}</td>
+                    <td>${escapeHtml(formatCurrency(doc.valor))}</td>
+                    <td>${statusBadge(mapNfeAmbienteLabel(doc.ambiente), doc.ambiente === 'producao' ? 'success' : 'warning')}</td>
+                    <td>${renderNfeStorageBadges(doc)}</td>
+                    <td>${renderCteStatusBadges(doc)}</td>
+                    <td>
+                      <div class="table-actions">
+                        <button class="icon-btn" data-action="cte-details" data-cte-id="${doc.id}">Visualizar detalhes</button>
+                        <button class="icon-btn" data-action="cte-view" data-cte-id="${doc.id}">Ver XML</button>
+                        <button class="icon-btn" data-action="cte-download" data-cte-id="${doc.id}">Baixar XML</button>
+                      </div>
+                    </td>
+                  </tr>`;
+                })
+                .join(''),
+              emptyMessage: 'Nenhum CT-e encontrado para os filtros informados.'
+            })}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function renderCteSortHeader(key, label) {
+  const isActive = state.sort.cteDocs.key === key;
+  const direction = isActive ? state.sort.cteDocs.direction : 'none';
+  const sortLabel =
+    direction === 'asc'
+      ? `${label}, ordenado crescente`
+      : direction === 'desc'
+        ? `${label}, ordenado decrescente`
+        : `${label}, ordenar`;
+
+  return `
+    <th>
+      <button class="sort-header ${isActive ? 'active' : ''}" type="button" data-action="cte-docs-sort" data-sort-key="${escapeHtml(key)}" aria-label="${escapeHtml(sortLabel)}">
+        <span>${escapeHtml(label)}</span>
+        <span class="sort-indicator" aria-hidden="true">${direction === 'asc' ? '▲' : direction === 'desc' ? '▼' : '↕'}</span>
+      </button>
+    </th>
+  `;
+}
+
 function renderStoredDocumentsTypeSwitcher(activeType) {
-  const isNfse = activeType !== 'nfe';
+  const isNfse = activeType === 'nfse';
+  const isNfe = activeType === 'nfe';
+  const isCte = activeType === 'cte';
 
   return `
     <article class="card" style="padding-bottom:18px;">
@@ -2657,7 +2966,8 @@ function renderStoredDocumentsTypeSwitcher(activeType) {
         </div>
         <div class="table-actions">
           <button class="btn ${isNfse ? 'primary' : 'secondary'}" type="button" data-action="stored-docs-switch" data-doc-type="nfse">NFS-e</button>
-          <button class="btn ${isNfse ? 'secondary' : 'primary'}" type="button" data-action="stored-docs-switch" data-doc-type="nfe">NF-e</button>
+          <button class="btn ${isNfe ? 'primary' : 'secondary'}" type="button" data-action="stored-docs-switch" data-doc-type="nfe">NF-e</button>
+          <button class="btn ${isCte ? 'primary' : 'secondary'}" type="button" data-action="stored-docs-switch" data-doc-type="cte">CT-e</button>
         </div>
       </div>
     </article>
@@ -2675,8 +2985,8 @@ function renderXmlsPage() {
   return `
     <section class="page-section">
       ${renderPageHeader({
-        title: 'XMLs Armazenados',
-        description: 'Consulte XMLs armazenados de NFS-e e NF-e no servidor interno.',
+        title: 'XMLs NFS-e',
+        description: 'Consulte XMLs armazenados de NFS-e no servidor interno.',
         actions: [actionButton('Exportar listagem', 'xml-export-list', 'secondary')]
       })}
 
@@ -3184,6 +3494,10 @@ function renderModal() {
       return renderNfeDetailsModal(state.modal.nfeId);
     case 'nfe-view':
       return renderNfeViewerModal(state.modal.nfeId);
+    case 'cte-details':
+      return renderCteDetailsModal(state.modal.cteId);
+    case 'cte-view':
+      return renderCteViewerModal(state.modal.cteId);
     case 'dominio-nfe-view':
       return renderDominioNfeViewerModal();
     case 'xml-details':
@@ -3502,6 +3816,73 @@ function renderNfeViewerModal(nfeId) {
         <div class="modal-footer">
           <button class="btn secondary" data-action="close-modal">Fechar</button>
           <button class="btn primary" data-action="nfe-download" data-nfe-id="${doc.id}">Baixar XML</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCteDetailsModal(cteId) {
+  const doc = findCteById(cteId);
+  if (!doc) {
+    return '';
+  }
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Detalhes do CT-e ${escapeHtml(doc.numeroCte || doc.chaveAcesso)}</h3>
+          <p class="modal-subtitle">Resumo do documento armazenado para consulta interna.</p>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid two">
+            ${detailItem('Cliente', doc.cliente)}
+            ${detailItem('Tipo', doc.tipo)}
+            ${detailItem('Chave de acesso', doc.chaveAcesso)}
+            ${detailItem('Numero CT-e', doc.numeroCte || '-')}
+            ${detailItem('Serie / modelo', `${doc.serie || '-'} / ${doc.modelo || '-'}`)}
+            ${detailItem('Ambiente', mapNfeAmbienteLabel(doc.ambiente))}
+            ${detailItem('Emitente', `${doc.emitenteNome || '-'}${doc.emitenteCnpj ? ` (${formatCnpj(doc.emitenteCnpj)})` : ''}`)}
+            ${detailItem('Destinatario', `${doc.destinatarioNome || '-'}${doc.destinatarioCnpj ? ` (${formatCnpj(doc.destinatarioCnpj)})` : ''}`)}
+            ${detailItem('Data de emissao', formatDateTime(doc.dataEmissao))}
+            ${detailItem('Data de autorizacao', formatDateTime(doc.dataAutorizacao))}
+            ${detailItem('Valor total', formatCurrency(doc.valor))}
+            ${detailItem('Schema', doc.schemaDoc || '-')}
+            ${detailItem('Arquivo completo', doc.xmlCompletoDisponivel ? 'Sim' : 'Nao')}
+            ${detailItem('Resumo disponivel', doc.resumoDisponivel ? 'Sim' : 'Nao')}
+            ${detailItem('Status fiscal', doc.statusFiscal || '-')}
+            ${detailItem('Caminho XML', doc.caminhoServidor || '-')}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="cte-view" data-cte-id="${doc.id}">Ver conteudo XML</button>
+          <button class="btn primary" data-action="cte-download" data-cte-id="${doc.id}">Baixar XML</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCteViewerModal(cteId) {
+  const doc = findCteById(cteId);
+  if (!doc) {
+    return '';
+  }
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Visualizador XML - CT-e ${escapeHtml(doc.numeroCte || doc.chaveAcesso)}</h3>
+          <p class="modal-subtitle">Visualizacao formatada para leitura interna.</p>
+        </div>
+        <div class="modal-body">
+          <pre class="xml-viewer">${escapeHtml(formatXml(doc.conteudoXml))}</pre>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="close-modal">Fechar</button>
+          <button class="btn primary" data-action="cte-download" data-cte-id="${doc.id}">Baixar XML</button>
         </div>
       </div>
     </div>
@@ -3933,6 +4314,15 @@ function renderNfeStatusBadges(doc) {
   return `<div class="status-stack">${badges.join('')}</div>`;
 }
 
+function renderCteStatusBadges(doc) {
+  const badges = [];
+  if (doc.statusFiscal && doc.statusFiscal !== '-') {
+    badges.push(statusBadge(doc.statusFiscal, toneFromFiscalStatus(doc.statusFiscal)));
+  }
+  badges.push(statusBadge(doc.tipo, doc.tipo === 'Emitido' ? 'success' : doc.tipo === 'Recebido' ? 'info' : 'neutral'));
+  return `<div class="status-stack">${badges.join('')}</div>`;
+}
+
 function renderTableRowsOrState({ key, colSpan, rowsHtml, emptyMessage }) {
   const tableState = state.tableState[key];
   if (tableState === 'loading') {
@@ -3981,6 +4371,7 @@ function parseRoute(hash) {
     '/xmls': 'xmls',
     '/buscas-nfe': 'buscas-nfe',
     '/xmls-nfe': 'xmls-nfe',
+    '/xmls-cte': 'xmls-cte',
     '/alertas': 'alertas',
     '/configuracoes': 'configuracoes'
   };
@@ -4009,9 +4400,6 @@ function resolvePageMeta() {
 function resolveNavKeyByRoute(routeName) {
   if (routeName === 'client-details') {
     return 'clientes';
-  }
-  if (routeName === 'xmls-nfe') {
-    return 'xmls';
   }
   return routeName;
 }
@@ -4716,6 +5104,17 @@ function getNfeDashboardStats() {
   };
 }
 
+function getCteDashboardStats() {
+  return {
+    totalCte: Number(state.cteDashboardStats?.totalCte || state.cteDocuments.length || 0),
+    xmlsCompletos: Number(
+      state.cteDashboardStats?.xmlsCompletos ||
+        state.cteDocuments.filter((doc) => doc.xmlCompletoDisponivel).length ||
+        0
+    )
+  };
+}
+
 function getNfeSyncClientRows(controls = state.nfeSyncControls, clients = getNfeEligibleClients()) {
   return clients.map((client) => {
     const rows = (Array.isArray(controls) ? controls : []).filter((control) => control.clientId === client.id);
@@ -5274,6 +5673,27 @@ async function applyNfeDocsFilters(form) {
   await executeNfeDocsSearch();
 }
 
+async function applyCteDocsFilters(form) {
+  const data = new FormData(form);
+  state.filters.cteDocs = {
+    cliente: String(data.get('cliente') || ''),
+    tipo: String(data.get('tipo') || 'Todos'),
+    cnpj: normalizeDigits(String(data.get('cnpj') || '')),
+    numero: String(data.get('numero') || '').trim(),
+    chave: normalizeDigits(String(data.get('chave') || '')),
+    emissaoInicio: String(data.get('emissaoInicio') || ''),
+    emissaoFim: String(data.get('emissaoFim') || ''),
+    status: String(data.get('status') || 'Todos'),
+    schemaDoc: String(data.get('schemaDoc') || 'Todos'),
+    valorMin: String(data.get('valorMin') || '').trim(),
+    valorMax: String(data.get('valorMax') || '').trim(),
+    xmlCompleto: String(data.get('xmlCompleto') || 'Todos'),
+    ambiente: String(data.get('ambiente') || 'Todos')
+  };
+
+  await executeCteDocsSearch();
+}
+
 async function openNfeDocumentsForClient(clientId) {
   if (!findClientById(clientId)) {
     pushToast('Cliente nao encontrado para abrir os XMLs de NF-e.', 'error');
@@ -5407,6 +5827,48 @@ async function executeNfeDocsSearch() {
     state.nfeSearch.results = [];
     state.tableState.nfeDocs = 'error';
     pushToast(`Falha ao buscar NF-e: ${toErrorMessage(error)}`, 'error');
+  }
+
+  render();
+}
+
+async function executeCteDocsSearch() {
+  if (!state.filters.cteDocs.cliente) {
+    resetCteDocsSearch();
+    pushToast('Selecione uma empresa para buscar CT-e.', 'error');
+    render();
+    return;
+  }
+
+  if (
+    state.filters.cteDocs.emissaoInicio &&
+    state.filters.cteDocs.emissaoFim &&
+    Date.parse(state.filters.cteDocs.emissaoInicio) > Date.parse(state.filters.cteDocs.emissaoFim)
+  ) {
+    resetCteDocsSearch();
+    pushToast('A data inicial nao pode ser maior que a data final.', 'error');
+    render();
+    return;
+  }
+
+  state.cteSearch.hasSearched = true;
+  state.cteSearch.results = [];
+  state.cteSearch.lastQuery = { ...state.filters.cteDocs };
+  state.tableState.cteDocs = 'loading';
+  render();
+
+  try {
+    const query = buildCteSearchQuery(state.filters.cteDocs);
+    const docs = await apiRequest(`/cte?${query.toString()}`);
+    const mapped = buildCteDocumentsFromApi(Array.isArray(docs) ? docs : [], state.clients);
+    state.cteDocuments = mergeCteDocumentsById(state.cteDocuments, mapped);
+    state.cteSearch.results = getFilteredCteDocumentsFromSource(mapped);
+    state.cteSearch.lastSearchedAt = new Date().toISOString();
+    state.tableState.cteDocs = 'data';
+  } catch (error) {
+    state.cteSearch.results = [];
+    state.tableState.cteDocs = 'error';
+    pushToast(`Falha ao buscar CT-e: ${toErrorMessage(error)}`, 'error');
   }
 
   render();
@@ -5549,6 +6011,63 @@ function buildNfeSearchQuery(filters) {
   return query;
 }
 
+function buildCteSearchQuery(filters) {
+  const query = new URLSearchParams();
+  query.set('clienteId', filters.cliente);
+
+  if (filters.emissaoInicio) {
+    query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
+  }
+
+  if (filters.emissaoFim) {
+    query.set('dataFim', `${filters.emissaoFim}T23:59:59.999Z`);
+  }
+
+  const client = findClientById(filters.cliente);
+  if (client?.cnpj) {
+    query.set('cnpjConsulta', normalizeDigits(client.cnpj));
+    if (filters.tipo === 'Emitido') {
+      query.set('tipoRelacao', 'emitidos');
+    } else if (filters.tipo === 'Recebido') {
+      query.set('tipoRelacao', 'recebidos');
+    }
+  }
+
+  if (filters.status !== 'Todos') {
+    query.set('status', filters.status);
+  }
+
+  if (filters.schemaDoc !== 'Todos') {
+    query.set('schemaDoc', filters.schemaDoc);
+  }
+
+  if (filters.numero) {
+    query.set('numeroCte', filters.numero);
+  }
+
+  if (filters.chave) {
+    query.set('chaveAcesso', filters.chave);
+  }
+
+  if (filters.ambiente !== 'Todos') {
+    query.set('ambiente', filters.ambiente);
+  }
+
+  if (filters.valorMin) {
+    query.set('valorMin', filters.valorMin);
+  }
+
+  if (filters.valorMax) {
+    query.set('valorMax', filters.valorMax);
+  }
+
+  if (filters.xmlCompleto === 'Somente completos') {
+    query.set('somenteXmlCompleto', 'true');
+  }
+
+  return query;
+}
+
 function mergeXmlFilesById(existing, incoming) {
   const byId = new Map();
   [...existing, ...incoming].forEach((xml) => {
@@ -5560,6 +6079,16 @@ function mergeXmlFilesById(existing, incoming) {
 }
 
 function mergeNfeDocumentsById(existing, incoming) {
+  const byId = new Map();
+  [...existing, ...incoming].forEach((doc) => {
+    if (doc?.id) {
+      byId.set(doc.id, doc);
+    }
+  });
+  return Array.from(byId.values()).sort((a, b) => Date.parse(b.dataEmissao || 0) - Date.parse(a.dataEmissao || 0));
+}
+
+function mergeCteDocumentsById(existing, incoming) {
   const byId = new Map();
   [...existing, ...incoming].forEach((doc) => {
     if (doc?.id) {
@@ -5620,6 +6149,14 @@ function getFilteredNfeDocuments() {
   return sortNfeDocuments(getFilteredNfeDocumentsFromSource(state.nfeSearch.results));
 }
 
+function getFilteredCteDocuments() {
+  if (!state.cteSearch.hasSearched) {
+    return [];
+  }
+
+  return sortCteDocuments(getFilteredCteDocumentsFromSource(state.cteSearch.results));
+}
+
 function getFilteredNfeDocumentsFromSource(source) {
   const filters = state.filters.nfeDocs;
   const docsSource = Array.isArray(source) ? source : [];
@@ -5633,6 +6170,48 @@ function getFilteredNfeDocumentsFromSource(source) {
       normalizeDigits(doc.destinatarioCnpj || '').includes(filters.cnpj) ||
       normalizeDigits(doc.contraparteCnpj || '').includes(filters.cnpj);
     const matchesNumero = !filters.numero || String(doc.numeroNfe || '').includes(filters.numero);
+    const matchesChave = !filters.chave || String(doc.chaveAcesso || '').includes(filters.chave);
+    const matchesStatus = filters.status === 'Todos' || doc.statusFiscal === filters.status;
+    const matchesSchema = filters.schemaDoc === 'Todos' || doc.schemaDoc === filters.schemaDoc;
+    const matchesAmbiente = filters.ambiente === 'Todos' || doc.ambiente === filters.ambiente;
+    const matchesXmlCompleto =
+      filters.xmlCompleto === 'Todos' ||
+      (filters.xmlCompleto === 'Somente completos' && doc.xmlCompletoDisponivel) ||
+      (filters.xmlCompleto === 'Somente resumos' && !doc.xmlCompletoDisponivel);
+
+    const emissaoDate = Date.parse(doc.dataEmissao);
+    const matchesEmissaoInicio = !filters.emissaoInicio || emissaoDate >= Date.parse(`${filters.emissaoInicio}T00:00:00`);
+    const matchesEmissaoFim = !filters.emissaoFim || emissaoDate <= Date.parse(`${filters.emissaoFim}T23:59:59`);
+
+    return (
+      matchesClient &&
+      matchesTipo &&
+      matchesCnpj &&
+      matchesNumero &&
+      matchesChave &&
+      matchesStatus &&
+      matchesSchema &&
+      matchesAmbiente &&
+      matchesXmlCompleto &&
+      matchesEmissaoInicio &&
+      matchesEmissaoFim
+    );
+  });
+}
+
+function getFilteredCteDocumentsFromSource(source) {
+  const filters = state.filters.cteDocs;
+  const docsSource = Array.isArray(source) ? source : [];
+
+  return docsSource.filter((doc) => {
+    const matchesClient = filters.cliente === 'Todos' || !filters.cliente || doc.clientId === filters.cliente;
+    const matchesTipo = filters.tipo === 'Todos' || doc.tipo === filters.tipo;
+    const matchesCnpj =
+      !filters.cnpj ||
+      normalizeDigits(doc.emitenteCnpj || '').includes(filters.cnpj) ||
+      normalizeDigits(doc.destinatarioCnpj || '').includes(filters.cnpj) ||
+      normalizeDigits(doc.contraparteCnpj || '').includes(filters.cnpj);
+    const matchesNumero = !filters.numero || String(doc.numeroCte || '').includes(filters.numero);
     const matchesChave = !filters.chave || String(doc.chaveAcesso || '').includes(filters.chave);
     const matchesStatus = filters.status === 'Todos' || doc.statusFiscal === filters.status;
     const matchesSchema = filters.schemaDoc === 'Todos' || doc.schemaDoc === filters.schemaDoc;
@@ -5680,6 +6259,15 @@ function updateNfeSort(key) {
   render();
 }
 
+function updateCteSort(key) {
+  const current = state.sort.cteDocs;
+  state.sort.cteDocs = {
+    key,
+    direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
+  };
+  render();
+}
+
 function sortXmls(xmls) {
   const sort = state.sort.xmls;
   const directionMultiplier = sort.direction === 'asc' ? 1 : -1;
@@ -5705,6 +6293,20 @@ function sortNfeDocuments(docs) {
     }
 
     return compareXmlSortValues(getNfeSortValue(a, 'chaveAcesso'), getNfeSortValue(b, 'chaveAcesso'));
+  });
+}
+
+function sortCteDocuments(docs) {
+  const sort = state.sort.cteDocs;
+  const directionMultiplier = sort.direction === 'asc' ? 1 : -1;
+
+  return [...docs].sort((a, b) => {
+    const comparison = compareXmlSortValues(getCteSortValue(a, sort.key), getCteSortValue(b, sort.key));
+    if (comparison !== 0) {
+      return comparison * directionMultiplier;
+    }
+
+    return compareXmlSortValues(getCteSortValue(a, 'chaveAcesso'), getCteSortValue(b, 'chaveAcesso'));
   });
 }
 
@@ -5739,6 +6341,33 @@ function getNfeSortValue(doc, key) {
       return normalizeDigits(doc.chaveAcesso || '');
     case 'numeroNfe':
       return toSortableNumber(doc.numeroNfe);
+    case 'cliente':
+      return doc.cliente || '';
+    case 'tipo':
+      return doc.tipo || '';
+    case 'contraparte':
+      return doc.contraparteNome || '';
+    case 'dataEmissao':
+      return toSortableDate(doc.dataEmissao);
+    case 'valor':
+      return Number(doc.valor || 0);
+    case 'ambiente':
+      return doc.ambiente || '';
+    case 'arquivo':
+      return `${doc.xmlCompletoDisponivel ? '1' : '0'}${doc.resumoDisponivel ? '1' : '0'}`;
+    case 'status':
+      return doc.statusFiscal || '';
+    default:
+      return '';
+  }
+}
+
+function getCteSortValue(doc, key) {
+  switch (key) {
+    case 'chaveAcesso':
+      return normalizeDigits(doc.chaveAcesso || '');
+    case 'numeroCte':
+      return toSortableNumber(doc.numeroCte);
     case 'cliente':
       return doc.cliente || '';
     case 'tipo':
@@ -5832,6 +6461,29 @@ function resetNfeDocsSearch() {
   state.nfeSearch.lastQuery = null;
   state.nfeSearch.lastSearchedAt = null;
   state.tableState.nfeDocs = 'data';
+}
+
+function resetCteDocsSearch() {
+  state.filters.cteDocs = {
+    cliente: 'Todos',
+    tipo: 'Todos',
+    cnpj: '',
+    numero: '',
+    chave: '',
+    emissaoInicio: '',
+    emissaoFim: '',
+    status: 'Todos',
+    schemaDoc: 'Todos',
+    valorMin: '',
+    valorMax: '',
+    xmlCompleto: 'Todos',
+    ambiente: 'Todos'
+  };
+  state.cteSearch.hasSearched = false;
+  state.cteSearch.results = [];
+  state.cteSearch.lastQuery = null;
+  state.cteSearch.lastSearchedAt = null;
+  state.tableState.cteDocs = 'data';
 }
 
 function applyAlertsFilters(form) {
@@ -6836,6 +7488,51 @@ function buildNfeDocumentsFromApi(nfeDocs, clients) {
     .sort((a, b) => Date.parse(b.dataEmissao || 0) - Date.parse(a.dataEmissao || 0));
 }
 
+function buildCteDocumentsFromApi(cteDocs, clients) {
+  const docs = Array.isArray(cteDocs) ? cteDocs : [];
+  const clientById = Object.fromEntries(clients.map((client) => [client.id, client]));
+
+  return docs
+    .map((doc) => {
+      const client = clientById[doc.clienteId] || null;
+      const tipo = mapCteTipoLabel(doc.tipoRelacao);
+      const emitenteCnpj = normalizeDigits(doc.cnpjEmitente || '');
+      const destinatarioCnpj = normalizeDigits(doc.cnpjDestinatario || '');
+      const contraparteNome = tipo === 'Emitido' ? doc.razaoSocialDestinatario : doc.razaoSocialEmitente;
+      const contraparteCnpj = tipo === 'Emitido' ? destinatarioCnpj : emitenteCnpj;
+
+      return {
+        id: `cte-${doc.id}`,
+        apiCteId: doc.id,
+        clientId: doc.clienteId,
+        cliente: client?.razaoSocial || 'Cliente nao identificado',
+        estabelecimentoId: doc.estabelecimentoId || null,
+        chaveAcesso: doc.chaveAcesso || '-',
+        numeroCte: doc.numeroNfe || '-',
+        serie: doc.serie || '-',
+        modelo: doc.modelo || '-',
+        ambiente: doc.ambiente || 'producao',
+        dataEmissao: doc.dataEmissao || doc.createdAt || doc.updatedAt,
+        dataAutorizacao: doc.dataAutorizacao || doc.updatedAt || doc.createdAt,
+        valor: toNumber(doc.valorTotal),
+        tipo,
+        statusFiscal: doc.status || '-',
+        schemaDoc: doc.schemaDoc || '-',
+        xmlCompletoDisponivel: Boolean(doc.xmlCompletoDisponivel),
+        resumoDisponivel: Boolean(doc.resumoDisponivel),
+        caminhoServidor: doc.xmlCompletoPath || doc.xmlResumoPath || '-',
+        emitenteNome: doc.razaoSocialEmitente || '-',
+        emitenteCnpj,
+        destinatarioNome: doc.razaoSocialDestinatario || '-',
+        destinatarioCnpj,
+        contraparteNome: contraparteNome || '-',
+        contraparteCnpj,
+        conteudoXml: null
+      };
+    })
+    .sort((a, b) => Date.parse(b.dataEmissao || 0) - Date.parse(a.dataEmissao || 0));
+}
+
 function buildNfeSyncControlsFromApi(nfeSyncByClient, clients, establishmentsByClient) {
   const clientById = Object.fromEntries(clients.map((client) => [client.id, client]));
   const establishmentById = {};
@@ -7426,6 +8123,13 @@ function findNfeById(nfeId) {
   return state.nfeSearch.results.find((doc) => doc.id === nfeId) || state.nfeDocuments.find((doc) => doc.id === nfeId) || null;
 }
 
+function findCteById(cteId) {
+  if (!cteId) {
+    return null;
+  }
+  return state.cteSearch.results.find((doc) => doc.id === cteId) || state.cteDocuments.find((doc) => doc.id === cteId) || null;
+}
+
 function mapClientOptions() {
   return state.clients.reduce((acc, client) => {
     acc[client.id] = `${client.razaoSocial} (${formatCnpj(client.cnpj)})`;
@@ -7551,6 +8255,16 @@ function mapNfeTipoLabel(tipoRelacao) {
   }
   if (tipoRelacao === 'recebida') {
     return 'Recebida';
+  }
+  return 'Nao identificado';
+}
+
+function mapCteTipoLabel(tipoRelacao) {
+  if (tipoRelacao === 'emitida') {
+    return 'Emitido';
+  }
+  if (tipoRelacao === 'recebida') {
+    return 'Recebido';
   }
   return 'Nao identificado';
 }
@@ -7834,6 +8548,47 @@ async function downloadNfeXmlById(nfeId) {
   pushToast(`Download da NF-e ${doc.numeroNfe || doc.chaveAcesso} iniciado.`, 'success');
 }
 
+async function openCteViewer(cteId) {
+  const doc = findCteById(cteId);
+  if (!doc) {
+    pushToast('CT-e nao encontrado.', 'error');
+    return;
+  }
+
+  try {
+    await ensureCteContentLoaded(doc);
+    openModal({ kind: 'cte-view', cteId });
+  } catch (error) {
+    pushToast(`Falha ao carregar XML do CT-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function downloadCteXmlById(cteId) {
+  const doc = findCteById(cteId);
+  if (!doc) {
+    pushToast('CT-e nao encontrado.', 'error');
+    return;
+  }
+
+  try {
+    await ensureCteContentLoaded(doc);
+  } catch (error) {
+    pushToast(`Falha ao baixar XML do CT-e: ${toErrorMessage(error)}`, 'error');
+    return;
+  }
+
+  const blob = new Blob([doc.conteudoXml], { type: 'application/xml' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `cte-${doc.chaveAcesso}.xml`;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+  pushToast(`Download do CT-e ${doc.numeroCte || doc.chaveAcesso} iniciado.`, 'success');
+}
+
 async function openXmlViewer(xmlId) {
   const xml = findXmlById(xmlId);
   if (!xml) {
@@ -8053,6 +8808,66 @@ function exportNfeListToCsv() {
   pushToast(`${docs.length} NF-e exportada(s) para CSV.`, 'success');
 }
 
+function exportCteListToCsv() {
+  if (!state.cteSearch.hasSearched) {
+    pushToast('Busque os CT-e antes de exportar a listagem.', 'error');
+    return;
+  }
+
+  const docs = getFilteredCteDocuments();
+  if (!docs.length) {
+    pushToast('Nao ha CT-e na listagem atual para exportar.', 'error');
+    return;
+  }
+
+  const header = [
+    'Chave de acesso',
+    'Numero CT-e',
+    'Cliente',
+    'Tipo',
+    'Ambiente',
+    'Data emissao',
+    'Data autorizacao',
+    'Valor total',
+    'Status',
+    'Schema',
+    'Emitente',
+    'CNPJ emitente',
+    'Destinatario',
+    'CNPJ destinatario',
+    'Arquivo completo',
+    'Resumo disponivel'
+  ];
+  const rows = docs.map((doc) => [
+    doc.chaveAcesso,
+    doc.numeroCte,
+    doc.cliente,
+    doc.tipo,
+    mapNfeAmbienteLabel(doc.ambiente),
+    formatDateTime(doc.dataEmissao),
+    formatDateTime(doc.dataAutorizacao),
+    formatCurrency(doc.valor),
+    doc.statusFiscal,
+    doc.schemaDoc,
+    doc.emitenteNome,
+    formatCnpj(doc.emitenteCnpj),
+    doc.destinatarioNome,
+    formatCnpj(doc.destinatarioCnpj),
+    doc.xmlCompletoDisponivel ? 'Sim' : 'Nao',
+    doc.resumoDisponivel ? 'Sim' : 'Nao'
+  ]);
+  const csv = [header, ...rows].map((row) => row.map(escapeCsvCell).join(';')).join('\r\n');
+  const client = findClientById(state.cteSearch.lastQuery?.cliente);
+  const start = state.cteSearch.lastQuery?.emissaoInicio || 'inicio';
+  const end = state.cteSearch.lastQuery?.emissaoFim || 'fim';
+  const clientName = toSafeFileName(client?.razaoSocial || 'cliente');
+  const fileName = `cte-${clientName}-${start}-${end}.csv`;
+  const blob = new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' });
+
+  triggerBrowserDownload(fileName, blob);
+  pushToast(`${docs.length} CT-e exportado(s) para CSV.`, 'success');
+}
+
 function escapeCsvCell(value) {
   const normalized = String(value ?? '').replaceAll('"', '""');
   return `"${normalized}"`;
@@ -8096,6 +8911,24 @@ async function ensureNfeContentLoaded(doc) {
   }
 
   const result = await apiRequest(`/nfe/${doc.apiNfeId}/xml?clienteId=${encodeURIComponent(doc.clientId)}`);
+  const rawXml = result?.xml || (result?.contentBase64 ? atob(result.contentBase64) : '');
+  if (!rawXml) {
+    throw new Error('Conteudo XML vazio');
+  }
+
+  doc.conteudoXml = rawXml;
+}
+
+async function ensureCteContentLoaded(doc) {
+  if (doc.conteudoXml) {
+    return;
+  }
+
+  if (!doc.apiCteId || !doc.clientId) {
+    throw new Error('Documento sem referencia para recuperar XML na API');
+  }
+
+  const result = await apiRequest(`/cte/${doc.apiCteId}/xml?clienteId=${encodeURIComponent(doc.clientId)}`);
   const rawXml = result?.xml || (result?.contentBase64 ? atob(result.contentBase64) : '');
   if (!rawXml) {
     throw new Error('Conteudo XML vazio');

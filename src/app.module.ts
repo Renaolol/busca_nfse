@@ -5,6 +5,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { CertificatesModule } from './modules/certificates/certificates.module';
 import { ClientsModule } from './modules/clients/clients.module';
+import { CteModule } from './modules/cte/cte.module';
 import { EstablishmentsModule } from './modules/establishments/establishments.module';
 import { HealthModule } from './modules/health/health.module';
 import { NfeModule } from './modules/nfe/nfe.module';
@@ -20,6 +21,7 @@ import { PrismaModule } from './prisma/prisma.module';
     StorageModule,
     HealthModule,
     ClientsModule,
+    CteModule,
     EstablishmentsModule,
     CertificatesModule,
     SyncModule,

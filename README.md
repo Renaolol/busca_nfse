@@ -274,6 +274,10 @@ Rotas principais:
 - `GET /nfe/:id`
 - `GET /nfe/:id/xml`
 - `GET /nfe/dashboard-stats`
+- `GET /cte`
+- `GET /cte/:id`
+- `GET /cte/:id/xml`
+- `GET /cte/dashboard-stats`
 - `GET /nfe/sync/status?clienteId=...`
 - `POST /nfe/importar-dominio`
 - `POST /nfe/dominio/xml`
@@ -310,7 +314,9 @@ Observacoes:
 - XMLs da Dominio com raiz `Baixas` sao ignorados automaticamente, pois representam baixa financeira e nao documento fiscal armazenavel.
 - O painel da ultima importacao consegue abrir o XML bruto do catalogo e disparar reimportacao pontual ou em lote usando esses `catalogoIds`.
 - Para revisar documentos de transporte que ja foram gravados em `nfe_documentos`, rode `npm run nfe:separar-cte` para gerar um relatorio em `.tmp/nfe-cte-separation` e `npm run nfe:separar-cte -- --apply` para marcar os CT-es detectados em `schemaDoc`, permitindo que o modulo de NF-e deixe de exibi-los nas listagens e indicadores.
+- O frontend agora expõe um menu dedicado `XMLs CT-e`, paralelo a `XMLs NFS-e` e `XMLs NF-e`, com filtros, visualizacao do XML e download por cliente.
 - `GET /nfe` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, periodo, status e `somenteXmlCompleto`.
+- `GET /cte` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, numero, chave, ambiente, periodo, status e `somenteXmlCompleto`.
 - Quando `NFE_DISTRIBUICAO_CLIENT_MODE=real`, o sistema consulta `distNSU`, `consNSU` e `consChNFe`, descompacta `docZip` e armazena resumos `resNFe` e XMLs completos retornados pelo Ambiente Nacional.
 
 ## Guia de layout do DANFSE
@@ -333,11 +339,13 @@ Com a API rodando, abra:
 - `http://localhost:3000/app`
 
 Esse frontend permite testar onboarding de cliente/certificado, controle de sync e pesquisa de NFS-e.
-O layout esta separado em 4 menus:
+O layout agora inclui menus dedicados para armazenamento por documento fiscal:
 
 - `Clientes`: cadastro/edicao, certificados e contexto ativo.
-- `Notas`: filtros, listagem e download em lote (ZIP XML/DANFSE) das linhas selecionadas.
-- `Busca API`: execucao continua da sincronizacao ate a ultima NSU, com pausa/retomada e destaque da ultima nota capturada.
+- `XMLs NFS-e`: filtros, listagem e download em lote (ZIP XML/DANFSE) das linhas selecionadas.
+- `Buscas NF-e`: execucao e acompanhamento da importacao de NF-e.
+- `XMLs NF-e`: armazenamento e consulta de documentos de compra e venda.
+- `XMLs CT-e`: armazenamento e consulta de documentos de transporte.
 - `Auditoria`: consulta de trilha operacional por `cliente_id` e `acao`.
 Use a lista suspensa de clientes para selecionar o contexto ativo; ao selecionar, as notas do cliente sao carregadas automaticamente.
 Ao abrir/selecionar cliente, a listagem inicia com competencia do mes anterior ao atual.
