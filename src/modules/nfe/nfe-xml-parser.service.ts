@@ -25,6 +25,12 @@ export interface InspectedNfeXml {
   modelo?: string;
 }
 
+export interface ClassifiedFiscalXml {
+  documentType: 'nfe' | 'cte' | 'unknown';
+  schemaDoc?: string;
+  contentType?: 'resumo' | 'completo';
+}
+
 @Injectable()
 export class NfeXmlParserService {
   inspect(xml: string): InspectedNfeXml {
@@ -36,15 +42,72 @@ export class NfeXmlParserService {
     };
   }
 
+  classify(xml: string): ClassifiedFiscalXml {
+    if (/<(?:\w+:)?resCTe\b/i.test(xml)) {
+      return {
+        documentType: 'cte',
+        schemaDoc: 'resCTe_v1.00',
+        contentType: 'resumo'
+      };
+    }
+
+    if (/<(?:\w+:)?cteProc\b/i.test(xml) || /<(?:\w+:)?procCTe\b/i.test(xml)) {
+      return {
+        documentType: 'cte',
+        schemaDoc: 'cteProc_v4.00',
+        contentType: 'completo'
+      };
+    }
+
+    if (/<(?:\w+:)?CTe\b/i.test(xml) || /portalfiscal\.inf\.br\/cte/i.test(xml)) {
+      return {
+        documentType: 'cte',
+        schemaDoc: 'CTe_v4.00',
+        contentType: 'completo'
+      };
+    }
+
+    if (/<(?:\w+:)?resNFe\b/i.test(xml)) {
+      return {
+        documentType: 'nfe',
+        schemaDoc: 'resNFe_v1.01',
+        contentType: 'resumo'
+      };
+    }
+
+    if (/<(?:\w+:)?nfeProc\b/i.test(xml) || /<(?:\w+:)?procNFe\b/i.test(xml)) {
+      return {
+        documentType: 'nfe',
+        schemaDoc: 'procNFe_v4.00',
+        contentType: 'completo'
+      };
+    }
+
+    if (/<(?:\w+:)?NFe\b/i.test(xml) || /portalfiscal\.inf\.br\/nfe/i.test(xml)) {
+      return {
+        documentType: 'nfe',
+        schemaDoc: 'NFe_v4.00',
+        contentType: 'completo'
+      };
+    }
+
+    return { documentType: 'unknown' };
+  }
+
   parse(xml: string): ParsedNfe {
+    const classification = this.classify(xml);
+    if (classification.documentType === 'cte') {
+      throw new Error('XML de CT-e informado no fluxo de NF-e');
+    }
+
     const inspected = this.inspect(xml);
     const chaveAcesso = inspected.chaveAcesso;
     if (!chaveAcesso) {
       throw new Error('Nao foi possivel localizar chave de acesso no XML da NF-e');
     }
 
-    const summary = this.isSummaryXml(xml);
-    const schemaDoc = this.detectSchemaDoc(xml, summary);
+    const summary = classification.contentType === 'resumo';
+    const schemaDoc = classification.schemaDoc ?? this.detectSchemaDoc(xml, summary);
 
     return {
       chaveAcesso,

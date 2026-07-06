@@ -1,4 +1,5 @@
 import { NfeAmbiente, NfeSyncStatus, NfeTipoRelacao, Prisma } from '@prisma/client';
+import { BadRequestException } from '@nestjs/common';
 import { DominioNfeXmlSource } from '../../../integrations/dominio-nfe/dominio-nfe.types';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { NfeDistribuicaoClient } from '../../../integrations/nfe-distribuicao/nfe-distribuicao.types';
@@ -392,6 +393,54 @@ describe('NfeService', () => {
           catalogoId: 521572,
           status: 'ignorado_xml_nao_fiscal',
           mensagem: 'XML da Dominio ignorado por se tratar de baixa financeira, sem documento fiscal para importar'
+        })
+      ])
+    );
+  });
+
+  it('ignora XML de CT-e retornado pela Dominio sem tentar persistir como NF-e', async () => {
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 600001,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: undefined,
+        dataEmissao: '2026-07-04',
+        xmlBase64: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8"?>
+<cteProc xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <CTe>
+    <infCte Id="CTe42260795849600000135570010000319691243772228">
+      <ide>
+        <mod>57</mod>
+        <serie>1</serie>
+        <nCT>31969</nCT>
+      </ide>
+    </infCte>
+  </CTe>
+  <protCTe><infProt><chCTe>42260795849600000135570010000319691243772228</chCTe></infProt></protCTe>
+</cteProc>`,
+          'utf8'
+        ).toString('base64')
+      }
+    ]);
+
+    const result = await service.importFromDominio({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
+    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(nfseService.importXml).not.toHaveBeenCalled();
+    expect(result.xmlsPersistidos).toBe(0);
+    expect(result.falhas).toBe(0);
+    expect(result.detalhes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          catalogoId: 600001,
+          status: 'ignorado_xml_cte',
+          mensagem: 'XML da Dominio ignorado por se tratar de CT-e; use um fluxo dedicado para documentos de transporte'
         })
       ])
     );
@@ -1009,6 +1058,33 @@ describe('NfeService', () => {
         })
       })
     );
+  });
+
+  it('rejeita importacao manual de CT-e no modulo de NF-e', async () => {
+    await expect(
+      service.importXml({
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.producao,
+        xmlBase64: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8"?>
+<cteProc xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <CTe>
+    <infCte Id="CTe42260795849600000135570010000319691243772228">
+      <ide>
+        <mod>57</mod>
+        <serie>1</serie>
+        <nCT>31969</nCT>
+      </ide>
+    </infCte>
+  </CTe>
+  <protCTe><infProt><chCTe>42260795849600000135570010000319691243772228</chCTe></infProt></protCTe>
+</cteProc>`,
+          'utf8'
+        ).toString('base64')
+      })
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
   });
 
   it('consulta um NSU especifico e persiste documento retornado', async () => {

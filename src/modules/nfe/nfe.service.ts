@@ -49,7 +49,7 @@ type NfeSyncSourceMode = 'distribuicao' | 'dominio';
 
 type NfeSyncRunFailureDetail = {
   kind: 'documento' | 'controle';
-  status: 'persistido' | 'ignorado_sem_vinculo' | 'ignorado_xml_nao_fiscal' | 'falha';
+  status: 'persistido' | 'ignorado_sem_vinculo' | 'ignorado_xml_nao_fiscal' | 'ignorado_xml_cte' | 'falha';
   clientId: string;
   estabelecimentoId: string;
   ambiente: NfeAmbiente;
@@ -438,7 +438,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async getDashboardStats(query: DashboardNfeStatsQueryDto) {
-    const where: Prisma.NfeDocumentoWhereInput = {};
+    const where: Prisma.NfeDocumentoWhereInput = {
+      NOT: this.getCteSchemaDocFilters()
+    };
     if (query.clienteId) {
       where.clienteId = query.clienteId;
     }
@@ -501,6 +503,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException('NF-e nao encontrada');
     }
     this.assertClientScope(found.clienteId, clienteId);
+    if (this.isCteSchemaDoc(found.schemaDoc)) {
+      throw new NotFoundException('NF-e nao encontrada');
+    }
     return found;
   }
 
@@ -739,7 +744,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       serie?: string;
       modelo?: string;
       cnpjEmpresa: string;
-      status: 'persistido' | 'ignorado_sem_vinculo' | 'ignorado_xml_nao_fiscal' | 'falha';
+      status: 'persistido' | 'ignorado_sem_vinculo' | 'ignorado_xml_nao_fiscal' | 'ignorado_xml_cte' | 'falha';
       mensagem: string;
     }> = [];
 
@@ -749,6 +754,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       const establishment = cnpjEmpresa ? establishmentByCnpj.get(cnpjEmpresa) : undefined;
       const xml = this.decodeXml(document.xmlBase64);
       const inspectedXml = this.parser.inspect(xml);
+      const classifiedXml = this.parser.classify(xml);
 
       if (this.isIgnorableDominioXml(xml)) {
         if (params.sortDirection === 'asc' && !travarCursor) {
@@ -763,6 +769,23 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           cnpjEmpresa: cnpjEmpresa ?? '',
           status: 'ignorado_xml_nao_fiscal',
           mensagem: 'XML da Dominio ignorado por se tratar de baixa financeira, sem documento fiscal para importar'
+        });
+        continue;
+      }
+
+      if (classifiedXml.documentType === 'cte') {
+        if (params.sortDirection === 'asc' && !travarCursor) {
+          cursorAtualizadoAte = document.catalogoId;
+        }
+        detalhes.push({
+          catalogoId: document.catalogoId,
+          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso) ?? inspectedXml.chaveAcesso,
+          numeroNfe: inspectedXml.numeroNfe,
+          serie: inspectedXml.serie,
+          modelo: inspectedXml.modelo,
+          cnpjEmpresa: cnpjEmpresa ?? '',
+          status: 'ignorado_xml_cte',
+          mensagem: 'XML da Dominio ignorado por se tratar de CT-e; use um fluxo dedicado para documentos de transporte'
         });
         continue;
       }
@@ -1388,6 +1411,11 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     origem: NfeDocumentoOrigem;
     tipoRelacaoForcada?: NfeTipoRelacao;
   }) {
+    const classifiedXml = this.parser.classify(params.document.xml);
+    if (classifiedXml.documentType === 'cte') {
+      throw new BadRequestException('XML de CT-e nao pode ser importado no modulo de NF-e');
+    }
+
     const parsed = this.parser.parse(params.document.xml);
     const existing = await this.prisma.nfeDocumento.findUnique({
       where: {
@@ -1545,7 +1573,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private buildBaseWhere(query: QueryNfeDto): Prisma.NfeDocumentoWhereInput {
-    const where: Prisma.NfeDocumentoWhereInput = {};
+    const where: Prisma.NfeDocumentoWhereInput = {
+      NOT: this.getCteSchemaDocFilters()
+    };
 
     if (query.clienteId) {
       where.clienteId = query.clienteId;
@@ -1588,6 +1618,22 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
 
     return where;
+  }
+
+  private getCteSchemaDocFilters(): Prisma.NfeDocumentoWhereInput[] {
+    return [
+      { schemaDoc: { startsWith: 'CTe' } },
+      { schemaDoc: { startsWith: 'cteProc' } },
+      { schemaDoc: { startsWith: 'resCTe' } }
+    ];
+  }
+
+  private isCteSchemaDoc(schemaDoc?: string | null): boolean {
+    if (!schemaDoc) {
+      return false;
+    }
+
+    return ['CTe', 'cteProc', 'resCTe'].some((prefix) => schemaDoc.startsWith(prefix));
   }
 
   private async runAutomaticSyncCycle(): Promise<void> {

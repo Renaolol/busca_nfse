@@ -294,6 +294,7 @@ Observacoes:
 - `POST /nfe/importar-dominio` consulta a base da Dominio via ODBC, relaciona `bethadba.geempre.cgce_emp` com `cliente_estabelecimentos.cnpj` e reaproveita o mesmo pipeline de persistencia/deduplicacao do endpoint manual. O exportador prioriza `bethadba.EFATENDIMENTO_NFE_XML_V2` e usa `bethadba.EFATENDIMENTO_NFE_XML` como fallback quando necessario.
 - `POST /nfe/importar-dominio` tambem aceita `catalogoIds` para reimportacao pontual de XMLs ja localizados pela Dominio.
 - `POST /nfe/dominio/xml` retorna o XML bruto de um `catalogoId` da Dominio para visualizacao interna sem depender de persistencia previa.
+- XMLs de `CT-e` (modelo `57`, como `cteProc`, `CTe` e `resCTe`) sao rejeitados no modulo de NF-e e, no fluxo da Dominio, passam a ser ignorados com mensagem explicita para evitar mistura entre dominios fiscais.
 
 ### Importacao de NF-e via Dominio
 
@@ -308,6 +309,7 @@ Observacoes:
 - Se o XML retornado pela Dominio for ABRASF/NFS-e em vez de NF-e, o backend redireciona a importacao para o modulo de NFS-e e reaproveita a deduplicacao por `ambiente + chave_acesso` desse armazenamento.
 - XMLs da Dominio com raiz `Baixas` sao ignorados automaticamente, pois representam baixa financeira e nao documento fiscal armazenavel.
 - O painel da ultima importacao consegue abrir o XML bruto do catalogo e disparar reimportacao pontual ou em lote usando esses `catalogoIds`.
+- Para revisar documentos de transporte que ja foram gravados em `nfe_documentos`, rode `npm run nfe:separar-cte` para gerar um relatorio em `.tmp/nfe-cte-separation` e `npm run nfe:separar-cte -- --apply` para marcar os CT-es detectados em `schemaDoc`, permitindo que o modulo de NF-e deixe de exibi-los nas listagens e indicadores.
 - `GET /nfe` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, periodo, status e `somenteXmlCompleto`.
 - Quando `NFE_DISTRIBUICAO_CLIENT_MODE=real`, o sistema consulta `distNSU`, `consNSU` e `consChNFe`, descompacta `docZip` e armazena resumos `resNFe` e XMLs completos retornados pelo Ambiente Nacional.
 

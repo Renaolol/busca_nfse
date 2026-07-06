@@ -79,4 +79,28 @@ describe('NfeXmlParserService', () => {
       modelo: '55'
     });
   });
+
+  it('classifica CT-e e rejeita parse no fluxo de NF-e', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<cteProc xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <CTe>
+    <infCte Id="CTe42260795849600000135570010000319691243772228">
+      <ide>
+        <mod>57</mod>
+        <serie>1</serie>
+        <nCT>31969</nCT>
+        <dhEmi>2026-07-04T08:45:12-03:00</dhEmi>
+      </ide>
+    </infCte>
+  </CTe>
+  <protCTe><infProt><chCTe>42260795849600000135570010000319691243772228</chCTe></infProt></protCTe>
+</cteProc>`;
+
+    expect(service.classify(xml)).toEqual({
+      documentType: 'cte',
+      schemaDoc: 'cteProc_v4.00',
+      contentType: 'completo'
+    });
+    expect(() => service.parse(xml)).toThrow('XML de CT-e informado no fluxo de NF-e');
+  });
 });
