@@ -1,6 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Ambiente, DocumentoOrigem, NfseDocumento, Prisma } from '@prisma/client';
 import JSZip from 'jszip';
+import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardStatsQueryDto } from './dto/dashboard-stats.dto';
@@ -290,6 +291,10 @@ export class NfseService {
   }
 
   private resolvePagination(query: QueryNfseDto): { page: number; pageSize: number; skip: number } {
+    if (query.all) {
+      return { page: 1, pageSize: MAX_UNPAGINATED_RESULTS, skip: 0 };
+    }
+
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.max(1, Math.min(200, query.pageSize ?? 100));
     return {

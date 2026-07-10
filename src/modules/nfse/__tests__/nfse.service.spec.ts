@@ -70,6 +70,32 @@ describe('NfseService', () => {
     });
   });
 
+  it('ignora page/pageSize e usa o limite de seguranca quando all=true', async () => {
+    prisma.nfseDocumento.count.mockResolvedValueOnce(245);
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      page: 3,
+      pageSize: 50,
+      all: true
+    });
+
+    expect(prisma.nfseDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        skip: 0,
+        take: 10000
+      })
+    );
+    expect(result).toEqual({
+      items: [],
+      total: 245,
+      page: 1,
+      pageSize: 10000,
+      totalPages: 1
+    });
+  });
+
   it('retorna estatisticas agregadas do dashboard por cliente', async () => {
     prisma.nfseDocumento.count.mockResolvedValueOnce(512).mockResolvedValueOnce(492);
     prisma.nfseDocumento.groupBy

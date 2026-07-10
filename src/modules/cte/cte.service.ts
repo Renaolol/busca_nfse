@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CteXmlParserService } from './cte-xml-parser.service';
@@ -322,6 +323,10 @@ export class CteService {
   }
 
   private resolvePagination(query: QueryCteDto): { page: number; pageSize: number; skip: number } {
+    if (query.all) {
+      return { page: 1, pageSize: MAX_UNPAGINATED_RESULTS, skip: 0 };
+    }
+
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.max(1, Math.min(200, query.pageSize ?? 100));
     return {

@@ -806,6 +806,14 @@ function onDocumentClick(event) {
       void changeStoredDocumentsPage(searchKind, page);
       return;
     }
+    case 'search-list-all': {
+      const searchKind = actionNode.getAttribute('data-search-kind');
+      if (!searchKind) {
+        return;
+      }
+      void loadAllStoredDocuments(searchKind);
+      return;
+    }
     case 'nfe-sync-pause-control': {
       const clientId = actionNode.getAttribute('data-client-id');
       const ambiente = actionNode.getAttribute('data-ambiente') || 'producao';
@@ -2989,6 +2997,7 @@ function renderStoredDocumentsPagination(searchKind, searchState) {
       <div class="table-actions">
         <button class="btn secondary" type="button" data-action="search-pagination" data-search-kind="${escapeHtml(searchKind)}" data-page="${escapeHtml(String(currentPage - 1))}" ${currentPage <= 1 ? 'disabled' : ''}>Pagina anterior</button>
         <button class="btn secondary" type="button" data-action="search-pagination" data-search-kind="${escapeHtml(searchKind)}" data-page="${escapeHtml(String(currentPage + 1))}" ${currentPage >= totalPages ? 'disabled' : ''}>Proxima pagina</button>
+        <button class="btn secondary" type="button" data-action="search-list-all" data-search-kind="${escapeHtml(searchKind)}">Listar todas (${escapeHtml(String(total))})</button>
       </div>
     </div>
   `;
@@ -6069,11 +6078,15 @@ async function applyXmlFilters(form) {
   render();
 }
 
-function buildXmlSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE) {
+function buildXmlSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE, all = false) {
   const query = new URLSearchParams();
   query.set('clienteId', filters.cliente);
-  query.set('page', String(page));
-  query.set('pageSize', String(pageSize));
+  if (all) {
+    query.set('all', 'true');
+  } else {
+    query.set('page', String(page));
+    query.set('pageSize', String(pageSize));
+  }
 
   if (filters.emissaoInicio) {
     query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
@@ -6116,11 +6129,15 @@ function buildXmlSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE) {
   return query;
 }
 
-function buildNfeSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE) {
+function buildNfeSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE, all = false) {
   const query = new URLSearchParams();
   query.set('clienteId', filters.cliente);
-  query.set('page', String(page));
-  query.set('pageSize', String(pageSize));
+  if (all) {
+    query.set('all', 'true');
+  } else {
+    query.set('page', String(page));
+    query.set('pageSize', String(pageSize));
+  }
 
   if (filters.emissaoInicio) {
     query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
@@ -6183,11 +6200,15 @@ function buildNfeSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE) {
   return query;
 }
 
-function buildCteSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE) {
+function buildCteSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE, all = false) {
   const query = new URLSearchParams();
   query.set('clienteId', filters.cliente);
-  query.set('page', String(page));
-  query.set('pageSize', String(pageSize));
+  if (all) {
+    query.set('all', 'true');
+  } else {
+    query.set('page', String(page));
+    query.set('pageSize', String(pageSize));
+  }
 
   if (filters.emissaoInicio) {
     query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
@@ -6694,6 +6715,136 @@ async function changeStoredDocumentsPage(searchKind, page) {
   if (searchKind === 'cteDocs') {
     await executeCteDocsSearch(page);
   }
+}
+
+async function loadAllStoredDocuments(searchKind) {
+  if (searchKind === 'xmls') {
+    await executeXmlSearchAll();
+    return;
+  }
+
+  if (searchKind === 'nfeDocs') {
+    await executeNfeDocsSearchAll();
+    return;
+  }
+
+  if (searchKind === 'cteDocs') {
+    await executeCteDocsSearchAll();
+  }
+}
+
+function reportFullListLoaded(entityLabel, payload) {
+  if (payload.total > payload.items.length) {
+    pushToast(
+      `Exibindo ${payload.items.length} de ${payload.total} ${entityLabel} (limite de seguranca da listagem completa atingido).`,
+      'info'
+    );
+    return;
+  }
+
+  pushToast(`${payload.items.length} ${entityLabel} carregada(s).`, 'success');
+}
+
+async function executeXmlSearchAll() {
+  if (!state.filters.xmls.cliente || state.dataSource !== 'api') {
+    return;
+  }
+
+  state.xmlSearch.hasSearched = true;
+  state.xmlSearch.results = [];
+  state.tableState.xmls = 'loading';
+  render();
+
+  try {
+    const query = buildXmlSearchQuery(state.filters.xmls, 1, SEARCH_PAGE_SIZE, true);
+    const payload = normalizePaginatedResponse(await apiRequest(`/nfse?${query.toString()}`));
+    const xmls = buildXmlFilesFromApi(payload.items, state.clients);
+    state.xmlFiles = mergeXmlFilesById(state.xmlFiles, xmls);
+    state.xmlSearch.results = getFilteredXmlsFromSource(xmls);
+    state.xmlSearch.lastSearchedAt = new Date().toISOString();
+    state.xmlSearch.page = 1;
+    state.xmlSearch.pageSize = payload.pageSize;
+    state.xmlSearch.total = payload.total;
+    state.xmlSearch.totalPages = 1;
+    state.tableState.xmls = 'data';
+    reportFullListLoaded('nota(s)', payload);
+  } catch (error) {
+    state.xmlSearch.results = [];
+    state.xmlSearch.total = 0;
+    state.xmlSearch.totalPages = 0;
+    state.tableState.xmls = 'error';
+    pushToast(`Falha ao listar todas as notas: ${toErrorMessage(error)}`, 'error');
+  }
+
+  render();
+}
+
+async function executeNfeDocsSearchAll() {
+  if (!state.filters.nfeDocs.cliente || state.dataSource !== 'api') {
+    return;
+  }
+
+  state.nfeSearch.hasSearched = true;
+  state.nfeSearch.results = [];
+  state.tableState.nfeDocs = 'loading';
+  render();
+
+  try {
+    const query = buildNfeSearchQuery(state.filters.nfeDocs, 1, SEARCH_PAGE_SIZE, true);
+    const payload = normalizePaginatedResponse(await apiRequest(`/nfe?${query.toString()}`));
+    const mapped = buildNfeDocumentsFromApi(payload.items, state.clients);
+    state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mapped);
+    state.nfeSearch.results = getFilteredNfeDocumentsFromSource(mapped);
+    state.nfeSearch.lastSearchedAt = new Date().toISOString();
+    state.nfeSearch.page = 1;
+    state.nfeSearch.pageSize = payload.pageSize;
+    state.nfeSearch.total = payload.total;
+    state.nfeSearch.totalPages = 1;
+    state.tableState.nfeDocs = 'data';
+    reportFullListLoaded('NF-e', payload);
+  } catch (error) {
+    state.nfeSearch.results = [];
+    state.nfeSearch.total = 0;
+    state.nfeSearch.totalPages = 0;
+    state.tableState.nfeDocs = 'error';
+    pushToast(`Falha ao listar todas as NF-e: ${toErrorMessage(error)}`, 'error');
+  }
+
+  render();
+}
+
+async function executeCteDocsSearchAll() {
+  if (!state.filters.cteDocs.cliente || state.dataSource !== 'api') {
+    return;
+  }
+
+  state.cteSearch.hasSearched = true;
+  state.cteSearch.results = [];
+  state.tableState.cteDocs = 'loading';
+  render();
+
+  try {
+    const query = buildCteSearchQuery(state.filters.cteDocs, 1, SEARCH_PAGE_SIZE, true);
+    const payload = normalizePaginatedResponse(await apiRequest(`/cte?${query.toString()}`));
+    const mapped = buildCteDocumentsFromApi(payload.items, state.clients);
+    state.cteDocuments = mergeCteDocumentsById(state.cteDocuments, mapped);
+    state.cteSearch.results = getFilteredCteDocumentsFromSource(mapped);
+    state.cteSearch.lastSearchedAt = new Date().toISOString();
+    state.cteSearch.page = 1;
+    state.cteSearch.pageSize = payload.pageSize;
+    state.cteSearch.total = payload.total;
+    state.cteSearch.totalPages = 1;
+    state.tableState.cteDocs = 'data';
+    reportFullListLoaded('CT-e', payload);
+  } catch (error) {
+    state.cteSearch.results = [];
+    state.cteSearch.total = 0;
+    state.cteSearch.totalPages = 0;
+    state.tableState.cteDocs = 'error';
+    pushToast(`Falha ao listar todas as CT-e: ${toErrorMessage(error)}`, 'error');
+  }
+
+  render();
 }
 
 async function executeXmlSearchPage(page = 1) {

@@ -9,6 +9,7 @@ import {
 } from '@prisma/client';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
 import { DOMINIO_NFE_XML_SOURCE, DominioNfeXmlSource } from '../../integrations/dominio-nfe/dominio-nfe.types';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -1688,6 +1689,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private resolvePagination(query: QueryNfeDto): { page: number; pageSize: number; skip: number } {
+    if (query.all) {
+      return { page: 1, pageSize: MAX_UNPAGINATED_RESULTS, skip: 0 };
+    }
+
     const page = Math.max(1, query.page ?? 1);
     const pageSize = Math.max(1, Math.min(200, query.pageSize ?? 100));
     return {
