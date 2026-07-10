@@ -5882,7 +5882,7 @@ async function executeNfeDocsSearch() {
     state.nfeSearch.results = getFilteredNfeDocumentsFromSource(mapped);
     state.nfeSearch.lastSearchedAt = new Date().toISOString();
     state.nfeSearch.total = payload.total;
-    state.nfeSearch.totalPages = 1;
+    state.nfeSearch.totalPages = payload.totalPages;
     state.nfeSearch.page = 1;
     state.nfeSearch.pageSize = payload.pageSize;
     state.tableState.nfeDocs = 'data';
@@ -5932,7 +5932,7 @@ async function executeCteDocsSearch() {
     state.cteSearch.results = getFilteredCteDocumentsFromSource(mapped);
     state.cteSearch.lastSearchedAt = new Date().toISOString();
     state.cteSearch.total = payload.total;
-    state.cteSearch.totalPages = 1;
+    state.cteSearch.totalPages = payload.totalPages;
     state.cteSearch.page = 1;
     state.cteSearch.pageSize = payload.pageSize;
     state.tableState.cteDocs = 'data';
@@ -6667,7 +6667,7 @@ async function executeXmlSearch() {
     state.xmlSearch.page = 1;
     state.xmlSearch.pageSize = payload.pageSize;
     state.xmlSearch.total = payload.total;
-    state.xmlSearch.totalPages = 1;
+    state.xmlSearch.totalPages = payload.totalPages;
     state.tableState.xmls = 'data';
     reportIfListingCapped('nota(s)', payload);
   } catch (error) {
