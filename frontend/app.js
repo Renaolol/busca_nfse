@@ -226,6 +226,7 @@ const state = {
       emissaoInicio: '',
       emissaoFim: '',
       status: 'Todos',
+      eventos: 'Todos',
       schemaDoc: 'Todos',
       valorMin: '',
       valorMax: '',
@@ -241,6 +242,7 @@ const state = {
       emissaoInicio: '',
       emissaoFim: '',
       status: 'Todos',
+      eventos: 'Todos',
       schemaDoc: 'Todos',
       valorMin: '',
       valorMax: '',
@@ -2633,6 +2635,10 @@ function renderNfeDocumentsPage() {
             <select name="status">${renderOptions(['Todos', ...statusOptions], state.filters.nfeDocs.status)}</select>
           </label>
           <label class="field">
+            Eventos / cancelamento
+            <select name="eventos">${renderOptions(['Todos', 'Com eventos', 'Sem eventos', 'Canceladas'], state.filters.nfeDocs.eventos)}</select>
+          </label>
+          <label class="field">
             Schema
             <select name="schemaDoc">${renderOptions(['Todos', ...schemaOptions], state.filters.nfeDocs.schemaDoc)}</select>
           </label>
@@ -2860,6 +2866,10 @@ function renderCteDocumentsPage() {
           <label class="field">
             Status
             <select name="status">${renderOptions(['Todos', ...statusOptions], state.filters.cteDocs.status)}</select>
+          </label>
+          <label class="field">
+            Eventos / cancelamento
+            <select name="eventos">${renderOptions(['Todos', 'Com eventos', 'Sem eventos', 'Canceladas'], state.filters.cteDocs.eventos)}</select>
           </label>
           <label class="field">
             Schema
@@ -4467,6 +4477,9 @@ function renderNfeStatusBadges(doc) {
   if (doc.statusFiscal && doc.statusFiscal !== '-') {
     badges.push(statusBadge(doc.statusFiscal, toneFromFiscalStatus(doc.statusFiscal)));
   }
+  if (doc.temEventos) {
+    badges.push(statusBadge('Com eventos', 'info'));
+  }
   badges.push(statusBadge(doc.tipo, doc.tipo === 'Emitida' ? 'success' : doc.tipo === 'Recebida' ? 'info' : 'neutral'));
   return `<div class="status-stack">${badges.join('')}</div>`;
 }
@@ -4475,6 +4488,9 @@ function renderCteStatusBadges(doc) {
   const badges = [];
   if (doc.statusFiscal && doc.statusFiscal !== '-') {
     badges.push(statusBadge(doc.statusFiscal, toneFromFiscalStatus(doc.statusFiscal)));
+  }
+  if (doc.temEventos) {
+    badges.push(statusBadge('Com eventos', 'info'));
   }
   badges.push(statusBadge(doc.tipo, doc.tipo === 'Emitido' ? 'success' : doc.tipo === 'Recebido' ? 'info' : 'neutral'));
   return `<div class="status-stack">${badges.join('')}</div>`;
@@ -5826,6 +5842,7 @@ async function applyNfeDocsFilters(form) {
     emissaoInicio: String(data.get('emissaoInicio') || ''),
     emissaoFim: String(data.get('emissaoFim') || ''),
     status: String(data.get('status') || 'Todos'),
+    eventos: String(data.get('eventos') || 'Todos'),
     schemaDoc: String(data.get('schemaDoc') || 'Todos'),
     valorMin: String(data.get('valorMin') || '').trim(),
     valorMax: String(data.get('valorMax') || '').trim(),
@@ -5847,6 +5864,7 @@ async function applyCteDocsFilters(form) {
     emissaoInicio: String(data.get('emissaoInicio') || ''),
     emissaoFim: String(data.get('emissaoFim') || ''),
     status: String(data.get('status') || 'Todos'),
+    eventos: String(data.get('eventos') || 'Todos'),
     schemaDoc: String(data.get('schemaDoc') || 'Todos'),
     valorMin: String(data.get('valorMin') || '').trim(),
     valorMax: String(data.get('valorMax') || '').trim(),
@@ -6199,10 +6217,6 @@ function buildNfeSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE, all
     }
   }
 
-  if (filters.status !== 'Todos') {
-    query.set('status', filters.status);
-  }
-
   if (filters.cnpj) {
     query.set('cnpj', filters.cnpj);
   }
@@ -6268,10 +6282,6 @@ function buildCteSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE, all
     } else if (filters.tipo === 'Recebido') {
       query.set('tipoRelacao', 'recebidos');
     }
-  }
-
-  if (filters.status !== 'Todos') {
-    query.set('status', filters.status);
   }
 
   if (filters.cnpj) {
@@ -6417,6 +6427,11 @@ function getFilteredNfeDocumentsFromSource(source) {
     const matchesNumero = !filters.numero || String(doc.numeroNfe || '').includes(filters.numero);
     const matchesChave = !filters.chave || String(doc.chaveAcesso || '').includes(filters.chave);
     const matchesStatus = filters.status === 'Todos' || doc.statusFiscal === filters.status;
+    const matchesEventos =
+      filters.eventos === 'Todos' ||
+      (filters.eventos === 'Com eventos' && doc.temEventos) ||
+      (filters.eventos === 'Sem eventos' && !doc.temEventos) ||
+      (filters.eventos === 'Canceladas' && doc.cancelada);
     const matchesSchema = filters.schemaDoc === 'Todos' || doc.schemaDoc === filters.schemaDoc;
     const matchesAmbiente = filters.ambiente === 'Todos' || doc.ambiente === filters.ambiente;
     const matchesXmlCompleto =
@@ -6435,6 +6450,7 @@ function getFilteredNfeDocumentsFromSource(source) {
       matchesNumero &&
       matchesChave &&
       matchesStatus &&
+      matchesEventos &&
       matchesSchema &&
       matchesAmbiente &&
       matchesXmlCompleto &&
@@ -6459,6 +6475,11 @@ function getFilteredCteDocumentsFromSource(source) {
     const matchesNumero = !filters.numero || String(doc.numeroCte || '').includes(filters.numero);
     const matchesChave = !filters.chave || String(doc.chaveAcesso || '').includes(filters.chave);
     const matchesStatus = filters.status === 'Todos' || doc.statusFiscal === filters.status;
+    const matchesEventos =
+      filters.eventos === 'Todos' ||
+      (filters.eventos === 'Com eventos' && doc.temEventos) ||
+      (filters.eventos === 'Sem eventos' && !doc.temEventos) ||
+      (filters.eventos === 'Canceladas' && doc.cancelada);
     const matchesSchema = filters.schemaDoc === 'Todos' || doc.schemaDoc === filters.schemaDoc;
     const matchesAmbiente = filters.ambiente === 'Todos' || doc.ambiente === filters.ambiente;
     const matchesXmlCompleto =
@@ -6477,6 +6498,7 @@ function getFilteredCteDocumentsFromSource(source) {
       matchesNumero &&
       matchesChave &&
       matchesStatus &&
+      matchesEventos &&
       matchesSchema &&
       matchesAmbiente &&
       matchesXmlCompleto &&
@@ -6699,6 +6721,7 @@ function resetNfeDocsSearch() {
     emissaoInicio: '',
     emissaoFim: '',
     status: 'Todos',
+    eventos: 'Todos',
     schemaDoc: 'Todos',
     valorMin: '',
     valorMax: '',
@@ -6726,6 +6749,7 @@ function resetCteDocsSearch() {
     emissaoInicio: '',
     emissaoFim: '',
     status: 'Todos',
+    eventos: 'Todos',
     schemaDoc: 'Todos',
     valorMin: '',
     valorMax: '',
@@ -7767,7 +7791,28 @@ function resolveFiscalStatus(status, dataCancelamento, cancelamentoEvento) {
   if (normalized === '100' || normalized.includes('autoriz')) {
     return 'Autorizada';
   }
-  return status ? String(status) : '-';
+  return mapFiscalStatusCode(status);
+}
+
+function mapFiscalStatusCode(status) {
+  const raw = String(status || '').trim();
+  if (!raw) {
+    return '-';
+  }
+
+  const codeLabels = {
+    '100': 'Autorizada',
+    '101': 'Cancelada',
+    '110': 'Uso denegado',
+    '128': 'Lote de evento processado',
+    '135': 'Evento registrado e vinculado',
+    '136': 'Evento registrado nao vinculado',
+    '150': 'Autorizada fora do prazo',
+    '151': 'Cancelamento homologado',
+    '155': 'Cancelamento homologado fora do prazo'
+  };
+
+  return codeLabels[raw] || raw;
 }
 
 function isCancelamentoEventoApi(evento) {
@@ -7888,6 +7933,7 @@ function buildNfeDocumentsFromApi(nfeDocs, clients) {
         valor: toNumber(doc.valorTotal),
         tipo,
         statusFiscal,
+        cancelada: normalizeSearchText(statusFiscal).includes('cancel'),
         schemaDoc: doc.schemaDoc || '-',
         xmlCompletoDisponivel: Boolean(doc.xmlCompletoDisponivel),
         resumoDisponivel: Boolean(doc.resumoDisponivel),
@@ -7899,6 +7945,7 @@ function buildNfeDocumentsFromApi(nfeDocs, clients) {
         contraparteNome: contraparteNome || '-',
         contraparteCnpj,
         eventos,
+        temEventos: eventos.length > 0,
         eventosResumo: buildEventosResumo(eventos),
         conteudoXml: null
       };
@@ -7938,6 +7985,7 @@ function buildCteDocumentsFromApi(cteDocs, clients) {
         valor: toNumber(doc.valorTotal),
         tipo,
         statusFiscal,
+        cancelada: normalizeSearchText(statusFiscal).includes('cancel'),
         schemaDoc: doc.schemaDoc || '-',
         xmlCompletoDisponivel: Boolean(doc.xmlCompletoDisponivel),
         resumoDisponivel: Boolean(doc.resumoDisponivel),
@@ -7949,6 +7997,7 @@ function buildCteDocumentsFromApi(cteDocs, clients) {
         contraparteNome: contraparteNome || '-',
         contraparteCnpj,
         eventos,
+        temEventos: eventos.length > 0,
         eventosResumo: buildEventosResumo(eventos),
         conteudoXml: null
       };
