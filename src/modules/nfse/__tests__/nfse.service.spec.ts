@@ -707,6 +707,115 @@ describe('NfseService', () => {
     importSpy.mockRestore();
   });
 
+  it('sincroniza evento estruturado em JSON e persiste cancelamento da NFS-e', async () => {
+    prisma.nfseDocumento.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'doc-evt-json-1',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: Ambiente.producao,
+          chaveAcesso: '42110092206960810000176000000000033326062205552016',
+          dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+          createdAt: new Date('2026-06-03T12:00:00.000Z')
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'doc-original-json',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: Ambiente.producao,
+          chaveAcesso: '42110092206960810000176000000000033326062205552016',
+          cnpjPrestador: '06960810000176',
+          cnpjTomador: null,
+          xmlPath: 'nfse/producao/06960810000176/2026/06/xml/42110092206960810000176000000000033326062205552016.xml',
+          numeroNfse: '333',
+          dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+          createdAt: new Date('2026-06-03T12:00:00.000Z'),
+          updatedAt: new Date('2026-06-03T12:00:00.000Z')
+        }
+      ]);
+    prisma.certificado.findFirst.mockResolvedValue({
+      id: 'cert-1',
+      validadeFim: new Date('2099-01-01T00:00:00.000Z')
+    });
+    adnClient.getEventosByChave.mockResolvedValue({
+      statusCode: 200,
+      data: {
+        eventos: [
+          {
+            chNFSe: '42110092206960810000176000000000033326062205552016',
+            tpEvento: '101101',
+            dhEvento: '2026-06-03T15:43:08-03:00',
+            CNPJAutor: '06960810000176',
+            xDesc: 'Cancelamento de NFS-e',
+            xMotivo: 'erro de digitacao'
+          }
+        ]
+      }
+    });
+    prisma.nfseDocumento.upsert.mockResolvedValue({
+      id: 'doc-original-json',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: Ambiente.producao,
+      chaveAcesso: '42110092206960810000176000000000033326062205552016',
+      origem: 'importacao_xml',
+      status: 'cancelada',
+      dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
+      xmlPath: 'nfse/producao/06960810000176/2026/06/xml/42110092206960810000176000000000033326062205552016.xml',
+      danfsePath: null,
+      cnpjPrestador: '06960810000176',
+      cnpjTomador: null
+    });
+    prisma.nfseEvento.upsert.mockResolvedValue({
+      id: 'evento-json-1',
+      tipoEvento: 'e101101',
+      xmlPath: 'nfse/producao/06960810000176/2026/06/eventos/42110092206960810000176000000000033326062205552016_e101101.xml'
+    });
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      limit: 10
+    });
+
+    expect(storage.putObject).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'nfse/producao/06960810000176/2026/06/eventos/42110092206960810000176000000000033326062205552016_e101101.xml'
+      ),
+      expect.stringContaining('<e101101><xDesc>Cancelamento de NFS-e - erro de digitacao</xDesc><xMotivo>erro de digitacao</xMotivo></e101101>')
+    );
+    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({
+          status: 'cancelada',
+          dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
+          danfsePath: null
+        })
+      })
+    );
+    expect(result).toEqual({
+      documentosAnalisados: 1,
+      documentosComEventos: 1,
+      eventosEncontrados: 1,
+      eventosImportados: 1,
+      falhas: 0,
+      detalhes: [
+        {
+          documentoId: 'doc-evt-json-1',
+          chaveAcesso: '42110092206960810000176000000000033326062205552016',
+          estabelecimentoId: 'estab-1',
+          ambiente: 'producao',
+          status: 'sincronizado',
+          eventosEncontrados: 1,
+          eventosImportados: 1,
+          mensagem: undefined
+        }
+      ]
+    });
+  });
+
   it('reporta falha de certificado ao sincronizar eventos quando nao ha certificado valido', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
       {

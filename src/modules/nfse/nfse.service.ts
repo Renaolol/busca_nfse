@@ -472,7 +472,7 @@ export class NfseService {
           continue;
         }
 
-        const xmls = this.extractEventoXmls(response);
+        const xmls = this.extractEventoImportXmls(response, document.chaveAcesso);
         const importedBefore = eventosImportados;
         for (const xml of xmls) {
           await this.importXml({
@@ -1506,6 +1506,306 @@ export class NfseService {
     }
 
     return xmls;
+  }
+
+  private extractEventoImportXmls(payload: unknown, chaveAcessoFallback?: string): string[] {
+    const xmls = this.extractEventoXmls(payload);
+    const seen = new Set<string>();
+    const signatures = new Set<string>();
+
+    for (const xml of xmls) {
+      seen.add(xml);
+      signatures.add(this.buildEventoSignatureFromXml(xml));
+    }
+
+    for (const evento of this.extractStructuredEventos(payload, chaveAcessoFallback)) {
+      const signature = this.buildEventoSignature(evento);
+      if (signatures.has(signature)) {
+        continue;
+      }
+
+      const xml = this.buildSyntheticEventoXml(evento);
+      if (seen.has(xml)) {
+        continue;
+      }
+
+      seen.add(xml);
+      signatures.add(signature);
+      xmls.push(xml);
+    }
+
+    return xmls;
+  }
+
+  private extractStructuredEventos(payload: unknown, chaveAcessoFallback?: string): ParsedNfseEvento[] {
+    const values = this.collectRecursiveValues(payload, 300);
+    const eventos: ParsedNfseEvento[] = [];
+    const seen = new Set<string>();
+
+    for (const value of values) {
+      const evento = this.tryExtractStructuredEvento(value, chaveAcessoFallback);
+      if (!evento) {
+        continue;
+      }
+
+      const signature = this.buildEventoSignature(evento);
+      if (seen.has(signature)) {
+        continue;
+      }
+
+      seen.add(signature);
+      eventos.push(evento);
+    }
+
+    return eventos;
+  }
+
+  private tryExtractStructuredEvento(payload: unknown, chaveAcessoFallback?: string): ParsedNfseEvento | null {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+
+    const record = payload as Record<string, unknown>;
+    const nestedEventEntry = Object.entries(record).find(([key]) => /^e\d{6}$/i.test(key));
+    const nestedEventRecord = this.asRecord(nestedEventEntry?.[1]);
+    const explicitTipoEvento =
+      nestedEventEntry?.[0] ??
+      this.scalarToString(
+        this.readRecordValue(record, [
+          'tipoEvento',
+          'tpEvento',
+          'cEvento',
+          'codigoEvento',
+          'codigoTipoEvento',
+          'eventoTipo'
+        ])
+      );
+    const descricao =
+      this.scalarToString(
+        this.readRecordValue(nestedEventRecord, ['xDesc', 'descricao', 'descricaoEvento', 'descEvento'])
+      ) ??
+      this.scalarToString(
+        this.readRecordValue(record, ['xDesc', 'descricao', 'descricaoEvento', 'descEvento', 'mensagem'])
+      );
+    const motivo =
+      this.scalarToString(this.readRecordValue(nestedEventRecord, ['xMotivo', 'motivo', 'motivoEvento'])) ??
+      this.scalarToString(this.readRecordValue(record, ['xMotivo', 'motivo', 'motivoEvento']));
+    const chaveAcesso =
+      this.normalizeChaveAcesso(
+        this.scalarToString(this.readRecordValue(record, ['chNFSe', 'chNfse', 'chaveAcesso', 'chave', 'nfseChave']))
+      ) ?? this.normalizeChaveAcesso(chaveAcessoFallback);
+    const tipoEvento = this.normalizeStructuredTipoEvento(explicitTipoEvento, descricao, motivo);
+    const dataEvento = this.parseUnknownDate(
+      this.readRecordValue(nestedEventRecord, ['dhEvento', 'dhProc', 'dataEvento', 'dataHoraEvento']) ??
+        this.readRecordValue(record, ['dhEvento', 'dhProc', 'dataEvento', 'dataHoraEvento', 'dhRegistro'])
+    );
+    const cnpjAutor = this.normalizeCnpj(
+      this.scalarToString(this.readRecordValue(record, ['CNPJAutor', 'cnpjAutor', 'cnpjResponsavel']))
+    );
+    const numeroSequencial =
+      this.scalarToString(this.readRecordValue(record, ['nSeqEvento', 'numSeqEvento', 'sequenciaEvento'])) ?? undefined;
+    const idEvento =
+      this.scalarToString(this.readRecordValue(record, ['idEvento', 'identificadorEvento', 'id'])) ?? undefined;
+    const descricaoCompleta = [descricao, motivo].filter(Boolean).join(' - ') || undefined;
+    const hasEventSignal = Boolean(tipoEvento || descricao || motivo || dataEvento || numeroSequencial || idEvento);
+
+    if (!hasEventSignal || !chaveAcesso) {
+      return null;
+    }
+
+    if (chaveAcessoFallback) {
+      const normalizedFallback = this.normalizeChaveAcesso(chaveAcessoFallback);
+      if (normalizedFallback && chaveAcesso !== normalizedFallback) {
+        return null;
+      }
+    }
+
+    const resolvedTipoEvento = tipoEvento ?? 'evento';
+
+    return {
+      chaveAcesso,
+      tipoEvento: resolvedTipoEvento,
+      dataEvento,
+      descricao: descricaoCompleta,
+      cnpjAutor,
+      motivo,
+      idEvento,
+      numeroSequencial,
+      isCancelamento: this.isEventoCancelamento({
+        tipoEvento: resolvedTipoEvento,
+        descricao: descricaoCompleta
+      })
+    };
+  }
+
+  private buildEventoSignatureFromXml(xml: string): string {
+    try {
+      return this.buildEventoSignature(this.parser.parseEvento(xml));
+    } catch {
+      return `xml:${xml}`;
+    }
+  }
+
+  private buildEventoSignature(evento: ParsedNfseEvento): string {
+    return [
+      evento.chaveAcesso,
+      (evento.tipoEvento || 'evento').trim().toLowerCase(),
+      evento.dataEvento?.toISOString() ?? '',
+      evento.numeroSequencial?.trim() ?? '',
+      this.normalizeSearchText(evento.descricao ?? undefined)
+    ].join('|');
+  }
+
+  private buildSyntheticEventoXml(evento: ParsedNfseEvento): string {
+    const tipoEvento = this.resolveSyntheticTipoEventoTag(evento.tipoEvento);
+    const descricao = this.escapeXml(evento.descricao ?? (evento.isCancelamento ? 'Cancelamento de NFS-e' : 'Evento de NFS-e'));
+    const motivo = evento.motivo ? `<xMotivo>${this.escapeXml(evento.motivo)}</xMotivo>` : '';
+    const dataEvento = evento.dataEvento?.toISOString() ?? new Date().toISOString();
+    const numeroSequencial = evento.numeroSequencial
+      ? `<nSeqEvento>${this.escapeXml(evento.numeroSequencial)}</nSeqEvento>`
+      : '';
+    const cnpjAutor = evento.cnpjAutor ? `<CNPJAutor>${this.escapeXml(evento.cnpjAutor)}</CNPJAutor>` : '';
+    const idEvento = evento.idEvento ? ` Id="${this.escapeXml(evento.idEvento)}"` : '';
+    const detalheEvento = /^e\d{6}$/i.test(tipoEvento)
+      ? `<${tipoEvento}><xDesc>${descricao}</xDesc>${motivo}</${tipoEvento}>`
+      : `<tpEvento>${this.escapeXml(tipoEvento)}</tpEvento><detEvento><xDesc>${descricao}</xDesc>${motivo}</detEvento>`;
+
+    return [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      '<evento versao="1.01" xmlns="http://www.sped.fazenda.gov.br/nfse">',
+      `  <infEvento${idEvento}>`,
+      `    <dhProc>${this.escapeXml(dataEvento)}</dhProc>`,
+      '    <pedRegEvento versao="1.01">',
+      '      <infPedReg>',
+      `        <dhEvento>${this.escapeXml(dataEvento)}</dhEvento>`,
+      cnpjAutor ? `        ${cnpjAutor}` : '',
+      `        <chNFSe>${this.escapeXml(evento.chaveAcesso)}</chNFSe>`,
+      numeroSequencial ? `        ${numeroSequencial}` : '',
+      `        ${detalheEvento}`,
+      '      </infPedReg>',
+      '    </pedRegEvento>',
+      '  </infEvento>',
+      '</evento>'
+    ]
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  private resolveSyntheticTipoEventoTag(tipoEvento?: string): string {
+    const normalized = this.normalizeStructuredTipoEvento(tipoEvento);
+    return normalized ?? 'evento';
+  }
+
+  private normalizeStructuredTipoEvento(
+    tipoEvento?: string,
+    descricao?: string,
+    motivo?: string
+  ): string | undefined {
+    const normalized = this.normalizeSearchText(tipoEvento);
+    if (normalized) {
+      if (/^e\d{6}$/.test(normalized)) {
+        return normalized;
+      }
+
+      if (/^\d{6}$/.test(normalized)) {
+        return `e${normalized}`;
+      }
+    }
+
+    const descriptionText = [descricao, motivo].filter(Boolean).join(' ');
+    if (this.isEventoCancelamento({ tipoEvento, descricao: descriptionText })) {
+      return 'e101101';
+    }
+
+    return tipoEvento?.trim() || undefined;
+  }
+
+  private normalizeChaveAcesso(value?: string | null): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const digits = value.replace(/\D/g, '');
+    if (digits.length >= 50) {
+      return digits.slice(0, 50);
+    }
+
+    return digits || undefined;
+  }
+
+  private parseUnknownDate(value: unknown): Date | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? undefined : value;
+    }
+
+    const text = this.scalarToString(value);
+    if (!text) {
+      return undefined;
+    }
+
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  }
+
+  private scalarToString(value: unknown): string | undefined {
+    if (value === null || value === undefined) {
+      return undefined;
+    }
+
+    if (value instanceof Date) {
+      return Number.isNaN(value.getTime()) ? undefined : value.toISOString();
+    }
+
+    if (typeof value === 'string') {
+      const trimmed = value.trim();
+      return trimmed || undefined;
+    }
+
+    if (typeof value === 'number' || typeof value === 'bigint' || typeof value === 'boolean') {
+      return String(value);
+    }
+
+    return undefined;
+  }
+
+  private asRecord(value: unknown): Record<string, unknown> | undefined {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return undefined;
+    }
+
+    return value as Record<string, unknown>;
+  }
+
+  private readRecordValue(record: Record<string, unknown> | undefined, keys: string[]): unknown {
+    if (!record) {
+      return undefined;
+    }
+
+    const normalizedKeys = new Set(keys.map((key) => this.normalizeLookupKey(key)));
+    for (const [key, value] of Object.entries(record)) {
+      if (normalizedKeys.has(this.normalizeLookupKey(key))) {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  private normalizeLookupKey(value: string): string {
+    return this.normalizeSearchText(value).replace(/[^a-z0-9]/g, '');
+  }
+
+  private escapeXml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
   }
 
   private collectRecursiveValues(payload: unknown, maxItems: number): unknown[] {
