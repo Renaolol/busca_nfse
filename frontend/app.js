@@ -954,6 +954,14 @@ function onDocumentClick(event) {
       void downloadDanfseByXmlId(xmlId);
       return;
     }
+    case 'xml-sync-events': {
+      const xmlId = actionNode.getAttribute('data-xml-id');
+      if (!xmlId) {
+        return;
+      }
+      void syncEventsForXml(xmlId);
+      return;
+    }
     case 'xml-select': {
       const xmlId = actionNode.getAttribute('data-xml-id');
       if (!xmlId) {
@@ -3197,6 +3205,15 @@ function renderXmlsTableCard(xmls) {
               colSpan: 11,
               rowsHtml: xmls
                 .map((xml) => {
+                  const xmlSyncDisabled =
+                    state.xmlEventsSyncRunning ||
+                    state.dataSource !== 'api' ||
+                    !xml.apiNfseId ||
+                    !xml.clientId ||
+                    !xml.estabelecimentoId ||
+                    normalizeDigits(xml.chaveAcesso || '').length === 0
+                      ? 'disabled'
+                      : '';
                   return `<tr class="${xml.cancelada ? 'xml-row-cancelled' : ''}">
                     <td><input type="checkbox" data-action="xml-select" data-xml-id="${escapeHtml(xml.id)}" ${state.selectedXmlIds.has(xml.id) ? 'checked' : ''} ${xml.apiNfseId ? '' : 'disabled'} aria-label="Selecionar NFS-e ${escapeHtml(xml.numeroNfse || '-')}" /></td>
                     <td>${renderNfseNumber(xml)}</td>
@@ -3211,6 +3228,7 @@ function renderXmlsTableCard(xmls) {
                     <td>
                       <div class="table-actions">
                         <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar detalhes</button>
+                        <button class="icon-btn" data-action="xml-sync-events" data-xml-id="${xml.id}" ${xmlSyncDisabled}>Buscar eventos</button>
                         <button class="icon-btn" data-action="xml-view" data-xml-id="${xml.id}">Ver XML</button>
                         <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
                         <button class="icon-btn" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
@@ -3986,6 +4004,15 @@ function renderXmlDetailsModal(xmlId) {
   if (!xml) {
     return '';
   }
+  const syncEventsDisabled =
+    state.xmlEventsSyncRunning ||
+    state.dataSource !== 'api' ||
+    !xml.apiNfseId ||
+    !xml.clientId ||
+    !xml.estabelecimentoId ||
+    normalizeDigits(xml.chaveAcesso || '').length === 0
+      ? 'disabled'
+      : '';
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -4011,6 +4038,7 @@ function renderXmlDetailsModal(xmlId) {
           </div>
         </div>
         <div class="modal-footer">
+          <button class="btn secondary" data-action="xml-sync-events" data-xml-id="${xml.id}" ${syncEventsDisabled}>Buscar eventos</button>
           <button class="btn secondary" data-action="xml-view" data-xml-id="${xml.id}">Ver conteudo XML</button>
           <button class="btn secondary" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
           <button class="btn primary" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
@@ -8964,35 +8992,95 @@ async function syncEventsForListedXmls() {
   pushToast(`Sincronizando eventos para ${documentoIds.length} NFS-e listada(s)...`, 'info');
 
   try {
-    const summary = await apiRequest('/nfse/eventos/sincronizar', {
-      method: 'POST',
-      body: {
-        clienteId: clientIds[0],
-        documentoIds,
-        somenteSemEventos: false,
-        limit: documentoIds.length
-      },
-      timeoutMs: Math.max(60000, documentoIds.length * 20000)
-    });
-
-    const failureMessages = (Array.isArray(summary?.detalhes) ? summary.detalhes : [])
-      .filter((detail) => detail?.status === 'falha_api' || detail?.status === 'falha_certificado')
-      .map((detail) => String(detail?.mensagem || '').trim())
-      .filter(Boolean);
-    const uniqueFailureMessages = [...new Set(failureMessages)];
-
-    await executeXmlSearch();
-
-    pushToast(
-      `Eventos sincronizados: ${summary.eventosImportados} importado(s), ${summary.documentosComEventos} nota(s) com eventos, ${summary.falhas} falha(s).${
-        uniqueFailureMessages.length ? ` Motivo: ${uniqueFailureMessages.slice(0, 2).join(' | ')}${uniqueFailureMessages.length > 2 ? ' | ...' : ''}` : ''
-      }`,
-      summary.falhas > 0 ? 'error' : summary.eventosImportados > 0 ? 'success' : 'info'
-    );
+    const summary = await requestNfseEventsSync(clientIds[0], documentoIds);
+    await refreshXmlSearchAfterEventsSync();
+    pushToast(buildEventsSyncSummaryMessage(summary), eventsSyncToastTone(summary));
   } finally {
     state.xmlEventsSyncRunning = false;
     render();
   }
+}
+
+async function syncEventsForXml(xmlId) {
+  if (state.xmlEventsSyncRunning) {
+    pushToast('A sincronizacao de eventos ja esta em andamento.', 'info');
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('A sincronizacao de eventos so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const xml = findXmlById(xmlId);
+  if (!xml) {
+    pushToast('NFS-e nao encontrada para sincronizacao de eventos.', 'error');
+    return;
+  }
+
+  if (!xml.apiNfseId || !xml.clientId || !xml.estabelecimentoId || normalizeDigits(xml.chaveAcesso || '').length === 0) {
+    pushToast('Esta NFS-e nao possui dados suficientes para consultar eventos.', 'error');
+    return;
+  }
+
+  state.xmlEventsSyncRunning = true;
+  render();
+  pushToast(`Sincronizando eventos da NFS-e ${xml.numeroNfse || xml.chaveAcesso || xml.id}...`, 'info');
+
+  try {
+    const summary = await requestNfseEventsSync(xml.clientId, [xml.apiNfseId]);
+    await refreshXmlSearchAfterEventsSync();
+    pushToast(buildEventsSyncSummaryMessage(summary), eventsSyncToastTone(summary));
+  } finally {
+    state.xmlEventsSyncRunning = false;
+    render();
+  }
+}
+
+async function requestNfseEventsSync(clienteId, documentoIds) {
+  return apiRequest('/nfse/eventos/sincronizar', {
+    method: 'POST',
+    body: {
+      clienteId,
+      documentoIds,
+      somenteSemEventos: false,
+      limit: documentoIds.length
+    },
+    timeoutMs: Math.max(60000, documentoIds.length * 20000)
+  });
+}
+
+async function refreshXmlSearchAfterEventsSync() {
+  if (state.xmlSearch.hasSearched && state.xmlSearch.lastQuery) {
+    await executeXmlSearch();
+    return;
+  }
+
+  await loadInitialData();
+}
+
+function buildEventsSyncSummaryMessage(summary) {
+  const failureMessages = (Array.isArray(summary?.detalhes) ? summary.detalhes : [])
+    .filter((detail) => detail?.status === 'falha_api' || detail?.status === 'falha_certificado')
+    .map((detail) => String(detail?.mensagem || '').trim())
+    .filter(Boolean);
+  const uniqueFailureMessages = [...new Set(failureMessages)];
+
+  return `Eventos sincronizados: ${summary.eventosImportados} importado(s), ${summary.documentosComEventos} nota(s) com eventos, ${summary.falhas} falha(s).${
+    uniqueFailureMessages.length ? ` Motivo: ${uniqueFailureMessages.slice(0, 2).join(' | ')}${uniqueFailureMessages.length > 2 ? ' | ...' : ''}` : ''
+  }`;
+}
+
+function eventsSyncToastTone(summary) {
+  if (summary?.falhas > 0) {
+    return 'error';
+  }
+
+  if (summary?.eventosImportados > 0) {
+    return 'success';
+  }
+
+  return 'info';
 }
 
 function exportXmlListToCsv() {
