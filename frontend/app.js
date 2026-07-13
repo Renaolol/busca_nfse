@@ -4031,6 +4031,8 @@ function renderXmlDetailsModal(xmlId) {
             ${detailItem('Valor dos servicos', formatCurrency(xml.valor))}
             ${detailItem('ISS', formatCurrency(xml.iss))}
             ${detailItem('Municipio', xml.municipio)}
+            ${detailItem('Codigo do servico prestado', xml.codigoServicoPrestado || '-')}
+            ${detailItem('Descricao do servico', xml.descricaoServico || '-')}
             ${detailItem('Status de armazenamento', xml.statusArmazenamento)}
             ${detailItem('Situacao fiscal', xml.statusFiscal || '-')}
             ${detailItem('Data de cancelamento', xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '-')}
@@ -7636,6 +7638,7 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
       const dataCancelamento = doc.dataCancelamento || cancelamentoEvento?.dataEvento || null;
       const statusFiscal = resolveFiscalStatus(doc.status, dataCancelamento, cancelamentoEvento);
       const cancelada = normalizeSearchText(statusFiscal).includes('cancel');
+      const codigoServicoPrestado = composeCodigoServicoPrestado(doc);
 
       let tipo = 'Emitida';
       if (clientCnpj && cnpjTomador === clientCnpj) {
@@ -7666,6 +7669,8 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
         statusFiscal,
         cancelada,
         dataCancelamento,
+        codigoServicoPrestado,
+        descricaoServico: doc.descricaoServico || '-',
         eventos,
         eventosResumo: buildEventosResumo(eventos),
         caminhoServidor: doc.xmlPath || '-',
@@ -7676,6 +7681,22 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
       };
     })
     .sort((a, b) => Date.parse(b.dataDownload || 0) - Date.parse(a.dataDownload || 0));
+}
+
+function composeCodigoServicoPrestado(doc) {
+  const codigoNacional = String(doc?.codigoServicoNacional || '').trim();
+  const codigoMunicipal = String(doc?.itemListaServico || '').trim();
+
+  if (codigoNacional && codigoMunicipal && codigoNacional !== codigoMunicipal) {
+    return `${codigoNacional} / ${codigoMunicipal}`;
+  }
+  if (codigoNacional) {
+    return codigoNacional;
+  }
+  if (codigoMunicipal) {
+    return codigoMunicipal;
+  }
+  return '-';
 }
 
 function resolveFiscalStatus(status, dataCancelamento, cancelamentoEvento) {

@@ -7,6 +7,7 @@ import { NfseAmbiente } from '../../../common/enums/nfse-ambiente.enum';
 import { NfseAdnClient } from '../../../integrations/nfse-adn/nfse-adn.types';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { NfseDanfseService } from '../../nfse/nfse-danfse.service';
+import { NfseService } from '../../nfse/nfse.service';
 import { NfseXmlParserService } from '../../nfse/nfse-xml-parser.service';
 import { LocalStorageService } from '../../storage/storage.service';
 import { SyncService } from '../sync.service';
@@ -51,6 +52,7 @@ describe('SyncService', () => {
   };
 
   const storage = {
+    getObject: jest.fn(),
     putObject: jest.fn(),
     resolveKeyPath: jest.fn().mockReturnValue(schedulerConfigPath)
   };
@@ -66,6 +68,9 @@ describe('SyncService', () => {
     parseAny: jest.fn(),
     getHash: jest.fn().mockReturnValue('hash')
   };
+  const nfseService = {
+    sincronizarEventos: jest.fn()
+  };
 
   let service: SyncService;
 
@@ -75,6 +80,7 @@ describe('SyncService', () => {
       storage as unknown as LocalStorageService,
       danfse as unknown as NfseDanfseService,
       parser as unknown as NfseXmlParserService,
+      nfseService as unknown as NfseService,
       adnClient as NfseAdnClient
     );
 
@@ -130,7 +136,16 @@ describe('SyncService', () => {
     prisma.nfseDocumento.findMany.mockResolvedValue([]);
     prisma.nfseEvento.upsert.mockResolvedValue({});
     prisma.nfseEvento.updateMany.mockResolvedValue({ count: 0 });
+    storage.getObject.mockRejectedValue(new Error('ENOENT: no such file or directory'));
     storage.putObject.mockResolvedValue(undefined);
+    nfseService.sincronizarEventos.mockResolvedValue({
+      documentosAnalisados: 0,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 0,
+      detalhes: []
+    });
 
     service = buildService();
   });
@@ -1245,6 +1260,82 @@ describe('SyncService', () => {
     });
   });
 
+  it('executa rotina automatica de eventos para NFS-e salvas ao fim do ciclo automatico', async () => {
+    prisma.nfseSyncControle.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'ctrl-evt-1',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: Ambiente.producao,
+          createdAt: new Date('2026-07-13T00:00:00.000Z'),
+          updatedAt: new Date('2026-07-13T00:00:00.000Z')
+        }
+      ]);
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-evt-1',
+        status: 'autorizada',
+        dataCancelamento: null,
+        createdAt: new Date('2026-07-12T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-12T00:00:00.000Z'),
+        eventos: []
+      }
+    ]);
+    nfseService.sincronizarEventos.mockResolvedValueOnce({
+      documentosAnalisados: 1,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 0,
+      detalhes: [
+        {
+          documentoId: 'doc-evt-1',
+          chaveAcesso: '42110092206960810000176000000000000126019687178145',
+          estabelecimentoId: 'estab-1',
+          ambiente: 'producao',
+          status: 'sem_eventos',
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          mensagem: 'Nenhum evento encontrado no ADN'
+        }
+      ]
+    });
+
+    await (service as unknown as { runAutomaticSyncCycle: () => Promise<void> }).runAutomaticSyncCycle();
+
+    expect(nfseService.sincronizarEventos).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: 'producao',
+      documentoIds: ['doc-evt-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+    expect(storage.putObject).toHaveBeenCalledWith(
+      'settings/nfse-event-auto-sync-state.json',
+      expect.stringContaining('"doc-evt-1"')
+    );
+  });
+
+  it('nao executa rotina automatica de eventos quando desabilitada por variavel de ambiente', async () => {
+    const previous = process.env.SYNC_EVENTS_AUTO_RUN_ENABLED;
+    process.env.SYNC_EVENTS_AUTO_RUN_ENABLED = 'false';
+
+    try {
+      service = buildService();
+      prisma.nfseSyncControle.findMany.mockResolvedValueOnce([]);
+
+      await (service as unknown as { runAutomaticSyncCycle: () => Promise<void> }).runAutomaticSyncCycle();
+
+      expect(nfseService.sincronizarEventos).not.toHaveBeenCalled();
+    } finally {
+      restoreEnv('SYNC_EVENTS_AUTO_RUN_ENABLED', previous);
+      service = buildService();
+    }
+  });
+
   it('retorna status operacional do agendador de sync', () => {
     const result = service.schedulerStatus();
 
@@ -1254,6 +1345,17 @@ describe('SyncService', () => {
         running: false,
         intervalMs: expect.any(Number),
         startupDelayMs: expect.any(Number)
+      })
+    );
+    expect(result.autoEventSync).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        perControlLimit: expect.any(Number),
+        candidateWindow: expect.any(Number),
+        noEventCooldownMs: expect.any(Number),
+        withEventCooldownMs: expect.any(Number),
+        failureCooldownMs: expect.any(Number),
+        certificateCooldownMs: expect.any(Number)
       })
     );
     expect(result.nightlySweep).toEqual(

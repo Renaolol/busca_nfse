@@ -21,6 +21,7 @@ import {
   NfseAdnClient
 } from '../../integrations/nfse-adn/nfse-adn.types';
 import { NfseDanfseService } from '../nfse/nfse-danfse.service';
+import { NfseService } from '../nfse/nfse.service';
 import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from '../nfse/nfse-xml-parser.service';
 import { LocalStorageService } from '../storage/storage.service';
 import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
@@ -69,10 +70,21 @@ type NightlySweepSlot = {
   minute: number;
 };
 
+type AutoEventSyncStateEntry = {
+  nextAttemptAt?: string;
+  lastAttemptAt?: string;
+  lastStatus?: string;
+};
+
+type AutoEventSyncStateFile = {
+  documents?: Record<string, AutoEventSyncStateEntry>;
+};
+
 @Injectable()
 export class SyncService implements OnModuleInit, OnModuleDestroy {
   private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
   private static readonly NIGHTLY_SWEEP_CONFIG_STORAGE_KEY = 'settings/nightly-sweep.json';
+  private static readonly AUTO_EVENT_SYNC_STATE_STORAGE_KEY = 'settings/nfse-event-auto-sync-state.json';
   private readonly logger = new Logger(SyncService.name);
   private autoSyncTimer: NodeJS.Timeout | null = null;
   private nightlySweepTimer: NodeJS.Timeout | null = null;
@@ -83,6 +95,25 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   private readonly autoSyncEnabled = process.env.SYNC_AUTO_RUN_ENABLED !== 'false';
   private readonly autoSyncIntervalMs = this.parsePositiveNumberEnv('SYNC_AUTO_RUN_INTERVAL_MS', 30000);
   private readonly autoSyncStartupDelayMs = this.parsePositiveNumberEnv('SYNC_AUTO_RUN_STARTUP_DELAY_MS', 3000);
+  private readonly autoEventSyncEnabled = process.env.SYNC_EVENTS_AUTO_RUN_ENABLED !== 'false';
+  private readonly autoEventSyncPerControlLimit = this.parsePositiveNumberEnv('SYNC_EVENTS_AUTO_RUN_PER_CONTROL_LIMIT', 2);
+  private readonly autoEventSyncCandidateWindow = this.parsePositiveNumberEnv('SYNC_EVENTS_AUTO_RUN_CANDIDATE_WINDOW', 25);
+  private readonly autoEventSyncNoEventCooldownMs = this.parsePositiveNumberEnv(
+    'SYNC_EVENTS_AUTO_RUN_NO_EVENT_COOLDOWN_MS',
+    24 * 60 * 60 * 1000
+  );
+  private readonly autoEventSyncWithEventCooldownMs = this.parsePositiveNumberEnv(
+    'SYNC_EVENTS_AUTO_RUN_WITH_EVENT_COOLDOWN_MS',
+    12 * 60 * 60 * 1000
+  );
+  private readonly autoEventSyncFailureCooldownMs = this.parsePositiveNumberEnv(
+    'SYNC_EVENTS_AUTO_RUN_FAILURE_COOLDOWN_MS',
+    30 * 60 * 1000
+  );
+  private readonly autoEventSyncCertificateCooldownMs = this.parsePositiveNumberEnv(
+    'SYNC_EVENTS_AUTO_RUN_CERTIFICATE_COOLDOWN_MS',
+    6 * 60 * 60 * 1000
+  );
   private readonly apiRetryDelayMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_DELAY_MS', 120000);
   private readonly dailySyncIntervalMs = this.parsePositiveNumberEnv('SYNC_DAILY_INTERVAL_MS', 24 * 60 * 60 * 1000);
   private readonly dailySyncMaxNsuPerRun = this.parsePositiveNumberEnv('SYNC_DAILY_MAX_NSU_PER_RUN', 10);
@@ -115,6 +146,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     private readonly storage: LocalStorageService,
     private readonly danfse: NfseDanfseService,
     private readonly parser: NfseXmlParserService,
+    private readonly nfseService: NfseService,
     @Inject(NFSE_ADN_CLIENT) private readonly adnClient: NfseAdnClient
   ) {}
 
@@ -213,6 +245,15 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       intervalMs: number;
       startupDelayMs: number;
     };
+    autoEventSync: {
+      enabled: boolean;
+      perControlLimit: number;
+      candidateWindow: number;
+      noEventCooldownMs: number;
+      withEventCooldownMs: number;
+      failureCooldownMs: number;
+      certificateCooldownMs: number;
+    };
     nightlySweep: {
       enabled: boolean;
       running: boolean;
@@ -243,6 +284,15 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         running: this.autoSyncRunning,
         intervalMs: this.autoSyncIntervalMs,
         startupDelayMs: this.autoSyncStartupDelayMs
+      },
+      autoEventSync: {
+        enabled: this.autoEventSyncEnabled,
+        perControlLimit: this.autoEventSyncPerControlLimit,
+        candidateWindow: this.autoEventSyncCandidateWindow,
+        noEventCooldownMs: this.autoEventSyncNoEventCooldownMs,
+        withEventCooldownMs: this.autoEventSyncWithEventCooldownMs,
+        failureCooldownMs: this.autoEventSyncFailureCooldownMs,
+        certificateCooldownMs: this.autoEventSyncCertificateCooldownMs
       },
       nightlySweep: {
         enabled: this.nightlySweepEnabled,
@@ -1027,11 +1077,210 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     this.autoSyncRunning = true;
     try {
       await this.runNow();
+      if (this.autoEventSyncEnabled && !this.isRateLimitCooldownActive()) {
+        await this.runAutomaticEventSyncCycle();
+      }
     } catch (error) {
       this.logger.error(`Falha na execucao automatica de sync: ${this.toErrorMessage(error)}`);
     } finally {
       this.autoSyncRunning = false;
     }
+  }
+
+  private async runAutomaticEventSyncCycle(): Promise<void> {
+    const controls = await this.prisma.nfseSyncControle.findMany({
+      where: {
+        status: SyncStatus.ativo
+      },
+      orderBy: [{ updatedAt: 'asc' }, { createdAt: 'asc' }],
+      take: 50
+    });
+
+    if (!controls.length) {
+      return;
+    }
+
+    const now = new Date();
+    const state = await this.loadAutoEventSyncState();
+    const documentsState = state.documents ?? (state.documents = {});
+    let stateChanged = false;
+
+    for (const control of controls) {
+      if (this.isRateLimitCooldownActive()) {
+        break;
+      }
+
+      const candidates = await this.findEligibleDocumentsForAutomaticEventSync(control, state, now);
+      if (!candidates.length) {
+        continue;
+      }
+
+      const summary = await this.nfseService.sincronizarEventos({
+        clienteId: control.clienteId,
+        estabelecimentoId: control.estabelecimentoId,
+        ambiente: control.ambiente === Ambiente.producao ? 'producao' : 'producao_restrita',
+        documentoIds: candidates.map((doc) => doc.id),
+        somenteSemEventos: false,
+        limit: candidates.length
+      });
+
+      for (const detail of summary.detalhes) {
+        const doc = candidates.find((candidate) => candidate.id === detail.documentoId);
+        if (!doc) {
+          continue;
+        }
+
+        const nextAttemptAt = this.resolveAutomaticEventNextAttemptAt(doc, detail, now);
+        documentsState[doc.id] = {
+          nextAttemptAt: nextAttemptAt.toISOString(),
+          lastAttemptAt: now.toISOString(),
+          lastStatus: detail.status
+        };
+        stateChanged = true;
+
+        if (this.isRateLimitMessage(detail.mensagem)) {
+          this.activateRateLimitCooldown();
+        }
+      }
+    }
+
+    if (stateChanged) {
+      await this.saveAutoEventSyncState(state);
+    }
+  }
+
+  private async findEligibleDocumentsForAutomaticEventSync(
+    control: Pick<NfseSyncControle, 'clienteId' | 'estabelecimentoId' | 'ambiente'>,
+    state: AutoEventSyncStateFile,
+    now: Date
+  ): Promise<
+    Array<{
+      id: string;
+      status: string | null;
+      dataCancelamento: Date | null;
+      createdAt: Date;
+      updatedAt: Date;
+      eventos: Array<{ tipoEvento: string | null; descricao: string | null; dataEvento: Date | null }>;
+    }>
+  > {
+    const docs = await this.prisma.nfseDocumento.findMany({
+      where: {
+        clienteId: control.clienteId,
+        estabelecimentoId: control.estabelecimentoId,
+        ambiente: control.ambiente,
+        xmlPath: {
+          not: null
+        }
+      },
+      select: {
+        id: true,
+        status: true,
+        dataCancelamento: true,
+        createdAt: true,
+        updatedAt: true,
+        eventos: {
+          select: {
+            tipoEvento: true,
+            descricao: true,
+            dataEvento: true
+          },
+          orderBy: [{ dataEvento: 'desc' }, { createdAt: 'desc' }]
+        }
+      },
+      orderBy: [{ updatedAt: 'asc' }, { createdAt: 'asc' }],
+      take: this.autoEventSyncCandidateWindow
+    });
+
+    return docs
+      .filter((doc) => !this.hasDocumentoCancelamento(doc))
+      .filter((doc) => this.isAutomaticEventSyncAttemptDue(doc.id, state, now))
+      .sort((left, right) => {
+        const leftHasEvents = left.eventos.length > 0 ? 1 : 0;
+        const rightHasEvents = right.eventos.length > 0 ? 1 : 0;
+        return leftHasEvents - rightHasEvents || left.updatedAt.getTime() - right.updatedAt.getTime();
+      })
+      .slice(0, this.autoEventSyncPerControlLimit);
+  }
+
+  private hasDocumentoCancelamento(doc: {
+    status?: string | null;
+    dataCancelamento?: Date | null;
+    eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
+  }): boolean {
+    return (
+      this.normalizeSearchText(doc.status ?? undefined) === 'cancelada' ||
+      Boolean(doc.dataCancelamento) ||
+      (doc.eventos ?? []).some((evento) => this.isEventoCancelamento(evento))
+    );
+  }
+
+  private isAutomaticEventSyncAttemptDue(docId: string, state: AutoEventSyncStateFile, now: Date): boolean {
+    const nextAttemptAt = state.documents?.[docId]?.nextAttemptAt;
+    if (!nextAttemptAt) {
+      return true;
+    }
+
+    const timestamp = Date.parse(nextAttemptAt);
+    return !Number.isFinite(timestamp) || timestamp <= now.getTime();
+  }
+
+  private resolveAutomaticEventNextAttemptAt(
+    doc: { eventos?: Array<unknown> },
+    detail: { status: 'sincronizado' | 'sem_eventos' | 'falha_api' | 'falha_certificado'; mensagem?: string },
+    now: Date
+  ): Date {
+    if (detail.status === 'falha_certificado') {
+      return new Date(now.getTime() + this.autoEventSyncCertificateCooldownMs);
+    }
+
+    if (detail.status === 'falha_api') {
+      return new Date(now.getTime() + this.autoEventSyncFailureCooldownMs);
+    }
+
+    if (detail.status === 'sincronizado' && (doc.eventos?.length ?? 0) > 0) {
+      return new Date(now.getTime() + this.autoEventSyncWithEventCooldownMs);
+    }
+
+    if (detail.status === 'sincronizado') {
+      return new Date(now.getTime() + this.autoEventSyncWithEventCooldownMs);
+    }
+
+    return new Date(now.getTime() + this.autoEventSyncNoEventCooldownMs);
+  }
+
+  private async loadAutoEventSyncState(): Promise<AutoEventSyncStateFile> {
+    try {
+      const raw = await this.storage.getObject(SyncService.AUTO_EVENT_SYNC_STATE_STORAGE_KEY);
+      const parsed = JSON.parse(raw.toString('utf8')) as AutoEventSyncStateFile;
+      return {
+        documents: parsed.documents ?? {}
+      };
+    } catch (error) {
+      const message = this.toErrorMessage(error);
+      if (message.includes('ENOENT')) {
+        return { documents: {} };
+      }
+
+      this.logger.warn(`Falha ao carregar estado da rotina automatica de eventos: ${message}`);
+      return { documents: {} };
+    }
+  }
+
+  private async saveAutoEventSyncState(state: AutoEventSyncStateFile): Promise<void> {
+    await this.storage.putObject(
+      SyncService.AUTO_EVENT_SYNC_STATE_STORAGE_KEY,
+      JSON.stringify(
+        {
+          documents: state.documents ?? {}
+        } satisfies AutoEventSyncStateFile,
+        null,
+        2
+      )
+    );
+  }
+
+  private isRateLimitMessage(message?: string | null): boolean {
+    return this.normalizeSearchText(message ?? undefined).includes('http 429');
   }
 
   private createReprocessDetail(control: NfseSyncControle, startNsu: bigint): ReprocessPastNsusDetail {
@@ -1438,12 +1687,14 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     descricao?: string | null;
     isCancelamento?: boolean;
   }): boolean {
-    const tipoEvento = (evento.tipoEvento ?? '').trim().toLowerCase();
+    const tipoEvento = this.normalizeSearchText(evento.tipoEvento ?? undefined);
     const descricao = this.normalizeSearchText(evento.descricao ?? undefined);
 
     return (
       Boolean(evento.isCancelamento) ||
       tipoEvento === 'e101101' ||
+      tipoEvento.includes('cancelamento') ||
+      tipoEvento.includes('cancelada') ||
       descricao.includes('cancelamento') ||
       descricao.includes('cancelada')
     );

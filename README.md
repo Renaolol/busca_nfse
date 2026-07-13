@@ -115,6 +115,13 @@ Veja `.env.example`.
 - `SYNC_AUTO_RUN_ENABLED`: habilita ciclo automatico de sync em background (padrao `true`).
 - `SYNC_AUTO_RUN_INTERVAL_MS`: intervalo entre ciclos automaticos (padrao `30000`).
 - `SYNC_AUTO_RUN_STARTUP_DELAY_MS`: atraso inicial apos boot para primeiro ciclo automatico (padrao `3000`).
+- `SYNC_EVENTS_AUTO_RUN_ENABLED`: habilita a rotina automatica de consulta de eventos para NFS-e ja salvas (padrao `true`).
+- `SYNC_EVENTS_AUTO_RUN_PER_CONTROL_LIMIT`: quantidade maxima de NFS-e por controle/empresa em cada ciclo automatico de eventos (padrao `2`).
+- `SYNC_EVENTS_AUTO_RUN_CANDIDATE_WINDOW`: janela de documentos por controle considerada para a rotina automatica de eventos (padrao `25`).
+- `SYNC_EVENTS_AUTO_RUN_NO_EVENT_COOLDOWN_MS`: espera antes de tentar novamente uma NFS-e que ainda nao retornou eventos (padrao `86400000` = 24h).
+- `SYNC_EVENTS_AUTO_RUN_WITH_EVENT_COOLDOWN_MS`: espera antes de reconsultar automaticamente uma NFS-e que ja possui eventos, para capturar mudancas posteriores como cancelamento (padrao `43200000` = 12h).
+- `SYNC_EVENTS_AUTO_RUN_FAILURE_COOLDOWN_MS`: espera apos falha de API na rotina automatica de eventos (padrao `1800000` = 30min).
+- `SYNC_EVENTS_AUTO_RUN_CERTIFICATE_COOLDOWN_MS`: espera apos falha de certificado na rotina automatica de eventos (padrao `21600000` = 6h).
 - `SYNC_API_RETRY_DELAY_MS`: espera antes de tentar novamente quando ocorrer erro temporario de API (ex.: HTTP 429) (padrao `120000`).
 - `SYNC_API_RETRY_JITTER_MS`: jitter adicional aleatorio aplicado ao retry de rate limit (padrao `60000`).
 - `SYNC_DAILY_INTERVAL_MS`: intervalo da rotina diaria quando o controle esta no modo `somente_novas` (padrao `86400000` = 24h).
@@ -225,6 +232,7 @@ Valores aceitos:
 - A elegibilidade do cliente para NF-e agora e controlada por `clientes.nfe_habilitado`, separada do status geral do cliente.
 - Cliente com NF-e desabilitada nao aparece no painel de `Buscas NF-e`, nao entra na ativacao em lote e nao participa do ciclo automatico/global.
 - O ciclo automatico de NF-e usa `NFE_SYNC_AUTO_RUN_*`.
+- O ciclo automatico de NFS-e pode tambem consultar eventos das notas salvas usando `SYNC_EVENTS_AUTO_RUN_*`, sem alterar `ultimo_nsu_consultado`.
 - A busca noturna de NF-e usa `NFE_SYNC_NIGHTLY_SWEEP_*` e, a cada slot configurado, garante controles ativos para clientes elegiveis antes de rodar a distribuicao incremental.
 - Se outro ERP/robo tambem consome `NFeDistribuicaoDFe` para o mesmo interessado/CNPJ, a recomendacao operacional e deixar apenas um consumidor ativo por cliente. Use `nfe_habilitado=false` quando o cliente ja possui outro capturador em producao.
 

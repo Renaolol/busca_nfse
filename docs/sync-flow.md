@@ -17,8 +17,10 @@
 - Os botoes `Pausar` e `Retomar` atuam no mesmo fluxo continuo e atualizam o estado dos controles do cliente.
 - A interface diferencia `Busca habilitada` (cliente elegivel para rotinas) de `Executando agora` (consulta em andamento no monitor).
 - O endpoint `GET /sync/scheduler-status` informa se o ciclo automatico e a busca noturna estao ligados, rodando, quais horarios noturnos estao ativos e qual a proxima execucao noturna.
+- O mesmo `GET /sync/scheduler-status` informa tambem a configuracao da rotina automatica de eventos das NFS-e ja salvas.
 - O endpoint `GET /nfse/dashboard-stats` retorna os totais agregados de NFS-e e XMLs armazenados por cliente para o dashboard, sem depender do limite da listagem `GET /nfse`.
 - A sincronizacao manual de eventos de NFS-e (`POST /nfse/eventos/sincronizar`) opera sobre notas ja salvas, consulta por chave de acesso e nao altera `ultimo_nsu_consultado`.
+- A rotina automatica de eventos reutiliza a mesma consulta por chave, grava um cooldown por documento em storage local e tambem nao altera `ultimo_nsu_consultado`.
 - O endpoint `PUT /sync/scheduler-settings` permite ativar/desativar a rotina noturna global e selecionar os horarios ativos entre `18:00`, `20:00`, `22:00`, `00:00`, `02:00`, `04:00` e `06:00`.
 - A consulta de logs (`GET /sync/logs`) exige `clienteId` (UUID valido) para retornar apenas o escopo do cliente informado.
 

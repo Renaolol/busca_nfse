@@ -63,4 +63,112 @@ describe('NfseDanfseService', () => {
     expect(content).toContain('MUNICIPIO DE MONDAI');
     expect(content.match(/\/Type \/Page\b/g)).toHaveLength(1);
   });
+
+  it('preenche DANFSE a partir de XML ABRASF classico e preserva cancelamento do XML', () => {
+    const xml = `
+      <CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+        <Nfse versao="1.00">
+          <InfNfse>
+            <Numero>4</Numero>
+            <CodigoVerificacao>42076502210413042000108000000000000426060684124896</CodigoVerificacao>
+            <DataEmissao>2026-06-15T09:45:30-03:00</DataEmissao>
+            <ValoresNfse>
+              <BaseCalculo>1566.72</BaseCalculo>
+              <Aliquota>0.00</Aliquota>
+              <ValorIss>0.00</ValorIss>
+            </ValoresNfse>
+            <PrestadorServico>
+              <IdentificacaoPrestador>
+                <CpfCnpj>
+                  <Cnpj>10413042000108</Cnpj>
+                </CpfCnpj>
+                <InscricaoMunicipal>6762</InscricaoMunicipal>
+              </IdentificacaoPrestador>
+              <RazaoSocial>KLAGENBERG &amp; KLAGENBERG LTDA</RazaoSocial>
+              <Endereco>
+                <Endereco>Rua Simoes</Endereco>
+                <Numero>145</Numero>
+                <Bairro>Centro</Bairro>
+                <CodigoMunicipio>4207650</CodigoMunicipio>
+                <Uf>SC</Uf>
+                <Cep>89899000</Cep>
+              </Endereco>
+              <Contato>
+                <Telefone>4936341082</Telefone>
+                <Email>financeiro@empresa.test</Email>
+              </Contato>
+            </PrestadorServico>
+            <DeclaracaoPrestacaoServico>
+              <InfDeclaracaoPrestacaoServico>
+                <Competencia>2026-06-15T00:00:00</Competencia>
+                <Servico>
+                  <Valores>
+                    <ValorServicos>1566.72</ValorServicos>
+                  </Valores>
+                  <IssRetido>2</IssRetido>
+                  <ItemListaServico>1706</ItemListaServico>
+                  <Discriminacao>Servico de publicidade institucional</Discriminacao>
+                  <CodigoMunicipio>4207650</CodigoMunicipio>
+                  <ExigibilidadeISS>1</ExigibilidadeISS>
+                  <MunicipioIncidencia>4207650</MunicipioIncidencia>
+                </Servico>
+                <Tomador>
+                  <IdentificacaoTomador>
+                    <CpfCnpj>
+                      <Cnpj>83599191000187</Cnpj>
+                    </CpfCnpj>
+                  </IdentificacaoTomador>
+                  <RazaoSocial>ASSEMBLEIA LEGISLATIVA DO ESTADO DE SANTA CATARINA</RazaoSocial>
+                  <Endereco>
+                    <Endereco>RUA JORGE LUZ FONTES</Endereco>
+                    <Numero>310</Numero>
+                    <Bairro>CENTRO</Bairro>
+                    <CodigoMunicipio>4205407</CodigoMunicipio>
+                    <Cep>88020900</Cep>
+                  </Endereco>
+                </Tomador>
+                <OptanteSimplesNacional>1</OptanteSimplesNacional>
+              </InfDeclaracaoPrestacaoServico>
+            </DeclaracaoPrestacaoServico>
+          </InfNfse>
+        </Nfse>
+        <NfseCancelamento>
+          <Confirmacao>
+            <Pedido>
+              <InfPedidoCancelamento>
+                <DataHora>2026-06-15T09:50:10-03:00</DataHora>
+              </InfPedidoCancelamento>
+            </Pedido>
+          </Confirmacao>
+        </NfseCancelamento>
+      </CompNfse>
+    `;
+
+    const pdf = service.generateFromXml(xml, {
+      chaveAcesso: '42076502210413042000108000000000000426060684124896',
+      status: 'Autorizada',
+      municipioPrestador: 'IPORA DO OESTE / SC'
+    });
+
+    const content = pdf.toString('latin1');
+
+    expect(content).toContain('CANCELADA');
+    expect(content).toContain('MUNICIPIO DE IPORA DO OESTE');
+    expect(content).toContain('42076502210413042000108000000000000426060684124896');
+    expect(content).toContain('10.413.042/0001-08');
+    expect(content).toContain('6762');
+    expect(content).toContain('\\(49\\) 3634-1082');
+    expect(content).toContain('financeiro@empresa.test');
+    expect(content).toContain('Rua Simoes, 145, Centro');
+    expect(content).toContain('89899-000');
+    expect(content).toContain('Optante');
+    expect(content).toContain('ASSEMBLEIA LEGISLATIVA DO ESTADO DE SANTA CATARINA');
+    expect(content).toContain('RUA JORGE LUZ FONTES, 310, CENTRO');
+    expect(content).toContain('88020-900');
+    expect(content).toContain('15/06/2026');
+    expect(content).not.toContain('14/06/2026');
+    expect(content).toContain('Retido');
+    expect(content).toContain('1.566,72');
+    expect(content).toContain('Servico de publicidade institucional');
+  });
 });

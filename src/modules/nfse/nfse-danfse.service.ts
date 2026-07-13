@@ -978,22 +978,44 @@ export class NfseDanfseService {
   }
 
   private extractFromXml(xml: string): Omit<DanfseRenderInput, 'chaveAcesso'> {
+    const competenciaRaw =
+      this.extractFromPaths(xml, [
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Competencia'],
+        ['InfDeclaracaoPrestacaoServico', 'Competencia']
+      ]) ?? this.extract(xml, ['competencia', 'dCompet']);
     const dataEmissao = this.parseDate(this.extract(xml, ['dataEmissao', 'DataEmissao', 'dhProc']));
     const dataEmissaoDps = this.parseDate(this.extractFromPaths(xml, [['infDPS', 'dhEmi'], ['DPS', 'infDPS', 'dhEmi']]));
-    const competencia = this.parseDateOnly(this.extract(xml, ['competencia', 'dCompet']));
+    const competencia = this.parseDateOnly(competenciaRaw);
+    const dataCancelamento = this.parseDate(
+      this.extractFromPaths(xml, [
+        ['NfseCancelamento', 'Confirmacao', 'Pedido', 'InfPedidoCancelamento', 'DataHora'],
+        ['NfseCancelamento', 'Pedido', 'InfPedidoCancelamento', 'DataHora'],
+        ['InfPedidoCancelamento', 'DataHora']
+      ])
+    );
+    const status =
+      dataCancelamento !== undefined
+        ? 'Cancelada'
+        : this.extract(xml, ['status', 'Situacao', 'cStat']);
 
     const cnpjPrestador =
       this.extractFromPaths(xml, [
         ['infDPS', 'prest', 'CNPJ'],
         ['emit', 'CNPJ'],
-        ['prestador', 'CNPJ']
+        ['prestador', 'CNPJ'],
+        ['PrestadorServico', 'IdentificacaoPrestador', 'CpfCnpj', 'Cnpj'],
+        ['PrestadorServico', 'IdentificacaoPrestador', 'CpfCnpj', 'CPF']
       ]) ?? this.extract(xml, ['CnpjPrestador']);
 
     const cnpjTomador =
       this.extractFromPaths(xml, [
         ['infDPS', 'toma', 'CNPJ'],
         ['infDPS', 'toma', 'CPF'],
-        ['tomador', 'CNPJ']
+        ['tomador', 'CNPJ'],
+        ['Tomador', 'IdentificacaoTomador', 'CpfCnpj', 'Cnpj'],
+        ['Tomador', 'IdentificacaoTomador', 'CpfCnpj', 'CPF'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'IdentificacaoTomador', 'CpfCnpj', 'Cnpj'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'IdentificacaoTomador', 'CpfCnpj', 'CPF']
       ]) ?? this.extract(xml, ['CnpjTomador']);
 
     const cnpjDestinatario = this.extractFromPaths(xml, [
@@ -1009,7 +1031,9 @@ export class NfseDanfseService {
     const municipioPrestacaoCodigo =
       this.extractFromPaths(xml, [
         ['infDPS', 'serv', 'locPrest', 'cLocPrestacao'],
-        ['serv', 'locPrest', 'cLocPrestacao']
+        ['serv', 'locPrest', 'cLocPrestacao'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'MunicipioIncidencia'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'CodigoMunicipio']
       ]) ?? this.extract(xml, ['municipioPrestacaoCodigo', 'codigoMunicipioPrestacao', 'cLocPrestacao']);
 
     const municipioPrestacaoNome = this.extract(xml, ['municipioPrestacaoNome', 'xLocPrestacao']);
@@ -1037,7 +1061,8 @@ export class NfseDanfseService {
     const valorServico =
       this.extractFromPaths(xml, [
         ['infDPS', 'valores', 'vServPrest', 'vServ'],
-        ['valores', 'vServPrest', 'vServ']
+        ['valores', 'vServPrest', 'vServ'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorServicos']
       ]) ??
       this.extract(xml, ['valorServico', 'ValorServicos', 'vServ']);
 
@@ -1086,7 +1111,7 @@ export class NfseDanfseService {
       dataEmissao,
       dataEmissaoDps,
       competencia,
-      status: this.extract(xml, ['status', 'Situacao', 'cStat']),
+      status,
       emitenteNfse: this.extractFromPaths(xml, [['infDPS', 'tpEmit'], ['DPS', 'infDPS', 'tpEmit']]),
       finalidade: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'finNFSe']]),
       codigoVerificacao: this.extract(xml, ['codigoVerificacao', 'cVerif', 'codigoVerificacaoNfse']),
@@ -1094,51 +1119,129 @@ export class NfseDanfseService {
       razaoSocialPrestador: this.extractFromPaths(xml, [
         ['infDPS', 'prest', 'xNome'],
         ['emit', 'xNome'],
-        ['prestador', 'xNome']
+        ['prestador', 'xNome'],
+        ['PrestadorServico', 'RazaoSocial'],
+        ['PrestadorServico', 'NomeFantasia']
       ]),
-      inscricaoMunicipalPrestador: this.extractFromPaths(xml, [['infDPS', 'prest', 'IM']]),
-      telefonePrestador: this.extractFromPaths(xml, [['infDPS', 'prest', 'fone'], ['emit', 'fone']]),
+      inscricaoMunicipalPrestador: this.extractFromPaths(xml, [
+        ['infDPS', 'prest', 'IM'],
+        ['PrestadorServico', 'IdentificacaoPrestador', 'InscricaoMunicipal']
+      ]),
+      telefonePrestador: this.extractFromPaths(xml, [
+        ['infDPS', 'prest', 'fone'],
+        ['emit', 'fone'],
+        ['PrestadorServico', 'Contato', 'Telefone']
+      ]),
       enderecoPrestador: this.composeAddress(xml, [
         ['infDPS', 'prest', 'end'],
-        ['emit', 'enderNac']
+        ['emit', 'enderNac'],
+        ['PrestadorServico', 'Endereco']
       ]),
       municipioPrestador: this.composeMunicipioUf(
         this.extractFromPaths(xml, [
           ['infDPS', 'prest', 'end', 'endNac', 'cMun'],
-          ['emit', 'enderNac', 'cMun']
+          ['emit', 'enderNac', 'cMun'],
+          ['PrestadorServico', 'Endereco', 'CodigoMunicipio']
         ]),
         this.extractFromPaths(xml, [
           ['infDPS', 'prest', 'end', 'endNac', 'UF'],
-          ['emit', 'enderNac', 'UF']
+          ['emit', 'enderNac', 'UF'],
+          ['PrestadorServico', 'Endereco', 'Uf']
         ]),
         this.extractFromPaths(xml, [['infNFSe', 'xLocEmi']])
-      ),
+      ) ??
+        this.composeMunicipioUf(
+          this.extractFromParentPaths(xml, [['PrestadorServico']], ['CodigoMunicipio']),
+          this.extractFromParentPaths(xml, [['PrestadorServico']], ['Uf'])
+        ),
       codigoIbgeCepPrestador: this.composeIbgeCep(
         this.extractFromPaths(xml, [
           ['infDPS', 'prest', 'end', 'endNac', 'cMun'],
-          ['emit', 'enderNac', 'cMun']
+          ['emit', 'enderNac', 'cMun'],
+          ['PrestadorServico', 'Endereco', 'CodigoMunicipio']
         ]),
         this.extractFromPaths(xml, [
           ['infDPS', 'prest', 'end', 'endNac', 'CEP'],
-          ['emit', 'enderNac', 'CEP']
+          ['emit', 'enderNac', 'CEP'],
+          ['PrestadorServico', 'Endereco', 'Cep']
         ])
-      ),
-      emailPrestador: this.extractFromPaths(xml, [['infDPS', 'prest', 'email'], ['emit', 'email']]),
-      simplesNacional: this.extractFromPaths(xml, [['infDPS', 'prest', 'regTrib', 'opSimpNac']]),
+      ) ??
+        this.composeIbgeCep(
+          this.extractFromParentPaths(xml, [['PrestadorServico']], ['CodigoMunicipio']),
+          this.extractFromParentPaths(xml, [['PrestadorServico']], ['Cep'])
+        ),
+      emailPrestador: this.extractFromPaths(xml, [
+        ['infDPS', 'prest', 'email'],
+        ['emit', 'email'],
+        ['PrestadorServico', 'Contato', 'Email']
+      ]),
+      simplesNacional: this.extractFromPaths(xml, [
+        ['infDPS', 'prest', 'regTrib', 'opSimpNac'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'OptanteSimplesNacional']
+      ]),
       regimeApuracaoSn: this.extractFromPaths(xml, [['infDPS', 'prest', 'regTrib', 'regApTribSN']]),
       cnpjTomador,
-      razaoSocialTomador: this.extractFromPaths(xml, [['infDPS', 'toma', 'xNome'], ['tomador', 'xNome']]),
+      razaoSocialTomador: this.extractFromPaths(xml, [
+        ['infDPS', 'toma', 'xNome'],
+        ['tomador', 'xNome'],
+        ['Tomador', 'RazaoSocial'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'RazaoSocial']
+      ]),
       inscricaoMunicipalTomador: this.extractFromPaths(xml, [['infDPS', 'toma', 'IM']]),
       telefoneTomador: this.extractFromPaths(xml, [['infDPS', 'toma', 'fone']]),
-      enderecoTomador: this.composeAddress(xml, [['infDPS', 'toma', 'end']]),
+      enderecoTomador: this.composeAddress(xml, [
+        ['infDPS', 'toma', 'end'],
+        ['Tomador', 'Endereco'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco']
+      ]),
       municipioTomador: this.composeMunicipioUf(
-        this.extractFromPaths(xml, [['infDPS', 'toma', 'end', 'endNac', 'cMun']]),
-        this.extractFromPaths(xml, [['infDPS', 'toma', 'end', 'endNac', 'UF']])
-      ),
+        this.extractFromPaths(xml, [
+          ['infDPS', 'toma', 'end', 'endNac', 'cMun'],
+          ['Tomador', 'Endereco', 'CodigoMunicipio'],
+          ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'CodigoMunicipio']
+        ]),
+        this.extractFromPaths(xml, [
+          ['infDPS', 'toma', 'end', 'endNac', 'UF'],
+          ['Tomador', 'Endereco', 'Uf'],
+          ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Uf']
+        ])
+      ) ??
+        this.composeMunicipioUf(
+          this.extractFromParentPaths(
+            xml,
+            [['Tomador'], ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador']],
+            ['CodigoMunicipio']
+          ),
+          this.extractFromParentPaths(
+            xml,
+            [['Tomador'], ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador']],
+            ['Uf']
+          )
+        ),
       codigoIbgeCepTomador: this.composeIbgeCep(
-        this.extractFromPaths(xml, [['infDPS', 'toma', 'end', 'endNac', 'cMun']]),
-        this.extractFromPaths(xml, [['infDPS', 'toma', 'end', 'endNac', 'CEP']])
-      ),
+        this.extractFromPaths(xml, [
+          ['infDPS', 'toma', 'end', 'endNac', 'cMun'],
+          ['Tomador', 'Endereco', 'CodigoMunicipio'],
+          ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'CodigoMunicipio']
+        ]),
+        this.extractFromPaths(xml, [
+          ['infDPS', 'toma', 'end', 'endNac', 'CEP'],
+          ['Tomador', 'Endereco', 'Cep'],
+          ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Cep']
+        ])
+      ) ??
+        this.composeIbgeCep(
+          this.extractFromParentPaths(
+            xml,
+            [['Tomador'], ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador']],
+            ['CodigoMunicipio']
+          ),
+          this.extractFromParentPaths(
+            xml,
+            [['Tomador'], ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador']],
+            ['Cep']
+          )
+        ),
       emailTomador: this.extractFromPaths(xml, [['infDPS', 'toma', 'email']]),
       cnpjDestinatario,
       razaoSocialDestinatario: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'dest', 'xNome']]),
@@ -1170,7 +1273,12 @@ export class NfseDanfseService {
       municipioPrestacaoCodigo,
       municipioPrestacaoNome,
       localPrestacao: this.composeLocalPrestacao(
-        this.extractFromPaths(xml, [['infDPS', 'serv', 'locPrest', 'xLocPrestacao'], ['infNFSe', 'xLocPrestacao']]),
+        this.extractFromPaths(xml, [
+          ['infDPS', 'serv', 'locPrest', 'xLocPrestacao'],
+          ['infNFSe', 'xLocPrestacao'],
+          ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'MunicipioIncidencia'],
+          ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'CodigoMunicipio']
+        ]),
         this.extractFromPaths(xml, [['infDPS', 'serv', 'locPrest', 'UF']]),
         this.extractFromPaths(xml, [['infDPS', 'serv', 'locPrest', 'cPaisPrestacao']])
       ),
@@ -1178,17 +1286,40 @@ export class NfseDanfseService {
       valorDeducoes,
       valorDescontoIncondicionado,
       valorDescontoCondicionado,
-      valorTotalRetencoes: this.extractFromPaths(xml, [['infNFSe', 'valores', 'vTotalRet'], ['valores', 'vTotalRet']]),
-      valorLiquidoNfse: this.extractFromPaths(xml, [['infNFSe', 'valores', 'vLiq'], ['valores', 'vLiq']]),
+      valorTotalRetencoes: this.extractFromPaths(xml, [
+        ['infNFSe', 'valores', 'vTotalRet'],
+        ['valores', 'vTotalRet'],
+        ['InfNfse', 'ValoresNfse', 'ValorTotalRetencoes']
+      ]),
+      valorLiquidoNfse: this.extractFromPaths(xml, [
+        ['infNFSe', 'valores', 'vLiq'],
+        ['valores', 'vLiq'],
+        ['InfNfse', 'ValoresNfse', 'ValorLiquidoNfse']
+      ]),
       valorTotalIbscbs,
       valorLiquidoComIbscbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'vTotNF']]),
-      valorIss: this.extract(xml, ['valorIss', 'valorISS', 'vISSQN', 'vISS']),
-      baseCalculoIss: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'vBCISSQN']]),
-      retencaoIss: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'tpRetISSQN']]),
-      aliquotaIss: this.extract(xml, ['aliquotaIss', 'aliquotaISS', 'pAliq', 'pAliquota']),
-      tipoTributacaoIssqn: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'tribISSQN']]),
+      valorIss: this.extract(xml, ['valorIss', 'valorISS', 'ValorIss', 'vISSQN', 'vISS']),
+      baseCalculoIss: this.extractFromPaths(xml, [
+        ['infDPS', 'valores', 'trib', 'tribMun', 'vBCISSQN'],
+        ['InfNfse', 'ValoresNfse', 'BaseCalculo']
+      ]),
+      retencaoIss: this.extractFromPaths(xml, [
+        ['infDPS', 'valores', 'trib', 'tribMun', 'tpRetISSQN'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'IssRetido']
+      ]),
+      aliquotaIss: this.extractFromPaths(xml, [
+        ['InfNfse', 'ValoresNfse', 'Aliquota']
+      ]) ?? this.extract(xml, ['aliquotaIss', 'aliquotaISS', 'pAliq', 'pAliquota']),
+      tipoTributacaoIssqn: this.extractFromPaths(xml, [
+        ['infDPS', 'valores', 'trib', 'tribMun', 'tribISSQN'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'ExigibilidadeISS']
+      ]),
       municipioIncidenciaIssqn: this.composeLocalPrestacao(
-        this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'xLocIncid'], ['infNFSe', 'xLocIncid']]),
+        this.extractFromPaths(xml, [
+          ['infDPS', 'valores', 'trib', 'tribMun', 'xLocIncid'],
+          ['infNFSe', 'xLocIncid'],
+          ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'MunicipioIncidencia']
+        ]),
         this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'UFIncid']]),
         this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribMun', 'cPaisResult']])
       ),
@@ -1958,10 +2089,18 @@ export class NfseDanfseService {
 
   private composeAddress(xml: string, basePaths: string[][]): string | undefined {
     for (const basePath of basePaths) {
-      const logradouro = this.extractFromPath(xml, [...basePath, 'xLgr']);
-      const numero = this.extractFromPath(xml, [...basePath, 'nro']);
-      const complemento = this.extractFromPath(xml, [...basePath, 'xCpl']);
-      const bairro = this.extractFromPath(xml, [...basePath, 'xBairro']);
+      const logradouro =
+        this.extractFromPath(xml, [...basePath, 'xLgr']) ??
+        this.extractFromPath(xml, [...basePath, 'Endereco']);
+      const numero =
+        this.extractFromPath(xml, [...basePath, 'nro']) ??
+        this.extractFromPath(xml, [...basePath, 'Numero']);
+      const complemento =
+        this.extractFromPath(xml, [...basePath, 'xCpl']) ??
+        this.extractFromPath(xml, [...basePath, 'Complemento']);
+      const bairro =
+        this.extractFromPath(xml, [...basePath, 'xBairro']) ??
+        this.extractFromPath(xml, [...basePath, 'Bairro']);
 
       const value = [logradouro, numero, complemento, bairro]
         .map((item) => this.safeValue(item))
@@ -1970,6 +2109,22 @@ export class NfseDanfseService {
 
       if (value) {
         return value;
+      }
+
+      if (basePath[basePath.length - 1] === 'Endereco') {
+        const parentPath = basePath.slice(0, -1);
+        const scopedLogradouro = this.extractFromParentPaths(xml, [parentPath], ['Endereco']);
+        const scopedNumero = this.extractFromParentPaths(xml, [parentPath], ['Numero']);
+        const scopedComplemento = this.extractFromParentPaths(xml, [parentPath], ['Complemento']);
+        const scopedBairro = this.extractFromParentPaths(xml, [parentPath], ['Bairro']);
+        const scopedValue = [scopedLogradouro, scopedNumero, scopedComplemento, scopedBairro]
+          .map((item) => this.safeValue(item))
+          .filter((item) => item !== '-')
+          .join(', ');
+
+        if (scopedValue) {
+          return scopedValue;
+        }
       }
     }
 
@@ -2140,13 +2295,10 @@ export class NfseDanfseService {
       return '-';
     }
 
-    const formatter = new Intl.DateTimeFormat('pt-BR', {
-      timeZone: 'America/Sao_Paulo',
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric'
-    });
-    return formatter.format(parsed);
+    const dd = String(parsed.getUTCDate()).padStart(2, '0');
+    const mm = String(parsed.getUTCMonth() + 1).padStart(2, '0');
+    const yyyy = parsed.getUTCFullYear();
+    return `${dd}/${mm}/${yyyy}`;
   }
 
   private formatMoney(value?: string | number | null): string | undefined {
@@ -2241,10 +2393,10 @@ export class NfseDanfseService {
       return undefined;
     }
     if (normalized === '1') {
-      return 'Nao Optante';
+      return 'Optante';
     }
     if (normalized === '2') {
-      return 'Optante';
+      return 'Nao Optante';
     }
     return normalized;
   }
@@ -2326,13 +2478,53 @@ export class NfseDanfseService {
     return undefined;
   }
 
+  private extractFromParentPaths(xml: string, parentPaths: string[][], childTags: string[]): string | undefined {
+    for (const parentPath of parentPaths) {
+      const scope = this.extractScope(xml, parentPath);
+      if (!scope) {
+        continue;
+      }
+
+      for (const childTag of childTags) {
+        const regex = new RegExp(`<(?:\\w+:)?${childTag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${childTag}>`, 'i');
+        const match = scope.match(regex);
+        if (!match?.[1]) {
+          continue;
+        }
+
+        const cleaned = this.cleanText(match[1]);
+        if (cleaned) {
+          return cleaned;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
   private extractFromPath(xml: string, path: string[]): string | undefined {
-    if (!path.length) {
+    const scope = this.extractScope(xml, path.slice(0, -1));
+    if (scope === undefined) {
       return undefined;
     }
 
+    const finalTag = path[path.length - 1];
+    const finalRegex = new RegExp(`<(?:\\w+:)?${finalTag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${finalTag}>`, 'i');
+    const finalMatch = scope.match(finalRegex);
+    if (!finalMatch?.[1]) {
+      return undefined;
+    }
+
+    return this.cleanText(finalMatch[1]);
+  }
+
+  private extractScope(xml: string, path: string[]): string | undefined {
+    if (!path.length) {
+      return xml;
+    }
+
     let scope = xml;
-    for (let i = 0; i < path.length - 1; i += 1) {
+    for (let i = 0; i < path.length; i += 1) {
       const parentRegex = new RegExp(
         `<(?:\\w+:)?${path[i]}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${path[i]}>`,
         'i'
@@ -2344,14 +2536,7 @@ export class NfseDanfseService {
       scope = parentMatch[1];
     }
 
-    const finalTag = path[path.length - 1];
-    const finalRegex = new RegExp(`<(?:\\w+:)?${finalTag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${finalTag}>`, 'i');
-    const finalMatch = scope.match(finalRegex);
-    if (!finalMatch?.[1]) {
-      return undefined;
-    }
-
-    return this.cleanText(finalMatch[1]);
+    return scope;
   }
 
   private extractNestedAny(xml: string, parentTags: string[], childTags: string[]): string | undefined {
@@ -2459,18 +2644,77 @@ export class NfseDanfseService {
     extracted: Omit<DanfseRenderInput, 'chaveAcesso'>,
     fallback: DanfseRenderInput
   ): Omit<DanfseRenderInput, 'chaveAcesso'> {
-    const merged = { ...extracted } as Record<string, unknown>;
-    const fallbackEntries = Object.entries(fallback) as Array<[keyof DanfseRenderInput, unknown]>;
+    const merged = { ...fallback } as Record<string, unknown>;
+    const extractedEntries = Object.entries(extracted) as Array<[keyof DanfseRenderInput, unknown]>;
 
-    for (const [key, value] of fallbackEntries) {
-      if (key === 'chaveAcesso') {
+    for (const [key, value] of extractedEntries) {
+      if (!this.hasRenderableValue(value)) {
         continue;
       }
-      if (value !== undefined && value !== null && value !== '') {
+
+      const currentValue = merged[key];
+      if (!this.hasRenderableValue(currentValue) || this.shouldPreferExtractedValue(key, value, currentValue)) {
         merged[key] = value;
       }
     }
 
+    delete merged.chaveAcesso;
     return merged as Omit<DanfseRenderInput, 'chaveAcesso'>;
+  }
+
+  private hasRenderableValue(value: unknown): boolean {
+    if (value instanceof Date) {
+      return !Number.isNaN(value.getTime());
+    }
+    if (typeof value === 'string') {
+      return value.trim() !== '' && value.trim() !== '-';
+    }
+    return value !== undefined && value !== null;
+  }
+
+  private shouldPreferExtractedValue(
+    key: keyof DanfseRenderInput,
+    extractedValue: unknown,
+    fallbackValue: unknown
+  ): boolean {
+    if (extractedValue instanceof Date) {
+      return true;
+    }
+    if (typeof extractedValue !== 'string') {
+      return true;
+    }
+    if (typeof fallbackValue !== 'string') {
+      return true;
+    }
+
+    if (
+      this.isMunicipioLikeField(key) &&
+      this.looksLikeCodigoSemDescricao(extractedValue) &&
+      this.looksLikeDescricaoMunicipio(fallbackValue)
+    ) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private isMunicipioLikeField(key: keyof DanfseRenderInput): boolean {
+    return (
+      key === 'municipioPrestador' ||
+      key === 'municipioTomador' ||
+      key === 'municipioDestinatario' ||
+      key === 'municipioIntermediario' ||
+      key === 'localPrestacao' ||
+      key === 'municipioIncidenciaIssqn'
+    );
+  }
+
+  private looksLikeCodigoSemDescricao(value: string): boolean {
+    const normalized = value.trim();
+    return /^[0-9.\-/\s]+$/.test(normalized) || /^[0-9.\-/\s]+(?:[-/]\s*[A-Z]{2})$/.test(normalized);
+  }
+
+  private looksLikeDescricaoMunicipio(value: string): boolean {
+    return /[A-Za-zÀ-ÿ]/.test(value);
   }
 }
