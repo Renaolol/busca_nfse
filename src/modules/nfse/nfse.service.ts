@@ -1214,7 +1214,17 @@ export class NfseService {
     return conditions.length === 1 ? conditions[0] : { AND: conditions };
   }
 
-  private async ensureDanfseFile(doc: NfseDocumento): Promise<{ danfsePath: string; pdf: Buffer }> {
+  private async ensureDanfseFile(
+    doc: NfseDocumento & {
+      eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
+      dataCancelamento?: Date | null;
+      status?: string | null;
+    }
+  ): Promise<{ danfsePath: string; pdf: Buffer }> {
+    if (this.hasCancelamento(doc)) {
+      return this.regenerateDanfseFile(doc);
+    }
+
     if (doc.danfsePath) {
       try {
         const existingPdf = await this.storage.getObject(doc.danfsePath);

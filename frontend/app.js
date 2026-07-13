@@ -4034,7 +4034,11 @@ function renderXmlDetailsModal(xmlId) {
             ${detailItem('Status de armazenamento', xml.statusArmazenamento)}
             ${detailItem('Situacao fiscal', xml.statusFiscal || '-')}
             ${detailItem('Data de cancelamento', xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '-')}
-            ${detailItem('Eventos vinculados', xml.eventosResumo || '-')}
+            ${detailItem('Resumo de eventos', xml.eventosResumo || '-')}
+          </div>
+          <div style="margin-top:18px;">
+            <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
+            ${renderXmlEventsList(xml.eventos)}
           </div>
         </div>
         <div class="modal-footer">
@@ -7699,11 +7703,70 @@ function buildEventosResumo(eventos) {
   return eventos
     .slice(0, 3)
     .map((evento) => {
-      const descricao = evento.descricao || evento.tipoEvento || 'Evento';
+      const descricao = formatEventoResumoLabel(evento);
       const data = evento.dataEvento ? ` em ${formatDateTime(evento.dataEvento)}` : '';
       return `${descricao}${data}`;
     })
     .join(' / ');
+}
+
+function renderXmlEventsList(eventos) {
+  if (!Array.isArray(eventos) || eventos.length === 0) {
+    return `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">Nenhum evento vinculado.</div>`;
+  }
+
+  return `
+    <div style="display:grid; gap:10px;">
+      ${eventos
+        .map((evento) => {
+          const title = formatEventoCardTitle(evento);
+          const tipo = evento?.tipoEvento ? String(evento.tipoEvento).trim() : '-';
+          const descricao = evento?.descricao ? String(evento.descricao).trim() : '-';
+          const dataEvento = evento?.dataEvento ? formatDateTime(evento.dataEvento) : '-';
+          return `
+            <article style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb;">
+              <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px;">
+                <strong>${escapeHtml(title)}</strong>
+                <span class="chip ${isCancelamentoEventoApi(evento) ? 'danger' : 'info'}">${escapeHtml(tipo)}</span>
+              </div>
+              <div style="display:grid; gap:4px;">
+                <span><small style="color:#606062;">Data</small> <strong>${escapeHtml(dataEvento)}</strong></span>
+                <span><small style="color:#606062;">Descricao</small> <strong>${escapeHtml(descricao)}</strong></span>
+              </div>
+            </article>
+          `;
+        })
+        .join('')}
+    </div>
+  `;
+}
+
+function formatEventoResumoLabel(evento) {
+  if (isCancelamentoEventoApi(evento)) {
+    return 'Cancelamento';
+  }
+
+  const descricao = String(evento?.descricao || '').trim();
+  if (descricao) {
+    return descricao;
+  }
+
+  const tipoEvento = String(evento?.tipoEvento || '').trim();
+  return tipoEvento || 'Evento';
+}
+
+function formatEventoCardTitle(evento) {
+  if (isCancelamentoEventoApi(evento)) {
+    return 'Evento de cancelamento';
+  }
+
+  const descricao = String(evento?.descricao || '').trim();
+  if (descricao) {
+    return descricao;
+  }
+
+  const tipoEvento = String(evento?.tipoEvento || '').trim();
+  return tipoEvento ? `Evento ${tipoEvento}` : 'Evento de NFS-e';
 }
 
 function buildNfeDocumentsFromApi(nfeDocs, clients) {

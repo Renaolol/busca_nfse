@@ -342,6 +342,50 @@ describe('NfseService', () => {
     expect(result.contentBase64.length).toBeGreaterThan(20);
   });
 
+  it('regenera DANFSE cancelada mesmo quando ja existe PDF salvo', async () => {
+    prisma.nfseDocumento.findUnique.mockResolvedValue({
+      id: 'doc-4-cancelada',
+      clienteId: 'cliente-1',
+      chaveAcesso: '42110092206960810000176000000000033326062205552016',
+      ambiente: Ambiente.producao,
+      danfsePath: 'nfse/producao/06960810000176/2026/06/danfse/42110092206960810000176000000000033326062205552016.pdf',
+      xmlPath: 'nfse/producao/06960810000176/2026/06/xml/doc-4-cancelada.xml',
+      numeroNfse: '333',
+      dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+      status: 'cancelada',
+      dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
+      eventos: [
+        {
+          tipoEvento: 'e101101',
+          descricao: 'Cancelamento de NFS-e',
+          dataEvento: new Date('2026-06-03T18:43:08.000Z')
+        }
+      ],
+      cnpjPrestador: '06960810000176',
+      razaoSocialPrestador: 'Prestador Teste',
+      cnpjTomador: '12345678000199',
+      razaoSocialTomador: 'Tomador Teste',
+      valorServico: {
+        toString: () => '100.00'
+      },
+      descricaoServico: 'Servico cancelado',
+      createdAt: new Date('2026-06-03T12:00:00.000Z')
+    });
+
+    storage.getObject.mockResolvedValueOnce(Buffer.from('<NFSe><nNFSe>333</nNFSe></NFSe>', 'utf8'));
+    storage.putObject.mockResolvedValue('/tmp/danfse-cancelada.pdf');
+
+    const result = await service.getDanfse('doc-4-cancelada', 'cliente-1');
+
+    expect(storage.putObject).toHaveBeenCalledTimes(1);
+    expect(storage.putObject).toHaveBeenCalledWith(
+      expect.stringContaining('/danfse/42110092206960810000176000000000033326062205552016.pdf'),
+      expect.any(Buffer)
+    );
+    expect(result.contentType).toBe('application/pdf');
+    expect(result.contentBase64.length).toBeGreaterThan(20);
+  });
+
   it('reprocessa DANFSEs legadas e ignora PDFs ja no modelo novo', async () => {
     const legacyDoc = {
       id: '10000000-0000-4000-8000-000000000001',
