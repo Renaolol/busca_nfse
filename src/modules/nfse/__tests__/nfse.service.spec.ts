@@ -930,11 +930,23 @@ describe('NfseService', () => {
         valorServico: null,
         descricaoServico: null,
         createdAt: new Date('2026-01-10T00:00:00.000Z'),
-        updatedAt: new Date('2026-01-10T00:00:00.000Z')
+        updatedAt: new Date('2026-01-10T00:00:00.000Z'),
+        eventos: [
+          {
+            id: 'evento-zip-1',
+            tipoEvento: 'CANCELAMENTO',
+            dataEvento: new Date('2026-01-10T10:20:30.000Z'),
+            xmlPath:
+              'nfse/producao/123/2026/05/eventos/42110092206960810000176000000000001026016992784180_CANCELAMENTO.xml',
+            createdAt: new Date('2026-01-10T10:20:31.000Z')
+          }
+        ]
       }
     ]);
 
-    storage.getObject.mockResolvedValue(Buffer.from('<xml>doc-10</xml>', 'utf8'));
+    storage.getObject
+      .mockResolvedValueOnce(Buffer.from('<xml>doc-10</xml>', 'utf8'))
+      .mockResolvedValueOnce(Buffer.from('<evento>cancelamento</evento>', 'utf8'));
 
     const result = await service.downloadLote({
       ids: ['550e8400-e29b-41d4-a716-446655440010'],
@@ -943,20 +955,26 @@ describe('NfseService', () => {
     });
 
     expect(result.contentType).toBe('application/zip');
-    expect(result.totalArquivosIncluidos).toBe(1);
+    expect(result.totalArquivosIncluidos).toBe(2);
     expect(result.idsNaoEncontrados).toEqual([]);
     expect(result.erros).toEqual([]);
 
     const zipBuffer = Buffer.from(result.contentBase64, 'base64');
     const zip = await JSZip.loadAsync(zipBuffer);
     const xmlEntry = zip.file('xml/NFSE-42110092206960810000176000000000001026016992784180.xml');
+    const eventoXmlEntry = zip.file(
+      'xml/eventos/42110092206960810000176000000000001026016992784180_CANCELAMENTO.xml'
+    );
     const manifestEntry = zip.file('manifest.json');
 
     expect(xmlEntry).toBeTruthy();
+    expect(eventoXmlEntry).toBeTruthy();
     expect(manifestEntry).toBeTruthy();
 
     const xmlContent = await xmlEntry!.async('string');
+    const eventoXmlContent = await eventoXmlEntry!.async('string');
     expect(xmlContent).toBe('<xml>doc-10</xml>');
+    expect(eventoXmlContent).toBe('<evento>cancelamento</evento>');
   });
 
   it('retorna IDs nao encontrados no manifest de lote', async () => {

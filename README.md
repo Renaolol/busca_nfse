@@ -238,7 +238,7 @@ Eventos sao vinculados pela chave da NFS-e referenciada (`chNFSe`) e salvos em `
 
 - `GET /nfse/:id/xml`: retorna XML da nota com `fileName`, `contentType` e `contentBase64`.
 - `GET /nfse/:id/danfse`: retorna DANFSE em PDF com `fileName`, `contentType` e `contentBase64`.
-- `POST /nfse/download-lote`: gera um arquivo ZIP em Base64 para baixar XML/DANFSE em lote.
+- `POST /nfse/download-lote`: gera um arquivo ZIP em Base64 para baixar XML/DANFSE em lote. Quando houver eventos de NFS-e vinculados e o lote incluir XMLs, os XMLs de evento tambem entram no ZIP.
 - `POST /nfse/reprocessar-xmls`: reprocessa XMLs ja salvos para preencher campos faltantes e (opcionalmente) regenerar DANFSE.
 - `POST /nfse/reprocessar-danfses`: reprocessa DANFSEs salvas para atualizar PDFs legados ou ausentes para o modelo atual.
 - `POST /nfse/eventos/sincronizar`: consulta manualmente os eventos das NFS-e ja armazenadas, usando a chave de acesso da nota e o certificado do estabelecimento, sem alterar NSU. O import aceita tanto XMLs de evento retornados pelo ADN quanto eventos estruturados em JSON.

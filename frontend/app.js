@@ -7692,7 +7692,13 @@ function resolveFiscalStatus(status, dataCancelamento, cancelamentoEvento) {
 function isCancelamentoEventoApi(evento) {
   const tipoEvento = normalizeSearchText(evento?.tipoEvento);
   const descricao = normalizeSearchText(evento?.descricao);
-  return tipoEvento === 'e101101' || descricao.includes('cancelamento') || descricao.includes('cancelada');
+  return (
+    tipoEvento === 'e101101' ||
+    tipoEvento.includes('cancelamento') ||
+    tipoEvento.includes('cancelada') ||
+    descricao.includes('cancelamento') ||
+    descricao.includes('cancelada')
+  );
 }
 
 function buildEventosResumo(eventos) {
@@ -8935,6 +8941,27 @@ async function downloadXmlById(xmlId) {
   if (!xml) {
     pushToast('XML nao encontrado.', 'error');
     return;
+  }
+
+  if (xml.apiNfseId && xml.clientId) {
+    try {
+      const payload = await apiRequest('/nfse/download-lote', {
+        method: 'POST',
+        body: {
+          ids: [xml.apiNfseId],
+          tipoArquivo: 'xml',
+          clienteId: xml.clientId
+        },
+        timeoutMs: 60000
+      });
+      downloadFromPayload(payload, `nfse-${xml.numeroNfse || xml.chaveAcesso}-xmls.zip`);
+      const included = Number(payload?.totalArquivosIncluidos || 0);
+      pushToast(`Download dos XMLs da NFS-e ${xml.numeroNfse || xml.chaveAcesso} iniciado (${included} arquivo(s)).`, 'success');
+      return;
+    } catch (error) {
+      pushToast(`Falha ao baixar XMLs da NFS-e: ${toErrorMessage(error)}`, 'error');
+      return;
+    }
   }
 
   try {

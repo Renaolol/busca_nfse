@@ -196,7 +196,13 @@ export class NfseXmlParserService {
     const tipo = this.normalizeSearchText(tipoEvento);
     const texto = this.normalizeSearchText(descricao);
 
-    return tipo === 'e101101' || texto.includes('cancelamento') || texto.includes('cancelada');
+    return (
+      tipo === 'e101101' ||
+      tipo.includes('cancelamento') ||
+      tipo.includes('cancelada') ||
+      texto.includes('cancelamento') ||
+      texto.includes('cancelada')
+    );
   }
 
   getHash(xml: string): string {

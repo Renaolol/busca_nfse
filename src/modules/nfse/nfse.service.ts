@@ -804,12 +804,14 @@ export class NfseService {
     descricao?: string | null;
     isCancelamento?: boolean;
   }): boolean {
-    const tipoEvento = (evento.tipoEvento ?? '').trim().toLowerCase();
+    const tipoEvento = this.normalizeSearchText(evento.tipoEvento ?? undefined);
     const descricao = this.normalizeSearchText(evento.descricao ?? undefined);
 
     return (
       Boolean(evento.isCancelamento) ||
       tipoEvento === 'e101101' ||
+      tipoEvento.includes('cancelamento') ||
+      tipoEvento.includes('cancelada') ||
       descricao.includes('cancelamento') ||
       descricao.includes('cancelada')
     );
@@ -1110,6 +1112,11 @@ export class NfseService {
           in: uniqueIds
         },
         clienteId: dto.clienteId ?? undefined
+      },
+      include: {
+        eventos: {
+          orderBy: [{ dataEvento: 'asc' }, { createdAt: 'asc' }]
+        }
       }
     });
 
@@ -1134,6 +1141,23 @@ export class NfseService {
             totalArquivosIncluidos += 1;
           } catch (error) {
             errors.push({ id: doc.id, erro: `Falha ao ler XML: ${this.toErrorMessage(error)}` });
+          }
+        }
+
+        for (const evento of doc.eventos ?? []) {
+          if (!evento.xmlPath) {
+            continue;
+          }
+
+          try {
+            const eventoXmlBuffer = await this.storage.getObject(evento.xmlPath);
+            zip.file(this.buildEventoZipEntryPath(doc.chaveAcesso, evento), eventoXmlBuffer);
+            totalArquivosIncluidos += 1;
+          } catch (error) {
+            errors.push({
+              id: doc.id,
+              erro: `Falha ao ler XML do evento ${evento.tipoEvento || evento.id}: ${this.toErrorMessage(error)}`
+            });
           }
         }
       }
@@ -1212,6 +1236,18 @@ export class NfseService {
     }
 
     return conditions.length === 1 ? conditions[0] : { AND: conditions };
+  }
+
+  private buildEventoZipEntryPath(
+    chaveAcesso: string,
+    evento: { id: string; tipoEvento?: string | null; dataEvento?: Date | null; xmlPath?: string | null }
+  ): string {
+    const tipoEvento = this.toSafeFileName((evento.tipoEvento ?? 'evento').trim() || 'evento');
+    const dataEvento = evento.dataEvento ? evento.dataEvento.toISOString().replace(/[:.]/g, '-') : 'sem-data';
+    const fallbackFileName = `NFSE-EVENTO-${this.toSafeFileName(chaveAcesso)}-${tipoEvento}-${dataEvento}.xml`;
+    const originalFileName = evento.xmlPath?.split('/').filter(Boolean).pop();
+
+    return `xml/eventos/${originalFileName ? this.toSafeFileName(originalFileName) : fallbackFileName}`;
   }
 
   private async ensureDanfseFile(
