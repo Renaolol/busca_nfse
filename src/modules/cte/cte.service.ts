@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
 import { NfeService } from '../nfe/nfe.service';
@@ -11,6 +11,8 @@ import { QueryCteDto } from './dto/query-cte.dto';
 
 @Injectable()
 export class CteService {
+  private readonly logger = new Logger(CteService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: LocalStorageService,
@@ -40,9 +42,8 @@ export class CteService {
 
     const [total, documents] = await Promise.all([
       this.prisma.nfeDocumento.count({ where }),
-      this.prisma.nfeDocumento.findMany({
+      this.findManyDocumentosWithEventos({
         where,
-        include: this.documentInclude(),
         orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: pageSize
@@ -120,9 +121,8 @@ export class CteService {
   }
 
   async findOne(id: string, clienteId: string) {
-    const found = await this.prisma.nfeDocumento.findUnique({
-      where: { id },
-      include: this.documentInclude()
+    const found = await this.findUniqueDocumentoWithEventos({
+      where: { id }
     });
     if (!found || !this.isCteDocument(found)) {
       throw new NotFoundException('CT-e nao encontrado');
@@ -286,6 +286,47 @@ export class CteService {
     };
   }
 
+  private async findManyDocumentosWithEventos(
+    args: Omit<Prisma.NfeDocumentoFindManyArgs, 'include'>
+  ): Promise<Array<Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })>> {
+    try {
+      return await this.prisma.nfeDocumento.findMany({
+        ...args,
+        include: this.documentInclude()
+      });
+    } catch (error) {
+      if (!this.isEventosSchemaUnavailable(error)) {
+        throw error;
+      }
+
+      this.logger.warn('Tabela nfe_eventos indisponivel; retornando CT-e sem eventos vinculados. Aplique a migration pendente.');
+      const documentos = await this.prisma.nfeDocumento.findMany(args);
+      return documentos.map((documento) => ({
+        ...documento,
+        eventos: []
+      }));
+    }
+  }
+
+  private async findUniqueDocumentoWithEventos(
+    args: Omit<Prisma.NfeDocumentoFindUniqueArgs, 'include'>
+  ): Promise<(Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })) | null> {
+    try {
+      return await this.prisma.nfeDocumento.findUnique({
+        ...args,
+        include: this.documentInclude()
+      });
+    } catch (error) {
+      if (!this.isEventosSchemaUnavailable(error)) {
+        throw error;
+      }
+
+      this.logger.warn('Tabela nfe_eventos indisponivel; retornando detalhe de CT-e sem eventos vinculados. Aplique a migration pendente.');
+      const documento = await this.prisma.nfeDocumento.findUnique(args);
+      return documento ? { ...documento, eventos: [] } : null;
+    }
+  }
+
   private async enrichDocument<T extends {
     chaveAcesso: string;
     numeroNfe?: string | null;
@@ -347,6 +388,19 @@ export class CteService {
 
     const digits = value.replace(/\D/g, '');
     return digits || undefined;
+  }
+
+  private isEventosSchemaUnavailable(error: unknown): boolean {
+    const message = error instanceof Error && error.message ? error.message.toLowerCase() : 'erro inesperado';
+    return (
+      message.includes('nfe_eventos') &&
+      (message.includes('does not exist') ||
+        message.includes('relation') ||
+        message.includes('table') ||
+        message.includes('column') ||
+        message.includes('p2021') ||
+        message.includes('p2022'))
+    );
   }
 
   private resolvePagination(query: QueryCteDto): { page: number; pageSize: number; skip: number } {

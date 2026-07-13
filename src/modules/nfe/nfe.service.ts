@@ -438,9 +438,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
     const [total, items] = await Promise.all([
       this.prisma.nfeDocumento.count({ where }),
-      this.prisma.nfeDocumento.findMany({
+      this.findManyDocumentosWithEventos({
         where,
-        include: this.nfeDocumentoInclude(),
         orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: pageSize
@@ -517,9 +516,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async findOne(id: string, clienteId: string) {
-    const found = await this.prisma.nfeDocumento.findUnique({
-      where: { id },
-      include: this.nfeDocumentoInclude()
+    const found = await this.findUniqueDocumentoWithEventos({
+      where: { id }
     });
     if (!found) {
       throw new NotFoundException('NF-e nao encontrada');
@@ -1998,6 +1996,47 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private async findManyDocumentosWithEventos(
+    args: Omit<Prisma.NfeDocumentoFindManyArgs, 'include'>
+  ): Promise<Array<Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })>> {
+    try {
+      return await this.prisma.nfeDocumento.findMany({
+        ...args,
+        include: this.nfeDocumentoInclude()
+      });
+    } catch (error) {
+      if (!this.isEventosSchemaUnavailable(error)) {
+        throw error;
+      }
+
+      this.logger.warn('Tabela nfe_eventos indisponivel; retornando NF-e sem eventos vinculados. Aplique a migration pendente.');
+      const documentos = await this.prisma.nfeDocumento.findMany(args);
+      return documentos.map((documento) => ({
+        ...documento,
+        eventos: []
+      }));
+    }
+  }
+
+  private async findUniqueDocumentoWithEventos(
+    args: Omit<Prisma.NfeDocumentoFindUniqueArgs, 'include'>
+  ): Promise<(Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })) | null> {
+    try {
+      return await this.prisma.nfeDocumento.findUnique({
+        ...args,
+        include: this.nfeDocumentoInclude()
+      });
+    } catch (error) {
+      if (!this.isEventosSchemaUnavailable(error)) {
+        throw error;
+      }
+
+      this.logger.warn('Tabela nfe_eventos indisponivel; retornando detalhe de NF-e sem eventos vinculados. Aplique a migration pendente.');
+      const documento = await this.prisma.nfeDocumento.findUnique(args);
+      return documento ? { ...documento, eventos: [] } : null;
+    }
+  }
+
   private resolveDocumentoStatus(
     status: string | null | undefined,
     eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null }>
@@ -2017,6 +2056,19 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           return tipoEvento === '110111' || tipoEvento.includes('cancel') || descricao.includes('cancel');
         })
       : false;
+  }
+
+  private isEventosSchemaUnavailable(error: unknown): boolean {
+    const message = this.toErrorMessage(error).toLowerCase();
+    return (
+      message.includes('nfe_eventos') &&
+      (message.includes('does not exist') ||
+        message.includes('relation') ||
+        message.includes('table') ||
+        message.includes('column') ||
+        message.includes('p2021') ||
+        message.includes('p2022'))
+    );
   }
 
   private getAndConditions(where: Prisma.NfeDocumentoWhereInput): Prisma.NfeDocumentoWhereInput[] {
