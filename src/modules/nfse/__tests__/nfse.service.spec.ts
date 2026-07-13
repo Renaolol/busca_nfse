@@ -18,12 +18,20 @@ describe('NfseService', () => {
     },
     nfseEvento: {
       upsert: jest.fn()
+    },
+    certificado: {
+      findFirst: jest.fn()
     }
   };
 
   const storage = {
     getObject: jest.fn(),
     putObject: jest.fn()
+  };
+
+  const adnClient = {
+    getDFeByNsu: jest.fn(),
+    getEventosByChave: jest.fn()
   };
 
   const parser = new NfseXmlParserService();
@@ -33,7 +41,8 @@ describe('NfseService', () => {
     prisma as unknown as PrismaService,
     parser,
     storage as unknown as LocalStorageService,
-    danfse
+    danfse,
+    adnClient
   );
 
   beforeEach(() => {
@@ -598,6 +607,143 @@ describe('NfseService', () => {
       eventoId: 'evento-1',
       tipoEvento: 'e101101',
       status: 'cancelada'
+    });
+  });
+
+  it('sincroniza eventos de NFS-e salvas consultando o ADN por chave', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-evt-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000033326062205552016',
+        dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+        createdAt: new Date('2026-06-03T12:00:00.000Z')
+      }
+    ]);
+    prisma.certificado.findFirst.mockResolvedValue({
+      id: 'cert-1',
+      validadeFim: new Date('2099-01-01T00:00:00.000Z')
+    });
+    adnClient.getEventosByChave.mockResolvedValue({
+      statusCode: 200,
+      data: {
+        eventos: [
+          {
+            xml: `<?xml version="1.0" encoding="utf-8"?>
+<evento versao="1.01" xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infEvento Id="EVT42110092206960810000176000000000033326062205552016101101001">
+    <dhProc>2026-06-03T15:43:08-03:00</dhProc>
+    <pedRegEvento versao="1.01">
+      <infPedReg Id="PRE42110092206960810000176000000000033326062205552016101101">
+        <dhEvento>2026-06-03T15:43:08-03:00</dhEvento>
+        <CNPJAutor>06960810000176</CNPJAutor>
+        <chNFSe>42110092206960810000176000000000033326062205552016</chNFSe>
+        <e101101>
+          <xDesc>Cancelamento de NFS-e</xDesc>
+        </e101101>
+      </infPedReg>
+    </pedRegEvento>
+  </infEvento>
+</evento>`
+          }
+        ]
+      }
+    });
+    const importSpy = jest.spyOn(service, 'importXml').mockResolvedValue({
+      id: 'doc-evt-1',
+      chaveAcesso: '42110092206960810000176000000000033326062205552016',
+      tipo: 'evento',
+      eventoId: 'evento-1',
+      tipoEvento: 'e101101',
+      status: 'cancelada'
+    } as never);
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      limit: 10
+    });
+
+    expect(prisma.nfseDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          clienteId: 'cliente-1',
+          eventos: { none: {} }
+        }),
+        take: 10
+      })
+    );
+    expect(adnClient.getEventosByChave).toHaveBeenCalledWith({
+      chaveAcesso: '42110092206960810000176000000000033326062205552016',
+      ambiente: 'producao',
+      certificateId: 'cert-1'
+    });
+    expect(importSpy).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: 'producao',
+      xml: expect.stringContaining('<evento versao="1.01"')
+    });
+    expect(result).toEqual({
+      documentosAnalisados: 1,
+      documentosComEventos: 1,
+      eventosEncontrados: 1,
+      eventosImportados: 1,
+      falhas: 0,
+      detalhes: [
+        {
+          documentoId: 'doc-evt-1',
+          chaveAcesso: '42110092206960810000176000000000033326062205552016',
+          estabelecimentoId: 'estab-1',
+          ambiente: 'producao',
+          status: 'sincronizado',
+          eventosEncontrados: 1,
+          eventosImportados: 1,
+          mensagem: undefined
+        }
+      ]
+    });
+    importSpy.mockRestore();
+  });
+
+  it('reporta falha de certificado ao sincronizar eventos quando nao ha certificado valido', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-evt-2',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao_restrita,
+        chaveAcesso: '42110092206960810000176000000000044426062205552016',
+        dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+        createdAt: new Date('2026-06-03T12:00:00.000Z')
+      }
+    ]);
+    prisma.certificado.findFirst.mockResolvedValue(null);
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1'
+    });
+
+    expect(adnClient.getEventosByChave).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      documentosAnalisados: 1,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 1,
+      detalhes: [
+        {
+          documentoId: 'doc-evt-2',
+          chaveAcesso: '42110092206960810000176000000000044426062205552016',
+          estabelecimentoId: 'estab-1',
+          ambiente: 'producao_restrita',
+          status: 'falha_certificado',
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          mensagem: 'Nenhum certificado ativo para o estabelecimento'
+        }
+      ]
     });
   });
 

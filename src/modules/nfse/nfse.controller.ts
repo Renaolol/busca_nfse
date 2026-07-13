@@ -10,6 +10,7 @@ import { ImportXmlDto } from './dto/import-xml.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
 import { ReprocessarDanfsesDto, ReprocessarDanfsesResponseDto } from './dto/reprocessar-danfses.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
+import { SincronizarNfseEventosDto, SincronizarNfseEventosResponseDto } from './dto/sincronizar-eventos.dto';
 import { NfseService } from './nfse.service';
 
 @ApiTags('nfse')
@@ -83,5 +84,12 @@ export class NfseController {
   @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
   reprocessarDanfses(@Body() dto: ReprocessarDanfsesDto) {
     return this.nfseService.reprocessarDanfses(dto);
+  }
+
+  @Post('eventos/sincronizar')
+  @ApiOkResponse({ type: SincronizarNfseEventosResponseDto })
+  @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
+  sincronizarEventos(@Body() dto: SincronizarNfseEventosDto) {
+    return this.nfseService.sincronizarEventos(dto);
   }
 }

@@ -241,9 +241,21 @@ Eventos sao vinculados pela chave da NFS-e referenciada (`chNFSe`) e salvos em `
 - `POST /nfse/download-lote`: gera um arquivo ZIP em Base64 para baixar XML/DANFSE em lote.
 - `POST /nfse/reprocessar-xmls`: reprocessa XMLs ja salvos para preencher campos faltantes e (opcionalmente) regenerar DANFSE.
 - `POST /nfse/reprocessar-danfses`: reprocessa DANFSEs salvas para atualizar PDFs legados ou ausentes para o modelo atual.
+- `POST /nfse/eventos/sincronizar`: consulta manualmente os eventos das NFS-e ja armazenadas, usando a chave de acesso da nota e o certificado do estabelecimento, sem alterar NSU.
 - `GET /nfse`, `GET /nfse/separadas` e `GET /nfse/:id` retornam tambem `eventos` vinculados a cada nota.
 - Os endpoints `GET /nfse/:id`, `GET /nfse/:id/xml` e `GET /nfse/:id/danfse` exigem `?clienteId=...` para garantir escopo de acesso por cliente.
   - `clienteId` deve ser UUID valido.
+
+Exemplo de body para sincronizacao manual de eventos:
+
+```json
+{
+  "clienteId": "550e8400-e29b-41d4-a716-446655440000",
+  "ambiente": "producao",
+  "somenteSemEventos": true,
+  "limit": 100
+}
+```
 
 Quando o DANFSE nao existir para uma nota ja salva, ele e gerado automaticamente a partir do XML no primeiro download.
 Na tela `Configuracoes > Manutencao`, a acao `Reprocessar DANFSEs` chama `POST /nfse/reprocessar-danfses` para atualizar os PDFs antigos em lote.

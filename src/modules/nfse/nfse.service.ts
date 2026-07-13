@@ -1,7 +1,9 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Ambiente, DocumentoOrigem, NfseDocumento, Prisma } from '@prisma/client';
 import JSZip from 'jszip';
+import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
+import { NFSE_ADN_CLIENT, NfseAdnClient } from '../../integrations/nfse-adn/nfse-adn.types';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardStatsQueryDto } from './dto/dashboard-stats.dto';
@@ -11,6 +13,7 @@ import { ImportXmlDto } from './dto/import-xml.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
 import { ReprocessarDanfsesDto } from './dto/reprocessar-danfses.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
+import { SincronizarNfseEventosDto } from './dto/sincronizar-eventos.dto';
 import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from './nfse-xml-parser.service';
 
 @Injectable()
@@ -19,7 +22,8 @@ export class NfseService {
     private readonly prisma: PrismaService,
     private readonly parser: NfseXmlParserService,
     private readonly storage: LocalStorageService,
-    private readonly danfse: NfseDanfseService
+    private readonly danfse: NfseDanfseService,
+    @Inject(NFSE_ADN_CLIENT) private readonly adnClient: NfseAdnClient
   ) {}
 
   async findAll(query: QueryNfseDto) {
@@ -182,6 +186,32 @@ export class NfseService {
         orderBy: [{ dataEvento: 'desc' }, { createdAt: 'desc' }]
       }
     };
+  }
+
+  private buildEventoSyncWhere(dto: SincronizarNfseEventosDto): Prisma.NfseDocumentoWhereInput {
+    const where: Prisma.NfseDocumentoWhereInput = {
+      clienteId: dto.clienteId
+    };
+
+    if (dto.estabelecimentoId) {
+      where.estabelecimentoId = dto.estabelecimentoId;
+    }
+
+    if (dto.ambiente) {
+      where.ambiente = dto.ambiente === 'producao_restrita' ? Ambiente.producao_restrita : Ambiente.producao;
+    }
+
+    if (dto.chaveAcesso) {
+      where.chaveAcesso = dto.chaveAcesso;
+    }
+
+    if (dto.somenteSemEventos ?? true) {
+      where.eventos = {
+        none: {}
+      };
+    }
+
+    return where;
   }
 
   private buildBaseWhere(query: QueryNfseDto): Prisma.NfseDocumentoWhereInput {
@@ -375,6 +405,109 @@ export class NfseService {
     }
 
     return this.importNfseXml(dto, parsedXml.nfse);
+  }
+
+  async sincronizarEventos(dto: SincronizarNfseEventosDto) {
+    const limit = dto.limit ?? 100;
+    const documents = await this.prisma.nfseDocumento.findMany({
+      where: this.buildEventoSyncWhere(dto),
+      orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
+      take: limit
+    });
+    const certificateByEstablishment = new Map<string, { id: string }>();
+    const detalhes: Array<{
+      documentoId: string;
+      chaveAcesso: string;
+      estabelecimentoId: string;
+      ambiente: 'producao' | 'producao_restrita';
+      status: 'sincronizado' | 'sem_eventos' | 'falha_api' | 'falha_certificado';
+      eventosEncontrados: number;
+      eventosImportados: number;
+      mensagem?: string;
+    }> = [];
+    let documentosComEventos = 0;
+    let eventosEncontrados = 0;
+    let eventosImportados = 0;
+    let falhas = 0;
+
+    for (const document of documents) {
+      try {
+        let certificate = certificateByEstablishment.get(document.estabelecimentoId);
+        if (!certificate) {
+          certificate = await this.findUsableCertificate(dto.clienteId, document.estabelecimentoId);
+          certificateByEstablishment.set(document.estabelecimentoId, certificate);
+        }
+
+        const response = await this.adnClient.getEventosByChave({
+          chaveAcesso: document.chaveAcesso,
+          ambiente: this.toExternalAmbiente(document.ambiente),
+          certificateId: certificate.id
+        });
+        const statusCode = this.extractStatusCode(response);
+        if (statusCode !== undefined && statusCode !== 200) {
+          falhas += 1;
+          detalhes.push({
+            documentoId: document.id,
+            chaveAcesso: document.chaveAcesso,
+            estabelecimentoId: document.estabelecimentoId,
+            ambiente: this.toDtoAmbiente(document.ambiente),
+            status: 'falha_api',
+            eventosEncontrados: 0,
+            eventosImportados: 0,
+            mensagem: this.extractSyncMessage(response) ?? `Consulta de eventos retornou HTTP ${statusCode}.`
+          });
+          continue;
+        }
+
+        const xmls = this.extractEventoXmls(response);
+        const importedBefore = eventosImportados;
+        for (const xml of xmls) {
+          await this.importXml({
+            clienteId: dto.clienteId,
+            estabelecimentoId: document.estabelecimentoId,
+            ambiente: this.toDtoAmbiente(document.ambiente),
+            xml
+          });
+          eventosImportados += 1;
+        }
+
+        if (xmls.length > 0) {
+          documentosComEventos += 1;
+        }
+        eventosEncontrados += xmls.length;
+        detalhes.push({
+          documentoId: document.id,
+          chaveAcesso: document.chaveAcesso,
+          estabelecimentoId: document.estabelecimentoId,
+          ambiente: this.toDtoAmbiente(document.ambiente),
+          status: xmls.length > 0 ? 'sincronizado' : 'sem_eventos',
+          eventosEncontrados: xmls.length,
+          eventosImportados: eventosImportados - importedBefore,
+          mensagem: xmls.length > 0 ? undefined : this.extractSyncMessage(response) ?? 'Nenhum evento encontrado no ADN'
+        });
+      } catch (error) {
+        falhas += 1;
+        detalhes.push({
+          documentoId: document.id,
+          chaveAcesso: document.chaveAcesso,
+          estabelecimentoId: document.estabelecimentoId,
+          ambiente: this.toDtoAmbiente(document.ambiente),
+          status: this.isCertificateError(error) ? 'falha_certificado' : 'falha_api',
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          mensagem: this.toErrorMessage(error)
+        });
+      }
+    }
+
+    return {
+      documentosAnalisados: documents.length,
+      documentosComEventos,
+      eventosEncontrados,
+      eventosImportados,
+      falhas,
+      detalhes
+    };
   }
 
   private async importNfseXml(dto: ImportXmlDto, parsed: ParsedNfse) {
@@ -1208,6 +1341,128 @@ export class NfseService {
     return value.replace(/[^a-zA-Z0-9._-]/g, '_');
   }
 
+  private toExternalAmbiente(ambiente: Ambiente): NfseAmbiente {
+    return ambiente === Ambiente.producao_restrita ? NfseAmbiente.PRODUCAO_RESTRITA : NfseAmbiente.PRODUCAO;
+  }
+
+  private toDtoAmbiente(ambiente: Ambiente): 'producao' | 'producao_restrita' {
+    return ambiente === Ambiente.producao_restrita ? 'producao_restrita' : 'producao';
+  }
+
+  private async findUsableCertificate(clienteId: string, estabelecimentoId: string): Promise<{ id: string }> {
+    const certificate = await this.prisma.certificado.findFirst({
+      where: {
+        clienteId,
+        estabelecimentoId,
+        ativo: true
+      },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        validadeFim: true
+      }
+    });
+
+    if (!certificate) {
+      throw new BadRequestException('Nenhum certificado ativo para o estabelecimento');
+    }
+
+    if (certificate.validadeFim && certificate.validadeFim.getTime() < Date.now()) {
+      throw new BadRequestException('Certificado vencido');
+    }
+
+    return { id: certificate.id };
+  }
+
+  private extractStatusCode(payload: unknown): number | undefined {
+    if (!payload || typeof payload !== 'object') {
+      return undefined;
+    }
+
+    const candidate = (payload as { statusCode?: unknown; status?: unknown }).statusCode ?? (payload as { status?: unknown }).status;
+    return typeof candidate === 'number' ? candidate : undefined;
+  }
+
+  private extractSyncMessage(payload: unknown): string | undefined {
+    const values = this.collectRecursiveValues(payload, 100);
+
+    for (const value of values) {
+      if (typeof value !== 'string') {
+        continue;
+      }
+
+      const trimmed = value.trim();
+      if (!trimmed || this.parser.isEventoXml(trimmed)) {
+        continue;
+      }
+
+      const lower = trimmed.toLowerCase();
+      if (
+        lower.includes('sem evento') ||
+        lower.includes('nenhum evento') ||
+        lower.includes('mensagem') ||
+        lower.includes('erro') ||
+        lower.includes('falha')
+      ) {
+        return trimmed;
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractEventoXmls(payload: unknown): string[] {
+    const values = this.collectRecursiveValues(payload, 300);
+    const xmls: string[] = [];
+    const seen = new Set<string>();
+
+    for (const value of values) {
+      if (typeof value !== 'string') {
+        continue;
+      }
+
+      const trimmed = value.trim();
+      if (!trimmed || !this.parser.isEventoXml(trimmed) || seen.has(trimmed)) {
+        continue;
+      }
+
+      seen.add(trimmed);
+      xmls.push(trimmed);
+    }
+
+    return xmls;
+  }
+
+  private collectRecursiveValues(payload: unknown, maxItems: number): unknown[] {
+    const values: unknown[] = [];
+    const queue: unknown[] = [payload];
+    const seen = new Set<object>();
+
+    while (queue.length > 0 && values.length < maxItems) {
+      const current = queue.shift();
+      values.push(current);
+
+      if (!current || typeof current !== 'object') {
+        continue;
+      }
+
+      if (seen.has(current)) {
+        continue;
+      }
+
+      seen.add(current);
+
+      if (Array.isArray(current)) {
+        queue.push(...current);
+        continue;
+      }
+
+      queue.push(...Object.values(current));
+    }
+
+    return values;
+  }
+
   private toErrorMessage(error: unknown): string {
     if (error instanceof Error && error.message.trim()) {
       return error.message.trim();
@@ -1224,5 +1479,9 @@ export class NfseService {
     if (doc.clienteId !== clienteId) {
       throw new NotFoundException('NFS-e nao encontrada');
     }
+  }
+
+  private isCertificateError(error: unknown): boolean {
+    return this.toErrorMessage(error).toLowerCase().includes('certificado');
   }
 }
