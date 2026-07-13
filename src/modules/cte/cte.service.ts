@@ -1,10 +1,12 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
+import { NfeService } from '../nfe/nfe.service';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CteXmlParserService } from './cte-xml-parser.service';
 import { DashboardCteStatsQueryDto } from './dto/dashboard-stats.dto';
+import { SincronizarCteEventosDto } from './dto/sincronizar-eventos.dto';
 import { QueryCteDto } from './dto/query-cte.dto';
 
 @Injectable()
@@ -12,7 +14,8 @@ export class CteService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: LocalStorageService,
-    private readonly cteXmlParser: CteXmlParserService
+    private readonly cteXmlParser: CteXmlParserService,
+    private readonly nfeService: NfeService
   ) {}
 
   async findAll(query: QueryCteDto) {
@@ -39,6 +42,7 @@ export class CteService {
       this.prisma.nfeDocumento.count({ where }),
       this.prisma.nfeDocumento.findMany({
         where,
+        include: this.documentInclude(),
         orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: pageSize
@@ -116,7 +120,10 @@ export class CteService {
   }
 
   async findOne(id: string, clienteId: string) {
-    const found = await this.prisma.nfeDocumento.findUnique({ where: { id } });
+    const found = await this.prisma.nfeDocumento.findUnique({
+      where: { id },
+      include: this.documentInclude()
+    });
     if (!found || !this.isCteDocument(found)) {
       throw new NotFoundException('CT-e nao encontrado');
     }
@@ -142,6 +149,16 @@ export class CteService {
       contentBase64: xmlBuffer.toString('base64'),
       xml
     };
+  }
+
+  async sincronizarEventos(dto: SincronizarCteEventosDto) {
+    return this.nfeService.sincronizarEventosDocumentos({
+      clienteId: dto.clienteId,
+      documentoIds: dto.documentoIds,
+      somenteSemEventos: dto.somenteSemEventos,
+      limit: dto.limit,
+      filtro: 'cte'
+    });
   }
 
   private buildBaseWhere(query: QueryCteDto): Prisma.NfeDocumentoWhereInput {
@@ -234,7 +251,9 @@ export class CteService {
             { modelo: '57' },
             { schemaDoc: { startsWith: 'CTe' } },
             { schemaDoc: { startsWith: 'cteProc' } },
-            { schemaDoc: { startsWith: 'resCTe' } }
+            { schemaDoc: { startsWith: 'resCTe' } },
+            { schemaDoc: { startsWith: 'eventoCTe' } },
+            { schemaDoc: { startsWith: 'procEventoCTe' } }
           ]
         }
       ]
@@ -256,7 +275,15 @@ export class CteService {
   }
 
   private isCteDocument(doc: Pick<Prisma.NfeDocumentoUncheckedCreateInput, 'modelo' | 'schemaDoc'>): boolean {
-    return doc.modelo === '57' || ['CTe', 'cteProc', 'resCTe'].some((prefix) => String(doc.schemaDoc || '').startsWith(prefix));
+    return doc.modelo === '57' || ['CTe', 'cteProc', 'resCTe', 'eventoCTe', 'procEventoCTe'].some((prefix) => String(doc.schemaDoc || '').startsWith(prefix));
+  }
+
+  private documentInclude(): Prisma.NfeDocumentoInclude {
+    return {
+      eventos: {
+        orderBy: [{ dataEvento: 'desc' }, { createdAt: 'desc' }]
+      }
+    };
   }
 
   private async enrichDocument<T extends {

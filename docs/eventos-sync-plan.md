@@ -21,12 +21,16 @@ Criar uma trilha de captura de eventos para documentos ja salvos no app, cobrind
 ### NF-e
 
 - Existe pipeline de documento principal via distribuicao DF-e e importacao manual.
-- Ainda nao existe tabela de eventos, parser de eventos nem rotina de sincronizacao por chave/documento salvo.
+- Eventos agora sao persistidos em `nfe_eventos`, vinculados ao `nfe_documentos`.
+- O parser ja reconhece `eventoNFe` e `procEventoNFe`.
+- Existe sincronizacao manual por documento salvo em `POST /nfe/eventos/sincronizar`.
 
 ### CT-e
 
-- O modulo `cte` ainda reaproveita `nfe_documentos` como armazenamento.
-- Ainda nao existe estrutura de eventos nem adapter dedicado para captura de eventos de transporte.
+- O modulo `cte` continua reaproveitando `nfe_documentos` como armazenamento base.
+- Eventos de CT-e passam a reutilizar a mesma tabela `nfe_eventos`, mantendo o vinculo no documento compartilhado.
+- O parser ja reconhece `eventoCTe` e `procEventoCTe`.
+- Existe sincronizacao manual por documento salvo em `POST /cte/eventos/sincronizar`.
 
 ## Principios do desenho
 
@@ -70,6 +74,8 @@ Adicionar rotina recorrente para NFS-e:
 
 ### Fase 3 - Infra comum para NF-e
 
+Status: concluida.
+
 Adicionar base estrutural para eventos de NF-e:
 
 - migration Prisma para `nfe_eventos`;
@@ -79,26 +85,27 @@ Adicionar base estrutural para eventos de NF-e:
 
 ### Fase 4 - CT-e
 
-Fechar antes a decisao estrutural:
+Status: concluida no modelo compartilhado.
 
-- manter CT-e compartilhando `nfe_documentos`, com tabela de eventos ligada ao documento compartilhado;
-ou
-- separar CT-e em storage/schema proprio e entao criar `cte_eventos`.
+Decisao aplicada:
 
-Sem essa decisao, a implementacao de eventos de CT-e tende a nascer inconsistente.
+- manter CT-e compartilhando `nfe_documentos`;
+- usar `nfe_eventos` como storage de eventos tambem para CT-e;
+- diferenciar o tipo pelo parser/classificacao do XML e pelo `schemaDoc`.
 
 ## Recorte inicial implementado
 
-Nesta etapa do projeto vamos iniciar pela Fase 1:
+Entregas ja implementadas:
 
-- documentacao do plano;
-- endpoint manual de sincronizacao de eventos de NFS-e;
-- testes da normalizacao/importacao;
-- atualizacao de README/OpenAPI.
+- sincronizacao manual de eventos de NFS-e;
+- rotina automatica de eventos para NFS-e armazenadas;
+- persistencia e parser de eventos de NF-e e CT-e;
+- endpoints `POST /nfe/eventos/sincronizar` e `POST /cte/eventos/sincronizar`;
+- exibicao dos eventos vinculados nas telas de detalhes;
+- atualizacao da documentacao operacional desta trilha.
 
 ## Fora do escopo desta etapa
 
-- novo schema para NF-e;
-- sincronizacao automatica de eventos em background;
-- tela dedicada no frontend;
-- captura de eventos de CT-e.
+- novo schema separado para CT-e;
+- job automatico dedicado para eventos de NF-e e CT-e independente da busca principal;
+- dashboard especifico de fila/tentativas de eventos.

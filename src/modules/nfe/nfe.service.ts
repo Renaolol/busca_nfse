@@ -31,9 +31,10 @@ import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
 import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
 import { RunNfeSyncDto } from './dto/run-sync.dto';
+import { SincronizarNfeEventosDto } from './dto/sincronizar-eventos.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
 import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
-import { NfeXmlParserService, ParsedNfe } from './nfe-xml-parser.service';
+import { NfeXmlParserService, ParsedDfeEvento, ParsedNfe } from './nfe-xml-parser.service';
 
 type NfeNightlySweepConfigFile = {
   enabled?: boolean;
@@ -439,6 +440,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       this.prisma.nfeDocumento.count({ where }),
       this.prisma.nfeDocumento.findMany({
         where,
+        include: this.nfeDocumentoInclude(),
         orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
         skip,
         take: pageSize
@@ -515,7 +517,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async findOne(id: string, clienteId: string) {
-    const found = await this.prisma.nfeDocumento.findUnique({ where: { id } });
+    const found = await this.prisma.nfeDocumento.findUnique({
+      where: { id },
+      include: this.nfeDocumentoInclude()
+    });
     if (!found) {
       throw new NotFoundException('NF-e nao encontrada');
     }
@@ -524,6 +529,16 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       throw new NotFoundException('NF-e nao encontrada');
     }
     return found;
+  }
+
+  async sincronizarEventos(dto: SincronizarNfeEventosDto) {
+    return this.sincronizarEventosDocumentos({
+      clienteId: dto.clienteId,
+      documentoIds: dto.documentoIds,
+      somenteSemEventos: dto.somenteSemEventos,
+      limit: dto.limit,
+      filtro: 'nfe'
+    });
   }
 
   async getXml(id: string, clienteId: string) {
@@ -543,6 +558,120 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       contentType: 'application/xml',
       contentBase64: xmlBuffer.toString('base64'),
       xml
+    };
+  }
+
+  async sincronizarEventosDocumentos(params: {
+    clienteId: string;
+    documentoIds?: string[];
+    somenteSemEventos?: boolean;
+    limit?: number;
+    filtro: 'nfe' | 'cte';
+  }) {
+    await this.ensureClient(params.clienteId);
+
+    const limit = params.limit ?? 50;
+    const documents = await this.prisma.nfeDocumento.findMany({
+      where: this.buildEventoSyncWhere(params),
+      include: this.nfeDocumentoInclude(),
+      orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
+      take: limit
+    });
+
+    const detalhes: Array<{
+      documentoId: string;
+      chaveAcesso: string;
+      numeroDocumento?: string | null;
+      status: 'sincronizado' | 'sem_eventos' | 'falha_api' | 'falha_certificado';
+      eventosEncontrados: number;
+      eventosImportados: number;
+      mensagem?: string;
+    }> = [];
+    let documentosComEventos = 0;
+    let eventosEncontrados = 0;
+    let eventosImportados = 0;
+    let falhas = 0;
+
+    for (const document of documents) {
+      const numeroDocumento = document.numeroNfe ?? null;
+
+      try {
+        const establishment = await this.getEstablishmentOrThrow(document.estabelecimentoId, document.clienteId);
+        const cnpjConsulta = establishment.cnpj;
+        const certificate = await this.findActiveCertificateOrThrow(document.clienteId, document.estabelecimentoId, cnpjConsulta);
+        const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
+        const result = await this.distribuicaoClient.consultarPorChave({
+          cnpjConsulta,
+          cUfAutor,
+          chaveAcesso: document.chaveAcesso,
+          ambiente: document.ambiente,
+          certificateId: certificate.id
+        });
+
+        if (result.statusCode !== 200) {
+          falhas += 1;
+          detalhes.push({
+            documentoId: document.id,
+            chaveAcesso: document.chaveAcesso,
+            numeroDocumento,
+            status: 'falha_api',
+            eventosEncontrados: 0,
+            eventosImportados: 0,
+            mensagem: result.xMotivo ?? `Consulta de eventos retornou HTTP ${result.statusCode}.`
+          });
+          continue;
+        }
+
+        const eventDocuments = this.extractEventDocuments(result.documents, params.filtro);
+        const importedBefore = eventosImportados;
+
+        for (const eventDocument of eventDocuments) {
+          await this.persistDocument({
+            clienteId: document.clienteId,
+            estabelecimentoId: document.estabelecimentoId,
+            ambiente: document.ambiente,
+            cnpjConsulta,
+            document: eventDocument,
+            origem: document.origem ?? NfeDocumentoOrigem.distribuicao_nsu
+          });
+          eventosImportados += 1;
+        }
+
+        if (eventDocuments.length > 0) {
+          documentosComEventos += 1;
+        }
+        eventosEncontrados += eventDocuments.length;
+        detalhes.push({
+          documentoId: document.id,
+          chaveAcesso: document.chaveAcesso,
+          numeroDocumento,
+          status: eventDocuments.length > 0 ? 'sincronizado' : 'sem_eventos',
+          eventosEncontrados: eventDocuments.length,
+          eventosImportados: eventosImportados - importedBefore,
+          mensagem: eventDocuments.length > 0 ? undefined : result.xMotivo ?? 'Nenhum evento encontrado na distribuicao'
+        });
+      } catch (error) {
+        falhas += 1;
+        const message = this.toErrorMessage(error);
+        detalhes.push({
+          documentoId: document.id,
+          chaveAcesso: document.chaveAcesso,
+          numeroDocumento,
+          status: message.toLowerCase().includes('certificado') ? 'falha_certificado' : 'falha_api',
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          mensagem: message
+        });
+      }
+    }
+
+    return {
+      documentosProcessados: documents.length,
+      documentosComEventos,
+      eventosEncontrados,
+      eventosImportados,
+      falhas,
+      detalhes
     };
   }
 
@@ -1429,6 +1558,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     tipoRelacaoForcada?: NfeTipoRelacao;
   }) {
     const classifiedXml = this.parser.classify(params.document.xml);
+    if (classifiedXml.contentType === 'evento') {
+      return this.persistEventDocument(params);
+    }
     if (classifiedXml.documentType === 'cte') {
       throw new BadRequestException('XML de CT-e nao pode ser importado no modulo de NF-e');
     }
@@ -1440,6 +1572,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           ambiente: params.ambiente,
           chaveAcesso: parsed.chaveAcesso
         }
+      },
+      include: {
+        eventos: true
       }
     });
 
@@ -1460,6 +1595,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const storageKey = `${storagePrefix}/${isFull ? 'xml' : 'resumos'}/${fileName}`;
     await this.storage.putObject(storageKey, params.document.xml);
     const hash = this.parser.getHash(params.document.xml);
+    const status = this.resolveDocumentoStatus(parsed.status, existing?.eventos);
 
     const updateData: Prisma.NfeDocumentoUncheckedUpdateInput = {
       clienteId: params.clienteId,
@@ -1470,7 +1606,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       modelo: parsed.modelo ?? '55',
       dataEmissao: parsed.dataEmissao,
       dataAutorizacao: parsed.dataAutorizacao,
-      status: parsed.status,
+      status,
       tipoRelacao,
       schemaDoc: params.document.schema || parsed.schemaDoc,
       cnpjEmitente:
@@ -1506,7 +1642,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       modelo: parsed.modelo ?? '55',
       dataEmissao: parsed.dataEmissao,
       dataAutorizacao: parsed.dataAutorizacao,
-      status: parsed.status,
+      status,
       tipoRelacao,
       schemaDoc: params.document.schema || parsed.schemaDoc,
       resumoDisponivel: !isFull,
@@ -1534,6 +1670,146 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       update: updateData,
       create: createData
     });
+  }
+
+  private async persistEventDocument(params: {
+    clienteId: string;
+    estabelecimentoId: string;
+    ambiente: NfeAmbiente;
+    cnpjConsulta?: string;
+    document: NfeDistribuicaoDocument;
+    origem: NfeDocumentoOrigem;
+    tipoRelacaoForcada?: NfeTipoRelacao;
+  }) {
+    const parsedEvent = this.parser.parseEvento(params.document.xml);
+    const hash = this.parser.getHash(params.document.xml);
+    const dataReferencia = parsedEvent.dataEvento ?? new Date();
+    const year = dataReferencia.getUTCFullYear();
+    const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
+    const cnpjPasta = parsedEvent.cnpjAutor ?? this.normalizeCnpj(params.cnpjConsulta) ?? 'sem-cnpj';
+    const tipoEvento = this.toSafeFileName(parsedEvent.tipoEvento || 'evento');
+    const suffix = parsedEvent.numeroSequencial ? `_${this.toSafeFileName(parsedEvent.numeroSequencial)}` : `_${hash.slice(0, 12)}`;
+    const storageKey = `nfe/${params.ambiente}/${cnpjPasta}/${year}/${month}/eventos/${parsedEvent.chaveAcesso}_${tipoEvento}${suffix}.xml`;
+    await this.storage.putObject(storageKey, params.document.xml);
+
+    const documento = await this.upsertDocumentoForEvento({
+      clienteId: params.clienteId,
+      estabelecimentoId: params.estabelecimentoId,
+      ambiente: params.ambiente,
+      cnpjConsulta: params.cnpjConsulta,
+      parsedEvent
+    });
+
+    await this.prisma.nfeEvento.upsert({
+      where: {
+        nfeDocumentoId_tipoEvento_dataEvento_hashXml: {
+          nfeDocumentoId: documento.id,
+          tipoEvento: parsedEvent.tipoEvento,
+          dataEvento: parsedEvent.dataEvento ?? new Date(0),
+          hashXml: hash
+        }
+      },
+      update: {
+        descricao: parsedEvent.descricao,
+        schemaDoc: params.document.schema || parsedEvent.schemaDoc,
+        xmlPath: storageKey
+      },
+      create: {
+        nfeDocumentoId: documento.id,
+        chaveAcesso: parsedEvent.chaveAcesso,
+        tipoEvento: parsedEvent.tipoEvento,
+        dataEvento: parsedEvent.dataEvento ?? new Date(0),
+        descricao: parsedEvent.descricao,
+        schemaDoc: params.document.schema || parsedEvent.schemaDoc,
+        xmlPath: storageKey,
+        hashXml: hash
+      }
+    });
+
+    return documento;
+  }
+
+  private async upsertDocumentoForEvento(params: {
+    clienteId: string;
+    estabelecimentoId: string;
+    ambiente: NfeAmbiente;
+    cnpjConsulta?: string;
+    parsedEvent: ParsedDfeEvento;
+  }) {
+    const existing = await this.prisma.nfeDocumento.findUnique({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente: params.ambiente,
+          chaveAcesso: params.parsedEvent.chaveAcesso
+        }
+      }
+    });
+
+    const cnpjConsulta = this.normalizeCnpj(params.cnpjConsulta);
+    const tipoRelacao =
+      params.parsedEvent.documentType === 'nfe'
+        ? this.resolveTipoRelacaoByEvent(cnpjConsulta, params.parsedEvent, existing?.tipoRelacao ?? null)
+        : existing?.tipoRelacao ?? null;
+    const isCte = params.parsedEvent.documentType === 'cte';
+    const status = params.parsedEvent.isCancelamento ? 'Cancelada' : existing?.status ?? 'Evento recebido';
+    const schemaDoc = existing?.schemaDoc ?? params.parsedEvent.schemaDoc;
+    const modelo = existing?.modelo ?? (isCte ? '57' : '55');
+
+    return this.prisma.nfeDocumento.upsert({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente: params.ambiente,
+          chaveAcesso: params.parsedEvent.chaveAcesso
+        }
+      },
+      update: {
+        clienteId: params.clienteId,
+        estabelecimentoId: params.estabelecimentoId,
+        modelo,
+        status,
+        schemaDoc,
+        tipoRelacao,
+        ...(params.parsedEvent.isCancelamento
+          ? { dataAutorizacao: existing?.dataAutorizacao, updatedAt: new Date() }
+          : { updatedAt: new Date() })
+      },
+      create: {
+        clienteId: params.clienteId,
+        estabelecimentoId: params.estabelecimentoId,
+        ambiente: params.ambiente,
+        chaveAcesso: params.parsedEvent.chaveAcesso,
+        modelo,
+        status,
+        schemaDoc,
+        tipoRelacao,
+        cnpjEmitente:
+          !isCte && tipoRelacao === NfeTipoRelacao.emitida ? cnpjConsulta : undefined,
+        cnpjDestinatario:
+          !isCte && tipoRelacao === NfeTipoRelacao.recebida ? cnpjConsulta : undefined,
+        origem: NfeDocumentoOrigem.importacao_xml
+      }
+    });
+  }
+
+  private extractEventDocuments(documents: NfeDistribuicaoDocument[], filtro: 'nfe' | 'cte'): NfeDistribuicaoDocument[] {
+    const seen = new Set<string>();
+    const filtered: NfeDistribuicaoDocument[] = [];
+
+    for (const document of documents) {
+      const classification = this.parser.classify(document.xml);
+      if (classification.contentType !== 'evento' || classification.documentType !== filtro) {
+        continue;
+      }
+
+      const signature = `${document.schema}|${this.parser.getHash(document.xml)}`;
+      if (seen.has(signature)) {
+        continue;
+      }
+      seen.add(signature);
+      filtered.push(document);
+    }
+
+    return filtered;
   }
 
   private async handleManualConsultaResult(params: {
@@ -1674,6 +1950,75 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return where;
   }
 
+  private buildEventoSyncWhere(params: {
+    clienteId: string;
+    documentoIds?: string[];
+    somenteSemEventos?: boolean;
+    filtro: 'nfe' | 'cte';
+  }): Prisma.NfeDocumentoWhereInput {
+    const where: Prisma.NfeDocumentoWhereInput =
+      params.filtro === 'cte'
+        ? {
+            AND: [
+              {
+                OR: [
+                  { modelo: '57' },
+                  { schemaDoc: { startsWith: 'CTe' } },
+                  { schemaDoc: { startsWith: 'cteProc' } },
+                  { schemaDoc: { startsWith: 'resCTe' } },
+                  { schemaDoc: { startsWith: 'eventoCTe' } },
+                  { schemaDoc: { startsWith: 'procEventoCTe' } }
+                ]
+              }
+            ]
+          }
+        : {
+            NOT: this.getCteSchemaDocFilters(),
+            AND: []
+          };
+    const andConditions = this.getAndConditions(where);
+    andConditions.push({ clienteId: params.clienteId });
+
+    if (params.documentoIds?.length) {
+      andConditions.push({ id: { in: params.documentoIds } });
+    }
+
+    if (params.somenteSemEventos ?? true) {
+      andConditions.push({ eventos: { none: {} } });
+    }
+
+    return where;
+  }
+
+  private nfeDocumentoInclude(): Prisma.NfeDocumentoInclude {
+    return {
+      eventos: {
+        orderBy: [{ dataEvento: 'desc' }, { createdAt: 'desc' }]
+      }
+    };
+  }
+
+  private resolveDocumentoStatus(
+    status: string | null | undefined,
+    eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null }>
+  ) {
+    if (this.hasCancellationEvent(eventos)) {
+      return 'Cancelada';
+    }
+
+    return status ?? undefined;
+  }
+
+  private hasCancellationEvent(eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null }>) {
+    return Array.isArray(eventos)
+      ? eventos.some((evento) => {
+          const tipoEvento = this.normalizeSearchText(evento?.tipoEvento);
+          const descricao = this.normalizeSearchText(evento?.descricao);
+          return tipoEvento === '110111' || tipoEvento.includes('cancel') || descricao.includes('cancel');
+        })
+      : false;
+  }
+
   private getAndConditions(where: Prisma.NfeDocumentoWhereInput): Prisma.NfeDocumentoWhereInput[] {
     if (Array.isArray(where.AND)) {
       return where.AND;
@@ -1707,7 +2052,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       { modelo: '57' },
       { schemaDoc: { startsWith: 'CTe' } },
       { schemaDoc: { startsWith: 'cteProc' } },
-      { schemaDoc: { startsWith: 'resCTe' } }
+      { schemaDoc: { startsWith: 'resCTe' } },
+      { schemaDoc: { startsWith: 'eventoCTe' } },
+      { schemaDoc: { startsWith: 'procEventoCTe' } }
     ];
   }
 
@@ -1716,7 +2063,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       return false;
     }
 
-    return ['CTe', 'cteProc', 'resCTe'].some((prefix) => schemaDoc.startsWith(prefix));
+    return ['CTe', 'cteProc', 'resCTe', 'eventoCTe', 'procEventoCTe'].some((prefix) => schemaDoc.startsWith(prefix));
   }
 
   private async runAutomaticSyncCycle(): Promise<void> {
@@ -1776,6 +2123,22 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
 
     return undefined;
+  }
+
+  private resolveTipoRelacaoByEvent(
+    cnpjConsulta: string | undefined,
+    parsedEvent: ParsedDfeEvento,
+    existing?: NfeTipoRelacao | null
+  ): NfeTipoRelacao | null | undefined {
+    if (existing) {
+      return existing;
+    }
+
+    if (!cnpjConsulta || !parsedEvent.cnpjAutor) {
+      return existing ?? null;
+    }
+
+    return parsedEvent.cnpjAutor === cnpjConsulta ? NfeTipoRelacao.emitida : existing ?? null;
   }
 
   private async ensureClient(clienteId: string): Promise<void> {
@@ -2135,6 +2498,25 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
     const digits = value.replace(/\D/g, '');
     return digits.length === 44 ? digits : undefined;
+  }
+
+  private normalizeSearchText(value?: string | null): string {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+  }
+
+  private toSafeFileName(value?: string | null): string {
+    return (
+      String(value || 'arquivo')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80)
+        .toLowerCase() || 'arquivo'
+    );
   }
 
   private toDecimal(value?: string): Prisma.Decimal | undefined {

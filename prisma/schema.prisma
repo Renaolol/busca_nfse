@@ -294,10 +294,29 @@ model NfeDocumento {
 
   cliente         Cliente                @relation(fields: [clienteId], references: [id], onDelete: Cascade)
   estabelecimento ClienteEstabelecimento @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
+  eventos         NfeEvento[]
 
   @@unique([ambiente, chaveAcesso], map: "nfe_documentos_ambiente_chave_acesso_key")
   @@unique([clienteId, ambiente, nsu], map: "nfe_documentos_cliente_id_ambiente_nsu_key")
   @@map("nfe_documentos")
+}
+
+model NfeEvento {
+  id            String    @id @default(uuid()) @db.Uuid
+  nfeDocumentoId String   @map("nfe_documento_id") @db.Uuid
+  chaveAcesso   String    @map("chave_acesso") @db.VarChar(44)
+  tipoEvento    String?   @map("tipo_evento") @db.VarChar(100)
+  dataEvento    DateTime? @map("data_evento")
+  descricao     String?   @db.Text
+  schemaDoc     String?   @map("schema_doc") @db.VarChar(120)
+  xmlPath       String?   @map("xml_path") @db.Text
+  hashXml       String?   @map("hash_xml") @db.VarChar(128)
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  nfeDocumento NfeDocumento @relation(fields: [nfeDocumentoId], references: [id], onDelete: Cascade)
+
+  @@unique([nfeDocumentoId, tipoEvento, dataEvento, hashXml], map: "nfe_eventos_documento_tipo_data_hash_key")
+  @@map("nfe_eventos")
 }
 
 model AuditoriaUsuario {

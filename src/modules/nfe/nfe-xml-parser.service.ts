@@ -28,7 +28,20 @@ export interface InspectedNfeXml {
 export interface ClassifiedFiscalXml {
   documentType: 'nfe' | 'cte' | 'unknown';
   schemaDoc?: string;
-  contentType?: 'resumo' | 'completo';
+  contentType?: 'resumo' | 'completo' | 'evento';
+}
+
+export interface ParsedDfeEvento {
+  documentType: 'nfe' | 'cte';
+  chaveAcesso: string;
+  tipoEvento: string;
+  dataEvento?: Date;
+  descricao?: string;
+  cnpjAutor?: string;
+  idEvento?: string;
+  numeroSequencial?: string;
+  schemaDoc?: string;
+  isCancelamento: boolean;
 }
 
 @Injectable()
@@ -43,6 +56,22 @@ export class NfeXmlParserService {
   }
 
   classify(xml: string): ClassifiedFiscalXml {
+    if (this.isCteEventoXml(xml)) {
+      return {
+        documentType: 'cte',
+        schemaDoc: this.detectCteEventSchemaDoc(xml),
+        contentType: 'evento'
+      };
+    }
+
+    if (this.isNfeEventoXml(xml)) {
+      return {
+        documentType: 'nfe',
+        schemaDoc: this.detectNfeEventSchemaDoc(xml),
+        contentType: 'evento'
+      };
+    }
+
     if (/<(?:\w+:)?resCTe\b/i.test(xml)) {
       return {
         documentType: 'cte',
@@ -99,6 +128,9 @@ export class NfeXmlParserService {
     if (classification.documentType === 'cte') {
       throw new Error('XML de CT-e informado no fluxo de NF-e');
     }
+    if (classification.contentType === 'evento') {
+      throw new Error('XML de evento informado no fluxo de NF-e');
+    }
 
     const inspected = this.inspect(xml);
     const chaveAcesso = inspected.chaveAcesso;
@@ -137,6 +169,40 @@ export class NfeXmlParserService {
     return createHash('sha256').update(xml).digest('hex');
   }
 
+  parseEvento(xml: string): ParsedDfeEvento {
+    const classification = this.classify(xml);
+    if (classification.contentType !== 'evento' || classification.documentType === 'unknown') {
+      throw new Error('XML informado nao corresponde a um evento de NF-e/CT-e');
+    }
+
+    const chaveAcesso = this.extractEventAccessKey(xml);
+    if (!chaveAcesso) {
+      throw new Error('Nao foi possivel localizar chave de acesso no XML do evento');
+    }
+
+    const tipoEvento = this.extract(xml, ['tpEvento', 'cEvento']) ?? 'evento';
+    const descricao =
+      this.extract(xml, ['xEvento', 'descEvento', 'xJust']) ??
+      this.extractEventoDescricaoPorTag(xml, tipoEvento);
+
+    return {
+      documentType: classification.documentType,
+      chaveAcesso,
+      tipoEvento,
+      dataEvento: this.parseDate(this.extract(xml, ['dhEvento', 'dhRegEvento', 'dhProc'])),
+      descricao,
+      cnpjAutor: this.normalizeCnpj(this.extract(xml, ['CNPJ', 'CPF'])),
+      idEvento: this.extractAttribute(xml, 'infEvento', 'Id'),
+      numeroSequencial: this.extract(xml, ['nSeqEvento']),
+      schemaDoc: classification.schemaDoc,
+      isCancelamento: this.isCancelamentoEvento(tipoEvento, descricao)
+    };
+  }
+
+  isEventoXml(xml: string): boolean {
+    return this.classify(xml).contentType === 'evento';
+  }
+
   private isSummaryXml(xml: string): boolean {
     return /<(?:\w+:)?resNFe\b/i.test(xml);
   }
@@ -154,6 +220,44 @@ export class NfeXmlParserService {
     return 'NFe_v4.00';
   }
 
+  private detectNfeEventSchemaDoc(xml: string): string {
+    if (/<(?:\w+:)?procEventoNFe\b/i.test(xml) || /<(?:\w+:)?procEvento\b/i.test(xml)) {
+      return 'procEventoNFe_v1.00';
+    }
+    return 'eventoNFe_v1.00';
+  }
+
+  private detectCteEventSchemaDoc(xml: string): string {
+    if (/<(?:\w+:)?procEventoCTe\b/i.test(xml) || /<(?:\w+:)?procEventoCTeOS\b/i.test(xml)) {
+      return 'procEventoCTe_v4.00';
+    }
+    return 'eventoCTe_v4.00';
+  }
+
+  private isNfeEventoXml(xml: string): boolean {
+    return (
+      /portalfiscal\.inf\.br\/nfe/i.test(xml) &&
+      (/<(?:\w+:)?procEventoNFe\b/i.test(xml) ||
+        /<(?:\w+:)?procEvento\b/i.test(xml) ||
+        /<(?:\w+:)?evento\b/i.test(xml) ||
+        /<(?:\w+:)?retEvento\b/i.test(xml)) &&
+      /<(?:\w+:)?infEvento\b/i.test(xml)
+    );
+  }
+
+  private isCteEventoXml(xml: string): boolean {
+    return (
+      /portalfiscal\.inf\.br\/cte/i.test(xml) &&
+      (/<(?:\w+:)?procEventoCTe\b/i.test(xml) ||
+        /<(?:\w+:)?procEventoCTeOS\b/i.test(xml) ||
+        /<(?:\w+:)?eventoCTe\b/i.test(xml) ||
+        /<(?:\w+:)?eventoCTeOS\b/i.test(xml) ||
+        /<(?:\w+:)?procEvento\b/i.test(xml) ||
+        /<(?:\w+:)?evento\b/i.test(xml)) &&
+      /<(?:\w+:)?infEvento\b/i.test(xml)
+    );
+  }
+
   private extractChaveAcesso(xml: string): string | undefined {
     const direct = this.normalizeChaveAcesso(this.extract(xml, ['chNFe']));
     if (direct) {
@@ -168,6 +272,36 @@ export class NfeXmlParserService {
 
     const fromText = xml.match(/\b\d{44}\b/);
     return fromText?.[0];
+  }
+
+  private extractEventAccessKey(xml: string): string | undefined {
+    const direct = this.normalizeChaveAcesso(this.extract(xml, ['chNFe', 'chCTe']));
+    if (direct) {
+      return direct;
+    }
+
+    const infEventoId = this.extractAttribute(xml, 'infEvento', 'Id');
+    const idDigits = infEventoId?.match(/(\d{44})/)?.[1];
+    if (idDigits) {
+      return idDigits;
+    }
+
+    const generic = xml.match(/\b\d{44}\b/);
+    return generic?.[0];
+  }
+
+  private extractEventoDescricaoPorTag(xml: string, tipoEvento: string): string | undefined {
+    const normalized = tipoEvento.trim();
+    if (!normalized) {
+      return undefined;
+    }
+
+    const byTipo = this.extractNestedAny(xml, [normalized], ['xDesc', 'descEvento', 'xEvento', 'xJust']);
+    if (byTipo) {
+      return byTipo;
+    }
+
+    return undefined;
   }
 
   private extract(xml: string, tags: string[]): string | undefined {
@@ -251,6 +385,25 @@ export class NfeXmlParserService {
 
     const digits = value.replace(/\D/g, '');
     return digits || undefined;
+  }
+
+  private isCancelamentoEvento(tipoEvento?: string, descricao?: string): boolean {
+    const tipo = this.normalizeSearchText(tipoEvento);
+    const desc = this.normalizeSearchText(descricao);
+
+    return (
+      tipo === '110111' ||
+      tipo.includes('cancel') ||
+      desc.includes('cancelamento') ||
+      desc.includes('cancelada')
+    );
+  }
+
+  private normalizeSearchText(value?: string): string {
+    return (value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
   }
 
   private parseDate(value?: string): Date | undefined {

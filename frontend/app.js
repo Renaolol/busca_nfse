@@ -99,6 +99,8 @@ const state = {
     disabling: false
   },
   xmlEventsSyncRunning: false,
+  nfeEventsSyncRunning: false,
+  cteEventsSyncRunning: false,
   nfeSyncControls: [],
   nfeDocuments: [],
   cteDocuments: [],
@@ -851,6 +853,18 @@ function onDocumentClick(event) {
       void downloadNfeXmlById(nfeId);
       return;
     }
+    case 'nfe-sync-events': {
+      const nfeId = actionNode.getAttribute('data-nfe-id');
+      if (!nfeId) {
+        return;
+      }
+      void syncEventsForNfe(nfeId);
+      return;
+    }
+    case 'nfe-sync-events-listed': {
+      void syncEventsForListedNfes();
+      return;
+    }
     case 'cte-docs-clear-filters': {
       resetCteDocsSearch();
       render();
@@ -886,6 +900,18 @@ function onDocumentClick(event) {
         return;
       }
       void downloadCteXmlById(cteId);
+      return;
+    }
+    case 'cte-sync-events': {
+      const cteId = actionNode.getAttribute('data-cte-id');
+      if (!cteId) {
+        return;
+      }
+      void syncEventsForCte(cteId);
+      return;
+    }
+    case 'cte-sync-events-listed': {
+      void syncEventsForListedCtes();
       return;
     }
     case 'nfe-last-run-view-xml': {
@@ -2693,6 +2719,11 @@ function renderNfeSearchSummary() {
 function renderNfeDocumentsTableCard(docs) {
   const totalValue = sumListedDocumentValues(docs);
   const totalResults = Number(state.nfeSearch.total || docs.length || 0);
+  const syncDisabled =
+    state.nfeEventsSyncRunning || state.dataSource !== 'api' || state.tableState.nfeDocs === 'loading' || !docs.length
+      ? 'disabled'
+      : '';
+  const syncLabel = state.nfeEventsSyncRunning ? 'Buscando eventos...' : 'Buscar eventos da listagem';
 
   return `
     <article class="card">
@@ -2700,6 +2731,9 @@ function renderNfeDocumentsTableCard(docs) {
         <div>
           <h3 class="card-title">NF-e encontradas</h3>
           <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(totalResults))} documento(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
+        </div>
+        <div class="table-actions">
+          <button class="btn secondary" type="button" data-action="nfe-sync-events-listed" ${syncDisabled}>${escapeHtml(syncLabel)}</button>
         </div>
       </div>
       <div class="table-wrap">
@@ -2724,6 +2758,7 @@ function renderNfeDocumentsTableCard(docs) {
               colSpan: 10,
               rowsHtml: docs
                 .map((doc) => {
+                  const syncDisabledRow = state.nfeEventsSyncRunning || !canSyncNfeEvents(doc) ? 'disabled' : '';
                   return `<tr>
                     <td>${escapeHtml(doc.numeroNfe || '-')}</td>
                     <td>${escapeHtml(doc.cliente)}</td>
@@ -2740,6 +2775,7 @@ function renderNfeDocumentsTableCard(docs) {
                     <td>
                       <div class="table-actions">
                         <button class="icon-btn" data-action="nfe-details" data-nfe-id="${doc.id}">Visualizar detalhes</button>
+                        <button class="icon-btn" data-action="nfe-sync-events" data-nfe-id="${doc.id}" ${syncDisabledRow}>Buscar eventos</button>
                         <button class="icon-btn" data-action="nfe-view" data-nfe-id="${doc.id}">Ver XML</button>
                         <button class="icon-btn" data-action="nfe-download" data-nfe-id="${doc.id}">Baixar XML</button>
                       </div>
@@ -2911,6 +2947,11 @@ function renderCteSearchSummary() {
 function renderCteDocumentsTableCard(docs) {
   const totalValue = sumListedDocumentValues(docs);
   const totalResults = Number(state.cteSearch.total || docs.length || 0);
+  const syncDisabled =
+    state.cteEventsSyncRunning || state.dataSource !== 'api' || state.tableState.cteDocs === 'loading' || !docs.length
+      ? 'disabled'
+      : '';
+  const syncLabel = state.cteEventsSyncRunning ? 'Buscando eventos...' : 'Buscar eventos da listagem';
 
   return `
     <article class="card">
@@ -2918,6 +2959,9 @@ function renderCteDocumentsTableCard(docs) {
         <div>
           <h3 class="card-title">CT-e encontrados</h3>
           <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(totalResults))} documento(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
+        </div>
+        <div class="table-actions">
+          <button class="btn secondary" type="button" data-action="cte-sync-events-listed" ${syncDisabled}>${escapeHtml(syncLabel)}</button>
         </div>
       </div>
       <div class="table-wrap">
@@ -2942,6 +2986,7 @@ function renderCteDocumentsTableCard(docs) {
               colSpan: 10,
               rowsHtml: docs
                 .map((doc) => {
+                  const syncDisabledRow = state.cteEventsSyncRunning || !canSyncCteEvents(doc) ? 'disabled' : '';
                   return `<tr>
                     <td>${escapeHtml(doc.numeroCte || '-')}</td>
                     <td>${escapeHtml(doc.cliente)}</td>
@@ -2958,6 +3003,7 @@ function renderCteDocumentsTableCard(docs) {
                     <td>
                       <div class="table-actions">
                         <button class="icon-btn" data-action="cte-details" data-cte-id="${doc.id}">Visualizar detalhes</button>
+                        <button class="icon-btn" data-action="cte-sync-events" data-cte-id="${doc.id}" ${syncDisabledRow}>Buscar eventos</button>
                         <button class="icon-btn" data-action="cte-view" data-cte-id="${doc.id}">Ver XML</button>
                         <button class="icon-btn" data-action="cte-download" data-cte-id="${doc.id}">Baixar XML</button>
                       </div>
@@ -3841,6 +3887,7 @@ function renderNfeDetailsModal(nfeId) {
   if (!doc) {
     return '';
   }
+  const syncEventsDisabled = state.nfeEventsSyncRunning || !canSyncNfeEvents(doc) ? 'disabled' : '';
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -3866,10 +3913,16 @@ function renderNfeDetailsModal(nfeId) {
             ${detailItem('Arquivo completo', doc.xmlCompletoDisponivel ? 'Sim' : 'Nao')}
             ${detailItem('Resumo disponivel', doc.resumoDisponivel ? 'Sim' : 'Nao')}
             ${detailItem('Status fiscal', doc.statusFiscal || '-')}
+            ${detailItem('Resumo de eventos', doc.eventosResumo || '-')}
             ${detailItem('Caminho XML', doc.caminhoServidor || '-')}
+          </div>
+          <div style="margin-top:18px;">
+            <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
+            ${renderXmlEventsList(doc.eventos)}
           </div>
         </div>
         <div class="modal-footer">
+          <button class="btn secondary" data-action="nfe-sync-events" data-nfe-id="${doc.id}" ${syncEventsDisabled}>Buscar eventos</button>
           <button class="btn secondary" data-action="nfe-view" data-nfe-id="${doc.id}">Ver conteudo XML</button>
           <button class="btn primary" data-action="nfe-download" data-nfe-id="${doc.id}">Baixar XML</button>
         </div>
@@ -3908,6 +3961,7 @@ function renderCteDetailsModal(cteId) {
   if (!doc) {
     return '';
   }
+  const syncEventsDisabled = state.cteEventsSyncRunning || !canSyncCteEvents(doc) ? 'disabled' : '';
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -3933,10 +3987,16 @@ function renderCteDetailsModal(cteId) {
             ${detailItem('Arquivo completo', doc.xmlCompletoDisponivel ? 'Sim' : 'Nao')}
             ${detailItem('Resumo disponivel', doc.resumoDisponivel ? 'Sim' : 'Nao')}
             ${detailItem('Status fiscal', doc.statusFiscal || '-')}
+            ${detailItem('Resumo de eventos', doc.eventosResumo || '-')}
             ${detailItem('Caminho XML', doc.caminhoServidor || '-')}
+          </div>
+          <div style="margin-top:18px;">
+            <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
+            ${renderXmlEventsList(doc.eventos)}
           </div>
         </div>
         <div class="modal-footer">
+          <button class="btn secondary" data-action="cte-sync-events" data-cte-id="${doc.id}" ${syncEventsDisabled}>Buscar eventos</button>
           <button class="btn secondary" data-action="cte-view" data-cte-id="${doc.id}">Ver conteudo XML</button>
           <button class="btn primary" data-action="cte-download" data-cte-id="${doc.id}">Baixar XML</button>
         </div>
@@ -7793,7 +7853,7 @@ function formatEventoCardTitle(evento) {
   }
 
   const tipoEvento = String(evento?.tipoEvento || '').trim();
-  return tipoEvento ? `Evento ${tipoEvento}` : 'Evento de NFS-e';
+  return tipoEvento ? `Evento ${tipoEvento}` : 'Evento fiscal';
 }
 
 function buildNfeDocumentsFromApi(nfeDocs, clients) {
@@ -7804,10 +7864,13 @@ function buildNfeDocumentsFromApi(nfeDocs, clients) {
     .map((doc) => {
       const client = clientById[doc.clienteId] || null;
       const tipo = mapNfeTipoLabel(doc.tipoRelacao);
+      const eventos = Array.isArray(doc.eventos) ? doc.eventos : [];
+      const cancelamentoEvento = eventos.find(isCancelamentoEventoApi) || null;
       const emitenteCnpj = normalizeDigits(doc.cnpjEmitente || '');
       const destinatarioCnpj = normalizeDigits(doc.cnpjDestinatario || '');
       const contraparteNome = tipo === 'Emitida' ? doc.razaoSocialDestinatario : doc.razaoSocialEmitente;
       const contraparteCnpj = tipo === 'Emitida' ? destinatarioCnpj : emitenteCnpj;
+      const statusFiscal = resolveFiscalStatus(doc.status, cancelamentoEvento?.dataEvento || null, cancelamentoEvento);
 
       return {
         id: `nfe-${doc.id}`,
@@ -7824,7 +7887,7 @@ function buildNfeDocumentsFromApi(nfeDocs, clients) {
         dataAutorizacao: doc.dataAutorizacao || doc.updatedAt || doc.createdAt,
         valor: toNumber(doc.valorTotal),
         tipo,
-        statusFiscal: doc.status || '-',
+        statusFiscal,
         schemaDoc: doc.schemaDoc || '-',
         xmlCompletoDisponivel: Boolean(doc.xmlCompletoDisponivel),
         resumoDisponivel: Boolean(doc.resumoDisponivel),
@@ -7835,6 +7898,8 @@ function buildNfeDocumentsFromApi(nfeDocs, clients) {
         destinatarioCnpj,
         contraparteNome: contraparteNome || '-',
         contraparteCnpj,
+        eventos,
+        eventosResumo: buildEventosResumo(eventos),
         conteudoXml: null
       };
     })
@@ -7849,10 +7914,13 @@ function buildCteDocumentsFromApi(cteDocs, clients) {
     .map((doc) => {
       const client = clientById[doc.clienteId] || null;
       const tipo = mapCteTipoLabel(doc.tipoRelacao);
+      const eventos = Array.isArray(doc.eventos) ? doc.eventos : [];
+      const cancelamentoEvento = eventos.find(isCancelamentoEventoApi) || null;
       const emitenteCnpj = normalizeDigits(doc.cnpjEmitente || '');
       const destinatarioCnpj = normalizeDigits(doc.cnpjDestinatario || '');
       const contraparteNome = tipo === 'Emitido' ? doc.razaoSocialDestinatario : doc.razaoSocialEmitente;
       const contraparteCnpj = tipo === 'Emitido' ? destinatarioCnpj : emitenteCnpj;
+      const statusFiscal = resolveFiscalStatus(doc.status, cancelamentoEvento?.dataEvento || null, cancelamentoEvento);
 
       return {
         id: `cte-${doc.id}`,
@@ -7869,7 +7937,7 @@ function buildCteDocumentsFromApi(cteDocs, clients) {
         dataAutorizacao: doc.dataAutorizacao || doc.updatedAt || doc.createdAt,
         valor: toNumber(doc.valorTotal),
         tipo,
-        statusFiscal: doc.status || '-',
+        statusFiscal,
         schemaDoc: doc.schemaDoc || '-',
         xmlCompletoDisponivel: Boolean(doc.xmlCompletoDisponivel),
         resumoDisponivel: Boolean(doc.resumoDisponivel),
@@ -7880,6 +7948,8 @@ function buildCteDocumentsFromApi(cteDocs, clients) {
         destinatarioCnpj,
         contraparteNome: contraparteNome || '-',
         contraparteCnpj,
+        eventos,
+        eventosResumo: buildEventosResumo(eventos),
         conteudoXml: null
       };
     })
@@ -8481,6 +8551,26 @@ function findCteById(cteId) {
     return null;
   }
   return state.cteSearch.results.find((doc) => doc.id === cteId) || state.cteDocuments.find((doc) => doc.id === cteId) || null;
+}
+
+function canSyncNfeEvents(doc) {
+  return Boolean(
+    state.dataSource === 'api' &&
+      doc?.apiNfeId &&
+      doc?.clientId &&
+      doc?.estabelecimentoId &&
+      normalizeDigits(doc?.chaveAcesso || '').length > 0
+  );
+}
+
+function canSyncCteEvents(doc) {
+  return Boolean(
+    state.dataSource === 'api' &&
+      doc?.apiCteId &&
+      doc?.clientId &&
+      doc?.estabelecimentoId &&
+      normalizeDigits(doc?.chaveAcesso || '').length > 0
+  );
 }
 
 function mapClientOptions() {
@@ -9161,6 +9251,210 @@ async function requestNfseEventsSync(clienteId, documentoIds) {
   });
 }
 
+async function syncEventsForListedNfes() {
+  if (state.nfeEventsSyncRunning) {
+    pushToast('A sincronizacao de eventos da listagem de NF-e ja esta em andamento.', 'info');
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('A sincronizacao de eventos so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const docs = getFilteredNfeDocuments();
+  if (!docs.length) {
+    pushToast('Nao ha NF-e listadas para sincronizar eventos.', 'error');
+    return;
+  }
+
+  const targets = docs.filter((doc) => canSyncNfeEvents(doc));
+  if (!targets.length) {
+    pushToast('A listagem atual nao possui NF-e aptas para sincronizacao de eventos.', 'error');
+    return;
+  }
+
+  const clientIds = [...new Set(targets.map((doc) => doc.clientId).filter(Boolean))];
+  if (clientIds.length !== 1) {
+    pushToast('A sincronizacao da listagem exige uma unica empresa no resultado atual.', 'error');
+    return;
+  }
+
+  const documentoIds = [...new Set(targets.map((doc) => doc.apiNfeId).filter(Boolean))];
+  state.nfeEventsSyncRunning = true;
+  render();
+  pushToast(`Sincronizando eventos para ${documentoIds.length} NF-e listada(s)...`, 'info');
+
+  try {
+    const summary = await requestNfeEventsSync(clientIds[0], documentoIds);
+    await refreshNfeSearchAfterEventsSync();
+    pushToast(buildDocumentEventsSyncSummaryMessage('NF-e', summary), eventsSyncToastTone(summary));
+  } finally {
+    state.nfeEventsSyncRunning = false;
+    render();
+  }
+}
+
+async function syncEventsForNfe(nfeId) {
+  if (state.nfeEventsSyncRunning) {
+    pushToast('A sincronizacao de eventos de NF-e ja esta em andamento.', 'info');
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('A sincronizacao de eventos so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const doc = findNfeById(nfeId);
+  if (!doc) {
+    pushToast('NF-e nao encontrada para sincronizacao de eventos.', 'error');
+    return;
+  }
+
+  if (!canSyncNfeEvents(doc)) {
+    pushToast('Esta NF-e nao possui dados suficientes para consultar eventos.', 'error');
+    return;
+  }
+
+  state.nfeEventsSyncRunning = true;
+  render();
+  pushToast(`Sincronizando eventos da NF-e ${doc.numeroNfe || doc.chaveAcesso || doc.id}...`, 'info');
+
+  try {
+    const summary = await requestNfeEventsSync(doc.clientId, [doc.apiNfeId]);
+    await refreshNfeSearchAfterEventsSync();
+    pushToast(buildDocumentEventsSyncSummaryMessage('NF-e', summary), eventsSyncToastTone(summary));
+  } finally {
+    state.nfeEventsSyncRunning = false;
+    render();
+  }
+}
+
+async function requestNfeEventsSync(clienteId, documentoIds) {
+  return apiRequest('/nfe/eventos/sincronizar', {
+    method: 'POST',
+    body: {
+      clienteId,
+      documentoIds,
+      somenteSemEventos: false,
+      limit: documentoIds.length
+    },
+    timeoutMs: Math.max(60000, documentoIds.length * 20000)
+  });
+}
+
+async function refreshNfeSearchAfterEventsSync() {
+  if (state.nfeSearch.hasSearched && state.nfeSearch.lastQuery) {
+    await executeNfeDocsSearch();
+    return;
+  }
+
+  await refreshApiData();
+}
+
+async function syncEventsForListedCtes() {
+  if (state.cteEventsSyncRunning) {
+    pushToast('A sincronizacao de eventos da listagem de CT-e ja esta em andamento.', 'info');
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('A sincronizacao de eventos so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const docs = getFilteredCteDocuments();
+  if (!docs.length) {
+    pushToast('Nao ha CT-e listados para sincronizar eventos.', 'error');
+    return;
+  }
+
+  const targets = docs.filter((doc) => canSyncCteEvents(doc));
+  if (!targets.length) {
+    pushToast('A listagem atual nao possui CT-e aptos para sincronizacao de eventos.', 'error');
+    return;
+  }
+
+  const clientIds = [...new Set(targets.map((doc) => doc.clientId).filter(Boolean))];
+  if (clientIds.length !== 1) {
+    pushToast('A sincronizacao da listagem exige uma unica empresa no resultado atual.', 'error');
+    return;
+  }
+
+  const documentoIds = [...new Set(targets.map((doc) => doc.apiCteId).filter(Boolean))];
+  state.cteEventsSyncRunning = true;
+  render();
+  pushToast(`Sincronizando eventos para ${documentoIds.length} CT-e listado(s)...`, 'info');
+
+  try {
+    const summary = await requestCteEventsSync(clientIds[0], documentoIds);
+    await refreshCteSearchAfterEventsSync();
+    pushToast(buildDocumentEventsSyncSummaryMessage('CT-e', summary), eventsSyncToastTone(summary));
+  } finally {
+    state.cteEventsSyncRunning = false;
+    render();
+  }
+}
+
+async function syncEventsForCte(cteId) {
+  if (state.cteEventsSyncRunning) {
+    pushToast('A sincronizacao de eventos de CT-e ja esta em andamento.', 'info');
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('A sincronizacao de eventos so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const doc = findCteById(cteId);
+  if (!doc) {
+    pushToast('CT-e nao encontrado para sincronizacao de eventos.', 'error');
+    return;
+  }
+
+  if (!canSyncCteEvents(doc)) {
+    pushToast('Este CT-e nao possui dados suficientes para consultar eventos.', 'error');
+    return;
+  }
+
+  state.cteEventsSyncRunning = true;
+  render();
+  pushToast(`Sincronizando eventos do CT-e ${doc.numeroCte || doc.chaveAcesso || doc.id}...`, 'info');
+
+  try {
+    const summary = await requestCteEventsSync(doc.clientId, [doc.apiCteId]);
+    await refreshCteSearchAfterEventsSync();
+    pushToast(buildDocumentEventsSyncSummaryMessage('CT-e', summary), eventsSyncToastTone(summary));
+  } finally {
+    state.cteEventsSyncRunning = false;
+    render();
+  }
+}
+
+async function requestCteEventsSync(clienteId, documentoIds) {
+  return apiRequest('/cte/eventos/sincronizar', {
+    method: 'POST',
+    body: {
+      clienteId,
+      documentoIds,
+      somenteSemEventos: false,
+      limit: documentoIds.length
+    },
+    timeoutMs: Math.max(60000, documentoIds.length * 20000)
+  });
+}
+
+async function refreshCteSearchAfterEventsSync() {
+  if (state.cteSearch.hasSearched && state.cteSearch.lastQuery) {
+    await executeCteDocsSearch();
+    return;
+  }
+
+  await refreshApiData();
+}
+
 async function refreshXmlSearchAfterEventsSync() {
   if (state.xmlSearch.hasSearched && state.xmlSearch.lastQuery) {
     await executeXmlSearch();
@@ -9171,13 +9465,17 @@ async function refreshXmlSearchAfterEventsSync() {
 }
 
 function buildEventsSyncSummaryMessage(summary) {
+  return buildDocumentEventsSyncSummaryMessage('nota', summary);
+}
+
+function buildDocumentEventsSyncSummaryMessage(documentLabel, summary) {
   const failureMessages = (Array.isArray(summary?.detalhes) ? summary.detalhes : [])
     .filter((detail) => detail?.status === 'falha_api' || detail?.status === 'falha_certificado')
     .map((detail) => String(detail?.mensagem || '').trim())
     .filter(Boolean);
   const uniqueFailureMessages = [...new Set(failureMessages)];
 
-  return `Eventos sincronizados: ${summary.eventosImportados} importado(s), ${summary.documentosComEventos} nota(s) com eventos, ${summary.falhas} falha(s).${
+  return `Eventos sincronizados: ${summary?.eventosImportados || 0} importado(s), ${summary?.documentosComEventos || 0} ${documentLabel}(s) com eventos, ${summary?.falhas || 0} falha(s).${
     uniqueFailureMessages.length ? ` Motivo: ${uniqueFailureMessages.slice(0, 2).join(' | ')}${uniqueFailureMessages.length > 2 ? ' | ...' : ''}` : ''
   }`;
 }

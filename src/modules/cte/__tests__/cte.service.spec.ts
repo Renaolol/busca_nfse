@@ -2,6 +2,7 @@ import { CteService } from '../cte.service';
 import { CteXmlParserService } from '../cte-xml-parser.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LocalStorageService } from '../../storage/storage.service';
+import { NfeService } from '../../nfe/nfe.service';
 
 describe('CteService', () => {
   const prisma = {
@@ -17,17 +18,30 @@ describe('CteService', () => {
     getObject: jest.fn()
   };
 
+  const nfeService = {
+    sincronizarEventosDocumentos: jest.fn()
+  };
+
   const parser = new CteXmlParserService();
   const service = new CteService(
     prisma as unknown as PrismaService,
     storage as unknown as LocalStorageService,
-    parser
+    parser,
+    nfeService as unknown as NfeService
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
     prisma.nfeDocumento.findMany.mockResolvedValue([]);
     prisma.nfeDocumento.findUnique.mockResolvedValue(null);
+    nfeService.sincronizarEventosDocumentos.mockResolvedValue({
+      documentosProcessados: 0,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 0,
+      detalhes: []
+    });
   });
 
   it('lista CT-es usando modelo 57 como filtro base', async () => {
@@ -196,5 +210,22 @@ describe('CteService', () => {
     });
 
     await expect(service.findOne('doc-1', 'cliente-1')).rejects.toThrow('CT-e nao encontrado');
+  });
+
+  it('delegates sincronizacao de eventos ao servico compartilhado', async () => {
+    await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+
+    expect(nfeService.sincronizarEventosDocumentos).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-1'],
+      somenteSemEventos: false,
+      limit: 1,
+      filtro: 'cte'
+    });
   });
 });

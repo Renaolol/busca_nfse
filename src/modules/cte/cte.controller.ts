@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
@@ -6,6 +6,7 @@ import { CteService } from './cte.service';
 import { DashboardCteStatsQueryDto, DashboardCteStatsResponseDto } from './dto/dashboard-stats.dto';
 import { DownloadCteDocumentDto } from './dto/download-document.dto';
 import { QueryCteDto } from './dto/query-cte.dto';
+import { SincronizarCteEventosDto, SincronizarCteEventosResponseDto } from './dto/sincronizar-eventos.dto';
 
 @ApiTags('cte')
 @Controller('cte')
@@ -38,5 +39,12 @@ export class CteController {
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   getXml(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
     return this.cteService.getXml(id, query.clienteId);
+  }
+
+  @Post('eventos/sincronizar')
+  @ApiOkResponse({ type: SincronizarCteEventosResponseDto })
+  @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
+  sincronizarEventos(@Body() dto: SincronizarCteEventosDto) {
+    return this.cteService.sincronizarEventos(dto);
   }
 }

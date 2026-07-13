@@ -18,6 +18,7 @@ import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
 import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
 import { RunNfeSyncDto } from './dto/run-sync.dto';
+import { SincronizarNfeEventosDto, SincronizarNfeEventosResponseDto } from './dto/sincronizar-eventos.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
 import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
 import { NfeService } from './nfe.service';
@@ -71,6 +72,13 @@ export class NfeController {
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   importXml(@Body() dto: ImportNfeXmlDto) {
     return this.nfeService.importXml(dto);
+  }
+
+  @Post('eventos/sincronizar')
+  @ApiOkResponse({ type: SincronizarNfeEventosResponseDto })
+  @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
+  sincronizarEventos(@Body() dto: SincronizarNfeEventosDto) {
+    return this.nfeService.sincronizarEventos(dto);
   }
 
   @Post('importar-dominio')

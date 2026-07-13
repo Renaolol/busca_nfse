@@ -28,6 +28,9 @@ describe('NfeService', () => {
       findUnique: jest.fn(),
       upsert: jest.fn()
     },
+    nfeEvento: {
+      upsert: jest.fn()
+    },
     nfeSyncControle: {
       findFirst: jest.fn(),
       findMany: jest.fn(),
@@ -95,6 +98,7 @@ describe('NfeService', () => {
       id: 'doc-1',
       ...args.create
     }));
+    prisma.nfeEvento.upsert.mockResolvedValue({});
     prisma.nfeSyncControle.findFirst.mockResolvedValue(null);
     prisma.nfeSyncControle.findMany.mockResolvedValue([]);
     prisma.nfeSyncControle.create.mockResolvedValue({});
@@ -1217,6 +1221,174 @@ describe('NfeService', () => {
       persistido: false,
       documentosEncontrados: 1,
       documentosPersistidos: 0
+    });
+  });
+
+  it('sincroniza eventos de cancelamento para NF-e ja armazenada', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        numeroNfe: '123',
+        origem: 'distribuicao_nsu',
+        eventos: []
+      }
+    ]);
+    (distribuicaoClient.consultarPorChave as jest.Mock).mockResolvedValueOnce({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado por chave',
+      ultNsu: 0n,
+      maxNsu: 0n,
+      documents: [
+        {
+          schema: 'procEventoNFe_v1.00.xsd',
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<procEventoNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">
+  <evento versao="1.00">
+    <infEvento Id="ID1101113526061234567800019955001000000123100000123101">
+      <CNPJ>12345678000199</CNPJ>
+      <chNFe>35260612345678000199550010000001231000001231</chNFe>
+      <dhEvento>2026-07-13T14:10:00-03:00</dhEvento>
+      <tpEvento>110111</tpEvento>
+      <nSeqEvento>1</nSeqEvento>
+      <detEvento versao="1.00">
+        <descEvento>Cancelamento</descEvento>
+      </detEvento>
+    </infEvento>
+  </evento>
+</procEventoNFe>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+
+    expect(distribuicaoClient.consultarPorChave).toHaveBeenCalledWith({
+      cnpjConsulta: '12345678000199',
+      cUfAutor: '42',
+      chaveAcesso: '35260612345678000199550010000001231000001231',
+      ambiente: NfeAmbiente.producao,
+      certificateId: 'cert-1'
+    });
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          modelo: '55',
+          status: 'Cancelada'
+        })
+      })
+    );
+    expect(prisma.nfeEvento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          nfeDocumentoId_tipoEvento_dataEvento_hashXml: expect.objectContaining({
+            nfeDocumentoId: 'doc-1',
+            tipoEvento: '110111'
+          })
+        })
+      })
+    );
+    expect(result).toMatchObject({
+      documentosProcessados: 1,
+      documentosComEventos: 1,
+      eventosEncontrados: 1,
+      eventosImportados: 1,
+      falhas: 0
+    });
+  });
+
+  it('sincroniza eventos de CT-e usando o filtro compartilhado', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-cte-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        numeroNfe: '31969',
+        modelo: '57',
+        origem: 'distribuicao_nsu',
+        eventos: []
+      }
+    ]);
+    (distribuicaoClient.consultarPorChave as jest.Mock).mockResolvedValueOnce({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado por chave',
+      ultNsu: 0n,
+      maxNsu: 0n,
+      documents: [
+        {
+          schema: 'procEventoCTe_v4.00.xsd',
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<procEventoCTe xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <eventoCTe versao="4.00">
+    <infEvento Id="ID1101114226079584960000013557001000031969124377222801">
+      <CNPJ>12345678000199</CNPJ>
+      <chCTe>42260795849600000135570010000319691243772228</chCTe>
+      <dhEvento>2026-07-13T14:15:00-03:00</dhEvento>
+      <tpEvento>110111</tpEvento>
+      <nSeqEvento>1</nSeqEvento>
+      <detEvento versaoEvento="4.00">
+        <descEvento>Cancelamento</descEvento>
+      </detEvento>
+    </infEvento>
+  </eventoCTe>
+</procEventoCTe>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.sincronizarEventosDocumentos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-cte-1'],
+      somenteSemEventos: false,
+      limit: 1,
+      filtro: 'cte'
+    });
+
+    expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              OR: expect.arrayContaining([expect.objectContaining({ modelo: '57' })])
+            }),
+            { clienteId: 'cliente-1' },
+            { id: { in: ['doc-cte-1'] } }
+          ])
+        })
+      })
+    );
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          modelo: '57',
+          status: 'Cancelada'
+        })
+      })
+    );
+    expect(result).toMatchObject({
+      documentosProcessados: 1,
+      documentosComEventos: 1,
+      eventosEncontrados: 1,
+      eventosImportados: 1,
+      falhas: 0
     });
   });
 });
