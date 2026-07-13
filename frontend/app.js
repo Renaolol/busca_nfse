@@ -98,6 +98,7 @@ const state = {
     stopRequested: false,
     disabling: false
   },
+  xmlEventsSyncRunning: false,
   nfeSyncControls: [],
   nfeDocuments: [],
   cteDocuments: [],
@@ -984,6 +985,10 @@ function onDocumentClick(event) {
     case 'xmls-batch-download': {
       const tipoArquivo = actionNode.getAttribute('data-tipo-arquivo') || 'ambos';
       void downloadSelectedXmlBatch(tipoArquivo);
+      return;
+    }
+    case 'xmls-sync-events-listed': {
+      void syncEventsForListedXmls();
       return;
     }
     case 'xmls-sort': {
@@ -3147,6 +3152,11 @@ function renderXmlsTableCard(xmls) {
   const batchDisabled = selectedVisibleCount > 0 ? '' : 'disabled';
   const totalValue = sumListedDocumentValues(xmls);
   const totalResults = Number(state.xmlSearch.total || xmls.length || 0);
+  const syncEventsDisabled =
+    state.xmlEventsSyncRunning || state.dataSource !== 'api' || state.tableState.xmls === 'loading' || !xmls.length
+      ? 'disabled'
+      : '';
+  const syncEventsLabel = state.xmlEventsSyncRunning ? 'Buscando eventos...' : 'Buscar eventos da listagem';
 
   return `
     <article class="card">
@@ -3156,6 +3166,7 @@ function renderXmlsTableCard(xmls) {
           <p class="card-subtitle">Mostrando ${escapeHtml(String(xmls.length))} de ${escapeHtml(String(totalResults))} XML(s). ${selectedVisibleCount} selecionado(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
         </div>
         <div class="table-actions">
+          <button class="btn secondary" type="button" data-action="xmls-sync-events-listed" ${syncEventsDisabled}>${escapeHtml(syncEventsLabel)}</button>
           <button class="btn secondary" type="button" data-action="xmls-batch-download" data-tipo-arquivo="xml" ${batchDisabled}>Baixar XMLs</button>
           <button class="btn secondary" type="button" data-action="xmls-batch-download" data-tipo-arquivo="danfse" ${batchDisabled}>Baixar DANFSEs</button>
           <button class="btn primary" type="button" data-action="xmls-batch-download" data-tipo-arquivo="ambos" ${batchDisabled}>Baixar XML + DANFSE</button>
@@ -7607,11 +7618,14 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
         id: `xml-${doc.id}`,
         apiNfseId: doc.id,
         clientId: doc.clienteId,
+        estabelecimentoId: doc.estabelecimentoId || null,
         cliente: client?.razaoSocial || 'Cliente nao identificado',
         cnpj: normalizeDigits(client?.cnpj || doc.cnpjPrestador || doc.cnpjTomador || ''),
         municipio: doc.municipioPrestacaoNome || client?.municipio || '-',
         numeroNfse: doc.numeroNfse || (doc.chaveAcesso ? String(doc.chaveAcesso).slice(-8) : '-'),
         codigoVerificacao: '-',
+        chaveAcesso: doc.chaveAcesso || '',
+        ambiente: doc.ambiente || 'producao',
         dataEmissao: doc.dataEmissao || doc.createdAt || doc.updatedAt,
         dataDownload: doc.updatedAt || doc.createdAt || doc.dataEmissao,
         valor: toNumber(doc.valorServico),
@@ -8908,6 +8922,124 @@ async function downloadSelectedXmlBatch(tipoArquivo = 'ambos') {
     );
   } catch (error) {
     pushToast(`Falha ao baixar lote: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function syncEventsForListedXmls() {
+  if (state.xmlEventsSyncRunning) {
+    pushToast('A sincronizacao de eventos da listagem ja esta em andamento.', 'info');
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('A sincronizacao de eventos so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const listedXmls = getFilteredXmls();
+  if (!listedXmls.length) {
+    pushToast('Nao ha NFS-e listadas para sincronizar eventos.', 'error');
+    return;
+  }
+
+  const targets = listedXmls
+    .filter((xml) => xml.apiNfseId && xml.clientId && xml.estabelecimentoId && normalizeDigits(xml.chaveAcesso || '').length > 0)
+    .map((xml) => ({
+      xmlId: xml.id,
+      numeroNfse: xml.numeroNfse,
+      cliente: xml.cliente,
+      clienteId: xml.clientId,
+      estabelecimentoId: xml.estabelecimentoId,
+      ambiente: xml.ambiente || 'producao',
+      chaveAcesso: normalizeDigits(xml.chaveAcesso || '')
+    }));
+
+  if (!targets.length) {
+    pushToast('A listagem atual nao possui NFS-e aptas para sincronizacao de eventos.', 'error');
+    return;
+  }
+
+  state.xmlEventsSyncRunning = true;
+  render();
+  pushToast(`Sincronizando eventos para ${targets.length} NFS-e listada(s)...`, 'info');
+
+  try {
+    const results = await mapWithConcurrency(targets, 3, async (target) => {
+      try {
+        return await apiRequest('/nfse/eventos/sincronizar', {
+          method: 'POST',
+          body: {
+            clienteId: target.clienteId,
+            estabelecimentoId: target.estabelecimentoId,
+            ambiente: target.ambiente,
+            chaveAcesso: target.chaveAcesso,
+            somenteSemEventos: false,
+            limit: 1
+          },
+          timeoutMs: 60000
+        });
+      } catch (error) {
+        return {
+          documentosAnalisados: 0,
+          documentosComEventos: 0,
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          falhas: 1,
+          detalhes: [
+            {
+              documentoId: target.xmlId,
+              chaveAcesso: target.chaveAcesso,
+              estabelecimentoId: target.estabelecimentoId,
+              ambiente: target.ambiente,
+              status: 'falha_api',
+              eventosEncontrados: 0,
+              eventosImportados: 0,
+              mensagem: `${target.cliente} / NFS-e ${target.numeroNfse}: ${toErrorMessage(error)}`
+            }
+          ]
+        };
+      }
+    });
+
+    const summary = results.reduce(
+      (acc, result) => {
+        acc.documentosAnalisados += Number(result?.documentosAnalisados || 0);
+        acc.documentosComEventos += Number(result?.documentosComEventos || 0);
+        acc.eventosEncontrados += Number(result?.eventosEncontrados || 0);
+        acc.eventosImportados += Number(result?.eventosImportados || 0);
+        acc.falhas += Number(result?.falhas || 0);
+        if (Array.isArray(result?.detalhes)) {
+          acc.detalhes.push(...result.detalhes);
+        }
+        return acc;
+      },
+      {
+        documentosAnalisados: 0,
+        documentosComEventos: 0,
+        eventosEncontrados: 0,
+        eventosImportados: 0,
+        falhas: 0,
+        detalhes: []
+      }
+    );
+
+    const failureMessages = summary.detalhes
+      .filter((detail) => detail?.status === 'falha_api' || detail?.status === 'falha_certificado')
+      .map((detail) => String(detail?.mensagem || '').trim())
+      .filter(Boolean);
+    const uniqueFailureMessages = [...new Set(failureMessages)];
+
+    await executeXmlSearch();
+
+    pushToast(
+      `Eventos sincronizados: ${summary.eventosImportados} importado(s), ${summary.documentosComEventos} nota(s) com eventos, ${summary.falhas} falha(s).${
+        uniqueFailureMessages.length ? ` Motivo: ${uniqueFailureMessages.slice(0, 2).join(' | ')}${uniqueFailureMessages.length > 2 ? ' | ...' : ''}` : ''
+      }`,
+      summary.falhas > 0 ? 'error' : summary.eventosImportados > 0 ? 'success' : 'info'
+    );
+  } finally {
+    state.xmlEventsSyncRunning = false;
+    render();
   }
 }
 
