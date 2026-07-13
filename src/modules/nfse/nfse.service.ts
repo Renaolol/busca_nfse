@@ -18,6 +18,13 @@ import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from './nfse-xml-p
 
 @Injectable()
 export class NfseService {
+  private readonly eventRequestIntervalMs = process.env.NODE_ENV === 'test' ? 0 : this.readPositiveNumberEnv('NFSE_EVENTOS_REQUEST_INTERVAL_MS', 5000);
+  private readonly eventRateLimitRetryCount =
+    process.env.NODE_ENV === 'test' ? 0 : this.readBoundedIntegerEnv('NFSE_EVENTOS_RATE_LIMIT_RETRY_COUNT', 2, 0, 5);
+  private readonly eventRateLimitRetryDelayMs =
+    process.env.NODE_ENV === 'test' ? 0 : this.readPositiveNumberEnv('NFSE_EVENTOS_RATE_LIMIT_RETRY_DELAY_MS', 15000);
+  private lastEventRequestAtMs = 0;
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly parser: NfseXmlParserService,
@@ -192,6 +199,12 @@ export class NfseService {
     const where: Prisma.NfseDocumentoWhereInput = {
       clienteId: dto.clienteId
     };
+
+    if (Array.isArray(dto.documentoIds) && dto.documentoIds.length > 0) {
+      where.id = {
+        in: dto.documentoIds
+      };
+    }
 
     if (dto.estabelecimentoId) {
       where.estabelecimentoId = dto.estabelecimentoId;
@@ -438,7 +451,7 @@ export class NfseService {
           certificateByEstablishment.set(document.estabelecimentoId, certificate);
         }
 
-        const response = await this.adnClient.getEventosByChave({
+        const response = await this.fetchEventosByChaveWithRetry({
           chaveAcesso: document.chaveAcesso,
           ambiente: this.toExternalAmbiente(document.ambiente),
           certificateId: certificate.id
@@ -1339,6 +1352,68 @@ export class NfseService {
 
   private toSafeFileName(value: string): string {
     return value.replace(/[^a-zA-Z0-9._-]/g, '_');
+  }
+
+  private async fetchEventosByChaveWithRetry(params: {
+    chaveAcesso: string;
+    ambiente: NfseAmbiente;
+    certificateId: string;
+  }): Promise<unknown> {
+    let attempt = 0;
+
+    while (true) {
+      await this.waitForEventRequestSlot();
+      const response = await this.adnClient.getEventosByChave(params);
+      const statusCode = this.extractStatusCode(response);
+      if (statusCode !== 429 || attempt >= this.eventRateLimitRetryCount) {
+        return response;
+      }
+
+      attempt += 1;
+      await this.delay(this.eventRateLimitRetryDelayMs);
+    }
+  }
+
+  private async waitForEventRequestSlot(): Promise<void> {
+    if (this.eventRequestIntervalMs <= 0) {
+      return;
+    }
+
+    const now = Date.now();
+    const elapsed = now - this.lastEventRequestAtMs;
+    if (elapsed < this.eventRequestIntervalMs) {
+      await this.delay(this.eventRequestIntervalMs - elapsed);
+    }
+
+    this.lastEventRequestAtMs = Date.now();
+  }
+
+  private async delay(ms: number): Promise<void> {
+    if (ms <= 0) {
+      return;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  private readPositiveNumberEnv(name: string, fallback: number): number {
+    const raw = process.env[name];
+    const parsed = raw ? Number(raw) : Number.NaN;
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      return fallback;
+    }
+
+    return parsed;
+  }
+
+  private readBoundedIntegerEnv(name: string, fallback: number, min: number, max: number): number {
+    const raw = process.env[name];
+    const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
+    if (!Number.isFinite(parsed)) {
+      return fallback;
+    }
+
+    return Math.max(min, Math.min(max, parsed));
   }
 
   private toExternalAmbiente(ambiente: Ambiente): NfseAmbiente {

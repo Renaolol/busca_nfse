@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 
 export class SincronizarNfseEventosDto {
   @ApiProperty({ description: 'Cliente dono das NFS-e que terao eventos consultados' })
@@ -21,6 +21,14 @@ export class SincronizarNfseEventosDto {
   @IsOptional()
   @IsString()
   chaveAcesso?: string;
+
+  @ApiPropertyOptional({
+    description: 'Lista explicita de IDs de NFS-e a processar. Quando informada, a sincronizacao percorre apenas esses documentos.'
+  })
+  @IsOptional()
+  @IsArray()
+  @IsUUID('4', { each: true })
+  documentoIds?: string[];
 
   @ApiPropertyOptional({
     description: 'Quando true, prioriza notas sem eventos salvos localmente',

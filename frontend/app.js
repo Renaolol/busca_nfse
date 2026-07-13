@@ -8942,88 +8942,40 @@ async function syncEventsForListedXmls() {
     return;
   }
 
-  const targets = listedXmls
-    .filter((xml) => xml.apiNfseId && xml.clientId && xml.estabelecimentoId && normalizeDigits(xml.chaveAcesso || '').length > 0)
-    .map((xml) => ({
-      xmlId: xml.id,
-      numeroNfse: xml.numeroNfse,
-      cliente: xml.cliente,
-      clienteId: xml.clientId,
-      estabelecimentoId: xml.estabelecimentoId,
-      ambiente: xml.ambiente || 'producao',
-      chaveAcesso: normalizeDigits(xml.chaveAcesso || '')
-    }));
+  const targets = listedXmls.filter(
+    (xml) => xml.apiNfseId && xml.clientId && xml.estabelecimentoId && normalizeDigits(xml.chaveAcesso || '').length > 0
+  );
 
   if (!targets.length) {
     pushToast('A listagem atual nao possui NFS-e aptas para sincronizacao de eventos.', 'error');
     return;
   }
 
+  const clientIds = [...new Set(targets.map((xml) => xml.clientId).filter(Boolean))];
+  if (clientIds.length !== 1) {
+    pushToast('A sincronizacao da listagem exige uma unica empresa no resultado atual.', 'error');
+    return;
+  }
+
+  const documentoIds = [...new Set(targets.map((xml) => xml.apiNfseId).filter(Boolean))];
+
   state.xmlEventsSyncRunning = true;
   render();
-  pushToast(`Sincronizando eventos para ${targets.length} NFS-e listada(s)...`, 'info');
+  pushToast(`Sincronizando eventos para ${documentoIds.length} NFS-e listada(s)...`, 'info');
 
   try {
-    const results = await mapWithConcurrency(targets, 3, async (target) => {
-      try {
-        return await apiRequest('/nfse/eventos/sincronizar', {
-          method: 'POST',
-          body: {
-            clienteId: target.clienteId,
-            estabelecimentoId: target.estabelecimentoId,
-            ambiente: target.ambiente,
-            chaveAcesso: target.chaveAcesso,
-            somenteSemEventos: false,
-            limit: 1
-          },
-          timeoutMs: 60000
-        });
-      } catch (error) {
-        return {
-          documentosAnalisados: 0,
-          documentosComEventos: 0,
-          eventosEncontrados: 0,
-          eventosImportados: 0,
-          falhas: 1,
-          detalhes: [
-            {
-              documentoId: target.xmlId,
-              chaveAcesso: target.chaveAcesso,
-              estabelecimentoId: target.estabelecimentoId,
-              ambiente: target.ambiente,
-              status: 'falha_api',
-              eventosEncontrados: 0,
-              eventosImportados: 0,
-              mensagem: `${target.cliente} / NFS-e ${target.numeroNfse}: ${toErrorMessage(error)}`
-            }
-          ]
-        };
-      }
+    const summary = await apiRequest('/nfse/eventos/sincronizar', {
+      method: 'POST',
+      body: {
+        clienteId: clientIds[0],
+        documentoIds,
+        somenteSemEventos: false,
+        limit: documentoIds.length
+      },
+      timeoutMs: Math.max(60000, documentoIds.length * 20000)
     });
 
-    const summary = results.reduce(
-      (acc, result) => {
-        acc.documentosAnalisados += Number(result?.documentosAnalisados || 0);
-        acc.documentosComEventos += Number(result?.documentosComEventos || 0);
-        acc.eventosEncontrados += Number(result?.eventosEncontrados || 0);
-        acc.eventosImportados += Number(result?.eventosImportados || 0);
-        acc.falhas += Number(result?.falhas || 0);
-        if (Array.isArray(result?.detalhes)) {
-          acc.detalhes.push(...result.detalhes);
-        }
-        return acc;
-      },
-      {
-        documentosAnalisados: 0,
-        documentosComEventos: 0,
-        eventosEncontrados: 0,
-        eventosImportados: 0,
-        falhas: 0,
-        detalhes: []
-      }
-    );
-
-    const failureMessages = summary.detalhes
+    const failureMessages = (Array.isArray(summary?.detalhes) ? summary.detalhes : [])
       .filter((detail) => detail?.status === 'falha_api' || detail?.status === 'falha_certificado')
       .map((detail) => String(detail?.mensagem || '').trim())
       .filter(Boolean);

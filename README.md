@@ -251,9 +251,12 @@ Exemplo de body para sincronizacao manual de eventos:
 ```json
 {
   "clienteId": "550e8400-e29b-41d4-a716-446655440000",
-  "ambiente": "producao",
+  "documentoIds": [
+    "550e8400-e29b-41d4-a716-446655440010",
+    "550e8400-e29b-41d4-a716-446655440011"
+  ],
   "somenteSemEventos": true,
-  "limit": 100
+  "limit": 2
 }
 ```
 
