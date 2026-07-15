@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import { DominioNfeXmlRecord, DominioNfeXmlSource } from './dominio-nfe.types';
+import { DominioNfeCatalogRecord, DominioNfeXmlRecord, DominioNfeXmlSource } from './dominio-nfe.types';
 
 type PythonRecord = {
   catalogo_id: number;
@@ -52,6 +52,43 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
       chaveAcesso: record.chave_acesso,
       dataEmissao: record.data_emissao,
       xmlBase64: record.xml_base64
+    }));
+  }
+
+  async listCatalog(params: {
+    cnpjs: string[];
+    limit?: number;
+    dataEmissaoInicio?: string;
+    dataEmissaoFim?: string;
+    chavesAcesso?: string[];
+    catalogoIds?: number[];
+    catalogoIdMinExclusive?: number;
+    sortDirection?: 'asc' | 'desc';
+  }): Promise<DominioNfeCatalogRecord[]> {
+    if (!this.connectionString) {
+      throw new Error('DOMINIO_ODBC_CONNECTION_STRING nao configurada para importar XMLs da Dominio');
+    }
+
+    const payload = JSON.stringify({
+      mode: 'catalog',
+      connectionString: this.connectionString,
+      cnpjs: params.cnpjs,
+      limit: params.limit,
+      dataEmissaoInicio: params.dataEmissaoInicio,
+      dataEmissaoFim: params.dataEmissaoFim,
+      chavesAcesso: params.chavesAcesso,
+      catalogoIds: params.catalogoIds,
+      catalogoIdMinExclusive: params.catalogoIdMinExclusive,
+      sortDirection: params.sortDirection
+    });
+
+    const records = await this.runPythonScript(payload);
+    return records.map((record) => ({
+      catalogoId: record.catalogo_id,
+      codigoEmpresa: record.codigo_empresa,
+      cnpjEmpresa: record.cnpj_empresa,
+      chaveAcesso: record.chave_acesso,
+      dataEmissao: record.data_emissao
     }));
   }
 

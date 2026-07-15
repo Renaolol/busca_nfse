@@ -10,7 +10,11 @@ import {
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
-import { DOMINIO_NFE_XML_SOURCE, DominioNfeXmlSource } from '../../integrations/dominio-nfe/dominio-nfe.types';
+import {
+  DOMINIO_NFE_XML_SOURCE,
+  DominioNfeCatalogRecord,
+  DominioNfeXmlSource
+} from '../../integrations/dominio-nfe/dominio-nfe.types';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NfseService } from '../nfse/nfse.service';
@@ -47,11 +51,19 @@ type NfeNightlySweepSlot = {
   minute: number;
 };
 
-type NfeSyncSourceMode = 'distribuicao' | 'dominio';
+type NfeSyncSourceMode = 'distribuicao' | 'dominio' | 'dominio_chave';
 
 type NfeSyncRunFailureDetail = {
   kind: 'documento' | 'controle';
-  status: 'persistido' | 'ignorado_sem_vinculo' | 'ignorado_xml_nao_fiscal' | 'ignorado_xml_cte' | 'falha';
+  status:
+    | 'persistido'
+    | 'ignorado_sem_vinculo'
+    | 'ignorado_xml_nao_fiscal'
+    | 'ignorado_xml_cte'
+    | 'ignorado_ja_completo'
+    | 'ignorado_chave_invalida'
+    | 'ignorado_chave_cte'
+    | 'falha';
   clientId: string;
   estabelecimentoId: string;
   ambiente: NfeAmbiente;
@@ -210,7 +222,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     falhas: number;
     detalhes: Array<{ estabelecimentoId: string; cnpjConsulta: string; status: 'inicializado' | 'reativado' | 'falha'; mensagem: string }>;
   }> {
-    if (this.isDominioSyncSource()) {
+    if (this.usesDominioSyncSource()) {
       return this.prepareDominioControls({
         clienteId: dto.clienteId,
         ambiente: dto.ambiente ?? NfeAmbiente.producao
@@ -355,7 +367,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     falhas: number;
     detalhes: Array<{ clienteId: string; sucesso: boolean; mensagem: string }>;
   }> {
-    if (this.isDominioSyncSource()) {
+    if (this.usesDominioSyncSource()) {
       return this.prepareDominioControlsForAll(dto);
     }
 
@@ -739,7 +751,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async iniciarSync(dto: StartNfeSyncDto): Promise<{ controlesCriadosOuAtualizados: number }> {
-    if (this.isDominioSyncSource()) {
+    if (this.usesDominioSyncSource()) {
       const result = await this.prepareDominioControls({
         clienteId: dto.clienteId,
         estabelecimentoId: dto.estabelecimentoId,
@@ -812,8 +824,17 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   async runNow(dto: RunNfeSyncDto): Promise<NfeSyncRunResult> {
     await this.ensureClientEligibleForNfeSync(dto.clienteId);
-    if (this.isDominioSyncSource()) {
+    if (this.isDominioXmlSyncSource()) {
       return this.runNowViaDominio({
+        clienteId: dto.clienteId,
+        ambiente: dto.ambiente,
+        estabelecimentoId: dto.estabelecimentoId,
+        limitControles: dto.limitControles
+      });
+    }
+
+    if (this.isDominioChaveSyncSource()) {
+      return this.runNowViaDominioConsultaChave({
         clienteId: dto.clienteId,
         ambiente: dto.ambiente,
         estabelecimentoId: dto.estabelecimentoId,
@@ -830,8 +851,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async runNowGlobal(): Promise<NfeSyncRunResult> {
-    if (this.isDominioSyncSource()) {
+    if (this.isDominioXmlSyncSource()) {
       return this.runNowViaDominio({
+        limitControles: 50
+      });
+    }
+
+    if (this.isDominioChaveSyncSource()) {
+      return this.runNowViaDominioConsultaChave({
         limitControles: 50
       });
     }
@@ -1038,6 +1065,36 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       .filter((value): value is string => Boolean(value));
 
     return this.dominioXmlSource.listDocuments({
+      cnpjs,
+      limit: params.limit,
+      dataEmissaoInicio: params.dataEmissaoInicio,
+      dataEmissaoFim: params.dataEmissaoFim,
+      chavesAcesso: params.chavesAcesso?.map((value) => this.normalizeChaveAcesso(value)).filter((value): value is string => Boolean(value)),
+      catalogoIds: (params.catalogoIds || [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isInteger(value) && value > 0),
+      catalogoIdMinExclusive: params.catalogoIdMinExclusive,
+      sortDirection: params.sortDirection
+    });
+  }
+
+  private async loadDominioCatalogForClient(params: {
+    clienteId: string;
+    estabelecimentoId?: string;
+    limit?: number;
+    dataEmissaoInicio?: string;
+    dataEmissaoFim?: string;
+    chavesAcesso?: string[];
+    catalogoIds?: number[];
+    catalogoIdMinExclusive?: number;
+    sortDirection?: 'asc' | 'desc';
+  }): Promise<DominioNfeCatalogRecord[]> {
+    const establishments = await this.resolveTargetEstablishments(params.clienteId, params.estabelecimentoId);
+    const cnpjs = establishments
+      .map((establishment) => this.normalizeCnpj(establishment.cnpj))
+      .filter((value): value is string => Boolean(value));
+
+    return this.dominioXmlSource.listCatalog({
       cnpjs,
       limit: params.limit,
       dataEmissaoInicio: params.dataEmissaoInicio,
@@ -1387,6 +1444,311 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             status: NfeSyncStatus.erro_api,
             ultimaExecucao: new Date(),
             ultimaMensagem: `Falha na importacao via banco Dominio: ${this.toErrorMessage(error)}`
+          }
+        });
+      }
+    }
+
+    return {
+      processed: controls.length,
+      documentsSaved,
+      failures,
+      executionDetails,
+      failureDetails
+    };
+  }
+
+  private async runNowViaDominioConsultaChave(params: {
+    clienteId?: string;
+    ambiente?: NfeAmbiente;
+    estabelecimentoId?: string;
+    limitControles?: number;
+  }): Promise<NfeSyncRunResult> {
+    const controls = await this.prisma.nfeSyncControle.findMany({
+      where: {
+        cliente: {
+          ativo: true,
+          nfeHabilitado: true
+        },
+        status: {
+          in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api]
+        },
+        ...(params.clienteId ? { clienteId: params.clienteId } : {}),
+        ...(params.ambiente ? { ambiente: params.ambiente } : {}),
+        ...(params.estabelecimentoId ? { estabelecimentoId: params.estabelecimentoId } : {})
+      },
+      orderBy: { updatedAt: 'asc' },
+      take: params.limitControles ?? 10
+    });
+
+    let documentsSaved = 0;
+    let failures = 0;
+    const executionDetails: NfeSyncRunFailureDetail[] = [];
+    const failureDetails: NfeSyncRunFailureDetail[] = [];
+    const limitPorControle = this.parsePositiveNumberEnv('NFE_DOMINIO_IMPORT_LIMIT_PER_RUN', 500);
+
+    for (const control of controls) {
+      try {
+        const establishment = await this.getEstablishmentOrThrow(control.estabelecimentoId, control.clienteId);
+        const certificate = await this.findActiveCertificateOrThrow(
+          control.clienteId,
+          control.estabelecimentoId,
+          control.cnpjConsulta
+        );
+        const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
+        const entries = await this.loadDominioCatalogForClient({
+          clienteId: control.clienteId,
+          estabelecimentoId: control.estabelecimentoId,
+          limit: limitPorControle,
+          catalogoIdMinExclusive: this.toSafeCatalogoCursor(control.ultimoNsuConsultado),
+          sortDirection: 'asc'
+        });
+
+        let cursorAtualizadoAte = this.toSafeCatalogoCursor(control.ultimoNsuConsultado);
+        let maxCatalogoEncontrado = this.toSafeCatalogoCursor(control.maxNsu);
+        let controlFailures = 0;
+        let controlSaved = 0;
+        let travarCursor = false;
+
+        for (const entry of entries) {
+          maxCatalogoEncontrado = Math.max(maxCatalogoEncontrado, entry.catalogoId);
+          const chaveAcesso = this.normalizeChaveAcesso(entry.chaveAcesso);
+          const modelo = this.extractModeloFromChave(chaveAcesso);
+
+          if (!chaveAcesso) {
+            if (!travarCursor) {
+              cursorAtualizadoAte = entry.catalogoId;
+            }
+            executionDetails.push({
+              kind: 'documento',
+              status: 'ignorado_chave_invalida',
+              clientId: control.clienteId,
+              estabelecimentoId: control.estabelecimentoId,
+              ambiente: control.ambiente,
+              cnpjConsulta: control.cnpjConsulta,
+              catalogoId: entry.catalogoId,
+              chaveAcesso: undefined,
+              modelo: undefined,
+              mensagem: 'Catalogo Dominio sem chave de acesso valida para consulta externa'
+            });
+            continue;
+          }
+
+          if (modelo === '57') {
+            if (!travarCursor) {
+              cursorAtualizadoAte = entry.catalogoId;
+            }
+            executionDetails.push({
+              kind: 'documento',
+              status: 'ignorado_chave_cte',
+              clientId: control.clienteId,
+              estabelecimentoId: control.estabelecimentoId,
+              ambiente: control.ambiente,
+              cnpjConsulta: control.cnpjConsulta,
+              catalogoId: entry.catalogoId,
+              chaveAcesso,
+              modelo,
+              mensagem: 'Chave de CT-e ignorada: o fluxo oficial atual nao suporta consulta por chave para CT-e'
+            });
+            continue;
+          }
+
+          const existing = await this.prisma.nfeDocumento.findUnique({
+            where: {
+              ambiente_chaveAcesso: {
+                ambiente: control.ambiente,
+                chaveAcesso
+              }
+            },
+            select: {
+              xmlCompletoDisponivel: true
+            }
+          });
+
+          if (existing?.xmlCompletoDisponivel) {
+            if (!travarCursor) {
+              cursorAtualizadoAte = entry.catalogoId;
+            }
+            executionDetails.push({
+              kind: 'documento',
+              status: 'ignorado_ja_completo',
+              clientId: control.clienteId,
+              estabelecimentoId: control.estabelecimentoId,
+              ambiente: control.ambiente,
+              cnpjConsulta: control.cnpjConsulta,
+              catalogoId: entry.catalogoId,
+              chaveAcesso,
+              modelo,
+              mensagem: 'Chave ignorada porque a NF-e ja possui XML completo armazenado'
+            });
+            continue;
+          }
+
+          const result = await this.distribuicaoClient.consultarPorChave({
+            cnpjConsulta: control.cnpjConsulta,
+            cUfAutor,
+            chaveAcesso,
+            ambiente: control.ambiente,
+            certificateId: certificate.id
+          });
+
+          if (result.statusCode !== 200) {
+            controlFailures += 1;
+            travarCursor = true;
+            const detail: NfeSyncRunFailureDetail = {
+              kind: 'documento',
+              status: 'falha',
+              clientId: control.clienteId,
+              estabelecimentoId: control.estabelecimentoId,
+              ambiente: control.ambiente,
+              cnpjConsulta: control.cnpjConsulta,
+              catalogoId: entry.catalogoId,
+              chaveAcesso,
+              modelo,
+              mensagem: result.xMotivo ?? `Falha na consulta por chave da NF-e. HTTP ${result.statusCode}.`
+            };
+            executionDetails.push(detail);
+            failureDetails.push(detail);
+            continue;
+          }
+
+          const cStat = String(result.cStat || '').trim();
+          if (!['137', '138'].includes(cStat)) {
+            controlFailures += 1;
+            travarCursor = true;
+            const detail: NfeSyncRunFailureDetail = {
+              kind: 'documento',
+              status: 'falha',
+              clientId: control.clienteId,
+              estabelecimentoId: control.estabelecimentoId,
+              ambiente: control.ambiente,
+              cnpjConsulta: control.cnpjConsulta,
+              catalogoId: entry.catalogoId,
+              chaveAcesso,
+              modelo,
+              mensagem: `Consulta por chave retornou cStat ${cStat || 'desconhecido'}: ${result.xMotivo || 'Sem xMotivo.'}`
+            };
+            executionDetails.push(detail);
+            failureDetails.push(detail);
+            continue;
+          }
+
+          if (result.documents.length === 0) {
+            if (!travarCursor) {
+              cursorAtualizadoAte = entry.catalogoId;
+            }
+            executionDetails.push({
+              kind: 'documento',
+              status: 'ignorado_xml_nao_fiscal',
+              clientId: control.clienteId,
+              estabelecimentoId: control.estabelecimentoId,
+              ambiente: control.ambiente,
+              cnpjConsulta: control.cnpjConsulta,
+              catalogoId: entry.catalogoId,
+              chaveAcesso,
+              modelo,
+              mensagem: result.xMotivo || 'Consulta por chave sem documentos retornados'
+            });
+            continue;
+          }
+
+          try {
+            let persistedForKey = 0;
+            for (const document of result.documents) {
+              await this.persistDocument({
+                clienteId: control.clienteId,
+                estabelecimentoId: control.estabelecimentoId,
+                ambiente: control.ambiente,
+                cnpjConsulta: control.cnpjConsulta,
+                document,
+                origem: NfeDocumentoOrigem.distribuicao_nsu
+              });
+              persistedForKey += 1;
+            }
+
+            documentsSaved += persistedForKey;
+            controlSaved += persistedForKey;
+            if (!travarCursor) {
+              cursorAtualizadoAte = entry.catalogoId;
+            }
+            executionDetails.push({
+              kind: 'documento',
+              status: 'persistido',
+              clientId: control.clienteId,
+              estabelecimentoId: control.estabelecimentoId,
+              ambiente: control.ambiente,
+              cnpjConsulta: control.cnpjConsulta,
+              catalogoId: entry.catalogoId,
+              chaveAcesso,
+              numeroNfe: this.extractPrimaryNumeroNfe(result.documents),
+              serie: this.extractPrimarySerie(result.documents),
+              modelo,
+              mensagem:
+                persistedForKey === 1
+                  ? 'NF-e consultada por chave e persistida com sucesso'
+                  : `NF-e consultada por chave e persistida com ${persistedForKey} documento(s)`
+            });
+          } catch (error) {
+            controlFailures += 1;
+            travarCursor = true;
+            const detail: NfeSyncRunFailureDetail = {
+              kind: 'documento',
+              status: 'falha',
+              clientId: control.clienteId,
+              estabelecimentoId: control.estabelecimentoId,
+              ambiente: control.ambiente,
+              cnpjConsulta: control.cnpjConsulta,
+              catalogoId: entry.catalogoId,
+              chaveAcesso,
+              numeroNfe: this.extractPrimaryNumeroNfe(result.documents),
+              serie: this.extractPrimarySerie(result.documents),
+              modelo,
+              mensagem: this.toErrorMessage(error)
+            };
+            executionDetails.push(detail);
+            failureDetails.push(detail);
+          }
+        }
+
+        failures += controlFailures;
+        await this.prisma.nfeSyncControle.update({
+          where: { id: control.id },
+          data: {
+            status: controlFailures > 0 ? NfeSyncStatus.erro_api : NfeSyncStatus.ativo,
+            ultimoNsuConsultado: BigInt(cursorAtualizadoAte),
+            ultimoNsuDistribuido: BigInt(cursorAtualizadoAte),
+            maxNsu: BigInt(maxCatalogoEncontrado),
+            ultimaExecucao: new Date(),
+            ultimaMensagem:
+              controlFailures > 0
+                ? `Consulta por chave via catalogo Dominio executada com ${controlFailures} falha(s)`
+                : controlSaved > 0
+                  ? `Consulta por chave via catalogo Dominio salvou ${controlSaved} documento(s)`
+                  : 'Consulta por chave via catalogo Dominio sem novos documentos',
+            totalDocumentosBaixados: {
+              increment: controlSaved
+            }
+          }
+        });
+      } catch (error) {
+        failures += 1;
+        const detail: NfeSyncRunFailureDetail = {
+          kind: 'controle',
+          status: 'falha',
+          clientId: control.clienteId,
+          estabelecimentoId: control.estabelecimentoId,
+          ambiente: control.ambiente,
+          cnpjConsulta: control.cnpjConsulta,
+          mensagem: this.toErrorMessage(error)
+        };
+        executionDetails.push(detail);
+        failureDetails.push(detail);
+        await this.prisma.nfeSyncControle.update({
+          where: { id: control.id },
+          data: {
+            status: NfeSyncStatus.erro_api,
+            ultimaExecucao: new Date(),
+            ultimaMensagem: `Falha na consulta por chave via catalogo Dominio: ${this.toErrorMessage(error)}`
           }
         });
       }
@@ -2498,11 +2860,59 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private getSyncSourceMode(): NfeSyncSourceMode {
-    return String(process.env.NFE_SYNC_SOURCE_MODE || '').trim().toLowerCase() === 'dominio' ? 'dominio' : 'distribuicao';
+    const mode = String(process.env.NFE_SYNC_SOURCE_MODE || '').trim().toLowerCase();
+    if (mode === 'dominio') {
+      return 'dominio';
+    }
+    if (mode === 'dominio_chave') {
+      return 'dominio_chave';
+    }
+    return 'distribuicao';
   }
 
-  private isDominioSyncSource(): boolean {
+  private usesDominioSyncSource(): boolean {
+    return this.getSyncSourceMode() !== 'distribuicao';
+  }
+
+  private isDominioXmlSyncSource(): boolean {
     return this.getSyncSourceMode() === 'dominio';
+  }
+
+  private isDominioChaveSyncSource(): boolean {
+    return this.getSyncSourceMode() === 'dominio_chave';
+  }
+
+  private extractModeloFromChave(chaveAcesso?: string | null): string | undefined {
+    const normalized = this.normalizeChaveAcesso(chaveAcesso);
+    if (!normalized || normalized.length < 22) {
+      return undefined;
+    }
+
+    return normalized.slice(20, 22);
+  }
+
+  private extractPrimaryNumeroNfe(documents: NfeDistribuicaoDocument[]): string | undefined {
+    for (const document of documents) {
+      try {
+        return this.parser.inspect(document.xml).numeroNfe;
+      } catch {
+        continue;
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractPrimarySerie(documents: NfeDistribuicaoDocument[]): string | undefined {
+    for (const document of documents) {
+      try {
+        return this.parser.inspect(document.xml).serie;
+      } catch {
+        continue;
+      }
+    }
+
+    return undefined;
   }
 
   private toSafeCatalogoCursor(value?: bigint | null): number {

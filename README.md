@@ -103,6 +103,11 @@ Veja `.env.example`.
 - `NFE_DISTRIBUICAO_URL_PRODUCAO` e `NFE_DISTRIBUICAO_URL_HOMOLOGACAO`: URLs do `NFeDistribuicaoDFe` do Ambiente Nacional publicadas no portal da NF-e.
 - `NFE_DISTRIBUICAO_TIMEOUT_MS`: timeout das chamadas SOAP de distribuicao NF-e.
 - `NFE_DISTRIBUICAO_REJECT_UNAUTHORIZED`: controle de validacao TLS do endpoint NF-e.
+- `NFE_SYNC_SOURCE_MODE`: `distribuicao`, `dominio` (usa XML da Dominio) ou `dominio_chave` (usa `EFATENDIMENTO_NFE_CATALOGO` e consulta `consChNFe` por chave).
+- `DOMINIO_NFE_SOURCE_MODE`: `mock` ou `real` para ativar o adapter da Dominio.
+- `DOMINIO_ODBC_CONNECTION_STRING`: string ODBC da Dominio.
+- `DOMINIO_PYTHON_BIN`: binario Python usado pelo exportador da Dominio.
+- `NFE_DOMINIO_IMPORT_LIMIT_PER_RUN`: quantidade maxima de registros lidos por controle em cada execucao da Dominio.
 - `NFE_SYNC_AUTO_RUN_ENABLED`: habilita ciclo automatico de NF-e em background (padrao `true`).
 - `NFE_SYNC_AUTO_RUN_INTERVAL_MS`: intervalo entre ciclos automaticos de NF-e (padrao `300000`).
 - `NFE_SYNC_AUTO_RUN_STARTUP_DELAY_MS`: atraso inicial apos boot para primeiro ciclo de NF-e (padrao `15000`).
@@ -233,7 +238,7 @@ Valores aceitos:
 - Cliente com NF-e desabilitada nao aparece no painel de `Buscas NF-e`, nao entra na ativacao em lote e nao participa do ciclo automatico/global.
 - O ciclo automatico de NF-e usa `NFE_SYNC_AUTO_RUN_*`.
 - O ciclo automatico de NFS-e pode tambem consultar eventos das notas salvas usando `SYNC_EVENTS_AUTO_RUN_*`, sem alterar `ultimo_nsu_consultado`.
-- A busca noturna de NF-e usa `NFE_SYNC_NIGHTLY_SWEEP_*` e, a cada slot configurado, garante controles ativos para clientes elegiveis antes de rodar a distribuicao incremental.
+- A busca noturna de NF-e usa `NFE_SYNC_NIGHTLY_SWEEP_*` e, a cada slot configurado, garante controles ativos para clientes elegiveis antes de rodar a distribuicao incremental ou a consulta por chave baseada na Dominio, conforme `NFE_SYNC_SOURCE_MODE`.
 - Se outro ERP/robo tambem consome `NFeDistribuicaoDFe` para o mesmo interessado/CNPJ, a recomendacao operacional e deixar apenas um consumidor ativo por cliente. Use `nfe_habilitado=false` quando o cliente ja possui outro capturador em producao.
 
 ## Importacao de XML
@@ -326,15 +331,18 @@ Observacoes:
 ### Importacao de NF-e via Dominio
 
 - Configure `DOMINIO_NFE_SOURCE_MODE=real` para habilitar o adapter real.
-- Configure `NFE_SYNC_SOURCE_MODE=dominio` se quiser que as rotinas do painel `Buscas NF-e` (`Ligar`, `Ligar todos` e `Rodar agora`) passem a importar da base da Dominio em vez de consultar distribuicao DF-e.
+- Configure `NFE_SYNC_SOURCE_MODE=dominio` se quiser que as rotinas do painel `Buscas NF-e` (`Ligar`, `Ligar todos` e `Rodar agora`) passem a importar XMLs diretamente da base da Dominio.
+- Configure `NFE_SYNC_SOURCE_MODE=dominio_chave` se quiser que essas mesmas rotinas leiam a `EFATENDIMENTO_NFE_CATALOGO`, identifiquem o cliente pelo CNPJ e consultem a NF-e por `consChNFe` usando o certificado ja cadastrado, sem consumir `distNSU`.
 - Configure `DOMINIO_ODBC_CONNECTION_STRING` com a string ODBC completa da Dominio, por exemplo: `DSN=ContabilPBI;UID=PBI;PWD=Pbi`.
 - Opcionalmente configure `DOMINIO_PYTHON_BIN` quando o executavel Python nao estiver disponivel como `python`.
 - Opcionalmente configure `NFE_DOMINIO_IMPORT_LIMIT_PER_RUN` para limitar quantos registros por controle sao lidos em cada execucao automatica/manual do painel.
 - O importador usa o script `scripts/dominio_nfe_export.py`, que depende de `pyodbc` no host onde a API estiver rodando.
 - A vinculacao com o cliente local ocorre por CNPJ do estabelecimento ativo; nao foi necessario adicionar coluna de codigo da empresa da Dominio no schema.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio`, o backend reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, evitando reler o historico inteiro a cada execucao.
+- Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, o backend tambem reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, mas faz o download oficial por `consChNFe` para cada chave nova encontrada.
 - Se o XML retornado pela Dominio for ABRASF/NFS-e em vez de NF-e, o backend redireciona a importacao para o modulo de NFS-e e reaproveita a deduplicacao por `ambiente + chave_acesso` desse armazenamento.
 - XMLs da Dominio com raiz `Baixas` sao ignorados automaticamente, pois representam baixa financeira e nao documento fiscal armazenavel.
+- Chaves de CT-e encontradas no catalogo sao registradas como ignoradas nesse modo, porque o fluxo oficial validado para CT-e nao oferece consulta equivalente por chave.
 - O painel da ultima importacao consegue abrir o XML bruto do catalogo e disparar reimportacao pontual ou em lote usando esses `catalogoIds`.
 - Para revisar documentos de transporte que ja foram gravados em `nfe_documentos`, rode `npm run nfe:separar-cte` para gerar um relatorio em `.tmp/nfe-cte-separation` e `npm run nfe:separar-cte -- --apply` para marcar os CT-es detectados em `schemaDoc`, permitindo que o modulo de NF-e deixe de exibi-los nas listagens e indicadores.
 - O frontend agora expõe um menu dedicado `XMLs CT-e`, paralelo a `XMLs NFS-e` e `XMLs NF-e`, com filtros, visualizacao do XML e download por cliente.

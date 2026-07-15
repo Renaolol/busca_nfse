@@ -57,7 +57,8 @@ describe('NfeService', () => {
   };
 
   const dominioXmlSource: DominioNfeXmlSource = {
-    listDocuments: jest.fn()
+    listDocuments: jest.fn(),
+    listCatalog: jest.fn()
   };
 
   const service = new NfeService(
@@ -115,6 +116,7 @@ describe('NfeService', () => {
     });
     storage.putObject.mockResolvedValue(undefined);
     (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([]);
+    (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([]);
   });
 
   it('pagina a listagem de NF-e armazenadas', async () => {
@@ -806,6 +808,174 @@ describe('NfeService', () => {
           serie: '1',
           modelo: '55',
           mensagem: 'XML importado com sucesso'
+        }
+      ],
+      failureDetails: []
+    });
+  });
+
+  it('roda consulta por chave via catalogo Dominio usando cursor salvo no controle', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio_chave';
+    process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN = '300';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 10n,
+        ultimoNsuDistribuido: 10n,
+        maxNsu: 10n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 11,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        dataEmissao: '2026-06-29'
+      }
+    ]);
+    (distribuicaoClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado',
+      ultNsu: 0n,
+      maxNsu: 0n,
+      documents: [
+        {
+          schema: 'procNFe_v4.00',
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe35260612345678000199550010000001231000001231">
+      <ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>2026-06-29T10:00:00-03:00</dhEmi></ide>
+      <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
+      <dest><CNPJ>99888777000166</CNPJ><xNome>Cliente Teste</xNome></dest>
+      <total><ICMSTot><vNF>150.00</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat><dhRecbto>2026-06-29T10:00:01-03:00</dhRecbto></infProt></protNFe>
+</nfeProc>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.runNowGlobal();
+
+    expect(dominioXmlSource.listCatalog).toHaveBeenCalledWith({
+      cnpjs: ['12345678000199'],
+      limit: 300,
+      dataEmissaoInicio: undefined,
+      dataEmissaoFim: undefined,
+      chavesAcesso: undefined,
+      catalogoIds: [],
+      catalogoIdMinExclusive: 10,
+      sortDirection: 'asc'
+    });
+    expect(dominioXmlSource.listDocuments).not.toHaveBeenCalled();
+    expect(distribuicaoClient.consultarPorChave).toHaveBeenCalledWith({
+      cnpjConsulta: '12345678000199',
+      cUfAutor: '42',
+      chaveAcesso: '35260612345678000199550010000001231000001231',
+      ambiente: NfeAmbiente.producao,
+      certificateId: 'cert-1'
+    });
+    expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ctrl-1' },
+        data: expect.objectContaining({
+          ultimoNsuConsultado: 11n,
+          ultimoNsuDistribuido: 11n,
+          maxNsu: 11n,
+          status: NfeSyncStatus.ativo
+        })
+      })
+    );
+    expect(result).toEqual({
+      processed: 1,
+      documentsSaved: 1,
+      failures: 0,
+      executionDetails: [
+        {
+          kind: 'documento',
+          status: 'persistido',
+          clientId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: NfeAmbiente.producao,
+          cnpjConsulta: '12345678000199',
+          catalogoId: 11,
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          numeroNfe: '123',
+          serie: '1',
+          modelo: '55',
+          mensagem: 'NF-e consultada por chave e persistida com sucesso'
+        }
+      ],
+      failureDetails: []
+    });
+  });
+
+  it('ignora chaves de CT-e no catalogo Dominio sem consultar webservice de NF-e', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio_chave';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 10n,
+        ultimoNsuDistribuido: 10n,
+        maxNsu: 10n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 22,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        dataEmissao: '2026-06-29'
+      }
+    ]);
+
+    const result = await service.runNowGlobal();
+
+    expect(distribuicaoClient.consultarPorChave).not.toHaveBeenCalled();
+    expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ctrl-1' },
+        data: expect.objectContaining({
+          ultimoNsuConsultado: 22n,
+          ultimoNsuDistribuido: 22n,
+          maxNsu: 22n,
+          status: NfeSyncStatus.ativo
+        })
+      })
+    );
+    expect(result).toEqual({
+      processed: 1,
+      documentsSaved: 0,
+      failures: 0,
+      executionDetails: [
+        {
+          kind: 'documento',
+          status: 'ignorado_chave_cte',
+          clientId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: NfeAmbiente.producao,
+          cnpjConsulta: '12345678000199',
+          catalogoId: 22,
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          modelo: '57',
+          mensagem: 'Chave de CT-e ignorada: o fluxo oficial atual nao suporta consulta por chave para CT-e'
         }
       ],
       failureDetails: []

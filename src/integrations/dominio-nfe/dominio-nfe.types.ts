@@ -7,6 +7,14 @@ export interface DominioNfeXmlRecord {
   xmlBase64: string;
 }
 
+export interface DominioNfeCatalogRecord {
+  catalogoId: number;
+  codigoEmpresa: number;
+  cnpjEmpresa: string;
+  chaveAcesso?: string;
+  dataEmissao?: string;
+}
+
 export interface DominioNfeXmlSource {
   listDocuments(params: {
     cnpjs: string[];
@@ -18,6 +26,16 @@ export interface DominioNfeXmlSource {
     catalogoIdMinExclusive?: number;
     sortDirection?: 'asc' | 'desc';
   }): Promise<DominioNfeXmlRecord[]>;
+  listCatalog(params: {
+    cnpjs: string[];
+    limit?: number;
+    dataEmissaoInicio?: string;
+    dataEmissaoFim?: string;
+    chavesAcesso?: string[];
+    catalogoIds?: number[];
+    catalogoIdMinExclusive?: number;
+    sortDirection?: 'asc' | 'desc';
+  }): Promise<DominioNfeCatalogRecord[]>;
 }
 
 export const DOMINIO_NFE_XML_SOURCE = Symbol('DOMINIO_NFE_XML_SOURCE');

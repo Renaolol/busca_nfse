@@ -128,4 +128,114 @@ describe('dominio_nfe_export.py', () => {
       rmSync(tempDir, { recursive: true, force: true });
     }
   });
+
+  it('consulta apenas o catalogo quando o modo e catalog', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'dominio-nfe-export-catalog-'));
+    const pyodbcMockPath = join(tempDir, 'pyodbc.py');
+    const capturePath = join(tempDir, 'query.json');
+    const connectionCapturePath = join(tempDir, 'connection.json');
+
+    writeFileSync(
+      pyodbcMockPath,
+      [
+        'import json',
+        'import os',
+        '',
+        'class Row:',
+        '    def __init__(self, data):',
+        '        self.__dict__.update(data)',
+        '',
+        'class Cursor:',
+        '    def execute(self, query, params):',
+        "        with open(os.environ['PYODBC_CAPTURE_PATH'], 'w', encoding='utf-8') as fp:",
+        "            json.dump({'query': query, 'params': list(params)}, fp)",
+        '',
+        '    def fetchall(self):',
+        "        rows = json.loads(os.environ.get('PYODBC_ROWS_JSON', '[]'))",
+        '        return [Row(item) for item in rows]',
+        '',
+        'class Connection:',
+        '    def cursor(self):',
+        '        return Cursor()',
+        '',
+        '    def close(self):',
+        '        return None',
+        '',
+        'def connect(connection_string):',
+        "    with open(os.environ['PYODBC_CONNECTION_CAPTURE_PATH'], 'w', encoding='utf-8') as fp:",
+        "        json.dump({'connection_string': connection_string}, fp)",
+        '    return Connection()',
+        ''
+      ].join('\n'),
+      'utf8'
+    );
+
+    const payload = {
+      mode: 'catalog',
+      connectionString: 'DSN=ContabilPBI;UID=PBI;PWD=Pbi',
+      cnpjs: ['12.345.678/0001-99'],
+      limit: 10,
+      catalogoIdMinExclusive: 50,
+      sortDirection: 'asc'
+    };
+
+    const row = {
+      catalogo_id: 77,
+      codigo_empresa: 123,
+      cnpj_empresa: '12.345.678/0001-99',
+      chave_acesso: '35260612345678000199550010000001231000001231',
+      data_emissao: '2026-06-29'
+    };
+
+    const result = spawnSync(pythonBin, [scriptPath], {
+      cwd: process.cwd(),
+      input: JSON.stringify(payload),
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PYTHONPATH: tempDir,
+        PYODBC_CAPTURE_PATH: capturePath,
+        PYODBC_CONNECTION_CAPTURE_PATH: connectionCapturePath,
+        PYODBC_ROWS_JSON: JSON.stringify([row])
+      }
+    });
+
+    try {
+      expect(result.status).toBe(0);
+      expect(result.stderr).toBe('');
+
+      const queryCapture = JSON.parse(readFileSync(capturePath, 'utf8')) as {
+        query: string;
+        params: Array<string | number>;
+      };
+
+      expect(queryCapture.query).toContain('FROM bethadba.EFATENDIMENTO_NFE_CATALOGO cat');
+      expect(queryCapture.query).toContain('WHERE cat.CHAVE IS NOT NULL');
+      expect(queryCapture.query).not.toContain('EFATENDIMENTO_NFE_XML_V2');
+      expect(queryCapture.query).not.toContain('COALESCE(nfe_xml_v2.CONTEUDO_XML, nfe_xml.CONTEUDO_XML)');
+      expect(queryCapture.params).toEqual(['12345678000199', 50]);
+
+      const lines = result.stdout
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter(Boolean);
+      expect(lines).toHaveLength(1);
+
+      const exportedRecord = JSON.parse(lines[0]) as {
+        catalogo_id: number;
+        cnpj_empresa: string;
+        chave_acesso: string;
+        data_emissao: string;
+      };
+      expect(exportedRecord).toEqual({
+        catalogo_id: 77,
+        cnpj_empresa: '12345678000199',
+        chave_acesso: '35260612345678000199550010000001231000001231',
+        codigo_empresa: 123,
+        data_emissao: '2026-06-29'
+      });
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
 });
