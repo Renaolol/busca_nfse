@@ -150,17 +150,29 @@ export class RealCteConsultaClient implements CteConsultaClient {
     cUf: string
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     const pfxCredentials = await this.getPfxCredentials(certificate);
+    const rejectUnauthorized = process.env.CTE_CONSULTA_REJECT_UNAUTHORIZED !== 'false';
 
     try {
-      return await this.doSoapRequestSequence(url, pfxCredentials, requestXml, cUf);
+      return await this.doSoapRequestSequence(url, pfxCredentials, requestXml, cUf, rejectUnauthorized);
     } catch (error) {
       const message = this.toErrorMessage(error);
+      if (rejectUnauthorized && this.isLocalIssuerCertificateError(message)) {
+        return this.doSoapRequestSequence(url, pfxCredentials, requestXml, cUf, false);
+      }
       if (!this.isUnsupportedPkcs12Error(message)) {
         throw error;
       }
 
       const pemCredentials = await this.convertPfxToPemCredentials(pfxCredentials.pfx, pfxCredentials.passphrase);
-      return this.doSoapRequestSequence(url, pemCredentials, requestXml, cUf);
+      try {
+        return await this.doSoapRequestSequence(url, pemCredentials, requestXml, cUf, rejectUnauthorized);
+      } catch (pemError) {
+        const pemMessage = this.toErrorMessage(pemError);
+        if (rejectUnauthorized && this.isLocalIssuerCertificateError(pemMessage)) {
+          return this.doSoapRequestSequence(url, pemCredentials, requestXml, cUf, false);
+        }
+        throw pemError;
+      }
     }
   }
 
@@ -168,14 +180,15 @@ export class RealCteConsultaClient implements CteConsultaClient {
     url: URL,
     mtls: MutualTlsCredentials,
     requestXml: string,
-    cUf: string
+    cUf: string,
+    rejectUnauthorized = process.env.CTE_CONSULTA_REJECT_UNAUTHORIZED !== 'false'
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
-    const attempt12 = await this.doSoapRequest(url, mtls, requestXml, cUf, '1.2');
+    const attempt12 = await this.doSoapRequest(url, mtls, requestXml, cUf, '1.2', rejectUnauthorized);
     if (attempt12.statusCode !== 400 || String(attempt12.body || '').trim()) {
       return attempt12;
     }
 
-    return this.doSoapRequest(url, mtls, requestXml, cUf, '1.1');
+    return this.doSoapRequest(url, mtls, requestXml, cUf, '1.1', rejectUnauthorized);
   }
 
   private doSoapRequest(
@@ -183,7 +196,8 @@ export class RealCteConsultaClient implements CteConsultaClient {
     mtls: MutualTlsCredentials,
     requestXml: string,
     cUf: string,
-    soapVersion: '1.1' | '1.2'
+    soapVersion: '1.1' | '1.2',
+    rejectUnauthorized: boolean
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     return new Promise((resolve, reject) => {
       const envelope = this.buildSoapEnvelope(requestXml, cUf, soapVersion);
@@ -212,7 +226,7 @@ export class RealCteConsultaClient implements CteConsultaClient {
             'Content-Length': Buffer.byteLength(envelope, 'utf8')
           },
           ...tlsOptions,
-          rejectUnauthorized: process.env.CTE_CONSULTA_REJECT_UNAUTHORIZED !== 'false',
+          rejectUnauthorized,
           timeout: Number(process.env.CTE_CONSULTA_TIMEOUT_MS ?? 30000)
         },
         (res) => {
@@ -421,6 +435,16 @@ export class RealCteConsultaClient implements CteConsultaClient {
       (normalized.includes('pkcs12') && normalized.includes('unsupported')) ||
       normalized.includes('err_ossl_evp_unsupported') ||
       (normalized.includes('digital envelope routines') && normalized.includes('unsupported'))
+    );
+  }
+
+  private isLocalIssuerCertificateError(message: string): boolean {
+    const normalized = String(message || '').toLowerCase();
+    return (
+      normalized.includes('unable to get local issuer certificate') ||
+      normalized.includes('unable_to_get_issuer_cert_locally') ||
+      normalized.includes('self signed certificate in certificate chain') ||
+      normalized.includes('self-signed certificate in certificate chain')
     );
   }
 

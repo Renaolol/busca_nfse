@@ -61,4 +61,55 @@ describe('RealCteConsultaClient', () => {
     expect(result.documents[0].chaveAcesso).toBe('42260795849600000135570010000319691243772228');
     expect(result.documents[1].xml).toContain('<procEventoCTe');
   });
+
+  it('refaz a consulta sem validacao da cadeia TLS quando o portal retorna erro de issuer local', async () => {
+    const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
+      doSoapRequestWithFallback(
+        url: URL,
+        certificate: Record<string, unknown>,
+        requestXml: string,
+        cUf: string
+      ): Promise<{ statusCode: number; headers: Record<string, unknown>; body: string }>;
+      getPfxCredentials(certificate: Record<string, unknown>): Promise<{ mode: 'pfx'; pfx: Buffer; passphrase: string }>;
+      doSoapRequestSequence: jest.Mock;
+    };
+
+    client.getPfxCredentials = jest.fn().mockResolvedValue({
+      mode: 'pfx',
+      pfx: Buffer.from('fake-pfx'),
+      passphrase: 'senha'
+    });
+    client.doSoapRequestSequence = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('unable to get local issuer certificate'))
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        headers: {},
+        body: '<ok />'
+      });
+
+    const result = await client.doSoapRequestWithFallback(new URL('https://cte.example.test/ws'), { id: 'cert-1' }, '<xml />', '42');
+
+    expect(client.doSoapRequestSequence).toHaveBeenNthCalledWith(
+      1,
+      expect.any(URL),
+      expect.objectContaining({ mode: 'pfx' }),
+      '<xml />',
+      '42',
+      true
+    );
+    expect(client.doSoapRequestSequence).toHaveBeenNthCalledWith(
+      2,
+      expect.any(URL),
+      expect.objectContaining({ mode: 'pfx' }),
+      '<xml />',
+      '42',
+      false
+    );
+    expect(result).toEqual({
+      statusCode: 200,
+      headers: {},
+      body: '<ok />'
+    });
+  });
 });
