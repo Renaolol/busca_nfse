@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Ambiente, DocumentoOrigem, NfseDocumento, Prisma } from '@prisma/client';
 import JSZip from 'jszip';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
@@ -18,6 +18,7 @@ import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from './nfse-xml-p
 
 @Injectable()
 export class NfseService {
+  private readonly logger = new Logger(NfseService.name);
   private readonly eventRequestIntervalMs = process.env.NODE_ENV === 'test' ? 0 : this.readPositiveNumberEnv('NFSE_EVENTOS_REQUEST_INTERVAL_MS', 5000);
   private readonly eventRateLimitRetryCount =
     process.env.NODE_ENV === 'test' ? 0 : this.readBoundedIntegerEnv('NFSE_EVENTOS_RATE_LIMIT_RETRY_COUNT', 2, 0, 5);
@@ -422,7 +423,7 @@ export class NfseService {
 
   async sincronizarEventos(dto: SincronizarNfseEventosDto) {
     const limit = dto.limit ?? 100;
-    const documents = await this.prisma.nfseDocumento.findMany({
+    const documents = await this.findManyDocumentosForEventoSync({
       where: this.buildEventoSyncWhere(dto),
       orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
       take: limit
@@ -521,6 +522,25 @@ export class NfseService {
       falhas,
       detalhes
     };
+  }
+
+  private async findManyDocumentosForEventoSync(args: Prisma.NfseDocumentoFindManyArgs) {
+    try {
+      return await this.prisma.nfseDocumento.findMany(args);
+    } catch (error) {
+      if (!this.isEventosSchemaUnavailable(error)) {
+        throw error;
+      }
+
+      this.logger.warn(
+        'Tabela nfse_eventos indisponivel durante sincronizacao de eventos de NFS-e; repetindo consulta sem filtro relacional.'
+      );
+      const { where, ...rest } = args;
+      return this.prisma.nfseDocumento.findMany({
+        ...rest,
+        where: this.removeNfseEventosRelationFilter(where)
+      });
+    }
   }
 
   private async importNfseXml(dto: ImportXmlDto, parsed: ParsedNfse) {
@@ -1904,5 +1924,75 @@ export class NfseService {
 
   private isCertificateError(error: unknown): boolean {
     return this.toErrorMessage(error).toLowerCase().includes('certificado');
+  }
+
+  private isEventosSchemaUnavailable(error: unknown): boolean {
+    const message = this.toErrorMessage(error).toLowerCase();
+    return (
+      message.includes('nfse_eventos') &&
+      (message.includes('does not exist') ||
+        message.includes('relation') ||
+        message.includes('table') ||
+        message.includes('column') ||
+        message.includes('p2021') ||
+        message.includes('p2022'))
+    );
+  }
+
+  private removeNfseEventosRelationFilter(
+    where?: Prisma.NfseDocumentoWhereInput
+  ): Prisma.NfseDocumentoWhereInput | undefined {
+    if (!where) {
+      return where;
+    }
+
+    const next: Prisma.NfseDocumentoWhereInput = { ...where };
+
+    if ('eventos' in next) {
+      delete next.eventos;
+    }
+
+    if (Array.isArray(next.AND)) {
+      next.AND = next.AND
+        .map((condition) => this.removeNfseEventosRelationFilter(condition))
+        .filter((condition): condition is Prisma.NfseDocumentoWhereInput => Boolean(condition));
+      if (next.AND.length === 0) {
+        delete next.AND;
+      }
+    } else if (next.AND) {
+      const cleanedAnd = this.removeNfseEventosRelationFilter(next.AND);
+      if (cleanedAnd) {
+        next.AND = cleanedAnd;
+      } else {
+        delete next.AND;
+      }
+    }
+
+    if (Array.isArray(next.OR)) {
+      next.OR = next.OR
+        .map((condition) => this.removeNfseEventosRelationFilter(condition))
+        .filter((condition): condition is Prisma.NfseDocumentoWhereInput => Boolean(condition));
+      if (next.OR.length === 0) {
+        delete next.OR;
+      }
+    }
+
+    if (Array.isArray(next.NOT)) {
+      next.NOT = next.NOT
+        .map((condition) => this.removeNfseEventosRelationFilter(condition))
+        .filter((condition): condition is Prisma.NfseDocumentoWhereInput => Boolean(condition));
+      if (next.NOT.length === 0) {
+        delete next.NOT;
+      }
+    } else if (next.NOT) {
+      const cleanedNot = this.removeNfseEventosRelationFilter(next.NOT);
+      if (cleanedNot) {
+        next.NOT = cleanedNot;
+      } else {
+        delete next.NOT;
+      }
+    }
+
+    return Object.keys(next).length > 0 ? next : undefined;
   }
 }

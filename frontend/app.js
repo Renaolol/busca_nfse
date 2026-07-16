@@ -3289,10 +3289,7 @@ function renderXmlsTableCard(xmls) {
                   const xmlSyncDisabled =
                     state.xmlEventsSyncRunning ||
                     state.dataSource !== 'api' ||
-                    !xml.apiNfseId ||
-                    !xml.clientId ||
-                    !xml.estabelecimentoId ||
-                    normalizeDigits(xml.chaveAcesso || '').length === 0
+                    !canSyncXmlEvents(xml)
                       ? 'disabled'
                       : '';
                   return `<tr class="${xml.cancelada ? 'xml-row-cancelled' : ''}">
@@ -4198,15 +4195,7 @@ function renderXmlDetailsModal(xmlId) {
   if (!xml) {
     return '';
   }
-  const syncEventsDisabled =
-    state.xmlEventsSyncRunning ||
-    state.dataSource !== 'api' ||
-    !xml.apiNfseId ||
-    !xml.clientId ||
-    !xml.estabelecimentoId ||
-    normalizeDigits(xml.chaveAcesso || '').length === 0
-      ? 'disabled'
-      : '';
+  const syncEventsDisabled = state.xmlEventsSyncRunning || !canSyncXmlEvents(xml) ? 'disabled' : '';
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -8726,12 +8715,15 @@ function findCteById(cteId) {
   return state.cteSearch.results.find((doc) => doc.id === cteId) || state.cteDocuments.find((doc) => doc.id === cteId) || null;
 }
 
+function canSyncXmlEvents(xml) {
+  return Boolean(state.dataSource === 'api' && xml?.apiNfseId && xml?.clientId && normalizeDigits(xml?.chaveAcesso || '').length > 0);
+}
+
 function canSyncNfeEvents(doc) {
   return Boolean(
     state.dataSource === 'api' &&
       doc?.apiNfeId &&
       doc?.clientId &&
-      doc?.estabelecimentoId &&
       normalizeDigits(doc?.chaveAcesso || '').length > 0
   );
 }
@@ -8741,7 +8733,6 @@ function canSyncCteEvents(doc) {
     state.dataSource === 'api' &&
       doc?.apiCteId &&
       doc?.clientId &&
-      doc?.estabelecimentoId &&
       normalizeDigits(doc?.chaveAcesso || '').length > 0
   );
 }
@@ -9345,7 +9336,7 @@ async function syncEventsForListedXmls() {
   }
 
   const targets = listedXmls.filter(
-    (xml) => xml.apiNfseId && xml.clientId && xml.estabelecimentoId && normalizeDigits(xml.chaveAcesso || '').length > 0
+    (xml) => canSyncXmlEvents(xml)
   );
 
   if (!targets.length) {
@@ -9398,7 +9389,7 @@ async function syncEventsForXml(xmlId) {
     return;
   }
 
-  if (!xml.apiNfseId || !xml.clientId || !xml.estabelecimentoId || normalizeDigits(xml.chaveAcesso || '').length === 0) {
+  if (!canSyncXmlEvents(xml)) {
     pushToast('Esta NFS-e nao possui dados suficientes para consultar eventos.', 'error');
     return;
   }
@@ -9432,7 +9423,7 @@ async function requestNfseEventsSync(clienteId, documentoIds) {
       somenteSemEventos: false,
       limit: documentoIds.length
     },
-    timeoutMs: Math.max(60000, documentoIds.length * 20000)
+    timeoutMs: Math.max(180000, documentoIds.length * 30000)
   });
 }
 
@@ -9537,7 +9528,7 @@ async function requestNfeEventsSync(clienteId, documentoIds) {
       somenteSemEventos: false,
       limit: documentoIds.length
     },
-    timeoutMs: Math.max(60000, documentoIds.length * 20000)
+    timeoutMs: Math.max(180000, documentoIds.length * 30000)
   });
 }
 
@@ -9651,7 +9642,7 @@ async function requestCteEventsSync(clienteId, documentoIds) {
       somenteSemEventos: false,
       limit: documentoIds.length
     },
-    timeoutMs: Math.max(60000, documentoIds.length * 20000)
+    timeoutMs: Math.max(180000, documentoIds.length * 30000)
   });
 }
 

@@ -582,7 +582,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     await this.ensureClient(params.clienteId);
 
     const limit = params.limit ?? 50;
-    const documents = await this.prisma.nfeDocumento.findMany({
+    const documents = await this.findManyDocumentosForEventoSync({
       where: this.buildEventoSyncWhere(params),
       include: this.nfeDocumentoInclude(),
       orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
@@ -2384,6 +2384,34 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async findManyDocumentosForEventoSync(
+    args: Prisma.NfeDocumentoFindManyArgs
+  ): Promise<Array<Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })>> {
+    try {
+      return (await this.prisma.nfeDocumento.findMany(args)) as Array<
+        Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })
+      >;
+    } catch (error) {
+      if (!this.isEventosSchemaUnavailable(error)) {
+        throw error;
+      }
+
+      this.logger.warn(
+        'Tabela nfe_eventos indisponivel durante sincronizacao de eventos de NF-e; repetindo consulta sem filtro relacional.'
+      );
+      const { where, ...rest } = args;
+      delete rest.include;
+      const documentos = await this.prisma.nfeDocumento.findMany({
+        ...rest,
+        where: this.removeEventosRelationFilter(where)
+      });
+      return documentos.map((documento) => ({
+        ...documento,
+        eventos: []
+      }));
+    }
+  }
+
   private async findUniqueDocumentoWithEventos(
     args: Omit<Prisma.NfeDocumentoFindUniqueArgs, 'include'>
   ): Promise<(Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })) | null> {
@@ -2454,6 +2482,63 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           return tipoEvento === '110111' || tipoEvento.includes('cancel') || descricao.includes('cancel');
         })
       : false;
+  }
+
+  private removeEventosRelationFilter(
+    where?: Prisma.NfeDocumentoWhereInput
+  ): Prisma.NfeDocumentoWhereInput | undefined {
+    if (!where) {
+      return where;
+    }
+
+    const next: Prisma.NfeDocumentoWhereInput = { ...where };
+
+    if ('eventos' in next) {
+      delete next.eventos;
+    }
+
+    if (Array.isArray(next.AND)) {
+      next.AND = next.AND
+        .map((condition) => this.removeEventosRelationFilter(condition))
+        .filter((condition): condition is Prisma.NfeDocumentoWhereInput => Boolean(condition));
+      if (next.AND.length === 0) {
+        delete next.AND;
+      }
+    } else if (next.AND) {
+      const cleanedAnd = this.removeEventosRelationFilter(next.AND);
+      if (cleanedAnd) {
+        next.AND = cleanedAnd;
+      } else {
+        delete next.AND;
+      }
+    }
+
+    if (Array.isArray(next.OR)) {
+      next.OR = next.OR
+        .map((condition) => this.removeEventosRelationFilter(condition))
+        .filter((condition): condition is Prisma.NfeDocumentoWhereInput => Boolean(condition));
+      if (next.OR.length === 0) {
+        delete next.OR;
+      }
+    }
+
+    if (Array.isArray(next.NOT)) {
+      next.NOT = next.NOT
+        .map((condition) => this.removeEventosRelationFilter(condition))
+        .filter((condition): condition is Prisma.NfeDocumentoWhereInput => Boolean(condition));
+      if (next.NOT.length === 0) {
+        delete next.NOT;
+      }
+    } else if (next.NOT) {
+      const cleanedNot = this.removeEventosRelationFilter(next.NOT);
+      if (cleanedNot) {
+        next.NOT = cleanedNot;
+      } else {
+        delete next.NOT;
+      }
+    }
+
+    return Object.keys(next).length > 0 ? next : undefined;
   }
 
   private isEventosSchemaUnavailable(error: unknown): boolean {
