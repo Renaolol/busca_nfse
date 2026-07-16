@@ -394,4 +394,70 @@ describe('CteService', () => {
       ]
     });
   });
+
+  it('continua sincronizacao manual de eventos de CT-e quando o erro cita o model NfeEvento', async () => {
+    prisma.nfeDocumento.findMany
+      .mockRejectedValueOnce(new Error('The table `public.NfeEvento` does not exist in the current database.'))
+      .mockResolvedValueOnce([
+        {
+          id: 'doc-1',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'est-1',
+          ambiente: NfeAmbiente.producao,
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          numeroNfe: '31969'
+        }
+      ]);
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-1'],
+      somenteSemEventos: true,
+      limit: 1
+    });
+
+    expect(prisma.nfeDocumento.findMany).toHaveBeenCalledTimes(2);
+    expect(result).toMatchObject({
+      documentosProcessados: 1,
+      falhas: 0
+    });
+  });
+
+  it('retorna falha estruturada quando a preparacao da sincronizacao manual de CT-e quebra antes do loop', async () => {
+    prisma.nfeDocumento.findMany
+      .mockRejectedValueOnce(new Error('boom na consulta inicial do cte'))
+      .mockResolvedValueOnce([
+        {
+          id: 'doc-1',
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          numeroNfe: '31969'
+        }
+      ]);
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+
+    expect(result).toEqual({
+      documentosProcessados: 1,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 1,
+      detalhes: [
+        {
+          documentoId: 'doc-1',
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          numeroDocumento: '31969',
+          status: 'falha_api',
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          mensagem: 'boom na consulta inicial do cte'
+        }
+      ]
+    });
+  });
 });

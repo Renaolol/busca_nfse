@@ -582,12 +582,30 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     await this.ensureClient(params.clienteId);
 
     const limit = params.limit ?? 50;
-    const documents = await this.findManyDocumentosForEventoSync({
-      where: this.buildEventoSyncWhere(params),
-      include: this.nfeDocumentoInclude(),
-      orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
-      take: limit
-    });
+    const where = this.buildEventoSyncWhere(params);
+    const orderBy: Prisma.NfeDocumentoOrderByWithRelationInput[] = [{ dataEmissao: 'desc' }, { createdAt: 'desc' }];
+    let documents: Array<
+      Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })
+    > = [];
+    try {
+      documents = await this.findManyDocumentosForEventoSync({
+        where,
+        include: this.nfeDocumentoInclude(),
+        orderBy,
+        take: limit
+      });
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao preparar sincronizacao manual de eventos de ${params.filtro.toUpperCase()}; retornando detalhe estruturado. ${this.toErrorMessage(error)}`
+      );
+      return this.buildFatalEventoSyncResponse({
+        documentoIds: params.documentoIds,
+        where,
+        orderBy,
+        take: limit,
+        error
+      });
+    }
 
     const detalhes: Array<{
       documentoId: string;
@@ -683,6 +701,48 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       eventosImportados,
       falhas,
       detalhes
+    };
+  }
+
+  private async buildFatalEventoSyncResponse(params: {
+    documentoIds?: string[];
+    where: Prisma.NfeDocumentoWhereInput;
+    orderBy: Prisma.NfeDocumentoOrderByWithRelationInput[];
+    take: number;
+    error: unknown;
+  }) {
+    const message = this.toErrorMessage(params.error);
+    const fallbackDocuments = await this.findFallbackDocumentsForEventoSync({
+      where: params.where,
+      orderBy: params.orderBy,
+      take: params.take
+    }).catch(() => []);
+    const requestedIds = [...new Set((params.documentoIds ?? []).filter(Boolean))];
+    const detailsSource =
+      fallbackDocuments.length > 0
+        ? fallbackDocuments
+        : requestedIds.map((id) => ({
+            id,
+            chaveAcesso: '',
+            numeroNfe: null
+          }));
+    const falhas = detailsSource.length || 1;
+
+    return {
+      documentosProcessados: detailsSource.length,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas,
+      detalhes: detailsSource.map((document) => ({
+        documentoId: document.id,
+        chaveAcesso: document.chaveAcesso || '',
+        numeroDocumento: document.numeroNfe ?? null,
+        status: 'falha_api' as const,
+        eventosEncontrados: 0,
+        eventosImportados: 0,
+        mensagem: message
+      }))
     };
   }
 
@@ -2412,6 +2472,23 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private async findFallbackDocumentsForEventoSync(args: {
+    where: Prisma.NfeDocumentoWhereInput;
+    orderBy: Prisma.NfeDocumentoOrderByWithRelationInput[];
+    take: number;
+  }): Promise<Array<{ id: string; chaveAcesso: string; numeroNfe: string | null }>> {
+    return this.prisma.nfeDocumento.findMany({
+      where: this.removeEventosRelationFilter(args.where),
+      orderBy: args.orderBy,
+      take: args.take,
+      select: {
+        id: true,
+        chaveAcesso: true,
+        numeroNfe: true
+      }
+    });
+  }
+
   private async findUniqueDocumentoWithEventos(
     args: Omit<Prisma.NfeDocumentoFindUniqueArgs, 'include'>
   ): Promise<(Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })) | null> {
@@ -2543,8 +2620,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   private isEventosSchemaUnavailable(error: unknown): boolean {
     const message = this.toErrorMessage(error).toLowerCase();
+    const mentionsEventosTable = ['nfe_eventos', 'nfeevento', 'nfe_evento', 'nfe evento'].some((fragment) => message.includes(fragment));
     return (
-      message.includes('nfe_eventos') &&
+      mentionsEventosTable &&
       (message.includes('does not exist') ||
         message.includes('relation') ||
         message.includes('table') ||
