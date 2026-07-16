@@ -112,4 +112,62 @@ describe('RealCteConsultaClient', () => {
       body: '<ok />'
     });
   });
+
+  it('repete a consulta em SOAP 1.1 quando o SOAP 1.2 retorna action not recognized', async () => {
+    const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
+      doSoapRequestSequence(
+        url: URL,
+        mtls: Record<string, unknown>,
+        requestXml: string,
+        cUf: string,
+        rejectUnauthorized?: boolean
+      ): Promise<{ statusCode: number; headers: Record<string, unknown>; body: string }>;
+      doSoapRequest: jest.Mock;
+    };
+
+    client.doSoapRequest = jest
+      .fn()
+      .mockResolvedValueOnce({
+        statusCode: 500,
+        headers: {},
+        body: `<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://www.w3.org/2003/05/soap-envelope"><soap:Body><soap:Fault><soap:Reason><soap:Text xml:lang="en">Unable to handle request. The action 'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4/cteConsultaCT' was not recognized.</soap:Text></soap:Reason></soap:Fault></soap:Body></soap:Envelope>`
+      })
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        headers: {},
+        body: '<ok />'
+      });
+
+    const result = await client.doSoapRequestSequence(
+      new URL('https://cte.example.test/ws'),
+      { mode: 'pfx', pfx: Buffer.from('fake'), passphrase: 'senha' },
+      '<xml />',
+      '42',
+      true
+    );
+
+    expect(client.doSoapRequest).toHaveBeenNthCalledWith(
+      1,
+      expect.any(URL),
+      expect.objectContaining({ mode: 'pfx' }),
+      '<xml />',
+      '42',
+      '1.2',
+      true
+    );
+    expect(client.doSoapRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.any(URL),
+      expect.objectContaining({ mode: 'pfx' }),
+      '<xml />',
+      '42',
+      '1.1',
+      true
+    );
+    expect(result).toEqual({
+      statusCode: 200,
+      headers: {},
+      body: '<ok />'
+    });
+  });
 });

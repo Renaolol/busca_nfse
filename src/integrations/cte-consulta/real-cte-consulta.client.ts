@@ -184,7 +184,7 @@ export class RealCteConsultaClient implements CteConsultaClient {
     rejectUnauthorized = process.env.CTE_CONSULTA_REJECT_UNAUTHORIZED !== 'false'
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     const attempt12 = await this.doSoapRequest(url, mtls, requestXml, cUf, '1.2', rejectUnauthorized);
-    if (attempt12.statusCode !== 400 || String(attempt12.body || '').trim()) {
+    if (!this.shouldRetryWithSoap11(attempt12)) {
       return attempt12;
     }
 
@@ -445,6 +445,20 @@ export class RealCteConsultaClient implements CteConsultaClient {
       normalized.includes('unable_to_get_issuer_cert_locally') ||
       normalized.includes('self signed certificate in certificate chain') ||
       normalized.includes('self-signed certificate in certificate chain')
+    );
+  }
+
+  private shouldRetryWithSoap11(response: { statusCode: number; body: string }): boolean {
+    const body = String(response.body || '').trim();
+    if (response.statusCode === 400 && !body) {
+      return true;
+    }
+
+    const normalizedBody = body.toLowerCase();
+    return (
+      normalizedBody.includes('action') &&
+      normalizedBody.includes('was not recognized') &&
+      normalizedBody.includes('cteconsultact')
     );
   }
 
