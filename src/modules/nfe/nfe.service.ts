@@ -3029,7 +3029,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     cnpjConsulta: string
   ): Promise<Pick<Certificado, 'id'>> {
     const now = new Date();
-    const certificate = await this.prisma.certificado.findFirst({
+    const certificates = await this.prisma.certificado.findMany({
       where: {
         ativo: true,
         AND: [
@@ -3051,11 +3051,18 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           }
         ]
       },
+      orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
       select: {
         id: true,
+        nome: true,
+        estabelecimentoId: true,
         arquivoCriptografadoPath: true
       }
     });
+
+    const certificate =
+      certificates.find((item) => item.estabelecimentoId === estabelecimentoId) ??
+      certificates.find((item) => item.estabelecimentoId === null);
 
     if (!certificate) {
       throw new BadRequestException(`Nenhum certificado ativo e valido encontrado para o CNPJ ${cnpjConsulta}`);
@@ -3064,7 +3071,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const certificateFileExists = await this.storage.hasObject(certificate.arquivoCriptografadoPath);
     if (!certificateFileExists) {
       throw new BadRequestException(
-        `Arquivo do certificado nao encontrado no storage local para o CNPJ ${cnpjConsulta}. Recadastre ou restaure o certificado deste estabelecimento.`
+        `Arquivo do certificado selecionado (${certificate.nome || certificate.id}) nao encontrado no storage local para o CNPJ ${cnpjConsulta}. Caminho esperado: ${certificate.arquivoCriptografadoPath}. Recadastre ou restaure esse certificado.`
       );
     }
 

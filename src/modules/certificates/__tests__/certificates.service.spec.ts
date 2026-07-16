@@ -74,7 +74,7 @@ describe('CertificatesService', () => {
   let service: CertificatesService;
   let prisma: PrismaMock;
   let crypto: { encrypt: jest.Mock; decrypt: jest.Mock };
-  let storage: { putObject: jest.Mock; getObject: jest.Mock; deleteObject: jest.Mock };
+  let storage: { putObject: jest.Mock; getObject: jest.Mock; deleteObject: jest.Mock; hasObject: jest.Mock };
 
   beforeEach(() => {
     prisma = {
@@ -101,7 +101,8 @@ describe('CertificatesService', () => {
     storage = {
       putObject: jest.fn().mockResolvedValue('/tmp/storage/certificado.bin'),
       getObject: jest.fn().mockResolvedValue(Buffer.from('enc:certificado')),
-      deleteObject: jest.fn().mockResolvedValue(undefined)
+      deleteObject: jest.fn().mockResolvedValue(undefined),
+      hasObject: jest.fn().mockResolvedValue(true)
     };
 
     service = new CertificatesService(
@@ -378,6 +379,28 @@ describe('CertificatesService', () => {
 
     await expect(service.remove('cert-outro-cliente', 'cliente-1')).rejects.toThrow('Certificado nao encontrado');
     expect(prisma.certificado.delete).not.toHaveBeenCalled();
+  });
+
+  it('marca validacao como invalida quando o arquivo fisico do certificado sumiu', async () => {
+    const certificate = buildCertificateRecord({
+      id: 'cert-ausente',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      nome: 'Certificado Ausente',
+      cnpjTitular: '12345678000199',
+      tipo: 'A1',
+      arquivoCriptografadoPath: 'certificados/cliente-1/cert-ausente.bin',
+      senhaCriptografada: 'enc:senha'
+    });
+
+    prisma.certificado.findUnique.mockResolvedValue(certificate);
+    storage.hasObject.mockResolvedValue(false);
+
+    await expect(service.validate('cert-ausente', 'cliente-1')).resolves.toEqual({
+      valido: false,
+      motivos: ['Arquivo do certificado ausente no storage local'],
+      validadeFim: certificate.validadeFim
+    });
   });
 
   it('atualiza anotacoes de certificado avulso sem exigir clienteId', async () => {

@@ -19,7 +19,7 @@ describe('NfeService', () => {
       findMany: jest.fn()
     },
     certificado: {
-      findFirst: jest.fn()
+      findMany: jest.fn()
     },
     nfeDocumento: {
       count: jest.fn(),
@@ -94,7 +94,14 @@ describe('NfeService', () => {
         createdAt: new Date('2026-06-29T00:00:00.000Z')
       }
     ]);
-    prisma.certificado.findFirst.mockResolvedValue({ id: 'cert-1', arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin' });
+    prisma.certificado.findMany.mockResolvedValue([
+      {
+        id: 'cert-1',
+        nome: 'Certificado Principal',
+        estabelecimentoId: 'estab-1',
+        arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin'
+      }
+    ]);
     prisma.nfeDocumento.findUnique.mockResolvedValue(null);
     prisma.nfeDocumento.upsert.mockImplementation(async (args: { create: Record<string, unknown> }) => ({
       id: 'doc-1',
@@ -634,7 +641,7 @@ describe('NfeService', () => {
     });
 
     expect(distribuicaoClient.distribuirPorNsu).not.toHaveBeenCalled();
-    expect(prisma.certificado.findFirst).not.toHaveBeenCalled();
+    expect(prisma.certificado.findMany).not.toHaveBeenCalled();
     expect(prisma.nfeSyncControle.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
@@ -1779,7 +1786,7 @@ describe('NfeService', () => {
           eventosEncontrados: 0,
           eventosImportados: 0,
           mensagem:
-            'Arquivo do certificado nao encontrado no storage local para o CNPJ 12345678000199. Recadastre ou restaure o certificado deste estabelecimento.'
+            'Arquivo do certificado selecionado (Certificado Principal) nao encontrado no storage local para o CNPJ 12345678000199. Caminho esperado: certificados/cliente-1/cert-1.bin. Recadastre ou restaure esse certificado.'
         }
       ]
     });

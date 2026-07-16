@@ -8711,6 +8711,10 @@ function deriveCertificateStatus(cert, precomputedDays) {
     return 'Nao validado';
   }
 
+  if (cert?.arquivoDisponivel === false) {
+    return 'Arquivo ausente';
+  }
+
   const days = Number.isFinite(precomputedDays) ? precomputedDays : daysUntil(cert.validadeFim);
   if (Number.isFinite(days)) {
     if (days < 0) {

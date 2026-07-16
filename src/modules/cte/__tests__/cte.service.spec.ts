@@ -15,7 +15,7 @@ describe('CteService', () => {
       findUnique: jest.fn()
     },
     certificado: {
-      findFirst: jest.fn()
+      findMany: jest.fn()
     },
     nfeDocumento: {
       count: jest.fn(),
@@ -59,7 +59,14 @@ describe('CteService', () => {
       ativo: true,
       cnpj: '12345678000199'
     });
-    prisma.certificado.findFirst.mockResolvedValue({ id: 'cert-1', arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin' });
+    prisma.certificado.findMany.mockResolvedValue([
+      {
+        id: 'cert-1',
+        nome: 'Certificado Principal',
+        estabelecimentoId: 'est-1',
+        arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin'
+      }
+    ]);
     prisma.nfeDocumento.findMany.mockResolvedValue([]);
     prisma.nfeDocumento.findUnique.mockResolvedValue(null);
     prisma.nfeDocumento.upsert.mockResolvedValue({ id: 'doc-1' });
@@ -499,7 +506,7 @@ describe('CteService', () => {
           eventosEncontrados: 0,
           eventosImportados: 0,
           mensagem:
-            'Arquivo do certificado nao encontrado no storage local para o CNPJ 12345678000199. Recadastre ou restaure o certificado deste estabelecimento.'
+            'Arquivo do certificado selecionado (Certificado Principal) nao encontrado no storage local para o CNPJ 12345678000199. Caminho esperado: certificados/cliente-1/cert-1.bin. Recadastre ou restaure esse certificado.'
         }
       ]
     });

@@ -84,7 +84,7 @@ export class CertificatesService {
       orderBy: { createdAt: 'desc' }
     });
 
-    return certificates.map((certificate) => this.toPublic(certificate));
+    return Promise.all(certificates.map((certificate) => this.toPublic(certificate)));
   }
 
   async listAll(clienteId?: string): Promise<Array<Record<string, unknown>>> {
@@ -93,7 +93,7 @@ export class CertificatesService {
       orderBy: { createdAt: 'desc' }
     });
 
-    return certificates.map((certificate) => this.toPublic(certificate));
+    return Promise.all(certificates.map((certificate) => this.toPublic(certificate)));
   }
 
   async findOne(id: string, clienteId?: string): Promise<Record<string, unknown>> {
@@ -349,6 +349,11 @@ export class CertificatesService {
       motivos.push('Documento titular invalido');
     }
 
+    const arquivoDisponivel = await this.storage.hasObject(certificate.arquivoCriptografadoPath);
+    if (!arquivoDisponivel) {
+      motivos.push('Arquivo do certificado ausente no storage local');
+    }
+
     return {
       valido: motivos.length === 0,
       motivos,
@@ -356,7 +361,9 @@ export class CertificatesService {
     };
   }
 
-  private toPublic(certificate: Certificado): Record<string, unknown> {
+  private async toPublic(certificate: Certificado): Promise<Record<string, unknown>> {
+    const arquivoDisponivel = await this.storage.hasObject(certificate.arquivoCriptografadoPath);
+
     return {
       id: certificate.id,
       clienteId: certificate.clienteId,
@@ -375,7 +382,8 @@ export class CertificatesService {
       substituidoPorCertificadoId: certificate.substituidoPorCertificadoId,
       createdAt: certificate.createdAt,
       updatedAt: certificate.updatedAt,
-      arquivoCriptografadoPath: certificate.arquivoCriptografadoPath
+      arquivoCriptografadoPath: certificate.arquivoCriptografadoPath,
+      arquivoDisponivel
     };
   }
 
