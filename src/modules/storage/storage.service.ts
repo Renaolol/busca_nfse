@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 @Injectable()
@@ -18,6 +18,16 @@ export class LocalStorageService {
   async getObject(key: string): Promise<Buffer> {
     const absolutePath = resolve(this.rootPath, key);
     return readFile(absolutePath);
+  }
+
+  async hasObject(key: string): Promise<boolean> {
+    const absolutePath = resolve(this.rootPath, key);
+    try {
+      await access(absolutePath);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async deleteObject(key: string): Promise<void> {

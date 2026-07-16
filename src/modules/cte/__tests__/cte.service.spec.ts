@@ -28,7 +28,8 @@ describe('CteService', () => {
 
   const storage = {
     getObject: jest.fn(),
-    putObject: jest.fn()
+    putObject: jest.fn(),
+    hasObject: jest.fn()
   };
 
   const nfeService = {
@@ -58,7 +59,7 @@ describe('CteService', () => {
       ativo: true,
       cnpj: '12345678000199'
     });
-    prisma.certificado.findFirst.mockResolvedValue({ id: 'cert-1' });
+    prisma.certificado.findFirst.mockResolvedValue({ id: 'cert-1', arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin' });
     prisma.nfeDocumento.findMany.mockResolvedValue([]);
     prisma.nfeDocumento.findUnique.mockResolvedValue(null);
     prisma.nfeDocumento.upsert.mockResolvedValue({ id: 'doc-1' });
@@ -72,6 +73,7 @@ describe('CteService', () => {
     });
     nfeService.persistEventDocumentFromExternalSource.mockResolvedValue({});
     storage.putObject.mockResolvedValue(undefined);
+    storage.hasObject.mockResolvedValue(true);
     (cteConsultaClient.consultarPorChave as jest.Mock).mockResolvedValue({
       statusCode: 200,
       cStat: '100',
@@ -457,6 +459,49 @@ describe('CteService', () => {
     expect(result).toMatchObject({
       documentosProcessados: 1,
       falhas: 0
+    });
+  });
+
+  it('retorna falha de certificado quando o arquivo criptografado nao existe no storage local do CT-e', async () => {
+    storage.hasObject.mockResolvedValue(false);
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        numeroNfe: '31969',
+        origem: 'distribuicao_nsu',
+        eventos: []
+      }
+    ]);
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+
+    expect(result).toEqual({
+      documentosProcessados: 1,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 1,
+      detalhes: [
+        {
+          documentoId: 'doc-1',
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          numeroDocumento: '31969',
+          status: 'falha_certificado',
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          mensagem:
+            'Arquivo do certificado nao encontrado no storage local para o CNPJ 12345678000199. Recadastre ou restaure o certificado deste estabelecimento.'
+        }
+      ]
     });
   });
 

@@ -3051,14 +3051,24 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           }
         ]
       },
-      select: { id: true }
+      select: {
+        id: true,
+        arquivoCriptografadoPath: true
+      }
     });
 
     if (!certificate) {
       throw new BadRequestException(`Nenhum certificado ativo e valido encontrado para o CNPJ ${cnpjConsulta}`);
     }
 
-    return certificate;
+    const certificateFileExists = await this.storage.hasObject(certificate.arquivoCriptografadoPath);
+    if (!certificateFileExists) {
+      throw new BadRequestException(
+        `Arquivo do certificado nao encontrado no storage local para o CNPJ ${cnpjConsulta}. Recadastre ou restaure o certificado deste estabelecimento.`
+      );
+    }
+
+    return { id: certificate.id };
   }
 
   private assertInitialCaptureResult(
