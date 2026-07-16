@@ -340,6 +340,7 @@ Observacoes:
 - A vinculacao com o cliente local ocorre por CNPJ do estabelecimento ativo; nao foi necessario adicionar coluna de codigo da empresa da Dominio no schema.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio`, o backend reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, evitando reler o historico inteiro a cada execucao.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, o backend tambem reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, mas faz o download oficial por `consChNFe` para cada chave nova encontrada.
+- Nesse modo, a leitura do catalogo da Dominio considera apenas notas com emissao a partir de `2026-01-02`, o que equivale a buscar somente documentos com data maior que `2026-01-01`.
 - Se o XML retornado pela Dominio for ABRASF/NFS-e em vez de NF-e, o backend redireciona a importacao para o modulo de NFS-e e reaproveita a deduplicacao por `ambiente + chave_acesso` desse armazenamento.
 - XMLs da Dominio com raiz `Baixas` sao ignorados automaticamente, pois representam baixa financeira e nao documento fiscal armazenavel.
 - Chaves de CT-e encontradas no catalogo sao registradas como ignoradas nesse modo, porque o fluxo oficial validado para CT-e nao oferece consulta equivalente por chave.

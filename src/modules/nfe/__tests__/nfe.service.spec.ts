@@ -871,7 +871,7 @@ describe('NfeService', () => {
     expect(dominioXmlSource.listCatalog).toHaveBeenCalledWith({
       cnpjs: ['12345678000199'],
       limit: 300,
-      dataEmissaoInicio: undefined,
+      dataEmissaoInicio: '2026-01-02',
       dataEmissaoFim: undefined,
       chavesAcesso: undefined,
       catalogoIds: [],
@@ -980,6 +980,58 @@ describe('NfeService', () => {
       ],
       failureDetails: []
     });
+  });
+
+  it('continua importacao de NF-e quando a tabela nfe_eventos nao existe', async () => {
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 10n,
+        ultimoNsuDistribuido: 10n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    prisma.nfeDocumento.findUnique
+      .mockRejectedValueOnce(new Error('The table `public.nfe_eventos` does not exist in the current database.'))
+      .mockResolvedValueOnce(null);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documentos localizados',
+      ultNsu: 11n,
+      maxNsu: 99n,
+      documents: [
+        {
+          nsu: 11n,
+          schema: 'procNFe_v4.00',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe35260612345678000199550010000001231000001231">
+      <ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>2026-06-29T10:00:00-03:00</dhEmi></ide>
+      <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
+      <dest><CNPJ>99888777000166</CNPJ><xNome>Cliente Teste</xNome></dest>
+      <total><ICMSTot><vNF>150.00</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat><dhRecbto>2026-06-29T10:00:01-03:00</dhRecbto></infProt></protNFe>
+</nfeProc>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.runNow({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalled();
+    expect(result.documentsSaved).toBe(1);
   });
 
   it('roda execucao global com controles ativos e em erro_api para permitir retentativa', async () => {

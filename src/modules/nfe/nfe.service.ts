@@ -88,6 +88,7 @@ type NfeSyncRunResult = {
 export class NfeService implements OnModuleInit, OnModuleDestroy {
   private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
   private static readonly NIGHTLY_SWEEP_CONFIG_STORAGE_KEY = 'settings/nfe-nightly-sweep.json';
+  private static readonly DOMINIO_CHAVE_DATA_EMISSAO_INICIO = '2026-01-02';
   private readonly logger = new Logger(NfeService.name);
   private autoSyncTimer: NodeJS.Timeout | null = null;
   private nightlySweepTimer: NodeJS.Timeout | null = null;
@@ -1500,6 +1501,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           clienteId: control.clienteId,
           estabelecimentoId: control.estabelecimentoId,
           limit: limitPorControle,
+          dataEmissaoInicio: NfeService.DOMINIO_CHAVE_DATA_EMISSAO_INICIO,
           catalogoIdMinExclusive: this.toSafeCatalogoCursor(control.ultimoNsuConsultado),
           sortDirection: 'asc'
         });
@@ -1926,17 +1928,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
 
     const parsed = this.parser.parse(params.document.xml);
-    const existing = await this.prisma.nfeDocumento.findUnique({
-      where: {
-        ambiente_chaveAcesso: {
-          ambiente: params.ambiente,
-          chaveAcesso: parsed.chaveAcesso
-        }
-      },
-      include: {
-        eventos: true
-      }
-    });
+    const existing = await this.findExistingDocumentoForPersist(params.ambiente, parsed.chaveAcesso);
 
     const cnpjConsulta = this.normalizeCnpj(params.cnpjConsulta);
     const tipoRelacao =
@@ -2395,6 +2387,38 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
       this.logger.warn('Tabela nfe_eventos indisponivel; retornando detalhe de NF-e sem eventos vinculados. Aplique a migration pendente.');
       const documento = await this.prisma.nfeDocumento.findUnique(args);
+      return documento ? { ...documento, eventos: [] } : null;
+    }
+  }
+
+  private async findExistingDocumentoForPersist(
+    ambiente: NfeAmbiente,
+    chaveAcesso: string
+  ): Promise<Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] }) | null> {
+    try {
+      return await this.prisma.nfeDocumento.findUnique({
+        where: {
+          ambiente_chaveAcesso: {
+            ambiente,
+            chaveAcesso
+          }
+        },
+        include: this.nfeDocumentoInclude()
+      });
+    } catch (error) {
+      if (!this.isEventosSchemaUnavailable(error)) {
+        throw error;
+      }
+
+      this.logger.warn('Tabela nfe_eventos indisponivel durante importacao de NF-e; continuando sem eventos vinculados.');
+      const documento = await this.prisma.nfeDocumento.findUnique({
+        where: {
+          ambiente_chaveAcesso: {
+            ambiente,
+            chaveAcesso
+          }
+        }
+      });
       return documento ? { ...documento, eventos: [] } : null;
     }
   }
