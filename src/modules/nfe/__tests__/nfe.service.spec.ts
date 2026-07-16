@@ -1613,4 +1613,46 @@ describe('NfeService', () => {
       falhas: 0
     });
   });
+
+  it('continua sincronizacao manual de eventos quando a tabela nfe_eventos nao existe', async () => {
+    prisma.nfeDocumento.findMany
+      .mockRejectedValueOnce(new Error('The table `public.nfe_eventos` does not exist in the current database.'))
+      .mockResolvedValueOnce([
+        {
+          id: 'doc-1',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: NfeAmbiente.producao,
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          numeroNfe: '123',
+          origem: 'distribuicao_nsu'
+        }
+      ]);
+    (distribuicaoClient.consultarPorChave as jest.Mock).mockResolvedValueOnce({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado por chave',
+      ultNsu: 0n,
+      maxNsu: 0n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-1'],
+      somenteSemEventos: true,
+      limit: 1
+    });
+
+    expect(prisma.nfeDocumento.findMany).toHaveBeenCalledTimes(2);
+    expect(distribuicaoClient.consultarPorChave).toHaveBeenCalledTimes(1);
+    expect(result).toMatchObject({
+      documentosProcessados: 1,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 0
+    });
+  });
 });

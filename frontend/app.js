@@ -1129,7 +1129,10 @@ function onDocumentClick(event) {
     }
     case 'drawer-close':
     case 'overlay-close': {
-      if (state.modal?.kind === 'events-sync-report' && state.modal.running) {
+      if (
+        (state.modal?.kind === 'events-sync-report' || state.modal?.kind === 'past-nsu-recovery-report') &&
+        state.modal.running
+      ) {
         return;
       }
       closeDrawer();
@@ -3659,6 +3662,8 @@ function renderModal() {
       return renderCteViewerModal(state.modal.cteId);
     case 'events-sync-report':
       return renderEventsSyncReportModal();
+    case 'past-nsu-recovery-report':
+      return renderPastNsuRecoveryReportModal();
     case 'dominio-nfe-view':
       return renderDominioNfeViewerModal();
     case 'xml-details':
@@ -4184,6 +4189,87 @@ function renderEventsSyncReportModal() {
         </div>
         <div class="modal-footer">
           ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao da busca manual...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderPastNsuRecoveryReportModal() {
+  if (state.modal?.kind !== 'past-nsu-recovery-report') {
+    return '';
+  }
+
+  const summary = state.modal.summary || {};
+  const rows = Array.isArray(state.modal.rows) ? state.modal.rows : [];
+  const running = Boolean(state.modal.running);
+  const currentMessage = String(state.modal.currentMessage || '').trim();
+  const clientName = String(state.modal.clientName || 'Cliente selecionado');
+  const processedCount = Number(summary?.controlesProcessados || 0);
+  const totalCount = Number(summary?.controlesEncontrados || state.modal.totalCount || 0);
+  const documentosSalvos = Number(summary?.documentosSalvos || 0);
+  const nsusConsultados = Number(summary?.nsusConsultados || 0);
+  const jaExistentes = Number(summary?.nsusIgnoradosComDocumento || 0) + Number(summary?.documentosIgnoradosExistentes || 0);
+  const semDocumento = Number(summary?.semDocumento || 0);
+  const falhas = Number(summary?.falhas || 0);
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="max-width:1120px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Auditoria do reprocessamento de NSUs</h3>
+          <p class="modal-subtitle">${escapeHtml(clientName)}${running ? ' • reprocessamento em andamento.' : ' • reprocessamento concluido.'}</p>
+        </div>
+        <div class="modal-body">
+          ${
+            currentMessage
+              ? `<div style="margin-bottom:14px; padding:12px 14px; border:1px solid #d9e7ff; border-radius:12px; background:#f4f8ff; color:#21446b;">${escapeHtml(currentMessage)}</div>`
+              : ''
+          }
+          <div class="form-grid four" style="margin-bottom:18px;">
+            ${detailItem('Controles processados', `${processedCount}${totalCount ? ` / ${totalCount}` : ''}`)}
+            ${detailItem('NSUs consultados', String(nsusConsultados))}
+            ${detailItem('XMLs salvos', String(documentosSalvos))}
+            ${detailItem('Ja existentes', String(jaExistentes))}
+            ${detailItem('Sem documento', String(semDocumento))}
+            ${detailItem('Falhas', String(falhas))}
+          </div>
+          ${
+            rows.length
+              ? `
+                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:hidden; background:#fff;">
+                  <div style="display:grid; grid-template-columns: minmax(170px, 1.1fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(240px, 1.4fr) minmax(160px, .9fr) minmax(220px, 1.2fr); gap:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                    <div style="padding:12px 14px;">CNPJ consulta</div>
+                    <div style="padding:12px 14px;">Ambiente</div>
+                    <div style="padding:12px 14px;">Faixa NSU</div>
+                    <div style="padding:12px 14px;">Resultado</div>
+                    <div style="padding:12px 14px;">Status</div>
+                    <div style="padding:12px 14px;">Mensagem</div>
+                  </div>
+                  ${rows
+                    .map(
+                      (row) => `
+                        <div style="display:grid; grid-template-columns: minmax(170px, 1.1fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(240px, 1.4fr) minmax(160px, .9fr) minmax(220px, 1.2fr); gap:0; border-bottom:1px solid #eef0f2; align-items:start;">
+                          <div style="padding:14px; font-family:monospace; font-size:12px;">${escapeHtml(row.cnpjConsulta)}</div>
+                          <div style="padding:14px;">${escapeHtml(row.ambienteLabel)}</div>
+                          <div style="padding:14px; font-family:monospace; font-size:12px;">${escapeHtml(row.nsuRangeLabel)}</div>
+                          <div style="padding:14px;">
+                            <strong>${escapeHtml(row.resultLabel)}</strong>
+                            <div style="margin-top:4px; color:#606062;">${escapeHtml(row.detailLabel)}</div>
+                          </div>
+                          <div style="padding:14px;">${statusBadge(row.statusLabel, row.statusTone)}</div>
+                          <div style="padding:14px; color:#606062;">${escapeHtml(row.message)}</div>
+                        </div>
+                      `
+                    )
+                    .join('')}
+                </div>
+              `
+              : `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">Nenhum detalhe retornado para o reprocessamento.</div>`
+          }
+        </div>
+        <div class="modal-footer">
+          ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao do reprocessamento manual...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
         </div>
       </div>
     </div>
@@ -6023,6 +6109,7 @@ async function recoverPastNsusForCurrentXmlClient() {
 
 async function runPastNsuRecovery(clientId = null) {
   const selectedClient = clientId ? findClientById(clientId) : null;
+  const shouldOpenOverlay = Boolean(clientId && state.dataSource === 'api');
 
   if (clientId && !selectedClient) {
     pushToast('Cliente nao encontrado para reprocessamento de NSUs.', 'error');
@@ -6046,6 +6133,24 @@ async function runPastNsuRecovery(clientId = null) {
       `Recuperacao de NSUs iniciada para ${selectedClient?.razaoSocial || 'todos os clientes'}. Esta operacao pode demorar.`,
       'info'
     );
+    if (shouldOpenOverlay) {
+      openPastNsuRecoveryReportModal({
+        clientName: selectedClient?.razaoSocial || 'Cliente selecionado',
+        totalCount: 0,
+        currentMessage: 'Preparando reprocessamento dos NSUs ja consultados...',
+        summary: {
+          controlesEncontrados: 0,
+          controlesProcessados: 0,
+          nsusConsultados: 0,
+          documentosSalvos: 0,
+          nsusIgnoradosComDocumento: 0,
+          documentosIgnoradosExistentes: 0,
+          semDocumento: 0,
+          falhas: 0
+        },
+        rows: []
+      });
+    }
     startExecutionMonitor(
       'Recuperacao',
       selectedClient ? 1 : state.clients.length || 1,
@@ -6060,6 +6165,16 @@ async function runPastNsuRecovery(clientId = null) {
       body: clientId ? { clienteId: clientId } : {},
       timeoutMs: 10 * 60 * 1000
     });
+
+    if (shouldOpenOverlay) {
+      updatePastNsuRecoveryOverlayState({
+        running: false,
+        totalCount: Number(result?.controlesEncontrados || 0),
+        currentMessage: String(result?.ultimaMensagem || 'Reprocessamento manual concluido.'),
+        summary: result,
+        rows: buildPastNsuRecoveryAuditRows(result)
+      });
+    }
 
     state.executionMonitor.total = Number(result?.controlesEncontrados || state.executionMonitor.total || 0);
     state.executionMonitor.processed = Number(result?.controlesProcessados || 0);
@@ -6080,6 +6195,23 @@ async function runPastNsuRecovery(clientId = null) {
   } catch (error) {
     state.executionMonitor.failed += 1;
     finishExecutionMonitor('Recuperacao de NSUs finalizada com falha.');
+    if (shouldOpenOverlay) {
+      updatePastNsuRecoveryOverlayState({
+        running: false,
+        currentMessage: `Falha ao recuperar NSUs passados: ${toErrorMessage(error)}`,
+        summary: {
+          controlesEncontrados: 0,
+          controlesProcessados: 0,
+          nsusConsultados: 0,
+          documentosSalvos: 0,
+          nsusIgnoradosComDocumento: 0,
+          documentosIgnoradosExistentes: 0,
+          semDocumento: 0,
+          falhas: 1
+        },
+        rows: []
+      });
+    }
     pushToast(`Falha ao recuperar NSUs passados: ${toErrorMessage(error)}`, 'error');
   }
 }
@@ -7267,6 +7399,104 @@ function closeModal() {
   }
   state.modal = null;
   render();
+}
+
+function openPastNsuRecoveryReportModal(params) {
+  openModal({
+    kind: 'past-nsu-recovery-report',
+    running: true,
+    clientName: params?.clientName || 'Cliente selecionado',
+    totalCount: Number(params?.totalCount || 0),
+    currentMessage: params?.currentMessage || 'Preparando reprocessamento...',
+    summary: params?.summary || {},
+    rows: Array.isArray(params?.rows) ? params.rows : []
+  });
+}
+
+function updatePastNsuRecoveryOverlayState(patch) {
+  if (state.modal?.kind !== 'past-nsu-recovery-report') {
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    ...patch
+  };
+  render();
+}
+
+function buildPastNsuRecoveryAuditRows(summary) {
+  const details = Array.isArray(summary?.detalhes) ? summary.detalhes : [];
+
+  return details.map((detail) => {
+    const status = resolvePastNsuRecoveryStatus(detail);
+
+    return {
+      cnpjConsulta: formatCnpj(detail?.cnpjConsulta || '-') || '-',
+      ambienteLabel: mapNfseAmbienteLabel(detail?.ambiente),
+      nsuRangeLabel: `${String(detail?.nsuInicial || '1')} ate ${String(detail?.nsuFinal || '0')}`,
+      resultLabel: `${Number(detail?.documentosSalvos || 0)} XML(s) salvo(s)`,
+      detailLabel: `${Number(detail?.nsusConsultados || 0)} NSU(s) consultado(s), ${Number(detail?.documentosIgnoradosExistentes || 0) + Number(detail?.nsusIgnoradosComDocumento || 0)} existente(s), ${Number(detail?.semDocumento || 0)} sem documento`,
+      statusLabel: mapPastNsuRecoveryStatusLabel(status),
+      statusTone: toneFromPastNsuRecoveryStatus(status),
+      message: buildPastNsuRecoveryRowMessage(detail, status)
+    };
+  });
+}
+
+function resolvePastNsuRecoveryStatus(detail) {
+  if (Number(detail?.falhas || 0) > 0) {
+    return 'falha';
+  }
+  if (Number(detail?.documentosSalvos || 0) > 0) {
+    return 'sucesso';
+  }
+  if (Number(detail?.nsusConsultados || 0) > 0 || Number(detail?.nsusIgnoradosComDocumento || 0) > 0) {
+    return 'processado';
+  }
+  return 'sem_acao';
+}
+
+function mapPastNsuRecoveryStatusLabel(status) {
+  switch (status) {
+    case 'sucesso':
+      return 'Concluido';
+    case 'falha':
+      return 'Falha';
+    case 'processado':
+      return 'Processado';
+    default:
+      return 'Sem acao';
+  }
+}
+
+function toneFromPastNsuRecoveryStatus(status) {
+  switch (status) {
+    case 'sucesso':
+      return 'success';
+    case 'falha':
+      return 'danger';
+    case 'processado':
+      return 'info';
+    default:
+      return 'neutral';
+  }
+}
+
+function buildPastNsuRecoveryRowMessage(detail, status) {
+  if (status === 'falha') {
+    return `${Number(detail?.falhas || 0)} falha(s) registrada(s) durante o reprocessamento.`;
+  }
+  if (Number(detail?.documentosSalvos || 0) > 0) {
+    return 'Foram recuperados XMLs faltantes para este controle.';
+  }
+  if (Number(detail?.semDocumento || 0) > 0) {
+    return 'Os NSUs consultados nao retornaram documento aproveitavel.';
+  }
+  if (Number(detail?.nsusIgnoradosComDocumento || 0) > 0 || Number(detail?.documentosIgnoradosExistentes || 0) > 0) {
+    return 'Os documentos desse intervalo ja estavam armazenados.';
+  }
+  return 'Nenhuma acao adicional foi necessaria para este controle.';
 }
 
 function openDrawer(drawer) {
@@ -8854,6 +9084,10 @@ function mapNfeSyncStatusLabel(status) {
 
 function mapNfeAmbienteLabel(ambiente) {
   return ambiente === 'homologacao' ? 'Homologacao' : 'Producao';
+}
+
+function mapNfseAmbienteLabel(ambiente) {
+  return mapNfeAmbienteLabel(ambiente);
 }
 
 function mapNfeTipoLabel(tipoRelacao) {

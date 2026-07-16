@@ -900,6 +900,60 @@ describe('NfseService', () => {
     });
   });
 
+  it('continua sincronizacao manual de eventos quando a tabela nfse_eventos nao existe', async () => {
+    prisma.nfseDocumento.findMany
+      .mockRejectedValueOnce(new Error('The table `public.nfse_eventos` does not exist in the current database.'))
+      .mockResolvedValueOnce([
+        {
+          id: 'doc-evt-3',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: Ambiente.producao,
+          chaveAcesso: '42110092206960810000176000000000055526062205552016',
+          dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+          createdAt: new Date('2026-06-03T12:00:00.000Z')
+        }
+      ]);
+    prisma.certificado.findFirst.mockResolvedValue({
+      id: 'cert-1',
+      validadeFim: new Date('2099-01-01T00:00:00.000Z')
+    });
+    adnClient.getEventosByChave.mockResolvedValue({
+      statusCode: 200,
+      data: {
+        eventos: []
+      }
+    });
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      somenteSemEventos: true,
+      limit: 1
+    });
+
+    expect(prisma.nfseDocumento.findMany).toHaveBeenCalledTimes(2);
+    expect(adnClient.getEventosByChave).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      documentosAnalisados: 1,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 0,
+      detalhes: [
+        {
+          documentoId: 'doc-evt-3',
+          chaveAcesso: '42110092206960810000176000000000055526062205552016',
+          estabelecimentoId: 'estab-1',
+          ambiente: 'producao',
+          status: 'sem_eventos',
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          mensagem: 'Nenhum evento encontrado no ADN'
+        }
+      ]
+    });
+  });
+
   it('bloqueia leitura quando NFS-e nao pertence ao cliente informado', async () => {
     prisma.nfseDocumento.findUnique.mockResolvedValue({
       id: 'doc-5',
