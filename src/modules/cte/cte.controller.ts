@@ -5,6 +5,7 @@ import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { CteService } from './cte.service';
 import { DashboardCteStatsQueryDto, DashboardCteStatsResponseDto } from './dto/dashboard-stats.dto';
 import { DownloadCteDocumentDto } from './dto/download-document.dto';
+import { QueryCteByChaveDto } from './dto/query-by-chave.dto';
 import { QueryCteDto } from './dto/query-cte.dto';
 import { SincronizarCteEventosDto, SincronizarCteEventosResponseDto } from './dto/sincronizar-eventos.dto';
 
@@ -39,6 +40,12 @@ export class CteController {
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   getXml(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
     return this.cteService.getXml(id, query.clienteId);
+  }
+
+  @Post('consultar-chave')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  consultarChave(@Body() dto: QueryCteByChaveDto) {
+    return this.cteService.consultarChave(dto);
   }
 
   @Post('eventos/sincronizar')

@@ -29,6 +29,8 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - `GET /cte/:id`
 - `GET /cte/:id/xml`
 - `GET /cte/dashboard-stats`
+- `POST /cte/consultar-chave`
+- `POST /cte/eventos/sincronizar`
 - `GET /nfe/sync/status?clienteId=...`
 - `POST /nfe/importar-dominio`
 - `POST /nfe/dominio/xml`
@@ -53,6 +55,7 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - homologacao: `https://hom1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx`
 - As URLs acima seguem a relacao oficial de servicos web do portal da NF-e e podem ser sobrescritas por env var.
 - O fluxo atual implementa `distNSU`, `consNSU` e `consChNFe`.
+- O modulo `cte` implementa consulta manual por chave via `CteConsultaV4` e tentativa de captura de eventos retornados pelo autorizador.
 - As rotas manuais permitem testar o ambiente real e recuperar documentos pontuais sem depender do ciclo incremental.
 - A importacao via Dominio consulta `bethadba.EFATENDIMENTO_NFE_CATALOGO` e prioriza XMLs em `bethadba.EFATENDIMENTO_NFE_XML_V2`, usando `bethadba.EFATENDIMENTO_NFE_XML` como fallback. O vinculo local continua sendo feito pelo CNPJ de `bethadba.geempre.cgce_emp`.
 - `POST /nfe/importar-dominio` aceita filtros por `chavesAcesso` e `catalogoIds`, permitindo reimportacao pontual a partir do painel operacional.
@@ -65,10 +68,10 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - XMLs da Dominio com assinatura ABRASF/NFS-e sao redirecionados para `NfseService.importXml`, preservando a deduplicacao do armazenamento de servicos por `ambiente + chave_acesso`.
 - XMLs da Dominio com raiz `Baixas` sao descartados na importacao, porque representam baixa financeira sem XML fiscal util para os modulos de NF-e/NFS-e.
 - XMLs de CT-e (`cteProc`, `CTe`, `resCTe`, modelo `57`) sao bloqueados no modulo de NF-e. Quando vierem da Dominio, o importador os ignora explicitamente para nao contaminar `nfe_documentos`.
-- No modo `dominio_chave`, chaves de CT-e tambem sao ignoradas, porque o fluxo oficial validado para CT-e nao oferece consulta equivalente por chave.
+- No modo `dominio_chave`, chaves de CT-e continuam fora do fluxo `POST /nfe/*`; quando necessario, devem ser consultadas pelo modulo dedicado em `POST /cte/consultar-chave`.
 - O painel da ultima importacao em `Buscas NF-e` pode abrir o XML bruto do catalogo e reimportar um item isolado ou todos os `catalogoIds` retornados na execucao manual.
 - O script `npm run nfe:separar-cte -- --apply` varre `nfe_documentos`, classifica os XMLs salvos e marca CT-es ja persistidos em `schemaDoc`, permitindo que o modulo de NF-e os exclua das listagens e do dashboard sem migration adicional.
-- O modulo `cte` reaproveita `nfe_documentos` como armazenamento, mas expoe consulta separada para documentos de transporte, incluindo `GET /cte`, `GET /cte/:id`, `GET /cte/:id/xml` e `GET /cte/dashboard-stats`.
+- O modulo `cte` reaproveita `nfe_documentos` como armazenamento, mas expoe consulta separada para documentos de transporte, incluindo `GET /cte`, `GET /cte/:id`, `GET /cte/:id/xml`, `GET /cte/dashboard-stats`, `POST /cte/consultar-chave` e `POST /cte/eventos/sincronizar`.
 - `GET /nfe` e `GET /cte` agora aceitam `page` e `pageSize` (padrao `100`, maximo `200`) e retornam `{ items, total, page, pageSize, totalPages }`, permitindo paginacao real no painel de armazenados.
 
 ## Operacao recomendada

@@ -8,6 +8,11 @@ export interface ParsedCte {
   dataEmissao?: Date;
   dataAutorizacao?: Date;
   valorTotal?: string;
+  status?: string;
+  cnpjEmitente?: string;
+  razaoSocialEmitente?: string;
+  cnpjDestinatario?: string;
+  razaoSocialDestinatario?: string;
   schemaDoc?: string;
 }
 
@@ -22,11 +27,24 @@ export class CteXmlParserService {
       dataEmissao: this.parseDate(this.extract(xml, ['dhEmi', 'dEmi'])),
       dataAutorizacao: this.parseDate(this.extract(xml, ['dhRecbto', 'dhAut'])),
       valorTotal: this.extractNestedAny(xml, ['vPrest'], ['vTPrest', 'vRec']) ?? this.extract(xml, ['vTPrest', 'vRec']),
+      status: this.extract(xml, ['xMotivo']),
+      cnpjEmitente: this.extractNestedAny(xml, ['emit'], ['CNPJ', 'CPF']) ?? this.extract(xml, ['CNPJCPF']),
+      razaoSocialEmitente: this.extractNestedAny(xml, ['emit'], ['xNome']),
+      cnpjDestinatario:
+        this.extractNestedAny(xml, ['dest', 'rem', 'receb'], ['CNPJ', 'CPF']) ??
+        this.extract(xml, ['CNPJDest', 'CNPJRem']),
+      razaoSocialDestinatario:
+        this.extractNestedAny(xml, ['dest', 'rem', 'receb'], ['xNome']) ??
+        this.extract(xml, ['xNomeDest', 'xNomeRem']),
       schemaDoc: this.detectSchemaDoc(xml)
     };
   }
 
   private detectSchemaDoc(xml: string): string | undefined {
+    if (/<(?:\w+:)?retConsSitCTe\b/i.test(xml)) {
+      return 'retConsSitCTe_v4.00';
+    }
+
     if (/<(?:\w+:)?resCTe\b/i.test(xml)) {
       return 'resCTe_v1.00';
     }

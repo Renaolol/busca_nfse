@@ -103,6 +103,11 @@ Veja `.env.example`.
 - `NFE_DISTRIBUICAO_URL_PRODUCAO` e `NFE_DISTRIBUICAO_URL_HOMOLOGACAO`: URLs do `NFeDistribuicaoDFe` do Ambiente Nacional publicadas no portal da NF-e.
 - `NFE_DISTRIBUICAO_TIMEOUT_MS`: timeout das chamadas SOAP de distribuicao NF-e.
 - `NFE_DISTRIBUICAO_REJECT_UNAUTHORIZED`: controle de validacao TLS do endpoint NF-e.
+- `CTE_CONSULTA_CLIENT_MODE`: `mock` ou `real` para ativar o adapter de consulta CT-e por chave.
+- `CTE_CONSULTA_URL_PRODUCAO` e `CTE_CONSULTA_URL_HOMOLOGACAO`: endpoint SOAP do `CteConsultaV4` usado pelo backend.
+- `CTE_CONSULTA_LAYOUT_VERSION`: versao do layout SOAP/XML de consulta CT-e (padrao `4.00`).
+- `CTE_CONSULTA_TIMEOUT_MS`: timeout das chamadas SOAP de consulta CT-e.
+- `CTE_CONSULTA_REJECT_UNAUTHORIZED`: controle de validacao TLS do endpoint CT-e.
 - `NFE_SYNC_SOURCE_MODE`: `distribuicao`, `dominio` (usa XML da Dominio) ou `dominio_chave` (usa `EFATENDIMENTO_NFE_CATALOGO` e consulta `consChNFe` por chave).
 - `DOMINIO_NFE_SOURCE_MODE`: `mock` ou `real` para ativar o adapter da Dominio.
 - `DOMINIO_ODBC_CONNECTION_STRING`: string ODBC da Dominio.
@@ -306,6 +311,8 @@ Rotas principais:
 - `GET /cte/:id`
 - `GET /cte/:id/xml`
 - `GET /cte/dashboard-stats`
+- `POST /cte/consultar-chave`
+- `POST /cte/eventos/sincronizar`
 - `GET /nfe/sync/status?clienteId=...`
 - `POST /nfe/importar-dominio`
 - `POST /nfe/dominio/xml`
@@ -322,6 +329,8 @@ Observacoes:
 - `POST /nfe/sync/rodar-agora` executa a distribuicao manual e persiste os documentos retornados.
 - `POST /nfe/sync/consultar-nsu` consulta um NSU pontual via `consNSU`, com opcao de persistir o documento retornado.
 - `POST /nfe/sync/consultar-chave` consulta uma NF-e especifica via `consChNFe`, com opcao de persistir o retorno.
+- `POST /cte/consultar-chave` consulta um CT-e especifico via `CteConsultaV4`, persiste o resumo/XML retornado e tenta aproveitar eventos quando o autorizador devolver `procEventoCTe`.
+- `POST /cte/eventos/sincronizar` reconsulta CT-es ja armazenados por chave de acesso para tentar importar eventos vinculados no mesmo storage compartilhado.
 - A deduplicacao de NF-e tambem ocorre por `ambiente + chave_acesso`.
 - `POST /nfe/importar-dominio` consulta a base da Dominio via ODBC, relaciona `bethadba.geempre.cgce_emp` com `cliente_estabelecimentos.cnpj` e reaproveita o mesmo pipeline de persistencia/deduplicacao do endpoint manual. O exportador prioriza `bethadba.EFATENDIMENTO_NFE_XML_V2` e usa `bethadba.EFATENDIMENTO_NFE_XML` como fallback quando necessario.
 - `POST /nfe/importar-dominio` tambem aceita `catalogoIds` para reimportacao pontual de XMLs ja localizados pela Dominio.
@@ -343,7 +352,7 @@ Observacoes:
 - Nesse modo, a leitura do catalogo da Dominio considera apenas notas com emissao a partir de `2026-01-02`, o que equivale a buscar somente documentos com data maior que `2026-01-01`.
 - Se o XML retornado pela Dominio for ABRASF/NFS-e em vez de NF-e, o backend redireciona a importacao para o modulo de NFS-e e reaproveita a deduplicacao por `ambiente + chave_acesso` desse armazenamento.
 - XMLs da Dominio com raiz `Baixas` sao ignorados automaticamente, pois representam baixa financeira e nao documento fiscal armazenavel.
-- Chaves de CT-e encontradas no catalogo sao registradas como ignoradas nesse modo, porque o fluxo oficial validado para CT-e nao oferece consulta equivalente por chave.
+- Chaves de CT-e encontradas no catalogo continuam fora do fluxo `POST /nfe/*`; a consulta por chave de CT-e agora ocorre no modulo dedicado `POST /cte/consultar-chave`.
 - O painel da ultima importacao consegue abrir o XML bruto do catalogo e disparar reimportacao pontual ou em lote usando esses `catalogoIds`.
 - Para revisar documentos de transporte que ja foram gravados em `nfe_documentos`, rode `npm run nfe:separar-cte` para gerar um relatorio em `.tmp/nfe-cte-separation` e `npm run nfe:separar-cte -- --apply` para marcar os CT-es detectados em `schemaDoc`, permitindo que o modulo de NF-e deixe de exibi-los nas listagens e indicadores.
 - O frontend agora expõe um menu dedicado `XMLs CT-e`, paralelo a `XMLs NFS-e` e `XMLs NF-e`, com filtros, visualizacao do XML e download por cliente.
@@ -352,6 +361,7 @@ Observacoes:
 - `GET /nfse`, `GET /nfe` e `GET /cte` aceitam `page` e `pageSize` (padrao `100`, maximo `200`) e retornam `{ items, total, page, pageSize, totalPages }`.
 - Os tres endpoints tambem aceitam `all=true` para retornar todos os registros que casam com o filtro de uma vez so, ignorando `page`/`pageSize` (limite de seguranca de 10000 itens por chamada). O painel (telas `Notas`/`XMLs NFS-e`, `XMLs NF-e` e `XMLs CT-e`) usa `all=true` por padrao ao clicar em buscar, entao a listagem ja vem completa sem precisar paginar; se o total ultrapassar o limite de seguranca, um aviso informa quantos itens ficaram de fora.
 - Quando `NFE_DISTRIBUICAO_CLIENT_MODE=real`, o sistema consulta `distNSU`, `consNSU` e `consChNFe`, descompacta `docZip` e armazena resumos `resNFe` e XMLs completos retornados pelo Ambiente Nacional.
+- Quando `CTE_CONSULTA_CLIENT_MODE=real`, o sistema usa o endpoint configurado de `CteConsultaV4` para consultar CT-e por chave com o certificado ativo do estabelecimento e pode persistir `retConsSitCTe`, `cteProc`, `CTe`, `procEventoCTe` e `eventoCTe` quando retornados pelo autorizador.
 
 ## Guia de layout do DANFSE
 

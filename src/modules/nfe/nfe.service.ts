@@ -1910,6 +1910,18 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  async persistEventDocumentFromExternalSource(params: {
+    clienteId: string;
+    estabelecimentoId: string;
+    ambiente: NfeAmbiente;
+    cnpjConsulta?: string;
+    document: NfeDistribuicaoDocument;
+    origem: NfeDocumentoOrigem;
+    tipoRelacaoForcada?: NfeTipoRelacao;
+  }) {
+    return this.persistDocument(params);
+  }
+
   private async persistDocument(params: {
     clienteId: string;
     estabelecimentoId: string;

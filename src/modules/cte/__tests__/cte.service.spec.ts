@@ -3,23 +3,41 @@ import { CteXmlParserService } from '../cte-xml-parser.service';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LocalStorageService } from '../../storage/storage.service';
 import { NfeService } from '../../nfe/nfe.service';
+import { CteConsultaClient } from '../../../integrations/cte-consulta/cte-consulta.types';
+import { NfeAmbiente } from '@prisma/client';
 
 describe('CteService', () => {
   const prisma = {
+    cliente: {
+      findUnique: jest.fn()
+    },
+    clienteEstabelecimento: {
+      findUnique: jest.fn()
+    },
+    certificado: {
+      findFirst: jest.fn()
+    },
     nfeDocumento: {
       count: jest.fn(),
       groupBy: jest.fn(),
       findMany: jest.fn(),
-      findUnique: jest.fn()
+      findUnique: jest.fn(),
+      upsert: jest.fn()
     }
   };
 
   const storage = {
-    getObject: jest.fn()
+    getObject: jest.fn(),
+    putObject: jest.fn()
   };
 
   const nfeService = {
-    sincronizarEventosDocumentos: jest.fn()
+    sincronizarEventosDocumentos: jest.fn(),
+    persistEventDocumentFromExternalSource: jest.fn()
+  };
+
+  const cteConsultaClient: CteConsultaClient = {
+    consultarPorChave: jest.fn()
   };
 
   const parser = new CteXmlParserService();
@@ -27,13 +45,23 @@ describe('CteService', () => {
     prisma as unknown as PrismaService,
     storage as unknown as LocalStorageService,
     parser,
-    nfeService as unknown as NfeService
+    nfeService as unknown as NfeService,
+    cteConsultaClient
   );
 
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.cliente.findUnique.mockResolvedValue({ id: 'cliente-1' });
+    prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
+      id: 'est-1',
+      clienteId: 'cliente-1',
+      ativo: true,
+      cnpj: '12345678000199'
+    });
+    prisma.certificado.findFirst.mockResolvedValue({ id: 'cert-1' });
     prisma.nfeDocumento.findMany.mockResolvedValue([]);
     prisma.nfeDocumento.findUnique.mockResolvedValue(null);
+    prisma.nfeDocumento.upsert.mockResolvedValue({ id: 'doc-1' });
     nfeService.sincronizarEventosDocumentos.mockResolvedValue({
       documentosProcessados: 0,
       documentosComEventos: 0,
@@ -41,6 +69,15 @@ describe('CteService', () => {
       eventosImportados: 0,
       falhas: 0,
       detalhes: []
+    });
+    nfeService.persistEventDocumentFromExternalSource.mockResolvedValue({});
+    storage.putObject.mockResolvedValue(undefined);
+    (cteConsultaClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '100',
+      xMotivo: 'CT-e localizado por chave',
+      documents: [],
+      rawResponse: { mock: true }
     });
   });
 
@@ -212,20 +249,149 @@ describe('CteService', () => {
     await expect(service.findOne('doc-1', 'cliente-1')).rejects.toThrow('CT-e nao encontrado');
   });
 
-  it('delegates sincronizacao de eventos ao servico compartilhado', async () => {
-    await service.sincronizarEventos({
+  it('consulta CT-e por chave e persiste resumo retornado pelo autorizador', async () => {
+    (cteConsultaClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '100',
+      xMotivo: 'Autorizado o uso do CT-e',
+      documents: [
+        {
+          schema: 'retConsSitCTe_v4.00',
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<retConsSitCTe xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <cStat>100</cStat>
+  <xMotivo>Autorizado o uso do CT-e</xMotivo>
+  <chCTe>42260795849600000135570010000319691243772228</chCTe>
+  <protCTe>
+    <infProt>
+      <chCTe>42260795849600000135570010000319691243772228</chCTe>
+      <dhRecbto>2026-07-15T10:00:01-03:00</dhRecbto>
+    </infProt>
+  </protCTe>
+</retConsSitCTe>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.consultarChave({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'est-1',
+      chaveAcesso: '42260795849600000135570010000319691243772228',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(cteConsultaClient.consultarPorChave).toHaveBeenCalledWith({
+      chaveAcesso: '42260795849600000135570010000319691243772228',
+      ambiente: NfeAmbiente.producao,
+      certificateId: 'cert-1'
+    });
+    expect(storage.putObject).toHaveBeenCalledWith(
+      expect.stringContaining('/resumos/42260795849600000135570010000319691243772228.xml'),
+      expect.any(String)
+    );
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          modelo: '57',
+          schemaDoc: 'retConsSitCTe_v4.00'
+        })
+      })
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        statusCode: 200,
+        cStat: '100',
+        documentosEncontrados: 1,
+        documentosPersistidos: 1,
+        eventosEncontrados: 0,
+        eventosPersistidos: 0
+      })
+    );
+  });
+
+  it('sincroniza eventos de CT-e consultando o autorizador por chave', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        numeroNfe: '31969',
+        ambiente: NfeAmbiente.producao,
+        origem: 'distribuicao_nsu',
+        eventos: []
+      }
+    ]);
+    (cteConsultaClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '100',
+      xMotivo: 'Consulta realizada',
+      documents: [
+        {
+          schema: 'retConsSitCTe_v4.00',
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          xml: '<retConsSitCTe xmlns="http://www.portalfiscal.inf.br/cte"><chCTe>42260795849600000135570010000319691243772228</chCTe></retConsSitCTe>'
+        },
+        {
+          schema: 'procEventoCTe_v4.00',
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<procEventoCTe xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <eventoCTe versao="4.00">
+    <infEvento>
+      <tpEvento>110111</tpEvento>
+      <chCTe>42260795849600000135570010000319691243772228</chCTe>
+      <dhEvento>2026-07-15T11:00:00-03:00</dhEvento>
+    </infEvento>
+  </eventoCTe>
+</procEventoCTe>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.sincronizarEventos({
       clienteId: 'cliente-1',
       documentoIds: ['doc-1'],
       somenteSemEventos: false,
       limit: 1
     });
 
-    expect(nfeService.sincronizarEventosDocumentos).toHaveBeenCalledWith({
-      clienteId: 'cliente-1',
-      documentoIds: ['doc-1'],
-      somenteSemEventos: false,
-      limit: 1,
-      filtro: 'cte'
+    expect(cteConsultaClient.consultarPorChave).toHaveBeenCalledWith({
+      chaveAcesso: '42260795849600000135570010000319691243772228',
+      ambiente: NfeAmbiente.producao,
+      certificateId: 'cert-1'
+    });
+    expect(nfeService.persistEventDocumentFromExternalSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        ambiente: NfeAmbiente.producao,
+        document: expect.objectContaining({
+          schema: 'procEventoCTe_v4.00'
+        })
+      })
+    );
+    expect(result).toEqual({
+      documentosProcessados: 1,
+      documentosComEventos: 1,
+      eventosEncontrados: 1,
+      eventosImportados: 1,
+      falhas: 0,
+      detalhes: [
+        {
+          documentoId: 'doc-1',
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          numeroDocumento: '31969',
+          status: 'sincronizado',
+          eventosEncontrados: 1,
+          eventosImportados: 1,
+          mensagem: 'Consulta realizada'
+        }
+      ]
     });
   });
 });

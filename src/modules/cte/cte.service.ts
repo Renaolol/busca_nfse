@@ -1,11 +1,14 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Certificado, NfeAmbiente, NfeDocumentoOrigem, NfeTipoRelacao, Prisma } from '@prisma/client';
+import { createHash } from 'node:crypto';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
+import { CTE_CONSULTA_CLIENT, CteConsultaClient, CteConsultaDocument, CteConsultaResult } from '../../integrations/cte-consulta/cte-consulta.types';
 import { NfeService } from '../nfe/nfe.service';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CteXmlParserService } from './cte-xml-parser.service';
 import { DashboardCteStatsQueryDto } from './dto/dashboard-stats.dto';
+import { QueryCteByChaveDto } from './dto/query-by-chave.dto';
 import { SincronizarCteEventosDto } from './dto/sincronizar-eventos.dto';
 import { QueryCteDto } from './dto/query-cte.dto';
 
@@ -17,7 +20,8 @@ export class CteService {
     private readonly prisma: PrismaService,
     private readonly storage: LocalStorageService,
     private readonly cteXmlParser: CteXmlParserService,
-    private readonly nfeService: NfeService
+    private readonly nfeService: NfeService,
+    @Inject(CTE_CONSULTA_CLIENT) private readonly cteConsultaClient: CteConsultaClient
   ) {}
 
   async findAll(query: QueryCteDto) {
@@ -151,14 +155,138 @@ export class CteService {
     };
   }
 
-  async sincronizarEventos(dto: SincronizarCteEventosDto) {
-    return this.nfeService.sincronizarEventosDocumentos({
-      clienteId: dto.clienteId,
-      documentoIds: dto.documentoIds,
-      somenteSemEventos: dto.somenteSemEventos,
-      limit: dto.limit,
-      filtro: 'cte'
+  async consultarChave(dto: QueryCteByChaveDto) {
+    await this.ensureClient(dto.clienteId);
+    const establishment = await this.getEstablishmentOrThrow(dto.estabelecimentoId, dto.clienteId);
+    const ambiente = dto.ambiente ?? NfeAmbiente.producao;
+    const certificate = await this.findActiveCertificateOrThrow(dto.clienteId, dto.estabelecimentoId, establishment.cnpj);
+    const result = await this.cteConsultaClient.consultarPorChave({
+      chaveAcesso: dto.chaveAcesso,
+      ambiente,
+      certificateId: certificate.id
     });
+
+    return this.handleConsultaChaveResult({
+      clienteId: dto.clienteId,
+      estabelecimentoId: dto.estabelecimentoId,
+      ambiente,
+      cnpjConsulta: establishment.cnpj,
+      persistir: dto.persistir !== false,
+      tentarEventos: dto.tentarEventos !== false,
+      requestedChave: dto.chaveAcesso,
+      result
+    });
+  }
+
+  async sincronizarEventos(dto: SincronizarCteEventosDto) {
+    await this.ensureClient(dto.clienteId);
+
+    const limit = dto.limit ?? 50;
+    const documents = await this.findManyDocumentosForEventoSync({
+      where: this.buildEventoSyncWhere({
+        clienteId: dto.clienteId,
+        documentoIds: dto.documentoIds,
+        somenteSemEventos: dto.somenteSemEventos
+      }),
+      include: this.documentInclude(),
+      orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
+      take: limit
+    });
+
+    const detalhes: Array<{
+      documentoId: string;
+      chaveAcesso: string;
+      numeroDocumento?: string | null;
+      status: 'sincronizado' | 'sem_eventos' | 'falha_api' | 'falha_certificado';
+      eventosEncontrados: number;
+      eventosImportados: number;
+      mensagem?: string;
+    }> = [];
+    let documentosComEventos = 0;
+    let eventosEncontrados = 0;
+    let eventosImportados = 0;
+    let falhas = 0;
+
+    for (const document of documents) {
+      const numeroDocumento = document.numeroNfe ?? null;
+
+      try {
+        const establishment = await this.getEstablishmentOrThrow(document.estabelecimentoId, document.clienteId);
+        const certificate = await this.findActiveCertificateOrThrow(document.clienteId, document.estabelecimentoId, establishment.cnpj);
+        const result = await this.cteConsultaClient.consultarPorChave({
+          chaveAcesso: document.chaveAcesso,
+          ambiente: document.ambiente,
+          certificateId: certificate.id
+        });
+
+        if (result.statusCode !== 200) {
+          falhas += 1;
+          detalhes.push({
+            documentoId: document.id,
+            chaveAcesso: document.chaveAcesso,
+            numeroDocumento,
+            status: 'falha_api',
+            eventosEncontrados: 0,
+            eventosImportados: 0,
+            mensagem: result.xMotivo ?? `Consulta de eventos retornou HTTP ${result.statusCode}.`
+          });
+          continue;
+        }
+
+        const eventDocuments = this.extractEventDocuments(result.documents);
+        const importedBefore = eventosImportados;
+
+        for (const eventDocument of eventDocuments) {
+          await this.nfeService.persistEventDocumentFromExternalSource({
+            clienteId: document.clienteId,
+            estabelecimentoId: document.estabelecimentoId,
+            ambiente: document.ambiente,
+            cnpjConsulta: establishment.cnpj,
+            document: {
+              schema: eventDocument.schema,
+              xml: eventDocument.xml,
+              chaveAcesso: eventDocument.chaveAcesso
+            },
+            origem: document.origem ?? NfeDocumentoOrigem.distribuicao_nsu
+          });
+          eventosImportados += 1;
+        }
+
+        if (eventDocuments.length > 0) {
+          documentosComEventos += 1;
+        }
+        eventosEncontrados += eventDocuments.length;
+        detalhes.push({
+          documentoId: document.id,
+          chaveAcesso: document.chaveAcesso,
+          numeroDocumento,
+          status: eventDocuments.length > 0 ? 'sincronizado' : 'sem_eventos',
+          eventosEncontrados: eventDocuments.length,
+          eventosImportados: eventosImportados - importedBefore,
+          mensagem: result.xMotivo
+        });
+      } catch (error) {
+        falhas += 1;
+        detalhes.push({
+          documentoId: document.id,
+          chaveAcesso: document.chaveAcesso,
+          numeroDocumento,
+          status: this.isCertificateSelectionError(error) ? 'falha_certificado' : 'falha_api',
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          mensagem: error instanceof Error ? error.message : 'Erro inesperado'
+        });
+      }
+    }
+
+    return {
+      documentosProcessados: documents.length,
+      documentosComEventos,
+      eventosEncontrados,
+      eventosImportados,
+      falhas,
+      detalhes
+    };
   }
 
   private buildBaseWhere(query: QueryCteDto): Prisma.NfeDocumentoWhereInput {
@@ -243,6 +371,26 @@ export class CteService {
     return where;
   }
 
+  private buildEventoSyncWhere(params: {
+    clienteId: string;
+    documentoIds?: string[];
+    somenteSemEventos?: boolean;
+  }): Prisma.NfeDocumentoWhereInput {
+    const where = this.createCteWhere();
+    const andConditions = this.getAndConditions(where);
+    andConditions.push({ clienteId: params.clienteId });
+
+    if (params.documentoIds?.length) {
+      andConditions.push({ id: { in: params.documentoIds } });
+    }
+
+    if (params.somenteSemEventos !== false) {
+      andConditions.push({ eventos: { none: {} } });
+    }
+
+    return where;
+  }
+
   private createCteWhere(): Prisma.NfeDocumentoWhereInput {
     return {
       AND: [
@@ -286,6 +434,117 @@ export class CteService {
     };
   }
 
+  private async persistDocument(params: {
+    clienteId: string;
+    estabelecimentoId: string;
+    ambiente: NfeAmbiente;
+    cnpjConsulta?: string;
+    document: CteConsultaDocument;
+    origem: NfeDocumentoOrigem;
+  }) {
+    const parsed = this.cteXmlParser.parse(params.document.xml);
+    const chaveAcesso = parsed.chaveAcesso ?? this.normalizeChaveAcesso(params.document.chaveAcesso);
+    if (!chaveAcesso) {
+      throw new BadRequestException('Nao foi possivel localizar chave de acesso no retorno da consulta de CT-e');
+    }
+
+    const existing = await this.prisma.nfeDocumento.findUnique({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente: params.ambiente,
+          chaveAcesso
+        }
+      }
+    });
+
+    const cnpjConsulta = this.normalizeCnpj(params.cnpjConsulta);
+    const tipoRelacao =
+      parsed.cnpjEmitente && cnpjConsulta && parsed.cnpjEmitente === cnpjConsulta
+        ? NfeTipoRelacao.emitida
+        : parsed.cnpjDestinatario && cnpjConsulta && parsed.cnpjDestinatario === cnpjConsulta
+          ? NfeTipoRelacao.recebida
+          : existing?.tipoRelacao ?? null;
+
+    const dataReferencia = parsed.dataEmissao ?? parsed.dataAutorizacao ?? new Date();
+    const year = dataReferencia.getUTCFullYear();
+    const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
+    const cnpjPasta = parsed.cnpjEmitente ?? parsed.cnpjDestinatario ?? cnpjConsulta ?? 'sem-cnpj';
+    const storagePrefix = `nfe/${params.ambiente}/${cnpjPasta}/${year}/${month}`;
+    const isFull = ['CTe_v4.00', 'cteProc_v4.00'].includes(parsed.schemaDoc ?? params.document.schema);
+    const storageKey = `${storagePrefix}/${isFull ? 'xml' : 'resumos'}/${chaveAcesso}.xml`;
+    await this.storage.putObject(storageKey, params.document.xml);
+    const hash = createHash('sha256').update(params.document.xml, 'utf8').digest('hex');
+
+    const updateData: Prisma.NfeDocumentoUncheckedUpdateInput = {
+      clienteId: params.clienteId,
+      estabelecimentoId: params.estabelecimentoId,
+      numeroNfe: parsed.numeroCte ?? existing?.numeroNfe,
+      serie: parsed.serie ?? existing?.serie,
+      modelo: parsed.modelo ?? existing?.modelo ?? '57',
+      dataEmissao: parsed.dataEmissao ?? existing?.dataEmissao,
+      dataAutorizacao: parsed.dataAutorizacao ?? existing?.dataAutorizacao,
+      status: parsed.status ?? existing?.status,
+      tipoRelacao,
+      schemaDoc: parsed.schemaDoc ?? params.document.schema,
+      cnpjEmitente: parsed.cnpjEmitente ?? existing?.cnpjEmitente,
+      razaoSocialEmitente: parsed.razaoSocialEmitente ?? existing?.razaoSocialEmitente,
+      cnpjDestinatario: parsed.cnpjDestinatario ?? existing?.cnpjDestinatario,
+      razaoSocialDestinatario: parsed.razaoSocialDestinatario ?? existing?.razaoSocialDestinatario,
+      valorTotal: parsed.valorTotal ? new Prisma.Decimal(parsed.valorTotal) : existing?.valorTotal,
+      origem: params.origem,
+      updatedAt: new Date(),
+      ...(isFull
+        ? {
+            xmlCompletoDisponivel: true,
+            xmlCompletoPath: storageKey,
+            hashXmlCompleto: hash
+          }
+        : {
+            resumoDisponivel: true,
+            xmlResumoPath: storageKey,
+            hashResumo: hash
+          })
+    };
+
+    const createData: Prisma.NfeDocumentoUncheckedCreateInput = {
+      clienteId: params.clienteId,
+      estabelecimentoId: params.estabelecimentoId,
+      ambiente: params.ambiente,
+      chaveAcesso,
+      numeroNfe: parsed.numeroCte,
+      serie: parsed.serie,
+      modelo: parsed.modelo ?? '57',
+      dataEmissao: parsed.dataEmissao,
+      dataAutorizacao: parsed.dataAutorizacao,
+      status: parsed.status,
+      tipoRelacao,
+      schemaDoc: parsed.schemaDoc ?? params.document.schema,
+      resumoDisponivel: !isFull,
+      xmlCompletoDisponivel: isFull,
+      cnpjEmitente: parsed.cnpjEmitente,
+      razaoSocialEmitente: parsed.razaoSocialEmitente,
+      cnpjDestinatario: parsed.cnpjDestinatario,
+      razaoSocialDestinatario: parsed.razaoSocialDestinatario,
+      valorTotal: parsed.valorTotal ? new Prisma.Decimal(parsed.valorTotal) : undefined,
+      xmlResumoPath: isFull ? undefined : storageKey,
+      xmlCompletoPath: isFull ? storageKey : undefined,
+      hashResumo: isFull ? undefined : hash,
+      hashXmlCompleto: isFull ? hash : undefined,
+      origem: params.origem
+    };
+
+    return this.prisma.nfeDocumento.upsert({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente: params.ambiente,
+          chaveAcesso
+        }
+      },
+      update: updateData,
+      create: createData
+    });
+  }
+
   private async findManyDocumentosWithEventos(
     args: Omit<Prisma.NfeDocumentoFindManyArgs, 'include'>
   ): Promise<Array<Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })>> {
@@ -301,6 +560,34 @@ export class CteService {
 
       this.logger.warn('Tabela nfe_eventos indisponivel; retornando CT-e sem eventos vinculados. Aplique a migration pendente.');
       const documentos = await this.prisma.nfeDocumento.findMany(args);
+      return documentos.map((documento) => ({
+        ...documento,
+        eventos: []
+      }));
+    }
+  }
+
+  private async findManyDocumentosForEventoSync(
+    args: Prisma.NfeDocumentoFindManyArgs
+  ): Promise<Array<Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })>> {
+    try {
+      return (await this.prisma.nfeDocumento.findMany(args)) as Array<
+        Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })
+      >;
+    } catch (error) {
+      if (!this.isEventosSchemaUnavailable(error)) {
+        throw error;
+      }
+
+      this.logger.warn(
+        'Tabela nfe_eventos indisponivel durante sincronizacao de eventos de CT-e; repetindo consulta sem filtro relacional.'
+      );
+      const { where, ...rest } = args;
+      delete rest.include;
+      const documentos = await this.prisma.nfeDocumento.findMany({
+        ...rest,
+        where: this.removeEventosRelationFilter(where)
+      });
       return documentos.map((documento) => ({
         ...documento,
         eventos: []
@@ -388,6 +675,222 @@ export class CteService {
 
     const digits = value.replace(/\D/g, '');
     return digits || undefined;
+  }
+
+  private normalizeChaveAcesso(value?: string): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const digits = value.replace(/\D/g, '');
+    return digits.length === 44 ? digits : undefined;
+  }
+
+  private removeEventosRelationFilter(
+    where?: Prisma.NfeDocumentoWhereInput
+  ): Prisma.NfeDocumentoWhereInput | undefined {
+    if (!where) {
+      return where;
+    }
+
+    const next: Prisma.NfeDocumentoWhereInput = { ...where };
+
+    if ('eventos' in next) {
+      delete next.eventos;
+    }
+
+    if (Array.isArray(next.AND)) {
+      next.AND = next.AND
+        .map((condition) => this.removeEventosRelationFilter(condition))
+        .filter((condition): condition is Prisma.NfeDocumentoWhereInput => Boolean(condition));
+      if (next.AND.length === 0) {
+        delete next.AND;
+      }
+    } else if (next.AND) {
+      const cleanedAnd = this.removeEventosRelationFilter(next.AND);
+      if (cleanedAnd) {
+        next.AND = cleanedAnd;
+      } else {
+        delete next.AND;
+      }
+    }
+
+    if (Array.isArray(next.OR)) {
+      next.OR = next.OR
+        .map((condition) => this.removeEventosRelationFilter(condition))
+        .filter((condition): condition is Prisma.NfeDocumentoWhereInput => Boolean(condition));
+      if (next.OR.length === 0) {
+        delete next.OR;
+      }
+    }
+
+    if (Array.isArray(next.NOT)) {
+      next.NOT = next.NOT
+        .map((condition) => this.removeEventosRelationFilter(condition))
+        .filter((condition): condition is Prisma.NfeDocumentoWhereInput => Boolean(condition));
+      if (next.NOT.length === 0) {
+        delete next.NOT;
+      }
+    } else if (next.NOT) {
+      const cleanedNot = this.removeEventosRelationFilter(next.NOT);
+      if (cleanedNot) {
+        next.NOT = cleanedNot;
+      } else {
+        delete next.NOT;
+      }
+    }
+
+    return Object.keys(next).length > 0 ? next : undefined;
+  }
+
+  private isEventDocument(document: CteConsultaDocument): boolean {
+    return ['eventoCTe', 'procEventoCTe'].some((prefix) => document.schema.startsWith(prefix)) || /<(?:\w+:)?(?:procEventoCTe|eventoCTe)\b/i.test(document.xml);
+  }
+
+  private extractEventDocuments(documents: CteConsultaDocument[]): CteConsultaDocument[] {
+    const seen = new Set<string>();
+    const filtered: CteConsultaDocument[] = [];
+
+    for (const document of documents) {
+      if (!this.isEventDocument(document)) {
+        continue;
+      }
+
+      const signature = `${document.schema}|${createHash('sha256').update(document.xml, 'utf8').digest('hex')}`;
+      if (seen.has(signature)) {
+        continue;
+      }
+
+      seen.add(signature);
+      filtered.push(document);
+    }
+
+    return filtered;
+  }
+
+  private async handleConsultaChaveResult(params: {
+    clienteId: string;
+    estabelecimentoId: string;
+    ambiente: NfeAmbiente;
+    cnpjConsulta: string;
+    persistir: boolean;
+    tentarEventos: boolean;
+    requestedChave: string;
+    result: CteConsultaResult;
+  }) {
+    let documentosPersistidos = 0;
+    let eventosPersistidos = 0;
+    const documentos = params.result.documents.map((document) => ({
+      schema: document.schema,
+      chaveAcesso: document.chaveAcesso
+    }));
+
+    if (params.persistir) {
+      for (const document of params.result.documents) {
+        if (this.isEventDocument(document)) {
+          if (!params.tentarEventos) {
+            continue;
+          }
+          await this.nfeService.persistEventDocumentFromExternalSource({
+            clienteId: params.clienteId,
+            estabelecimentoId: params.estabelecimentoId,
+            ambiente: params.ambiente,
+            cnpjConsulta: params.cnpjConsulta,
+            document: {
+              schema: document.schema,
+              xml: document.xml,
+              chaveAcesso: document.chaveAcesso
+            },
+            origem: NfeDocumentoOrigem.distribuicao_nsu
+          });
+          eventosPersistidos += 1;
+          continue;
+        }
+
+        await this.persistDocument({
+          clienteId: params.clienteId,
+          estabelecimentoId: params.estabelecimentoId,
+          ambiente: params.ambiente,
+          cnpjConsulta: params.cnpjConsulta,
+          document,
+          origem: NfeDocumentoOrigem.distribuicao_nsu
+        });
+        documentosPersistidos += 1;
+      }
+    }
+
+    return {
+      statusCode: params.result.statusCode,
+      cStat: params.result.cStat,
+      xMotivo: params.result.xMotivo,
+      requestedChave: params.requestedChave,
+      persistido: params.persistir,
+      documentosEncontrados: params.result.documents.filter((document) => !this.isEventDocument(document)).length,
+      documentosPersistidos,
+      eventosEncontrados: this.extractEventDocuments(params.result.documents).length,
+      eventosPersistidos,
+      documentos
+    };
+  }
+
+  private async ensureClient(clienteId: string): Promise<void> {
+    const found = await this.prisma.cliente.findUnique({ where: { id: clienteId } });
+    if (!found) {
+      throw new NotFoundException('Cliente nao encontrado');
+    }
+  }
+
+  private async getEstablishmentOrThrow(estabelecimentoId: string, clienteId: string) {
+    const found = await this.prisma.clienteEstabelecimento.findUnique({
+      where: { id: estabelecimentoId }
+    });
+    if (!found || found.clienteId !== clienteId || !found.ativo) {
+      throw new NotFoundException('Estabelecimento nao encontrado para o cliente informado');
+    }
+    return found;
+  }
+
+  private async findActiveCertificateOrThrow(
+    clienteId: string,
+    estabelecimentoId: string,
+    cnpjConsulta: string
+  ): Promise<Pick<Certificado, 'id'>> {
+    const now = new Date();
+    const certificate = await this.prisma.certificado.findFirst({
+      where: {
+        ativo: true,
+        AND: [
+          {
+            OR: [
+              {
+                clienteId,
+                estabelecimentoId
+              },
+              {
+                clienteId,
+                estabelecimentoId: null,
+                cnpjTitular: cnpjConsulta
+              }
+            ]
+          },
+          {
+            OR: [{ validadeFim: null }, { validadeFim: { gt: now } }]
+          }
+        ]
+      },
+      select: { id: true }
+    });
+
+    if (!certificate) {
+      throw new BadRequestException(`Nenhum certificado ativo e valido encontrado para o CNPJ ${cnpjConsulta}`);
+    }
+
+    return certificate;
+  }
+
+  private isCertificateSelectionError(error: unknown): boolean {
+    const message = error instanceof Error && error.message ? error.message.toLowerCase() : '';
+    return message.includes('certificado') || message.includes('cnpj');
   }
 
   private isEventosSchemaUnavailable(error: unknown): boolean {
