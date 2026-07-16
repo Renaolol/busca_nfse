@@ -916,6 +916,25 @@ function onDocumentClick(event) {
       void syncEventsForListedCtes();
       return;
     }
+    case 'events-report-open-document': {
+      const documentType = actionNode.getAttribute('data-document-type');
+      const documentId = actionNode.getAttribute('data-document-id');
+      if (!documentType || !documentId) {
+        return;
+      }
+      if (documentType === 'nfe') {
+        openModal({ kind: 'nfe-details', nfeId: documentId });
+        return;
+      }
+      if (documentType === 'cte') {
+        openModal({ kind: 'cte-details', cteId: documentId });
+        return;
+      }
+      if (documentType === 'nfse') {
+        openModal({ kind: 'xml-details', xmlId: documentId });
+      }
+      return;
+    }
     case 'nfe-last-run-view-xml': {
       const clientId = actionNode.getAttribute('data-client-id');
       const catalogoId = Number(actionNode.getAttribute('data-catalogo-id') || '0');
@@ -3635,6 +3654,8 @@ function renderModal() {
       return renderCteDetailsModal(state.modal.cteId);
     case 'cte-view':
       return renderCteViewerModal(state.modal.cteId);
+    case 'events-sync-report':
+      return renderEventsSyncReportModal();
     case 'dominio-nfe-view':
       return renderDominioNfeViewerModal();
     case 'xml-details':
@@ -4063,6 +4084,92 @@ function renderDominioNfeViewerModal() {
         <div class="modal-footer">
           <button class="btn secondary" data-action="close-modal">Fechar</button>
           <button class="btn primary" data-action="dominio-nfe-download-modal">Baixar XML</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderEventsSyncReportModal() {
+  if (state.modal?.kind !== 'events-sync-report') {
+    return '';
+  }
+
+  const documentType = state.modal.documentType || 'nfe';
+  const summary = state.modal.summary || {};
+  const rows = buildEventsSyncAuditRows(documentType, summary);
+  const titleByType = {
+    nfse: 'Auditoria da busca de eventos de NFS-e',
+    nfe: 'Auditoria da busca de eventos de NF-e',
+    cte: 'Auditoria da busca de eventos de CT-e'
+  };
+  const subtitlePrefix = state.modal.scope === 'individual' ? 'Consulta individual concluida.' : 'Consulta da listagem concluida.';
+  const processedCount = Number(summary?.documentosProcessados || summary?.documentosAnalisados || rows.length || 0);
+  const documentosComEventos = Number(summary?.documentosComEventos || 0);
+  const eventosImportados = Number(summary?.eventosImportados || 0);
+  const falhas = Number(summary?.falhas || 0);
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="max-width:1120px;">
+        <div class="modal-header">
+          <h3 class="modal-title">${escapeHtml(titleByType[documentType] || 'Auditoria da busca de eventos')}</h3>
+          <p class="modal-subtitle">${escapeHtml(subtitlePrefix)} Revise o resultado documento por documento.</p>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid four" style="margin-bottom:18px;">
+            ${detailItem('Documentos processados', String(processedCount))}
+            ${detailItem('Com eventos', String(documentosComEventos))}
+            ${detailItem('Eventos importados', String(eventosImportados))}
+            ${detailItem('Falhas', String(falhas))}
+          </div>
+          ${
+            rows.length
+              ? `
+                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:hidden; background:#fff;">
+                  <div style="display:grid; grid-template-columns: minmax(160px, 1.1fr) minmax(250px, 1.8fr) minmax(220px, 1.3fr) minmax(140px, .9fr) minmax(220px, 1.2fr) 120px; gap:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                    <div style="padding:12px 14px;">Documento</div>
+                    <div style="padding:12px 14px;">Chave de acesso</div>
+                    <div style="padding:12px 14px;">Evento</div>
+                    <div style="padding:12px 14px;">Resultado</div>
+                    <div style="padding:12px 14px;">Mensagem</div>
+                    <div style="padding:12px 14px;">Acao</div>
+                  </div>
+                  ${rows
+                    .map(
+                      (row) => `
+                        <div style="display:grid; grid-template-columns: minmax(160px, 1.1fr) minmax(250px, 1.8fr) minmax(220px, 1.3fr) minmax(140px, .9fr) minmax(220px, 1.2fr) 120px; gap:0; border-bottom:1px solid #eef0f2; align-items:start;">
+                          <div style="padding:14px;">
+                            <strong>${escapeHtml(row.documentLabel)}</strong>
+                            ${row.secondaryLabel ? `<div style="margin-top:4px; color:#606062;">${escapeHtml(row.secondaryLabel)}</div>` : ''}
+                          </div>
+                          <div style="padding:14px; font-family:monospace; font-size:12px; word-break:break-all;">${escapeHtml(row.chaveAcesso)}</div>
+                          <div style="padding:14px;">
+                            <strong>${escapeHtml(row.eventLabel)}</strong>
+                            <div style="margin-top:4px; color:#606062;">${escapeHtml(row.eventCountLabel)}</div>
+                          </div>
+                          <div style="padding:14px;">${statusBadge(row.statusLabel, row.statusTone)}</div>
+                          <div style="padding:14px; color:#606062;">${escapeHtml(row.message || '-')}</div>
+                          <div style="padding:14px;">
+                            ${
+                              row.openActionId
+                                ? `<button class="btn secondary small" data-action="events-report-open-document" data-document-type="${escapeHtml(
+                                    documentType
+                                  )}" data-document-id="${escapeHtml(row.openActionId)}">Ver nota</button>`
+                                : '<span style="color:#9a9ca1;">-</span>'
+                            }
+                          </div>
+                        </div>
+                      `
+                    )
+                    .join('')}
+                </div>
+              `
+              : `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">Nenhum retorno disponivel para auditoria.</div>`
+          }
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="close-modal">Fechar</button>
         </div>
       </div>
     </div>
@@ -9244,6 +9351,7 @@ async function syncEventsForListedXmls() {
   try {
     const summary = await requestNfseEventsSync(clientIds[0], documentoIds);
     await refreshXmlSearchAfterEventsSync();
+    openEventsSyncReportModal('nfse', summary, 'listagem');
     pushToast(buildEventsSyncSummaryMessage(summary), eventsSyncToastTone(summary));
   } finally {
     state.xmlEventsSyncRunning = false;
@@ -9280,6 +9388,7 @@ async function syncEventsForXml(xmlId) {
   try {
     const summary = await requestNfseEventsSync(xml.clientId, [xml.apiNfseId]);
     await refreshXmlSearchAfterEventsSync();
+    openEventsSyncReportModal('nfse', summary, 'individual');
     pushToast(buildEventsSyncSummaryMessage(summary), eventsSyncToastTone(summary));
   } finally {
     state.xmlEventsSyncRunning = false;
@@ -9337,6 +9446,7 @@ async function syncEventsForListedNfes() {
   try {
     const summary = await requestNfeEventsSync(clientIds[0], documentoIds);
     await refreshNfeSearchAfterEventsSync();
+    openEventsSyncReportModal('nfe', summary, 'listagem');
     pushToast(buildDocumentEventsSyncSummaryMessage('NF-e', summary), eventsSyncToastTone(summary));
   } finally {
     state.nfeEventsSyncRunning = false;
@@ -9373,6 +9483,7 @@ async function syncEventsForNfe(nfeId) {
   try {
     const summary = await requestNfeEventsSync(doc.clientId, [doc.apiNfeId]);
     await refreshNfeSearchAfterEventsSync();
+    openEventsSyncReportModal('nfe', summary, 'individual');
     pushToast(buildDocumentEventsSyncSummaryMessage('NF-e', summary), eventsSyncToastTone(summary));
   } finally {
     state.nfeEventsSyncRunning = false;
@@ -9439,6 +9550,7 @@ async function syncEventsForListedCtes() {
   try {
     const summary = await requestCteEventsSync(clientIds[0], documentoIds);
     await refreshCteSearchAfterEventsSync();
+    openEventsSyncReportModal('cte', summary, 'listagem');
     pushToast(buildDocumentEventsSyncSummaryMessage('CT-e', summary), eventsSyncToastTone(summary));
   } finally {
     state.cteEventsSyncRunning = false;
@@ -9475,6 +9587,7 @@ async function syncEventsForCte(cteId) {
   try {
     const summary = await requestCteEventsSync(doc.clientId, [doc.apiCteId]);
     await refreshCteSearchAfterEventsSync();
+    openEventsSyncReportModal('cte', summary, 'individual');
     pushToast(buildDocumentEventsSyncSummaryMessage('CT-e', summary), eventsSyncToastTone(summary));
   } finally {
     state.cteEventsSyncRunning = false;
@@ -9539,6 +9652,142 @@ function eventsSyncToastTone(summary) {
   }
 
   return 'info';
+}
+
+function openEventsSyncReportModal(documentType, summary, scope = 'listagem') {
+  openModal({
+    kind: 'events-sync-report',
+    documentType,
+    summary,
+    scope
+  });
+}
+
+function buildEventsSyncAuditRows(documentType, summary) {
+  const details = Array.isArray(summary?.detalhes) ? summary.detalhes : [];
+
+  return details.map((detail, index) => {
+    const document = findDocumentBySyncAudit(documentType, detail?.documentoId);
+    const documentLabel = resolveSyncAuditDocumentLabel(documentType, detail, document, index);
+    const secondaryLabel = resolveSyncAuditSecondaryLabel(documentType, detail, document);
+    const eventLabel = resolveSyncAuditEventLabel(detail, document);
+    const statusTone = resolveSyncAuditStatusTone(detail?.status);
+
+    return {
+      documentLabel,
+      secondaryLabel,
+      chaveAcesso: String(detail?.chaveAcesso || document?.chaveAcesso || '-'),
+      eventLabel,
+      eventCountLabel: `${Number(detail?.eventosEncontrados || 0)} encontrado(s) / ${Number(detail?.eventosImportados || 0)} importado(s)`,
+      statusLabel: mapSyncAuditStatusLabel(detail?.status),
+      statusTone,
+      message: String(detail?.mensagem || '').trim(),
+      openActionId: document?.id || null
+    };
+  });
+}
+
+function findDocumentBySyncAudit(documentType, documentoId) {
+  if (!documentoId) {
+    return null;
+  }
+
+  if (documentType === 'nfse') {
+    return (
+      state.xmlSearch.results.find((item) => item.apiNfseId === documentoId) ||
+      state.xmlFiles.find((item) => item.apiNfseId === documentoId) ||
+      null
+    );
+  }
+
+  if (documentType === 'cte') {
+    return (
+      state.cteSearch.results.find((item) => item.apiCteId === documentoId) ||
+      state.cteDocuments.find((item) => item.apiCteId === documentoId) ||
+      null
+    );
+  }
+
+  return (
+    state.nfeSearch.results.find((item) => item.apiNfeId === documentoId) ||
+    state.nfeDocuments.find((item) => item.apiNfeId === documentoId) ||
+    null
+  );
+}
+
+function resolveSyncAuditDocumentLabel(documentType, detail, document, index) {
+  if (documentType === 'nfse') {
+    return document?.numeroNfse || `NFS-e ${index + 1}`;
+  }
+
+  if (documentType === 'cte') {
+    return document?.numeroCte || detail?.numeroDocumento || `CT-e ${index + 1}`;
+  }
+
+  return document?.numeroNfe || detail?.numeroDocumento || `NF-e ${index + 1}`;
+}
+
+function resolveSyncAuditSecondaryLabel(documentType, detail, document) {
+  if (documentType === 'nfse') {
+    const ambiente = document?.ambiente ? mapNfseAmbienteLabel(document.ambiente) : detail?.ambiente ? mapNfseAmbienteLabel(detail.ambiente) : '';
+    const estabelecimento = document?.prestador || document?.cliente || '';
+    return [ambiente, estabelecimento].filter(Boolean).join(' • ');
+  }
+
+  const ambiente = document?.ambiente ? mapNfeAmbienteLabel(document.ambiente) : '';
+  const tipo = document?.tipo || '';
+  return [tipo, ambiente].filter(Boolean).join(' • ');
+}
+
+function resolveSyncAuditEventLabel(detail, document) {
+  if (detail?.status === 'falha_certificado') {
+    return 'Falha de certificado';
+  }
+
+  if (detail?.status === 'falha_api') {
+    return 'Falha na consulta';
+  }
+
+  if (detail?.status === 'sem_eventos') {
+    return 'Sem evento';
+  }
+
+  const eventos = Array.isArray(document?.eventos) ? document.eventos : [];
+  const labels = [...new Set(eventos.map((evento) => formatEventoResumoLabel(evento)).filter(Boolean))];
+  if (labels.length > 0) {
+    return labels.join(' / ');
+  }
+
+  return Number(detail?.eventosEncontrados || 0) > 0 ? `${Number(detail?.eventosEncontrados || 0)} evento(s)` : 'Evento localizado';
+}
+
+function mapSyncAuditStatusLabel(status) {
+  switch (status) {
+    case 'sincronizado':
+      return 'Sincronizado';
+    case 'sem_eventos':
+      return 'Sem evento';
+    case 'falha_certificado':
+      return 'Falha de certificado';
+    case 'falha_api':
+      return 'Falha de API';
+    default:
+      return 'Processado';
+  }
+}
+
+function resolveSyncAuditStatusTone(status) {
+  switch (status) {
+    case 'sincronizado':
+      return 'success';
+    case 'sem_eventos':
+      return 'neutral';
+    case 'falha_certificado':
+    case 'falha_api':
+      return 'danger';
+    default:
+      return 'info';
+  }
 }
 
 function exportXmlListToCsv() {
