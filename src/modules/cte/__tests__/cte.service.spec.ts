@@ -423,6 +423,43 @@ describe('CteService', () => {
     });
   });
 
+  it('infere clienteId a partir do documento quando a sincronizacao manual de CT-e nao recebe o cliente no body', async () => {
+    prisma.nfeDocumento.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'doc-1',
+          clienteId: 'cliente-1'
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'doc-1',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'est-1',
+          ambiente: NfeAmbiente.producao,
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          numeroNfe: '31969',
+          origem: 'distribuicao_nsu',
+          eventos: []
+        }
+      ]);
+
+    const result = await service.sincronizarEventos({
+      clienteId: '' as string,
+      documentoIds: ['doc-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+
+    expect(prisma.cliente.findUnique).toHaveBeenCalledWith({
+      where: { id: 'cliente-1' }
+    });
+    expect(result).toMatchObject({
+      documentosProcessados: 1,
+      falhas: 0
+    });
+  });
+
   it('retorna falha estruturada quando a preparacao da sincronizacao manual de CT-e quebra antes do loop', async () => {
     prisma.nfeDocumento.findMany
       .mockRejectedValueOnce(new Error('boom na consulta inicial do cte'))

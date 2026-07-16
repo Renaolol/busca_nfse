@@ -579,10 +579,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     limit?: number;
     filtro: 'nfe' | 'cte';
   }) {
-    await this.ensureClient(params.clienteId);
+    const clienteId = await this.resolveClienteIdForEventoSync(params.clienteId, params.documentoIds);
+    await this.ensureClient(clienteId);
 
     const limit = params.limit ?? 50;
-    const where = this.buildEventoSyncWhere(params);
+    const where = this.buildEventoSyncWhere({
+      ...params,
+      clienteId
+    });
     const orderBy: Prisma.NfeDocumentoOrderByWithRelationInput[] = [{ dataEmissao: 'desc' }, { createdAt: 'desc' }];
     let documents: Array<
       Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })
@@ -2755,10 +2759,46 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async ensureClient(clienteId: string): Promise<void> {
-    const found = await this.prisma.cliente.findUnique({ where: { id: clienteId } });
+    const normalizedClientId = this.normalizeScopeId(clienteId);
+    if (!normalizedClientId) {
+      throw new BadRequestException('clienteId obrigatorio para esta operacao');
+    }
+
+    const found = await this.prisma.cliente.findUnique({ where: { id: normalizedClientId } });
     if (!found) {
       throw new NotFoundException('Cliente nao encontrado');
     }
+  }
+
+  private async resolveClienteIdForEventoSync(clienteId?: string, documentoIds?: string[]): Promise<string> {
+    const normalizedClientId = this.normalizeScopeId(clienteId);
+    if (normalizedClientId) {
+      return normalizedClientId;
+    }
+
+    const ids = [...new Set((documentoIds ?? []).filter(Boolean))];
+    if (!ids.length) {
+      throw new BadRequestException('clienteId obrigatorio para sincronizacao de eventos');
+    }
+
+    const documents = await this.prisma.nfeDocumento.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        clienteId: true
+      }
+    });
+    const clientIds = [...new Set(documents.map((document) => this.normalizeScopeId(document.clienteId)).filter(Boolean))];
+
+    if (clientIds.length === 1) {
+      return clientIds[0] as string;
+    }
+
+    if (clientIds.length > 1) {
+      throw new BadRequestException('Os documentoIds informados pertencem a mais de um cliente; informe clienteId explicitamente');
+    }
+
+    throw new BadRequestException('Nao foi possivel determinar o cliente a partir dos documentoIds informados');
   }
 
   private async ensureClientEligibleForNfeSync(clienteId: string): Promise<void> {
@@ -3222,5 +3262,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
 
     return 'erro inesperado';
+  }
+
+  private normalizeScopeId(value?: string | null): string | null {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const normalized = value.trim();
+    return normalized || null;
   }
 }

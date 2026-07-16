@@ -179,11 +179,12 @@ export class CteService {
   }
 
   async sincronizarEventos(dto: SincronizarCteEventosDto) {
-    await this.ensureClient(dto.clienteId);
+    const clienteId = await this.resolveClienteIdForEventoSync(dto.clienteId, dto.documentoIds);
+    await this.ensureClient(clienteId);
 
     const limit = dto.limit ?? 50;
     const where = this.buildEventoSyncWhere({
-      clienteId: dto.clienteId,
+      clienteId,
       documentoIds: dto.documentoIds,
       somenteSemEventos: dto.somenteSemEventos
     });
@@ -911,10 +912,46 @@ export class CteService {
   }
 
   private async ensureClient(clienteId: string): Promise<void> {
-    const found = await this.prisma.cliente.findUnique({ where: { id: clienteId } });
+    const normalizedClientId = this.normalizeScopeId(clienteId);
+    if (!normalizedClientId) {
+      throw new BadRequestException('clienteId obrigatorio para esta operacao');
+    }
+
+    const found = await this.prisma.cliente.findUnique({ where: { id: normalizedClientId } });
     if (!found) {
       throw new NotFoundException('Cliente nao encontrado');
     }
+  }
+
+  private async resolveClienteIdForEventoSync(clienteId?: string, documentoIds?: string[]): Promise<string> {
+    const normalizedClientId = this.normalizeScopeId(clienteId);
+    if (normalizedClientId) {
+      return normalizedClientId;
+    }
+
+    const ids = [...new Set((documentoIds ?? []).filter(Boolean))];
+    if (!ids.length) {
+      throw new BadRequestException('clienteId obrigatorio para sincronizacao de eventos');
+    }
+
+    const documents = await this.prisma.nfeDocumento.findMany({
+      where: { id: { in: ids } },
+      select: {
+        id: true,
+        clienteId: true
+      }
+    });
+    const clientIds = [...new Set(documents.map((document) => this.normalizeScopeId(document.clienteId)).filter(Boolean))];
+
+    if (clientIds.length === 1) {
+      return clientIds[0] as string;
+    }
+
+    if (clientIds.length > 1) {
+      throw new BadRequestException('Os documentoIds informados pertencem a mais de um cliente; informe clienteId explicitamente');
+    }
+
+    throw new BadRequestException('Nao foi possivel determinar o cliente a partir dos documentoIds informados');
   }
 
   private async getEstablishmentOrThrow(estabelecimentoId: string, clienteId: string) {
@@ -990,6 +1027,15 @@ export class CteService {
     }
 
     return 'erro inesperado';
+  }
+
+  private normalizeScopeId(value?: string | null): string | null {
+    if (typeof value !== 'string') {
+      return null;
+    }
+
+    const normalized = value.trim();
+    return normalized || null;
   }
 
   private resolvePagination(query: QueryCteDto): { page: number; pageSize: number; skip: number } {

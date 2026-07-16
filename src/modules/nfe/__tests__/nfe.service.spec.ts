@@ -1694,6 +1694,52 @@ describe('NfeService', () => {
     });
   });
 
+  it('infere clienteId a partir do documento quando a sincronizacao manual nao recebe o cliente no body', async () => {
+    prisma.nfeDocumento.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'doc-1',
+          clienteId: 'cliente-1'
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'doc-1',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: NfeAmbiente.producao,
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          numeroNfe: '123',
+          origem: 'distribuicao_nsu',
+          eventos: []
+        }
+      ]);
+    (distribuicaoClient.consultarPorChave as jest.Mock).mockResolvedValueOnce({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado por chave',
+      ultNsu: 0n,
+      maxNsu: 0n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.sincronizarEventos({
+      clienteId: '' as string,
+      documentoIds: ['doc-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+
+    expect(prisma.cliente.findUnique).toHaveBeenCalledWith({
+      where: { id: 'cliente-1' }
+    });
+    expect(result).toMatchObject({
+      documentosProcessados: 1,
+      falhas: 0
+    });
+  });
+
   it('retorna falha estruturada quando a preparacao da sincronizacao manual quebra antes do loop', async () => {
     prisma.nfeDocumento.findMany
       .mockRejectedValueOnce(new Error('boom na consulta inicial'))
