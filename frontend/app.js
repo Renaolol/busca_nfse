@@ -456,6 +456,9 @@ function onDocumentClick(event) {
       return;
     }
     case 'close-modal': {
+      if (state.modal?.kind === 'events-sync-report' && state.modal.running) {
+        return;
+      }
       closeModal();
       return;
     }
@@ -1126,6 +1129,9 @@ function onDocumentClick(event) {
     }
     case 'drawer-close':
     case 'overlay-close': {
+      if (state.modal?.kind === 'events-sync-report' && state.modal.running) {
+        return;
+      }
       closeDrawer();
       closeModal();
       return;
@@ -4097,28 +4103,39 @@ function renderEventsSyncReportModal() {
 
   const documentType = state.modal.documentType || 'nfe';
   const summary = state.modal.summary || {};
-  const rows = buildEventsSyncAuditRows(documentType, summary);
+  const rows = Array.isArray(state.modal.rows) && state.modal.rows.length ? state.modal.rows : buildEventsSyncAuditRows(documentType, summary);
   const titleByType = {
     nfse: 'Auditoria da busca de eventos de NFS-e',
     nfe: 'Auditoria da busca de eventos de NF-e',
     cte: 'Auditoria da busca de eventos de CT-e'
   };
   const subtitlePrefix = state.modal.scope === 'individual' ? 'Consulta individual concluida.' : 'Consulta da listagem concluida.';
-  const processedCount = Number(summary?.documentosProcessados || summary?.documentosAnalisados || rows.length || 0);
-  const documentosComEventos = Number(summary?.documentosComEventos || 0);
-  const eventosImportados = Number(summary?.eventosImportados || 0);
-  const falhas = Number(summary?.falhas || 0);
+  const processedCount = Number(state.modal.processedCount || summary?.documentosProcessados || summary?.documentosAnalisados || rows.length || 0);
+  const totalCount = Number(state.modal.totalCount || processedCount || 0);
+  const documentosComEventos = Number(state.modal.documentosComEventos || summary?.documentosComEventos || 0);
+  const eventosImportados = Number(state.modal.eventosImportados || summary?.eventosImportados || 0);
+  const falhas = Number(state.modal.falhas || summary?.falhas || 0);
+  const running = Boolean(state.modal.running);
+  const currentMessage = String(state.modal.currentMessage || '').trim();
+  const subtitle = running
+    ? `Consulta em andamento. ${processedCount}/${totalCount} documento(s) processado(s).`
+    : `${subtitlePrefix} Revise o resultado documento por documento.`;
 
   return `
     <div class="overlay" data-action="overlay-close">
       <div class="modal" role="dialog" aria-modal="true" style="max-width:1120px;">
         <div class="modal-header">
           <h3 class="modal-title">${escapeHtml(titleByType[documentType] || 'Auditoria da busca de eventos')}</h3>
-          <p class="modal-subtitle">${escapeHtml(subtitlePrefix)} Revise o resultado documento por documento.</p>
+          <p class="modal-subtitle">${escapeHtml(subtitle)}</p>
         </div>
         <div class="modal-body">
+          ${
+            currentMessage
+              ? `<div style="margin-bottom:14px; padding:12px 14px; border:1px solid #d9e7ff; border-radius:12px; background:#f4f8ff; color:#21446b;">${escapeHtml(currentMessage)}</div>`
+              : ''
+          }
           <div class="form-grid four" style="margin-bottom:18px;">
-            ${detailItem('Documentos processados', String(processedCount))}
+            ${detailItem('Documentos processados', `${processedCount}${totalCount ? ` / ${totalCount}` : ''}`)}
             ${detailItem('Com eventos', String(documentosComEventos))}
             ${detailItem('Eventos importados', String(eventosImportados))}
             ${detailItem('Falhas', String(falhas))}
@@ -4152,7 +4169,7 @@ function renderEventsSyncReportModal() {
                           <div style="padding:14px; color:#606062;">${escapeHtml(row.message || '-')}</div>
                           <div style="padding:14px;">
                             ${
-                              row.openActionId
+                              row.openActionId && !running
                                 ? `<button class="btn secondary small" data-action="events-report-open-document" data-document-type="${escapeHtml(
                                     documentType
                                   )}" data-document-id="${escapeHtml(row.openActionId)}">Ver nota</button>`
@@ -4169,7 +4186,7 @@ function renderEventsSyncReportModal() {
           }
         </div>
         <div class="modal-footer">
-          <button class="btn secondary" data-action="close-modal">Fechar</button>
+          ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao da busca manual...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
         </div>
       </div>
     </div>
@@ -9349,9 +9366,14 @@ async function syncEventsForListedXmls() {
   pushToast(`Sincronizando eventos para ${documentoIds.length} NFS-e listada(s)...`, 'info');
 
   try {
-    const summary = await requestNfseEventsSync(clientIds[0], documentoIds);
+    const summary = await runManualEventsSyncOverlay({
+      documentType: 'nfse',
+      scope: 'listagem',
+      targets,
+      requestSync: (target) => requestNfseEventsSync(target.clientId, [target.apiNfseId]),
+      fetchUpdatedDocument: fetchUpdatedNfseDocumentAfterEventSync
+    });
     await refreshXmlSearchAfterEventsSync();
-    openEventsSyncReportModal('nfse', summary, 'listagem');
     pushToast(buildEventsSyncSummaryMessage(summary), eventsSyncToastTone(summary));
   } finally {
     state.xmlEventsSyncRunning = false;
@@ -9386,9 +9408,14 @@ async function syncEventsForXml(xmlId) {
   pushToast(`Sincronizando eventos da NFS-e ${xml.numeroNfse || xml.chaveAcesso || xml.id}...`, 'info');
 
   try {
-    const summary = await requestNfseEventsSync(xml.clientId, [xml.apiNfseId]);
+    const summary = await runManualEventsSyncOverlay({
+      documentType: 'nfse',
+      scope: 'individual',
+      targets: [xml],
+      requestSync: (target) => requestNfseEventsSync(target.clientId, [target.apiNfseId]),
+      fetchUpdatedDocument: fetchUpdatedNfseDocumentAfterEventSync
+    });
     await refreshXmlSearchAfterEventsSync();
-    openEventsSyncReportModal('nfse', summary, 'individual');
     pushToast(buildEventsSyncSummaryMessage(summary), eventsSyncToastTone(summary));
   } finally {
     state.xmlEventsSyncRunning = false;
@@ -9444,9 +9471,14 @@ async function syncEventsForListedNfes() {
   pushToast(`Sincronizando eventos para ${documentoIds.length} NF-e listada(s)...`, 'info');
 
   try {
-    const summary = await requestNfeEventsSync(clientIds[0], documentoIds);
+    const summary = await runManualEventsSyncOverlay({
+      documentType: 'nfe',
+      scope: 'listagem',
+      targets,
+      requestSync: (target) => requestNfeEventsSync(target.clientId, [target.apiNfeId]),
+      fetchUpdatedDocument: fetchUpdatedNfeDocumentAfterEventSync
+    });
     await refreshNfeSearchAfterEventsSync();
-    openEventsSyncReportModal('nfe', summary, 'listagem');
     pushToast(buildDocumentEventsSyncSummaryMessage('NF-e', summary), eventsSyncToastTone(summary));
   } finally {
     state.nfeEventsSyncRunning = false;
@@ -9481,9 +9513,14 @@ async function syncEventsForNfe(nfeId) {
   pushToast(`Sincronizando eventos da NF-e ${doc.numeroNfe || doc.chaveAcesso || doc.id}...`, 'info');
 
   try {
-    const summary = await requestNfeEventsSync(doc.clientId, [doc.apiNfeId]);
+    const summary = await runManualEventsSyncOverlay({
+      documentType: 'nfe',
+      scope: 'individual',
+      targets: [doc],
+      requestSync: (target) => requestNfeEventsSync(target.clientId, [target.apiNfeId]),
+      fetchUpdatedDocument: fetchUpdatedNfeDocumentAfterEventSync
+    });
     await refreshNfeSearchAfterEventsSync();
-    openEventsSyncReportModal('nfe', summary, 'individual');
     pushToast(buildDocumentEventsSyncSummaryMessage('NF-e', summary), eventsSyncToastTone(summary));
   } finally {
     state.nfeEventsSyncRunning = false;
@@ -9548,9 +9585,14 @@ async function syncEventsForListedCtes() {
   pushToast(`Sincronizando eventos para ${documentoIds.length} CT-e listado(s)...`, 'info');
 
   try {
-    const summary = await requestCteEventsSync(clientIds[0], documentoIds);
+    const summary = await runManualEventsSyncOverlay({
+      documentType: 'cte',
+      scope: 'listagem',
+      targets,
+      requestSync: (target) => requestCteEventsSync(target.clientId, [target.apiCteId]),
+      fetchUpdatedDocument: fetchUpdatedCteDocumentAfterEventSync
+    });
     await refreshCteSearchAfterEventsSync();
-    openEventsSyncReportModal('cte', summary, 'listagem');
     pushToast(buildDocumentEventsSyncSummaryMessage('CT-e', summary), eventsSyncToastTone(summary));
   } finally {
     state.cteEventsSyncRunning = false;
@@ -9585,9 +9627,14 @@ async function syncEventsForCte(cteId) {
   pushToast(`Sincronizando eventos do CT-e ${doc.numeroCte || doc.chaveAcesso || doc.id}...`, 'info');
 
   try {
-    const summary = await requestCteEventsSync(doc.clientId, [doc.apiCteId]);
+    const summary = await runManualEventsSyncOverlay({
+      documentType: 'cte',
+      scope: 'individual',
+      targets: [doc],
+      requestSync: (target) => requestCteEventsSync(target.clientId, [target.apiCteId]),
+      fetchUpdatedDocument: fetchUpdatedCteDocumentAfterEventSync
+    });
     await refreshCteSearchAfterEventsSync();
-    openEventsSyncReportModal('cte', summary, 'individual');
     pushToast(buildDocumentEventsSyncSummaryMessage('CT-e', summary), eventsSyncToastTone(summary));
   } finally {
     state.cteEventsSyncRunning = false;
@@ -9652,6 +9699,280 @@ function eventsSyncToastTone(summary) {
   }
 
   return 'info';
+}
+
+async function runManualEventsSyncOverlay(params) {
+  const targets = Array.isArray(params?.targets) ? params.targets.filter(Boolean) : [];
+  const aggregate = {
+    documentosProcessados: 0,
+    documentosAnalisados: 0,
+    documentosComEventos: 0,
+    eventosEncontrados: 0,
+    eventosImportados: 0,
+    falhas: 0,
+    detalhes: []
+  };
+
+  const rows = targets.map((target, index) => buildPendingEventsSyncRow(params.documentType, target, index));
+  openModal({
+    kind: 'events-sync-report',
+    documentType: params.documentType,
+    scope: params.scope || 'listagem',
+    running: true,
+    processedCount: 0,
+    totalCount: targets.length,
+    documentosComEventos: 0,
+    eventosImportados: 0,
+    falhas: 0,
+    currentMessage: targets.length ? 'Preparando consultas...' : 'Nenhum documento selecionado.',
+    rows,
+    summary: aggregate
+  });
+
+  for (let index = 0; index < targets.length; index += 1) {
+    const target = targets[index];
+    const baseRow = rows[index];
+    rows[index] = {
+      ...baseRow,
+      eventLabel: 'Pesquisando...',
+      statusLabel: 'Consultando',
+      statusTone: 'info',
+      message: 'Consultando eventos no servico externo...'
+    };
+    updateEventsSyncOverlayState({
+      running: true,
+      processedCount: index,
+      totalCount: targets.length,
+      documentosComEventos: aggregate.documentosComEventos,
+      eventosImportados: aggregate.eventosImportados,
+      falhas: aggregate.falhas,
+      currentMessage: `Consultando ${index + 1} de ${targets.length}: ${target.chaveAcesso || baseRow.documentLabel}`,
+      rows,
+      summary: aggregate
+    });
+
+    try {
+      const summary = await params.requestSync(target);
+      const detail = normalizeSingleEventsSyncDetail(summary, target);
+      const updatedDocument =
+        detail.status === 'sincronizado' && typeof params.fetchUpdatedDocument === 'function'
+          ? await params.fetchUpdatedDocument(target).catch(() => null)
+          : null;
+
+      aggregate.documentosProcessados += Number(summary?.documentosProcessados || 0);
+      aggregate.documentosAnalisados += Number(summary?.documentosAnalisados || 0);
+      aggregate.documentosComEventos += Number(summary?.documentosComEventos || 0);
+      aggregate.eventosEncontrados += Number(summary?.eventosEncontrados || 0);
+      aggregate.eventosImportados += Number(summary?.eventosImportados || 0);
+      aggregate.falhas += Number(summary?.falhas || 0);
+      aggregate.detalhes.push(detail);
+
+      rows[index] = buildResolvedEventsSyncRow(params.documentType, target, detail, updatedDocument, index);
+    } catch (error) {
+      const detail = buildFailedEventsSyncDetail(target, error);
+      aggregate.documentosProcessados += 1;
+      aggregate.documentosAnalisados += 1;
+      aggregate.falhas += 1;
+      aggregate.detalhes.push(detail);
+      rows[index] = buildResolvedEventsSyncRow(params.documentType, target, detail, null, index);
+    }
+
+    updateEventsSyncOverlayState({
+      running: true,
+      processedCount: index + 1,
+      totalCount: targets.length,
+      documentosComEventos: aggregate.documentosComEventos,
+      eventosImportados: aggregate.eventosImportados,
+      falhas: aggregate.falhas,
+      currentMessage:
+        index + 1 < targets.length
+          ? `Aguardando a proxima consulta...`
+          : 'Finalizando auditoria da busca manual...',
+      rows,
+      summary: aggregate
+    });
+  }
+
+  updateEventsSyncOverlayState({
+    running: false,
+    processedCount: targets.length,
+    totalCount: targets.length,
+    documentosComEventos: aggregate.documentosComEventos,
+    eventosImportados: aggregate.eventosImportados,
+    falhas: aggregate.falhas,
+    currentMessage: 'Busca manual concluida.',
+    rows,
+    summary: aggregate
+  });
+
+  return {
+    documentosProcessados: aggregate.documentosProcessados || targets.length,
+    documentosAnalisados: aggregate.documentosAnalisados || targets.length,
+    documentosComEventos: aggregate.documentosComEventos,
+    eventosEncontrados: aggregate.eventosEncontrados,
+    eventosImportados: aggregate.eventosImportados,
+    falhas: aggregate.falhas,
+    detalhes: aggregate.detalhes
+  };
+}
+
+function updateEventsSyncOverlayState(patch) {
+  if (state.modal?.kind !== 'events-sync-report') {
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    ...patch
+  };
+  render();
+}
+
+function buildPendingEventsSyncRow(documentType, target, index) {
+  const documentLabel = resolveSyncAuditDocumentLabel(documentType, null, target, index);
+  const secondaryLabel = resolveSyncAuditSecondaryLabel(documentType, null, target);
+
+  return {
+    documentLabel,
+    secondaryLabel,
+    chaveAcesso: String(target?.chaveAcesso || '-'),
+    eventLabel: Array.isArray(target?.eventos) && target.eventos.length ? buildCurrentEventLabelFromDocument(target) : 'Na fila',
+    eventCountLabel: '0 encontrado(s) / 0 importado(s)',
+    statusLabel: 'Na fila',
+    statusTone: 'neutral',
+    message: 'Aguardando consulta manual...',
+    openActionId: target?.id || null
+  };
+}
+
+function buildResolvedEventsSyncRow(documentType, target, detail, updatedDocument, index) {
+  const document = updatedDocument || target;
+  const eventLabel = resolveSyncAuditEventLabel(detail, document);
+
+  return {
+    documentLabel: resolveSyncAuditDocumentLabel(documentType, detail, document, index),
+    secondaryLabel: resolveSyncAuditSecondaryLabel(documentType, detail, document),
+    chaveAcesso: String(detail?.chaveAcesso || document?.chaveAcesso || '-'),
+    eventLabel,
+    eventCountLabel: `${Number(detail?.eventosEncontrados || 0)} encontrado(s) / ${Number(detail?.eventosImportados || 0)} importado(s)`,
+    statusLabel: mapSyncAuditStatusLabel(detail?.status),
+    statusTone: resolveSyncAuditStatusTone(detail?.status),
+    message: String(detail?.mensagem || '').trim() || (detail?.status === 'sincronizado' ? 'Consulta concluida com sucesso.' : '-'),
+    openActionId: document?.id || target?.id || null
+  };
+}
+
+function normalizeSingleEventsSyncDetail(summary, target) {
+  const detail = Array.isArray(summary?.detalhes) ? summary.detalhes[0] : null;
+  if (detail) {
+    return detail;
+  }
+
+  return {
+    documentoId: target?.apiNfeId || target?.apiCteId || target?.apiNfseId || target?.id,
+    chaveAcesso: target?.chaveAcesso || '',
+    numeroDocumento: target?.numeroNfe || target?.numeroCte || target?.numeroNfse || null,
+    status: Number(summary?.falhas || 0) > 0 ? 'falha_api' : Number(summary?.eventosEncontrados || 0) > 0 ? 'sincronizado' : 'sem_eventos',
+    eventosEncontrados: Number(summary?.eventosEncontrados || 0),
+    eventosImportados: Number(summary?.eventosImportados || 0),
+    mensagem: ''
+  };
+}
+
+function buildFailedEventsSyncDetail(target, error) {
+  const message = toErrorMessage(error);
+  const isCertificateFailure = normalizeSearchText(message).includes('certificado');
+
+  return {
+    documentoId: target?.apiNfeId || target?.apiCteId || target?.apiNfseId || target?.id,
+    chaveAcesso: target?.chaveAcesso || '',
+    numeroDocumento: target?.numeroNfe || target?.numeroCte || target?.numeroNfse || null,
+    status: isCertificateFailure ? 'falha_certificado' : 'falha_api',
+    eventosEncontrados: 0,
+    eventosImportados: 0,
+    mensagem: message
+  };
+}
+
+async function fetchUpdatedNfseDocumentAfterEventSync(target) {
+  if (!target?.apiNfseId || !target?.clientId) {
+    return null;
+  }
+
+  const raw = await apiRequest(`/nfse/${target.apiNfseId}?clienteId=${encodeURIComponent(target.clientId)}`);
+  const mapped = buildXmlFilesFromApi([raw], state.clients)[0] || null;
+  if (mapped) {
+    replaceDocumentInStateCollections('nfse', mapped);
+  }
+  return mapped;
+}
+
+async function fetchUpdatedNfeDocumentAfterEventSync(target) {
+  if (!target?.apiNfeId || !target?.clientId) {
+    return null;
+  }
+
+  const raw = await apiRequest(`/nfe/${target.apiNfeId}?clienteId=${encodeURIComponent(target.clientId)}`);
+  const mapped = buildNfeDocumentsFromApi([raw], state.clients)[0] || null;
+  if (mapped) {
+    replaceDocumentInStateCollections('nfe', mapped);
+  }
+  return mapped;
+}
+
+async function fetchUpdatedCteDocumentAfterEventSync(target) {
+  if (!target?.apiCteId || !target?.clientId) {
+    return null;
+  }
+
+  const raw = await apiRequest(`/cte/${target.apiCteId}?clienteId=${encodeURIComponent(target.clientId)}`);
+  const mapped = buildCteDocumentsFromApi([raw], state.clients)[0] || null;
+  if (mapped) {
+    replaceDocumentInStateCollections('cte', mapped);
+  }
+  return mapped;
+}
+
+function replaceDocumentInStateCollections(documentType, mapped) {
+  if (!mapped?.id) {
+    return;
+  }
+
+  if (documentType === 'nfse') {
+    state.xmlSearch.results = replaceItemInCollection(state.xmlSearch.results, mapped);
+    state.xmlFiles = replaceItemInCollection(state.xmlFiles, mapped);
+    return;
+  }
+
+  if (documentType === 'cte') {
+    state.cteSearch.results = replaceItemInCollection(state.cteSearch.results, mapped);
+    state.cteDocuments = replaceItemInCollection(state.cteDocuments, mapped);
+    return;
+  }
+
+  state.nfeSearch.results = replaceItemInCollection(state.nfeSearch.results, mapped);
+  state.nfeDocuments = replaceItemInCollection(state.nfeDocuments, mapped);
+}
+
+function replaceItemInCollection(collection, mapped) {
+  const items = Array.isArray(collection) ? collection : [];
+  const index = items.findIndex((item) => item?.id === mapped.id);
+  if (index === -1) {
+    return items;
+  }
+
+  const next = [...items];
+  next[index] = {
+    ...next[index],
+    ...mapped
+  };
+  return next;
+}
+
+function buildCurrentEventLabelFromDocument(document) {
+  const eventos = Array.isArray(document?.eventos) ? document.eventos : [];
+  const labels = [...new Set(eventos.map((evento) => formatEventoResumoLabel(evento)).filter(Boolean))];
+  return labels.length ? labels.join(' / ') : 'Evento';
 }
 
 function openEventsSyncReportModal(documentType, summary, scope = 'listagem') {
