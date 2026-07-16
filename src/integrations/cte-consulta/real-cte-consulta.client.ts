@@ -183,12 +183,16 @@ export class RealCteConsultaClient implements CteConsultaClient {
     cUf: string,
     rejectUnauthorized = process.env.CTE_CONSULTA_REJECT_UNAUTHORIZED !== 'false'
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
-    const attempt12 = await this.doSoapRequest(url, mtls, requestXml, cUf, '1.2', rejectUnauthorized);
+    const attempt12 = await this.doSoapRequest(url, mtls, requestXml, cUf, '1.2', rejectUnauthorized, 'default');
+    if (this.shouldRetryWithSoap12WithoutActionHeader(attempt12)) {
+      return this.doSoapRequest(url, mtls, requestXml, cUf, '1.2', rejectUnauthorized, 'omit');
+    }
+
     if (!this.shouldRetryWithSoap11(attempt12)) {
       return attempt12;
     }
 
-    return this.doSoapRequest(url, mtls, requestXml, cUf, '1.1', rejectUnauthorized);
+    return this.doSoapRequest(url, mtls, requestXml, cUf, '1.1', rejectUnauthorized, 'quoted');
   }
 
   private doSoapRequest(
@@ -197,7 +201,8 @@ export class RealCteConsultaClient implements CteConsultaClient {
     requestXml: string,
     cUf: string,
     soapVersion: '1.1' | '1.2',
-    rejectUnauthorized: boolean
+    rejectUnauthorized: boolean,
+    soapActionMode: 'default' | 'omit' | 'quoted'
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     return new Promise((resolve, reject) => {
       const envelope = this.buildSoapEnvelope(requestXml, cUf, soapVersion);
@@ -210,6 +215,17 @@ export class RealCteConsultaClient implements CteConsultaClient {
         soapVersion === '1.2'
           ? `application/soap+xml; charset=utf-8; action="${soapAction}"`
           : 'text/xml; charset=utf-8';
+      const soapActionHeader =
+        soapActionMode === 'omit' ? undefined : soapActionMode === 'quoted' || soapVersion === '1.1' ? `"${soapAction}"` : soapAction;
+      const headers: Record<string, string | number> = {
+        'Content-Type': contentType,
+        Accept: 'application/soap+xml, text/xml, application/xml',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Content-Length': Buffer.byteLength(envelope, 'utf8')
+      };
+      if (soapActionHeader) {
+        headers.SOAPAction = soapActionHeader;
+      }
 
       const req = httpsRequest(
         {
@@ -218,13 +234,7 @@ export class RealCteConsultaClient implements CteConsultaClient {
           port: url.port ? Number(url.port) : undefined,
           path: `${url.pathname}${url.search}`,
           method: 'POST',
-          headers: {
-            'Content-Type': contentType,
-            SOAPAction: soapVersion === '1.2' ? soapAction : `"${soapAction}"`,
-            Accept: 'application/soap+xml, text/xml, application/xml',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Content-Length': Buffer.byteLength(envelope, 'utf8')
-          },
+          headers,
           ...tlsOptions,
           rejectUnauthorized,
           timeout: Number(process.env.CTE_CONSULTA_TIMEOUT_MS ?? 30000)
@@ -450,11 +460,11 @@ export class RealCteConsultaClient implements CteConsultaClient {
 
   private shouldRetryWithSoap11(response: { statusCode: number; body: string }): boolean {
     const body = String(response.body || '').trim();
-    if (response.statusCode === 400 && !body) {
-      return true;
-    }
+    return response.statusCode === 400 && !body;
+  }
 
-    const normalizedBody = body.toLowerCase();
+  private shouldRetryWithSoap12WithoutActionHeader(response: { statusCode: number; body: string }): boolean {
+    const normalizedBody = String(response.body || '').trim().toLowerCase();
     return (
       normalizedBody.includes('action') &&
       normalizedBody.includes('was not recognized') &&

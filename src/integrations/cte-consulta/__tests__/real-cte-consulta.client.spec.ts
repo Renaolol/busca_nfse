@@ -113,7 +113,7 @@ describe('RealCteConsultaClient', () => {
     });
   });
 
-  it('repete a consulta em SOAP 1.1 quando o SOAP 1.2 retorna action not recognized', async () => {
+  it('repete a consulta em SOAP 1.2 sem SOAPAction quando o endpoint rejeita a action original', async () => {
     const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
       doSoapRequestSequence(
         url: URL,
@@ -153,7 +153,68 @@ describe('RealCteConsultaClient', () => {
       '<xml />',
       '42',
       '1.2',
+      true,
+      'default'
+    );
+    expect(client.doSoapRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.any(URL),
+      expect.objectContaining({ mode: 'pfx' }),
+      '<xml />',
+      '42',
+      '1.2',
+      true,
+      'omit'
+    );
+    expect(result).toEqual({
+      statusCode: 200,
+      headers: {},
+      body: '<ok />'
+    });
+  });
+
+  it('repete a consulta em SOAP 1.1 apenas quando o SOAP 1.2 volta com 400 vazio', async () => {
+    const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
+      doSoapRequestSequence(
+        url: URL,
+        mtls: Record<string, unknown>,
+        requestXml: string,
+        cUf: string,
+        rejectUnauthorized?: boolean
+      ): Promise<{ statusCode: number; headers: Record<string, unknown>; body: string }>;
+      doSoapRequest: jest.Mock;
+    };
+
+    client.doSoapRequest = jest
+      .fn()
+      .mockResolvedValueOnce({
+        statusCode: 400,
+        headers: {},
+        body: ''
+      })
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        headers: {},
+        body: '<ok />'
+      });
+
+    const result = await client.doSoapRequestSequence(
+      new URL('https://cte.example.test/ws'),
+      { mode: 'pfx', pfx: Buffer.from('fake'), passphrase: 'senha' },
+      '<xml />',
+      '42',
       true
+    );
+
+    expect(client.doSoapRequest).toHaveBeenNthCalledWith(
+      1,
+      expect.any(URL),
+      expect.objectContaining({ mode: 'pfx' }),
+      '<xml />',
+      '42',
+      '1.2',
+      true,
+      'default'
     );
     expect(client.doSoapRequest).toHaveBeenNthCalledWith(
       2,
@@ -162,7 +223,8 @@ describe('RealCteConsultaClient', () => {
       '<xml />',
       '42',
       '1.1',
-      true
+      true,
+      'quoted'
     );
     expect(result).toEqual({
       statusCode: 200,
