@@ -173,6 +173,7 @@ export class CteService {
     ambiente?: NfeAmbiente;
     persistir?: boolean;
     tentarEventos?: boolean;
+    fallbackDataEmissao?: string;
   }) {
     await this.ensureClient(params.clienteId);
     const establishment = await this.getEstablishmentOrThrow(params.estabelecimentoId, params.clienteId);
@@ -192,6 +193,7 @@ export class CteService {
       persistir: params.persistir !== false,
       tentarEventos: params.tentarEventos !== false,
       requestedChave: params.chaveAcesso,
+      fallbackDataEmissao: params.fallbackDataEmissao,
       result
     });
   }
@@ -266,6 +268,22 @@ export class CteService {
             eventosEncontrados: 0,
             eventosImportados: 0,
             mensagem: result.xMotivo ?? `Consulta de eventos retornou HTTP ${result.statusCode}.`
+          });
+          continue;
+        }
+
+        if (!this.isSuccessfulConsultaSummaryStatus(result.cStat)) {
+          falhas += 1;
+          detalhes.push({
+            documentoId: document.id,
+            chaveAcesso: document.chaveAcesso,
+            numeroDocumento,
+            status: 'falha_api',
+            eventosEncontrados: 0,
+            eventosImportados: 0,
+            mensagem:
+              `Consulta de eventos retornou cStat ${String(result.cStat || '').trim() || 'desconhecido'}: ` +
+              (result.xMotivo || 'Sem xMotivo.')
           });
           continue;
         }
@@ -518,6 +536,7 @@ export class CteService {
     estabelecimentoId: string;
     ambiente: NfeAmbiente;
     cnpjConsulta?: string;
+    fallbackDataEmissao?: string;
     document: CteConsultaDocument;
     origem: NfeDocumentoOrigem;
   }) {
@@ -544,7 +563,10 @@ export class CteService {
           ? NfeTipoRelacao.recebida
           : existing?.tipoRelacao ?? null;
 
-    const dataReferencia = parsed.dataEmissao ?? parsed.dataAutorizacao ?? new Date();
+    const fallbackDataEmissao = this.parseExternalDate(params.fallbackDataEmissao);
+    const dataEmissao = parsed.dataEmissao ?? existing?.dataEmissao ?? fallbackDataEmissao;
+    const dataAutorizacao = parsed.dataAutorizacao ?? existing?.dataAutorizacao;
+    const dataReferencia = dataEmissao ?? dataAutorizacao ?? new Date();
     const year = dataReferencia.getUTCFullYear();
     const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
     const cnpjPasta = parsed.cnpjEmitente ?? parsed.cnpjDestinatario ?? cnpjConsulta ?? 'sem-cnpj';
@@ -560,8 +582,8 @@ export class CteService {
       numeroNfe: parsed.numeroCte ?? existing?.numeroNfe,
       serie: parsed.serie ?? existing?.serie,
       modelo: parsed.modelo ?? existing?.modelo ?? '57',
-      dataEmissao: parsed.dataEmissao ?? existing?.dataEmissao,
-      dataAutorizacao: parsed.dataAutorizacao ?? existing?.dataAutorizacao,
+      dataEmissao,
+      dataAutorizacao,
       status: parsed.status ?? existing?.status,
       tipoRelacao,
       schemaDoc: parsed.schemaDoc ?? params.document.schema,
@@ -593,8 +615,8 @@ export class CteService {
       numeroNfe: parsed.numeroCte,
       serie: parsed.serie,
       modelo: parsed.modelo ?? '57',
-      dataEmissao: parsed.dataEmissao,
-      dataAutorizacao: parsed.dataAutorizacao,
+      dataEmissao,
+      dataAutorizacao,
       status: parsed.status,
       tipoRelacao,
       schemaDoc: parsed.schemaDoc ?? params.document.schema,
@@ -872,10 +894,12 @@ export class CteService {
     persistir: boolean;
     tentarEventos: boolean;
     requestedChave: string;
+    fallbackDataEmissao?: string;
     result: CteConsultaResult;
   }) {
     let documentosPersistidos = 0;
     let eventosPersistidos = 0;
+    const consultaValida = this.isSuccessfulConsultaSummaryStatus(params.result.cStat);
     const documentos = params.result.documents.map((document) => ({
       schema: document.schema,
       chaveAcesso: document.chaveAcesso
@@ -903,11 +927,16 @@ export class CteService {
           continue;
         }
 
+        if (document.schema === 'retConsSitCTe_v4.00' && !consultaValida) {
+          continue;
+        }
+
         await this.persistDocument({
           clienteId: params.clienteId,
           estabelecimentoId: params.estabelecimentoId,
           ambiente: params.ambiente,
           cnpjConsulta: params.cnpjConsulta,
+          fallbackDataEmissao: params.fallbackDataEmissao,
           document: {
             ...document,
             chaveAcesso: document.chaveAcesso || params.requestedChave
@@ -924,6 +953,7 @@ export class CteService {
       xMotivo: params.result.xMotivo,
       requestedChave: params.requestedChave,
       persistido: params.persistir,
+      consultaValida,
       documentosEncontrados: params.result.documents.filter((document) => !this.isEventDocument(document)).length,
       documentosPersistidos,
       eventosEncontrados: this.extractEventDocuments(params.result.documents).length,
@@ -942,6 +972,19 @@ export class CteService {
     if (!found) {
       throw new NotFoundException('Cliente nao encontrado');
     }
+  }
+
+  private isSuccessfulConsultaSummaryStatus(cStat?: string): boolean {
+    return ['100', '101', '110', '150', '151', '155'].includes(String(cStat || '').trim());
+  }
+
+  private parseExternalDate(value?: string): Date | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
   }
 
   private async resolveClienteIdForEventoSync(clienteId?: string, documentoIds?: string[]): Promise<string> {

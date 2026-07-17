@@ -134,6 +134,7 @@ describe('NfeService', () => {
       xMotivo: 'Autorizado o uso do CT-e',
       requestedChave: '42260795849600000135570010000319691243772228',
       persistido: true,
+      consultaValida: true,
       documentosEncontrados: 1,
       documentosPersistidos: 1,
       eventosEncontrados: 0,
@@ -982,7 +983,8 @@ describe('NfeService', () => {
       chaveAcesso: '42260795849600000135570010000319691243772228',
       ambiente: NfeAmbiente.producao,
       persistir: true,
-      tentarEventos: true
+      tentarEventos: true,
+      fallbackDataEmissao: '2026-06-29'
     });
     expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1336,7 +1338,8 @@ describe('NfeService', () => {
       chaveAcesso: '42260795849600000135570010000319691243772228',
       ambiente: NfeAmbiente.producao,
       persistir: true,
-      tentarEventos: true
+      tentarEventos: true,
+      fallbackDataEmissao: '2026-06-29'
     });
     expect(distribuicaoClient.consultarPorChave).toHaveBeenCalledWith({
       cnpjConsulta: '12345678000199',
@@ -1389,6 +1392,85 @@ describe('NfeService', () => {
           chaveAcesso: '42260795849600000135570010000319691243772228',
           modelo: '57',
           mensagem: 'Nao foi possivel localizar chave de acesso no retorno da consulta de CT-e'
+        }
+      ]
+    });
+  });
+
+  it('trata rejeicao da consulta de CT-e como falha e nao como download persistido', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN = '300';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 50n,
+        ultimoNsuDistribuido: 50n,
+        maxNsu: 50n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 11,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        dataEmissao: '2026-06-29'
+      }
+    ]);
+    cteService.consultarChaveInternal.mockResolvedValueOnce({
+      statusCode: 200,
+      cStat: '215',
+      xMotivo: 'Rejeicao: XML Mal Formado',
+      requestedChave: '42260795849600000135570010000319691243772228',
+      persistido: true,
+      consultaValida: false,
+      documentosEncontrados: 1,
+      documentosPersistidos: 0,
+      eventosEncontrados: 0,
+      eventosPersistidos: 0,
+      documentos: [{ schema: 'retConsSitCTe_v4.00', chaveAcesso: '42260795849600000135570010000319691243772228' }]
+    });
+
+    const result = await service.executeDownloadByKey({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(result).toEqual({
+      processed: 1,
+      documentsSaved: 0,
+      failures: 1,
+      executionDetails: [
+        {
+          kind: 'documento',
+          status: 'falha',
+          clientId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: NfeAmbiente.producao,
+          cnpjConsulta: '12345678000199',
+          catalogoId: 11,
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          modelo: '57',
+          mensagem: 'Consulta por chave retornou cStat 215: Rejeicao: XML Mal Formado'
+        }
+      ],
+      failureDetails: [
+        {
+          kind: 'documento',
+          status: 'falha',
+          clientId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: NfeAmbiente.producao,
+          cnpjConsulta: '12345678000199',
+          catalogoId: 11,
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          modelo: '57',
+          mensagem: 'Consulta por chave retornou cStat 215: Rejeicao: XML Mal Formado'
         }
       ]
     });

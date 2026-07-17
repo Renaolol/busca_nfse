@@ -2875,7 +2875,7 @@ function renderNfeDocumentsTableCard(docs) {
                       <span class="row-sub">${escapeHtml(formatCnpj(doc.contraparteCnpj || ''))}</span>
                     </td>
                     <td>${escapeHtml(formatDateTime(doc.dataEmissao))}</td>
-                    <td>${escapeHtml(formatCurrency(doc.valor))}</td>
+                    <td>${escapeHtml(formatOptionalCurrency(doc.valor))}</td>
                     <td>${statusBadge(mapNfeAmbienteLabel(doc.ambiente), doc.ambiente === 'producao' ? 'success' : 'warning')}</td>
                     <td>${renderNfeStorageBadges(doc)}</td>
                     <td>${renderNfeStatusBadges(doc)}</td>
@@ -3107,7 +3107,7 @@ function renderCteDocumentsTableCard(docs) {
                       <span class="row-sub">${escapeHtml(formatCnpj(doc.contraparteCnpj || ''))}</span>
                     </td>
                     <td>${escapeHtml(formatDateTime(doc.dataEmissao))}</td>
-                    <td>${escapeHtml(formatCurrency(doc.valor))}</td>
+                    <td>${escapeHtml(formatOptionalCurrency(doc.valor))}</td>
                     <td>${statusBadge(mapNfeAmbienteLabel(doc.ambiente), doc.ambiente === 'producao' ? 'success' : 'warning')}</td>
                     <td>${renderNfeStorageBadges(doc)}</td>
                     <td>${renderCteStatusBadges(doc)}</td>
@@ -4022,7 +4022,7 @@ function renderNfeDetailsModal(nfeId) {
             ${detailItem('Destinatario', `${doc.destinatarioNome || '-'}${doc.destinatarioCnpj ? ` (${formatCnpj(doc.destinatarioCnpj)})` : ''}`)}
             ${detailItem('Data de emissao', formatDateTime(doc.dataEmissao))}
             ${detailItem('Data de autorizacao', formatDateTime(doc.dataAutorizacao))}
-            ${detailItem('Valor total', formatCurrency(doc.valor))}
+            ${detailItem('Valor total', formatOptionalCurrency(doc.valor))}
             ${detailItem('Schema', doc.schemaDoc || '-')}
             ${detailItem('Arquivo completo', doc.xmlCompletoDisponivel ? 'Sim' : 'Nao')}
             ${detailItem('Resumo disponivel', doc.resumoDisponivel ? 'Sim' : 'Nao')}
@@ -4096,7 +4096,7 @@ function renderCteDetailsModal(cteId) {
             ${detailItem('Destinatario', `${doc.destinatarioNome || '-'}${doc.destinatarioCnpj ? ` (${formatCnpj(doc.destinatarioCnpj)})` : ''}`)}
             ${detailItem('Data de emissao', formatDateTime(doc.dataEmissao))}
             ${detailItem('Data de autorizacao', formatDateTime(doc.dataAutorizacao))}
-            ${detailItem('Valor total', formatCurrency(doc.valor))}
+            ${detailItem('Valor total', formatOptionalCurrency(doc.valor))}
             ${detailItem('Schema', doc.schemaDoc || '-')}
             ${detailItem('Arquivo completo', doc.xmlCompletoDisponivel ? 'Sim' : 'Nao')}
             ${detailItem('Resumo disponivel', doc.resumoDisponivel ? 'Sim' : 'Nao')}
@@ -8918,13 +8918,17 @@ function buildCteDocumentsFromApi(cteDocs, clients) {
   return docs
     .map((doc) => {
       const client = clientById[doc.clienteId] || null;
-      const tipo = mapCteTipoLabel(doc.tipoRelacao);
+      const isConsultaResumo = String(doc.schemaDoc || '').startsWith('retConsSitCTe');
+      const tipoBase = mapCteTipoLabel(doc.tipoRelacao);
+      const tipo = tipoBase === 'Nao identificado' && isConsultaResumo ? 'Consulta por chave' : tipoBase;
       const eventos = Array.isArray(doc.eventos) ? doc.eventos : [];
       const cancelamentoEvento = eventos.find(isCancelamentoEventoApi) || null;
       const emitenteCnpj = normalizeDigits(doc.cnpjEmitente || '');
       const destinatarioCnpj = normalizeDigits(doc.cnpjDestinatario || '');
-      const contraparteNome = tipo === 'Emitido' ? doc.razaoSocialDestinatario : doc.razaoSocialEmitente;
-      const contraparteCnpj = tipo === 'Emitido' ? destinatarioCnpj : emitenteCnpj;
+      const contraparteNome =
+        tipo === 'Emitido' ? doc.razaoSocialDestinatario : tipo === 'Recebido' ? doc.razaoSocialEmitente : '-';
+      const contraparteCnpj =
+        tipo === 'Emitido' ? destinatarioCnpj : tipo === 'Recebido' ? emitenteCnpj : '';
       const statusFiscal = resolveFiscalStatus(doc.status, cancelamentoEvento?.dataEvento || null, cancelamentoEvento);
 
       return {
@@ -8938,9 +8942,9 @@ function buildCteDocumentsFromApi(cteDocs, clients) {
         serie: doc.serie || '-',
         modelo: doc.modelo || '-',
         ambiente: doc.ambiente || 'producao',
-        dataEmissao: doc.dataEmissao || doc.createdAt || doc.updatedAt,
+        dataEmissao: doc.dataEmissao || doc.dataAutorizacao || doc.createdAt || doc.updatedAt,
         dataAutorizacao: doc.dataAutorizacao || doc.updatedAt || doc.createdAt,
-        valor: toNumber(doc.valorTotal),
+        valor: doc.valorTotal == null ? null : toNumber(doc.valorTotal),
         tipo,
         statusFiscal,
         cancelada: normalizeSearchText(statusFiscal).includes('cancel'),
@@ -9886,6 +9890,13 @@ function formatCurrency(value) {
     style: 'currency',
     currency: 'BRL'
   }).format(Number.isFinite(numeric) ? numeric : 0);
+}
+
+function formatOptionalCurrency(value) {
+  if (value == null || value === '') {
+    return '-';
+  }
+  return formatCurrency(value);
 }
 
 function sumListedDocumentValues(items) {

@@ -333,7 +333,8 @@ describe('CteService', () => {
         create: expect.objectContaining({
           chaveAcesso: '42260795849600000135570010000319691243772228',
           modelo: '57',
-          schemaDoc: 'retConsSitCTe_v4.00'
+          schemaDoc: 'retConsSitCTe_v4.00',
+          dataAutorizacao: new Date('2026-07-15T13:00:01.000Z')
         })
       })
     );
@@ -341,10 +342,86 @@ describe('CteService', () => {
       expect.objectContaining({
         statusCode: 200,
         cStat: '100',
+        consultaValida: true,
         documentosEncontrados: 1,
         documentosPersistidos: 1,
         eventosEncontrados: 0,
         eventosPersistidos: 0
+      })
+    );
+  });
+
+  it('usa a data de emissao da Dominio como fallback para resumo valido sem dhEmi', async () => {
+    (cteConsultaClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '100',
+      xMotivo: 'Autorizado o uso do CT-e',
+      documents: [
+        {
+          schema: 'retConsSitCTe_v4.00',
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<retConsSitCTe xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <cStat>100</cStat>
+  <xMotivo>Autorizado o uso do CT-e</xMotivo>
+  <chCTe>42260795849600000135570010000319691243772228</chCTe>
+</retConsSitCTe>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    await service.consultarChaveInternal({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'est-1',
+      chaveAcesso: '42260795849600000135570010000319691243772228',
+      ambiente: NfeAmbiente.producao,
+      fallbackDataEmissao: '2026-05-21'
+    });
+
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          dataEmissao: new Date('2026-05-21T00:00:00.000Z')
+        })
+      })
+    );
+  });
+
+  it('nao persiste resumo de CT-e quando a consulta retorna rejeicao', async () => {
+    (cteConsultaClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '215',
+      xMotivo: 'Rejeicao: XML Mal Formado',
+      documents: [
+        {
+          schema: 'retConsSitCTe_v4.00',
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<retConsSitCTe xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <cStat>215</cStat>
+  <xMotivo>Rejeicao: XML Mal Formado</xMotivo>
+  <chCTe>42260795849600000135570010000319691243772228</chCTe>
+</retConsSitCTe>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.consultarChave({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'est-1',
+      chaveAcesso: '42260795849600000135570010000319691243772228',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        cStat: '215',
+        consultaValida: false,
+        documentosEncontrados: 1,
+        documentosPersistidos: 0
       })
     );
   });

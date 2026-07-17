@@ -1765,7 +1765,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
                 chaveAcesso,
                 ambiente: control.ambiente,
                 persistir: true,
-                tentarEventos: true
+                tentarEventos: true,
+                fallbackDataEmissao: entry.dataEmissao
               });
             } catch (error) {
               controlFailures += 1;
@@ -1801,6 +1802,27 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
                 chaveAcesso,
                 modelo,
                 mensagem: result.xMotivo ?? `Falha na consulta por chave do CT-e. HTTP ${result.statusCode}.`
+              };
+              executionDetails.push(detail);
+              failureDetails.push(detail);
+              continue;
+            }
+
+            if (!result.consultaValida) {
+              controlFailures += 1;
+              travarCursor = true;
+              const cStat = String(result.cStat || '').trim();
+              const detail: NfeSyncRunFailureDetail = {
+                kind: 'documento',
+                status: 'falha',
+                clientId: control.clienteId,
+                estabelecimentoId: control.estabelecimentoId,
+                ambiente: control.ambiente,
+                cnpjConsulta: control.cnpjConsulta,
+                catalogoId: entry.catalogoId,
+                chaveAcesso,
+                modelo,
+                mensagem: `Consulta por chave retornou cStat ${cStat || 'desconhecido'}: ${result.xMotivo || 'Sem xMotivo.'}`
               };
               executionDetails.push(detail);
               failureDetails.push(detail);
