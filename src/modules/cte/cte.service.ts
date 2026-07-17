@@ -500,6 +500,19 @@ export class CteService {
             { schemaDoc: { startsWith: 'eventoCTe' } },
             { schemaDoc: { startsWith: 'procEventoCTe' } }
           ]
+        },
+        {
+          NOT: {
+            AND: [
+              { schemaDoc: 'retConsSitCTe_v4.00' },
+              {
+                status: {
+                  contains: 'Rejeicao',
+                  mode: 'insensitive'
+                }
+              }
+            ]
+          }
         }
       ]
     };

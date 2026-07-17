@@ -183,6 +183,34 @@ describe('CteService', () => {
     expect(hasCnpjRelationFilter).toBe(false);
   });
 
+  it('oculta resumos de rejeicao do CT-e na listagem base', async () => {
+    await service.findAll({
+      clienteId: 'cliente-1'
+    });
+
+    expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([
+            expect.objectContaining({
+              NOT: {
+                AND: [
+                  { schemaDoc: 'retConsSitCTe_v4.00' },
+                  {
+                    status: {
+                      contains: 'Rejeicao',
+                      mode: 'insensitive'
+                    }
+                  }
+                ]
+              }
+            })
+          ])
+        })
+      })
+    );
+  });
+
   it('retorna estatisticas agregadas do dashboard por cliente', async () => {
     prisma.nfeDocumento.count.mockResolvedValueOnce(7).mockResolvedValueOnce(4);
     prisma.nfeDocumento.groupBy
