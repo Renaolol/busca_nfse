@@ -1730,11 +1730,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
               }
             },
             select: {
-              xmlCompletoDisponivel: true
+              xmlCompletoDisponivel: true,
+              resumoDisponivel: true,
+              modelo: true,
+              schemaDoc: true
             }
           });
 
-          if (existing?.xmlCompletoDisponivel) {
+          if (this.shouldSkipDownloadByKeyForExistingDocument(existing, modelo)) {
             if (!travarCursor && shouldAdvanceSavedCursor) {
               cursorAtualizadoAte = entry.catalogoId;
             }
@@ -2082,11 +2085,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
               }
             },
             select: {
-              xmlCompletoDisponivel: true
+              xmlCompletoDisponivel: true,
+              resumoDisponivel: true,
+              modelo: true,
+              schemaDoc: true
             }
           });
 
-          if (existing?.xmlCompletoDisponivel) {
+          if (this.shouldSkipDownloadByKeyForExistingDocument(existing, this.extractModeloFromChave(chaveAcesso))) {
             continue;
           }
 
@@ -3455,6 +3461,29 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
 
     return normalized.slice(20, 22);
+  }
+
+  private shouldSkipDownloadByKeyForExistingDocument(
+    existing:
+      | {
+          xmlCompletoDisponivel: boolean;
+          resumoDisponivel: boolean;
+          modelo: string | null;
+          schemaDoc: string | null;
+        }
+      | null,
+    modelo?: string
+  ): boolean {
+    if (!existing) {
+      return false;
+    }
+
+    const isCte = modelo === '57' || existing.modelo === '57' || this.isCteSchemaDoc(existing.schemaDoc);
+    if (isCte) {
+      return existing.xmlCompletoDisponivel || existing.resumoDisponivel;
+    }
+
+    return existing.xmlCompletoDisponivel;
   }
 
   private extractPrimaryNumeroNfe(documents: NfeDistribuicaoDocument[]): string | undefined {

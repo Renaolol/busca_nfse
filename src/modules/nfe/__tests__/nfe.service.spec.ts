@@ -1110,6 +1110,50 @@ describe('NfeService', () => {
     });
   });
 
+  it('ignora CT-e ja armazenado em resumo na previsualizacao do download por chave', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 999n,
+        ultimoNsuDistribuido: 999n,
+        maxNsu: 999n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 22,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        dataEmissao: '2026-01-11'
+      }
+    ]);
+    prisma.nfeDocumento.findUnique.mockResolvedValueOnce({
+      xmlCompletoDisponivel: false,
+      resumoDisponivel: true,
+      modelo: '57',
+      schemaDoc: 'retConsSitCTe_v4.00'
+    });
+
+    const result = await service.previewDownloadByKey({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(result).toEqual({
+      processed: 1,
+      pendingDownloads: 0,
+      failures: 0,
+      rows: []
+    });
+  });
+
   it('executa download manual por chave em modo dominio sem trocar a rotina principal', async () => {
     process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
     process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN = '300';
