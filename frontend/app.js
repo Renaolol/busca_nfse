@@ -749,6 +749,10 @@ function onDocumentClick(event) {
       void runNfeSearchNow();
       return;
     }
+    case 'nfe-download-by-key-global': {
+      void runNfeDownloadByKey();
+      return;
+    }
     case 'nfe-client-enable': {
       const clientId = actionNode.getAttribute('data-client-id');
       if (!clientId) {
@@ -780,6 +784,21 @@ function onDocumentClick(event) {
         return;
       }
       void runNfeSyncNow({
+        clienteId: clientId,
+        estabelecimentoId: estabelecimentoId || undefined,
+        ambiente,
+        limitControles: 1
+      });
+      return;
+    }
+    case 'nfe-download-by-key-control': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      const estabelecimentoId = actionNode.getAttribute('data-estabelecimento-id') || '';
+      const ambiente = actionNode.getAttribute('data-ambiente') || 'producao';
+      if (!clientId) {
+        return;
+      }
+      void runNfeDownloadByKey({
         clienteId: clientId,
         estabelecimentoId: estabelecimentoId || undefined,
         ambiente,
@@ -824,6 +843,10 @@ function onDocumentClick(event) {
     }
     case 'nfe-docs-run-now-client': {
       void runNfeSyncForCurrentDocumentsClient();
+      return;
+    }
+    case 'nfe-docs-download-by-key-client': {
+      void runNfeDownloadByKeyForCurrentDocumentsClient();
       return;
     }
     case 'nfe-export-list': {
@@ -1130,7 +1153,11 @@ function onDocumentClick(event) {
     case 'drawer-close':
     case 'overlay-close': {
       if (
-        (state.modal?.kind === 'events-sync-report' || state.modal?.kind === 'past-nsu-recovery-report') &&
+        (
+          state.modal?.kind === 'events-sync-report' ||
+          state.modal?.kind === 'past-nsu-recovery-report' ||
+          state.modal?.kind === 'download-by-key-report'
+        ) &&
         state.modal.running
       ) {
         return;
@@ -2245,27 +2272,47 @@ function renderNfeSyncPage() {
   const ambienteOptions = uniqueValues(controls.map((control) => control.ambiente));
   const nfeStats = getNfeDashboardStats();
   const sourceMode = getNfeSourceMode();
-  const queueLabel = sourceMode === 'dominio' ? 'prontos para importar XMLs' : 'buscando NF-e futuras';
-  const errorLabel = sourceMode === 'dominio' ? 'revisar conexao, cursor ou XMLs' : 'revisar certificado ou API';
+  const queueLabel =
+    sourceMode === 'dominio'
+      ? 'prontos para importar XMLs'
+      : sourceMode === 'dominio_chave'
+        ? 'prontos para download por chave'
+        : 'buscando NF-e futuras';
+  const errorLabel =
+    sourceMode === 'dominio'
+      ? 'revisar conexao, cursor ou XMLs'
+      : sourceMode === 'dominio_chave'
+        ? 'revisar certificado, Dominio ou consulta por chave'
+        : 'revisar certificado ou API';
   const overviewDescription =
     sourceMode === 'dominio'
       ? 'Ligue a importacao por cliente ou em lote. O backend consulta o banco da Dominio, salva os XMLs no storage local e segue apenas com os registros novos.'
-      : 'Ligue a busca por cliente ou em lote. O sistema captura o NSU atual como base e segue apenas com as proximas NF-e de entrada e saida.';
+      : sourceMode === 'dominio_chave'
+        ? 'Ligue os controles por cliente e use o download manual por chave para consultar apenas documentos novos localizados no catalogo da Dominio.'
+        : 'Ligue a busca por cliente ou em lote. O sistema captura o NSU atual como base e segue apenas com as proximas NF-e de entrada e saida.';
   const simplifiedSubtitle =
     sourceMode === 'dominio'
       ? 'Ao ligar a importacao, o backend resolve os estabelecimentos ativos do cliente e passa a acompanhar novos XMLs no banco da Dominio.'
-      : 'Ao ligar a busca, o backend resolve os estabelecimentos ativos do cliente, captura o NSU atual e passa a sincronizar apenas as proximas NF-e.';
+      : sourceMode === 'dominio_chave'
+        ? 'Ao ligar a rotina, o backend prepara os controles por estabelecimento e usa o catalogo da Dominio como fila de chaves para download manual.'
+        : 'Ao ligar a busca, o backend resolve os estabelecimentos ativos do cliente, captura o NSU atual e passa a sincronizar apenas as proximas NF-e.';
   const detailSubtitle =
     sourceMode === 'dominio'
       ? 'Visao detalhada dos controles usados pelo backend para importar XMLs e manter o cursor incremental por estabelecimento.'
-      : 'Visao detalhada dos controles realmente mantidos pelo backend para distribuicao DF-e.';
-  const clientCursorLabel = sourceMode === 'dominio' ? 'Ult. cursor' : 'Ult. NSU base';
-  const controlCursorLabel = sourceMode === 'dominio' ? 'Cursor atual' : 'Ult. NSU consultado';
-  const controlProgressLabel = sourceMode === 'dominio' ? 'Cursor salvo' : 'Ult. NSU distribuido';
-  const controlMaxLabel = sourceMode === 'dominio' ? 'Maior catalogo' : 'Max NSU';
-  const globalRunLabel = sourceMode === 'dominio' ? 'Rodar importacao agora' : 'Rodar busca agora';
+      : sourceMode === 'dominio_chave'
+        ? 'Visao detalhada dos controles usados pelo backend para varrer o catalogo da Dominio e baixar documentos oficiais por chave.'
+        : 'Visao detalhada dos controles realmente mantidos pelo backend para distribuicao DF-e.';
+  const clientCursorLabel = sourceMode === 'distribuicao' ? 'Ult. NSU base' : 'Ult. cursor';
+  const controlCursorLabel = sourceMode === 'distribuicao' ? 'Ult. NSU consultado' : 'Cursor atual';
+  const controlProgressLabel = sourceMode === 'distribuicao' ? 'Ult. NSU distribuido' : 'Cursor salvo';
+  const controlMaxLabel = sourceMode === 'distribuicao' ? 'Max NSU' : 'Maior catalogo';
+  const globalRunLabel =
+    sourceMode === 'dominio' ? 'Rodar importacao agora' : sourceMode === 'dominio_chave' ? 'Download por chave' : 'Rodar busca agora';
   const clientEnableLabel = sourceMode === 'dominio' ? 'Ligar importacao' : 'Ligar busca';
-  const rowRunLabel = sourceMode === 'dominio' ? 'Importar agora' : 'Rodar agora';
+  const rowRunLabel =
+    sourceMode === 'dominio' ? 'Importar agora' : sourceMode === 'dominio_chave' ? 'Download por chave' : 'Rodar agora';
+  const globalRunAction = sourceMode === 'dominio_chave' ? 'nfe-download-by-key-global' : 'nfe-run-now';
+  const rowRunAction = sourceMode === 'dominio_chave' ? 'nfe-download-by-key-control' : 'nfe-sync-run-control';
   const filtersContent = `
     <form id="nfeSyncFilterForm" class="form-grid">
       <label class="field">
@@ -2387,7 +2434,7 @@ function renderNfeSyncPage() {
                   </td>
                   <td>
                     <div class="table-actions">
-                      <button class="icon-btn" data-action="nfe-sync-run-control" data-client-id="${control.clientId}" data-estabelecimento-id="${control.estabelecimentoId}" data-ambiente="${control.ambiente}">${escapeHtml(rowRunLabel)}</button>
+                      <button class="icon-btn" data-action="${escapeHtml(rowRunAction)}" data-client-id="${control.clientId}" data-estabelecimento-id="${control.estabelecimentoId}" data-ambiente="${control.ambiente}">${escapeHtml(rowRunLabel)}</button>
                       <button class="icon-btn" data-action="nfe-sync-pause-control" data-client-id="${control.clientId}" data-ambiente="${control.ambiente}">Pausar</button>
                     </div>
                   </td>
@@ -2408,7 +2455,7 @@ function renderNfeSyncPage() {
         description: overviewDescription,
         actions: [
           actionButton('Ligar todos os clientes', 'nfe-enable-auto-search', 'primary'),
-          actionButton(globalRunLabel, 'nfe-run-now', 'secondary'),
+          actionButton(globalRunLabel, globalRunAction, 'secondary'),
           actionButton('Pausar todos', 'nfe-disable-auto-search', 'secondary')
         ]
       })}
@@ -2430,10 +2477,10 @@ function renderNfeSyncPage() {
         defaultOpen: true
       })}
       ${
-        sourceMode === 'dominio'
+        sourceMode !== 'distribuicao'
           ? renderCollapsibleCard({
               sectionKey: 'failures',
-              title: 'Painel de falhas da importacao',
+              title: sourceMode === 'dominio' ? 'Painel de falhas da importacao' : 'Painel da ultima execucao manual',
               subtitle: 'Mostra a ultima execucao manual feita nesta tela.',
               contentHtml: renderNfeLastRunPanel(),
               defaultOpen: false
@@ -2575,11 +2622,13 @@ function renderNfeSchedulerStatusCard() {
           <span class="scheduler-dot info"></span>
           <strong>Origem da captura</strong>
         </div>
-        ${statusBadge(sourceMode === 'dominio' ? 'Banco Dominio' : 'Distribuicao DF-e', 'info')}
+        ${statusBadge(sourceMode === 'dominio' ? 'Banco Dominio' : sourceMode === 'dominio_chave' ? 'Dominio + chave' : 'Distribuicao DF-e', 'info')}
         <p>${
           sourceMode === 'dominio'
             ? 'Os controles ativos importam XMLs diretamente do banco da Dominio e salvam os arquivos no storage local.'
-            : 'Os controles ativos consultam a distribuicao DF-e e persistem os documentos retornados.'
+            : sourceMode === 'dominio_chave'
+              ? 'Os controles ativos usam o catalogo da Dominio para localizar chaves novas e o download oficial ocorre apenas quando voce dispara a rotina manual.'
+              : 'Os controles ativos consultam a distribuicao DF-e e persistem os documentos retornados.'
         }</p>
       </div>
       <div class="scheduler-item">
@@ -2591,7 +2640,9 @@ function renderNfeSchedulerStatusCard() {
         <p>${
           sourceMode === 'dominio'
             ? 'Processa controles ativos em segundo plano para importar novos XMLs sem depender de acao manual.'
-            : 'Processa controles ativos em segundo plano sem depender de acao manual.'
+            : sourceMode === 'dominio_chave'
+              ? 'No modo por chave, o ciclo automatico nao executa downloads. A rotina fica reservada para acionamento manual.'
+              : 'Processa controles ativos em segundo plano sem depender de acao manual.'
         }</p>
         <small>Intervalo: ${escapeHtml(formatDurationMs(autoSync.intervalMs || 0))}</small>
       </div>
@@ -2619,6 +2670,8 @@ function renderNfeDocumentsPage() {
   const statusOptions = uniqueValues(state.nfeDocuments.map((doc) => doc.statusFiscal).filter(Boolean));
   const schemaOptions = uniqueValues(state.nfeDocuments.map((doc) => doc.schemaDoc).filter(Boolean));
   const selectedClientId = state.filters.nfeDocs.cliente && state.filters.nfeDocs.cliente !== 'Todos' ? state.filters.nfeDocs.cliente : '';
+  const manualClientRunLabel = isNfeDownloadByKeyMode() ? 'Download por chave' : 'Rodar busca do cliente';
+  const manualClientRunAction = isNfeDownloadByKeyMode() ? 'nfe-docs-download-by-key-client' : 'nfe-docs-run-now-client';
 
   return `
     <section class="page-section">
@@ -2697,7 +2750,7 @@ function renderNfeDocumentsPage() {
           <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
             <button class="btn primary" type="submit">Buscar NF-e</button>
             <button class="btn secondary" type="button" data-action="nfe-docs-clear-filters">Limpar</button>
-            <button class="btn secondary" type="button" data-action="nfe-docs-run-now-client" ${selectedClientId ? '' : 'disabled'}>Rodar busca do cliente</button>
+            <button class="btn secondary" type="button" data-action="${escapeHtml(manualClientRunAction)}" ${selectedClientId ? '' : 'disabled'}>${escapeHtml(manualClientRunLabel)}</button>
           </div>
         </form>
       </article>
@@ -3664,6 +3717,8 @@ function renderModal() {
       return renderEventsSyncReportModal();
     case 'past-nsu-recovery-report':
       return renderPastNsuRecoveryReportModal();
+    case 'download-by-key-report':
+      return renderDownloadByKeyReportModal();
     case 'dominio-nfe-view':
       return renderDominioNfeViewerModal();
     case 'xml-details':
@@ -4203,11 +4258,13 @@ function renderPastNsuRecoveryReportModal() {
   const summary = state.modal.summary || {};
   const rows = Array.isArray(state.modal.rows) ? state.modal.rows : [];
   const running = Boolean(state.modal.running);
+  const rowMode = state.modal.rowMode || 'controle';
   const currentMessage = String(state.modal.currentMessage || '').trim();
   const clientName = String(state.modal.clientName || 'Cliente selecionado');
   const processedCount = Number(summary?.controlesProcessados || 0);
   const totalCount = Number(summary?.controlesEncontrados || state.modal.totalCount || 0);
   const documentosSalvos = Number(summary?.documentosSalvos || 0);
+  const nsusAvaliados = Number(summary?.nsusAvaliados || 0);
   const nsusConsultados = Number(summary?.nsusConsultados || 0);
   const jaExistentes = Number(summary?.nsusIgnoradosComDocumento || 0) + Number(summary?.documentosIgnoradosExistentes || 0);
   const semDocumento = Number(summary?.semDocumento || 0);
@@ -4228,6 +4285,7 @@ function renderPastNsuRecoveryReportModal() {
           }
           <div class="form-grid four" style="margin-bottom:18px;">
             ${detailItem('Controles processados', `${processedCount}${totalCount ? ` / ${totalCount}` : ''}`)}
+            ${detailItem('NSUs avaliados', String(nsusAvaliados))}
             ${detailItem('NSUs consultados', String(nsusConsultados))}
             ${detailItem('XMLs salvos', String(documentosSalvos))}
             ${detailItem('Ja existentes', String(jaExistentes))}
@@ -4236,7 +4294,36 @@ function renderPastNsuRecoveryReportModal() {
           </div>
           ${
             rows.length
-              ? `
+              ? rowMode === 'nsu'
+                ? `
+                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:hidden; background:#fff;">
+                  <div style="display:grid; grid-template-columns: minmax(120px, .7fr) minmax(170px, 1fr) minmax(140px, .8fr) minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(260px, 1.4fr); gap:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                    <div style="padding:12px 14px;">NSU</div>
+                    <div style="padding:12px 14px;">CNPJ consulta</div>
+                    <div style="padding:12px 14px;">Ambiente</div>
+                    <div style="padding:12px 14px;">Chave</div>
+                    <div style="padding:12px 14px;">Status</div>
+                    <div style="padding:12px 14px;">Mensagem</div>
+                  </div>
+                  ${rows
+                    .map(
+                      (row) => `
+                        <div style="display:grid; grid-template-columns: minmax(120px, .7fr) minmax(170px, 1fr) minmax(140px, .8fr) minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(260px, 1.4fr); gap:0; border-bottom:1px solid #eef0f2; align-items:start;">
+                          <div style="padding:14px; font-family:monospace; font-size:12px;">${escapeHtml(row.nsuLabel || '-')}</div>
+                          <div style="padding:14px; font-family:monospace; font-size:12px;">${escapeHtml(row.cnpjConsulta || '-')}</div>
+                          <div style="padding:14px;">${escapeHtml(row.ambienteLabel || '-')}</div>
+                          <div style="padding:14px; font-family:monospace; font-size:12px; word-break:break-all;">
+                            ${escapeHtml(row.chaveAcesso || '-')}
+                          </div>
+                          <div style="padding:14px;">${statusBadge(row.statusLabel || '-', row.statusTone || 'neutral')}</div>
+                          <div style="padding:14px; color:#606062;">${escapeHtml(row.message || '-')}</div>
+                        </div>
+                      `
+                    )
+                    .join('')}
+                </div>
+              `
+                : `
                 <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:hidden; background:#fff;">
                   <div style="display:grid; grid-template-columns: minmax(170px, 1.1fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(240px, 1.4fr) minmax(160px, .9fr) minmax(220px, 1.2fr); gap:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
                     <div style="padding:12px 14px;">CNPJ consulta</div>
@@ -4270,6 +4357,96 @@ function renderPastNsuRecoveryReportModal() {
         </div>
         <div class="modal-footer">
           ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao do reprocessamento manual...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderDownloadByKeyReportModal() {
+  if (state.modal?.kind !== 'download-by-key-report') {
+    return '';
+  }
+
+  const rows = Array.isArray(state.modal.rows) ? state.modal.rows : [];
+  const running = Boolean(state.modal.running);
+  const showClientColumn = Boolean(state.modal.showClientColumn);
+  const pendingCount = Number(state.modal.pendingCount || 0);
+  const downloadedCount = Number(state.modal.downloadedCount || 0);
+  const errorCount = Number(state.modal.errorCount || 0);
+  const currentMessage = String(state.modal.currentMessage || '').trim();
+  const clientName = String(state.modal.clientName || 'Todos os clientes');
+  const subtitle = running
+    ? `${clientName} • ${downloadedCount}/${pendingCount} item(ns) concluido(s).`
+    : `${clientName} • revise o resultado chave por chave.`;
+
+  const gridTemplate = showClientColumn
+    ? 'minmax(150px, 1.1fr) minmax(250px, 1.8fr) minmax(140px, .9fr) minmax(160px, .9fr) minmax(260px, 1.4fr)'
+    : 'minmax(250px, 1.9fr) minmax(140px, .9fr) minmax(160px, .9fr) minmax(300px, 1.5fr)';
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="max-width:1120px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Download por chave</h3>
+          <p class="modal-subtitle">${escapeHtml(subtitle)}</p>
+        </div>
+        <div class="modal-body">
+          ${
+            currentMessage
+              ? `<div style="margin-bottom:14px; padding:12px 14px; border:1px solid #d9e7ff; border-radius:12px; background:#f4f8ff; color:#21446b;">${escapeHtml(currentMessage)}</div>`
+              : ''
+          }
+          <div class="form-grid four" style="margin-bottom:18px;">
+            ${detailItem('Chaves pendentes', String(pendingCount))}
+            ${detailItem('Baixadas', String(downloadedCount))}
+            ${detailItem('Erros', String(errorCount))}
+            ${detailItem('Linhas exibidas', String(rows.length))}
+          </div>
+          ${
+            rows.length
+              ? `
+                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:hidden; background:#fff;">
+                  <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                    ${showClientColumn ? '<div style="padding:12px 14px;">Cliente</div>' : ''}
+                    <div style="padding:12px 14px;">Chave de acesso</div>
+                    <div style="padding:12px 14px;">Documento</div>
+                    <div style="padding:12px 14px;">Status</div>
+                    <div style="padding:12px 14px;">Mensagem</div>
+                  </div>
+                  ${rows
+                    .map(
+                      (row) => `
+                        <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; border-bottom:1px solid #eef0f2; align-items:start;">
+                          ${
+                            showClientColumn
+                              ? `<div style="padding:14px;">
+                                  <strong>${escapeHtml(row.clientLabel || '-')}</strong>
+                                  ${row.clientDetail ? `<div style="margin-top:4px; color:#606062;">${escapeHtml(row.clientDetail)}</div>` : ''}
+                                </div>`
+                              : ''
+                          }
+                          <div style="padding:14px; font-family:monospace; font-size:12px; word-break:break-all;">
+                            ${escapeHtml(row.chaveAcesso || '-')}
+                            ${row.keyDetail ? `<div style="margin-top:4px; color:#606062; font-family:inherit;">${escapeHtml(row.keyDetail)}</div>` : ''}
+                          </div>
+                          <div style="padding:14px;">
+                            <strong>${escapeHtml(row.documentLabel || '-')}</strong>
+                            ${row.documentDetail ? `<div style="margin-top:4px; color:#606062;">${escapeHtml(row.documentDetail)}</div>` : ''}
+                          </div>
+                          <div style="padding:14px;">${statusBadge(row.statusLabel || '-', row.statusTone || 'neutral')}</div>
+                          <div style="padding:14px; color:#606062;">${escapeHtml(row.message || '-')}</div>
+                        </div>
+                      `
+                    )
+                    .join('')}
+                </div>
+              `
+              : '<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">Nenhuma chave pendente foi encontrada para esta execucao.</div>'
+          }
+        </div>
+        <div class="modal-footer">
+          ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao do download manual por chave...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
         </div>
       </div>
     </div>
@@ -4624,7 +4801,9 @@ function renderClientNfeSearchActivation(client) {
     client.buscaNfeAtiva !== false
       ? sourceMode === 'dominio'
         ? 'participa da importacao via banco Dominio'
-        : 'participa da distribuicao DF-e'
+        : sourceMode === 'dominio_chave'
+          ? 'participa do download manual por chave via Dominio'
+          : 'participa da distribuicao DF-e'
       : 'excluida das rotinas de NF-e';
 
   return `
@@ -5583,7 +5762,9 @@ function getClientNfeBaseSummary(clientId, controls = state.nfeSyncControls) {
           ? 'Busca de NF-e desabilitada para este cliente'
           : sourceMode === 'dominio'
             ? 'Ative a importacao para iniciar a leitura incremental do banco da Dominio'
-            : 'Ative a busca para capturar o NSU atual',
+            : sourceMode === 'dominio_chave'
+              ? 'Ative a rotina para preparar o download manual por chave via catalogo da Dominio'
+              : 'Ative a busca para capturar o NSU atual',
       controlsLabel: 'Nenhum controle criado'
     };
   }
@@ -5607,9 +5788,11 @@ function getClientNfeBaseSummary(clientId, controls = state.nfeSyncControls) {
   const detail =
     sourceMode === 'dominio'
       ? `${rows.length} controle(s) com cursores independentes por estabelecimento`
-      : distinctNsuValues.length > 1
-        ? `${rows.length} controle(s) com NSUs independentes`
-        : `${rows.length} controle(s) configurado(s) para NF-e`;
+      : sourceMode === 'dominio_chave'
+        ? `${rows.length} controle(s) preparados para download manual por chave`
+        : distinctNsuValues.length > 1
+          ? `${rows.length} controle(s) com NSUs independentes`
+          : `${rows.length} controle(s) configurado(s) para NF-e`;
 
   return {
     displayValue,
@@ -5626,7 +5809,7 @@ async function enableNfeSearchForAllClients() {
     });
     const failureDetails = extractNfeActivationFailureMessages(result?.detalhes);
     pushToast(
-      `${getNfeSourceMode() === 'dominio' ? 'Importacao NF-e ligada' : 'NF-e ligada'} para ${Number(result?.clientesComSucesso || 0)} cliente(s). Controles preparados: ${Number(result?.controlesCriadosOuReativados || 0)}.${
+      `${getNfeSourceMode() === 'dominio' ? 'Importacao NF-e ligada' : getNfeSourceMode() === 'dominio_chave' ? 'Download por chave ligado' : 'NF-e ligada'} para ${Number(result?.clientesComSucesso || 0)} cliente(s). Controles preparados: ${Number(result?.controlesCriadosOuReativados || 0)}.${
         failureDetails ? ` ${failureDetails}` : ''
       }`,
       Number(result?.falhas || 0) > 0 ? 'error' : 'success'
@@ -5647,7 +5830,7 @@ async function enableNfeSearchForClient(clientId) {
     });
     const failureDetails = extractNfeActivationFailureMessages(result?.detalhes);
     pushToast(
-      `${getNfeSourceMode() === 'dominio' ? 'Importacao NF-e ligada' : 'NF-e ligada'} para o cliente: ${Number(result?.controlesCriadosOuReativados || 0)} controle(s) preparado(s).${
+      `${getNfeSourceMode() === 'dominio' ? 'Importacao NF-e ligada' : getNfeSourceMode() === 'dominio_chave' ? 'Download por chave ligado' : 'NF-e ligada'} para o cliente: ${Number(result?.controlesCriadosOuReativados || 0)} controle(s) preparado(s).${
         failureDetails ? ` ${failureDetails}` : ''
       }`,
       Number(result?.falhas || 0) > 0 ? 'error' : 'success'
@@ -5707,7 +5890,7 @@ async function disableNfeSearchForAllClients() {
 async function runNfeSearchNow() {
   try {
     pushToast(
-      `${getNfeSourceMode() === 'dominio' ? 'Importacao' : 'Busca'} de NF-e iniciada para todos os controles ativos. Aguarde a conclusao.`,
+      `${getNfeSourceMode() === 'dominio' ? 'Importacao' : getNfeSourceMode() === 'dominio_chave' ? 'Download por chave' : 'Busca'} de NF-e iniciada para todos os controles ativos. Aguarde a conclusao.`,
       'info'
     );
     const result = await apiRequest('/nfe/sync/rodar-agora-geral', {
@@ -5716,7 +5899,11 @@ async function runNfeSearchNow() {
     state.nfeLastRunReport = buildNfeRunReport(result);
     pushToast(
       buildNfeRunToastMessage(
-        getNfeSourceMode() === 'dominio' ? 'Importacao de NF-e executada' : 'Busca de NF-e executada',
+        getNfeSourceMode() === 'dominio'
+          ? 'Importacao de NF-e executada'
+          : getNfeSourceMode() === 'dominio_chave'
+            ? 'Download por chave executado'
+            : 'Busca de NF-e executada',
         result
       ),
       Number(result?.failures || 0) > 0 ? 'error' : 'success'
@@ -5785,7 +5972,7 @@ async function runNfeSyncNow(payload) {
     const client = payload?.clienteId ? findClientById(payload.clienteId) : null;
     pushToast(
       `${
-        getNfeSourceMode() === 'dominio' ? 'Importacao' : 'Busca'
+        getNfeSourceMode() === 'dominio' ? 'Importacao' : getNfeSourceMode() === 'dominio_chave' ? 'Download por chave' : 'Busca'
       } de NF-e iniciada${client ? ` para ${client.razaoSocial}` : ''}. Aguarde a conclusao da operacao.`,
       'info'
     );
@@ -5796,7 +5983,11 @@ async function runNfeSyncNow(payload) {
     state.nfeLastRunReport = buildNfeRunReport(response);
     pushToast(
       buildNfeRunToastMessage(
-        getNfeSourceMode() === 'dominio' ? 'Importacao NF-e executada' : 'Sincronizacao NF-e executada',
+        getNfeSourceMode() === 'dominio'
+          ? 'Importacao NF-e executada'
+          : getNfeSourceMode() === 'dominio_chave'
+            ? 'Download por chave executado'
+            : 'Sincronizacao NF-e executada',
         response
       ),
       Number(response?.failures || 0) > 0 ? 'error' : 'success'
@@ -6097,6 +6288,141 @@ async function runNfeSyncForCurrentDocumentsClient() {
   await runNfeSyncNow({ clienteId: clientId });
 }
 
+async function runNfeDownloadByKeyForCurrentDocumentsClient() {
+  const clientId = state.filters.nfeDocs.cliente && state.filters.nfeDocs.cliente !== 'Todos' ? state.filters.nfeDocs.cliente : '';
+  if (!clientId) {
+    pushToast('Selecione uma empresa para executar o download por chave.', 'error');
+    return;
+  }
+
+  await runNfeDownloadByKey({ clienteId: clientId });
+}
+
+async function runNfeDownloadByKey(payload = null) {
+  if (!isNfeDownloadByKeyMode()) {
+    pushToast('O download por chave so esta disponivel quando NFE_SYNC_SOURCE_MODE=dominio_chave.', 'error');
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('O download por chave so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const body = payload?.clienteId
+    ? {
+        clienteId: payload.clienteId,
+        ...(payload?.estabelecimentoId ? { estabelecimentoId: payload.estabelecimentoId } : {}),
+        ...(payload?.ambiente ? { ambiente: payload.ambiente } : {}),
+        ...(payload?.limitControles ? { limitControles: payload.limitControles } : {})
+      }
+    : null;
+  const isGlobal = !body?.clienteId;
+  const client = body?.clienteId ? findClientById(body.clienteId) : null;
+  const clientName = client?.razaoSocial || (isGlobal ? 'Todos os clientes' : 'Cliente selecionado');
+
+  try {
+    openDownloadByKeyReportModal({
+      showClientColumn: isGlobal,
+      clientName,
+      pendingCount: 0,
+      downloadedCount: 0,
+      errorCount: 0,
+      currentMessage: 'Lendo chaves pendentes na Dominio...',
+      rows: []
+    });
+
+    const preview = await apiRequest(isGlobal ? '/nfe/sync/download-por-chave/preview-global' : '/nfe/sync/download-por-chave/preview', {
+      method: 'POST',
+      ...(body ? { body } : {}),
+      timeoutMs: 3 * 60 * 1000
+    });
+
+    const previewRows = buildDownloadByKeyPreviewRows(preview?.rows, isGlobal);
+    const pendingCount = Number(preview?.pendingDownloads || 0);
+    const previewErrorCount = countDownloadByKeyErrorRows(previewRows);
+
+    updateDownloadByKeyOverlayState({
+      running: pendingCount > 0,
+      pendingCount,
+      downloadedCount: 0,
+      errorCount: previewErrorCount,
+      currentMessage:
+        pendingCount > 0
+          ? 'Chaves localizadas. Iniciando download oficial por chave...'
+          : 'Nenhuma chave pendente foi localizada para esta execucao.',
+      rows: previewRows
+    });
+
+    if (pendingCount === 0) {
+      pushToast(
+        previewErrorCount > 0
+          ? 'Nenhuma chave pendente foi localizada, mas houve falhas na preparacao da auditoria.'
+          : 'Nenhuma chave pendente foi localizada na Dominio para download.',
+        previewErrorCount > 0 ? 'error' : 'info'
+      );
+      return;
+    }
+
+    const runningRows = buildDownloadByKeyRunningRows(previewRows);
+    updateDownloadByKeyOverlayState({
+      running: true,
+      rows: runningRows,
+      currentMessage: 'Download oficial em andamento. Aguarde o retorno do backend...'
+    });
+
+    const result = await apiRequest(isGlobal ? '/nfe/sync/rodar-agora-geral' : '/nfe/sync/rodar-agora', {
+      method: 'POST',
+      ...(body ? { body } : {}),
+      timeoutMs: resolveDownloadByKeyTimeoutMs(pendingCount)
+    });
+
+    state.nfeLastRunReport = buildNfeRunReport(result);
+    const resolvedRows = buildDownloadByKeyResolvedRows(runningRows, result);
+    const downloadedCount = countDownloadByKeyRowsByStatus(resolvedRows, 'Baixada');
+    const errorCount = countDownloadByKeyErrorRows(resolvedRows);
+
+    updateDownloadByKeyOverlayState({
+      running: false,
+      rows: resolvedRows,
+      downloadedCount,
+      errorCount,
+      currentMessage: `Download concluido. ${downloadedCount} chave(s) baixada(s) e ${errorCount} erro(s) registrado(s).`
+    });
+
+    await refreshApiData();
+    pushToast(
+      `Download por chave concluido: ${Number(result?.documentsSaved || 0)} documento(s) salvo(s)${Number(result?.failures || 0) > 0 ? `, ${Number(result?.failures || 0)} falha(s)` : ''}.`,
+      Number(result?.failures || 0) > 0 ? 'error' : 'success'
+    );
+  } catch (error) {
+    if (state.modal?.kind === 'download-by-key-report') {
+      const failedRows = buildDownloadByKeyResolvedRows(Array.isArray(state.modal.rows) ? state.modal.rows : [], {
+        executionDetails: [],
+        failureDetails: []
+      }).map((row) =>
+        row.kind === 'documento' && row.statusLabel === 'Baixando'
+          ? {
+              ...row,
+              statusLabel: 'Erro',
+              statusTone: 'danger',
+              message: `Falha de API: ${toErrorMessage(error)}`
+            }
+          : row
+      );
+
+      updateDownloadByKeyOverlayState({
+        running: false,
+        rows: failedRows,
+        errorCount: countDownloadByKeyErrorRows(failedRows),
+        currentMessage: `Falha ao executar download por chave: ${toErrorMessage(error)}`
+      });
+    }
+
+    pushToast(`Falha ao executar download por chave: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
 async function recoverPastNsusForCurrentXmlClient() {
   const clientId = state.filters.xmls.cliente && state.filters.xmls.cliente !== 'Todos' ? state.filters.xmls.cliente : '';
   if (!clientId) {
@@ -6135,12 +6461,14 @@ async function runPastNsuRecovery(clientId = null) {
     );
     if (shouldOpenOverlay) {
       openPastNsuRecoveryReportModal({
+        rowMode: 'nsu',
         clientName: selectedClient?.razaoSocial || 'Cliente selecionado',
         totalCount: 0,
         currentMessage: 'Preparando reprocessamento dos NSUs ja consultados...',
         summary: {
           controlesEncontrados: 0,
           controlesProcessados: 0,
+          nsusAvaliados: 0,
           nsusConsultados: 0,
           documentosSalvos: 0,
           nsusIgnoradosComDocumento: 0,
@@ -6160,19 +6488,67 @@ async function runPastNsuRecovery(clientId = null) {
     state.executionMonitor.updatedAt = new Date().toISOString();
     render();
 
-    const result = await apiRequest('/sync/reprocessar-nsus-passados', {
-      method: 'POST',
-      body: clientId ? { clienteId: clientId } : {},
-      timeoutMs: 10 * 60 * 1000
-    });
+    let result;
+
+    if (shouldOpenOverlay && clientId) {
+      const execution = await apiRequest('/sync/reprocessar-nsus-passados/execucao', {
+        method: 'POST',
+        body: { clienteId: clientId },
+        timeoutMs: 2 * 60 * 1000
+      });
+
+      updatePastNsuRecoveryOverlayState({
+        running: execution?.status === 'running',
+        rowMode: 'nsu',
+        totalCount: Number(execution?.summary?.controlesEncontrados || 0),
+        currentMessage: String(execution?.currentMessage || 'Execucao iniciada.'),
+        summary: execution?.summary || {},
+        rows: buildPastNsuRecoveryLiveRows(execution)
+      });
+
+      let latestExecution = execution;
+      while (latestExecution?.status === 'running') {
+        await wait(900);
+        latestExecution = await apiRequest(
+          `/sync/reprocessar-nsus-passados/execucao/${encodeURIComponent(String(execution?.executionId || ''))}`,
+          {
+            method: 'GET',
+            timeoutMs: 2 * 60 * 1000
+          }
+        );
+
+        updatePastNsuRecoveryOverlayState({
+          running: latestExecution?.status === 'running',
+          rowMode: 'nsu',
+          totalCount: Number(latestExecution?.summary?.controlesEncontrados || 0),
+          currentMessage: String(latestExecution?.currentMessage || 'Reprocessamento em andamento...'),
+          summary: latestExecution?.summary || {},
+          rows: buildPastNsuRecoveryLiveRows(latestExecution)
+        });
+      }
+
+      result = latestExecution?.summary || {};
+    } else {
+      result = await apiRequest('/sync/reprocessar-nsus-passados', {
+        method: 'POST',
+        body: clientId ? { clienteId: clientId } : {},
+        timeoutMs: 10 * 60 * 1000
+      });
+    }
 
     if (shouldOpenOverlay) {
       updatePastNsuRecoveryOverlayState({
         running: false,
+        rowMode: state.modal?.rowMode || 'controle',
         totalCount: Number(result?.controlesEncontrados || 0),
         currentMessage: String(result?.ultimaMensagem || 'Reprocessamento manual concluido.'),
         summary: result,
-        rows: buildPastNsuRecoveryAuditRows(result)
+        rows:
+          state.modal?.rowMode === 'nsu' && clientId
+            ? Array.isArray(state.modal?.rows)
+              ? state.modal.rows
+              : buildPastNsuRecoveryLiveRows({ rows: [] })
+            : buildPastNsuRecoveryAuditRows(result)
       });
     }
 
@@ -6202,6 +6578,7 @@ async function runPastNsuRecovery(clientId = null) {
         summary: {
           controlesEncontrados: 0,
           controlesProcessados: 0,
+          nsusAvaliados: 0,
           nsusConsultados: 0,
           documentosSalvos: 0,
           nsusIgnoradosComDocumento: 0,
@@ -7405,6 +7782,7 @@ function openPastNsuRecoveryReportModal(params) {
   openModal({
     kind: 'past-nsu-recovery-report',
     running: true,
+    rowMode: params?.rowMode || 'controle',
     clientName: params?.clientName || 'Cliente selecionado',
     totalCount: Number(params?.totalCount || 0),
     currentMessage: params?.currentMessage || 'Preparando reprocessamento...',
@@ -7423,6 +7801,205 @@ function updatePastNsuRecoveryOverlayState(patch) {
     ...patch
   };
   render();
+}
+
+function mapPastNsuRecoveryLiveRowStatusLabel(status) {
+  switch (status) {
+    case 'ja_baixado':
+      return 'Ja baixado';
+    case 'consultando':
+      return 'Consultando';
+    case 'baixado':
+      return 'Baixado';
+    case 'sem_documento':
+      return 'Sem documento';
+    case 'erro':
+      return 'Erro';
+    default:
+      return 'Na fila';
+  }
+}
+
+function toneFromPastNsuRecoveryLiveStatus(status) {
+  switch (status) {
+    case 'ja_baixado':
+      return 'info';
+    case 'consultando':
+      return 'warning';
+    case 'baixado':
+      return 'success';
+    case 'sem_documento':
+      return 'neutral';
+    case 'erro':
+      return 'danger';
+    default:
+      return 'neutral';
+  }
+}
+
+function buildPastNsuRecoveryLiveRows(execution) {
+  const rows = Array.isArray(execution?.rows) ? execution.rows : [];
+  return rows.map((row) => ({
+    nsuLabel: String(row?.nsu || '-'),
+    cnpjConsulta: formatCnpj(row?.cnpjConsulta || '-') || '-',
+    ambienteLabel: mapNfseAmbienteLabel(row?.ambiente),
+    chaveAcesso: String(row?.chaveAcesso || '-'),
+    statusLabel: mapPastNsuRecoveryLiveRowStatusLabel(row?.status),
+    statusTone: toneFromPastNsuRecoveryLiveStatus(row?.status),
+    message: String(row?.mensagem || '').trim() || '-'
+  }));
+}
+
+function openDownloadByKeyReportModal(params) {
+  openModal({
+    kind: 'download-by-key-report',
+    running: true,
+    showClientColumn: Boolean(params?.showClientColumn),
+    clientName: params?.clientName || 'Todos os clientes',
+    pendingCount: Number(params?.pendingCount || 0),
+    downloadedCount: Number(params?.downloadedCount || 0),
+    errorCount: Number(params?.errorCount || 0),
+    currentMessage: params?.currentMessage || 'Preparando leitura das chaves pendentes...',
+    rows: Array.isArray(params?.rows) ? params.rows : []
+  });
+}
+
+function updateDownloadByKeyOverlayState(patch) {
+  if (state.modal?.kind !== 'download-by-key-report') {
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    ...patch
+  };
+  render();
+}
+
+function mapDownloadByKeyDocumentLabel(modelo, kind = 'documento') {
+  if (kind === 'controle') {
+    return 'Controle';
+  }
+  if (String(modelo || '') === '57') {
+    return 'CT-e';
+  }
+  if (String(modelo || '') === '55') {
+    return 'NF-e';
+  }
+  return 'Documento';
+}
+
+function buildDownloadByKeyPreviewRows(rawRows, showClientColumn = false) {
+  return (Array.isArray(rawRows) ? rawRows : []).map((row) => {
+    const client = findClientById(row?.clientId);
+    const isControl = row?.kind === 'controle';
+    return {
+      kind: isControl ? 'controle' : 'documento',
+      clientId: String(row?.clientId || ''),
+      estabelecimentoId: String(row?.estabelecimentoId || ''),
+      catalogoId: Number(row?.catalogoId || 0) || null,
+      chaveAcesso: String(row?.chaveAcesso || ''),
+      modelo: String(row?.modelo || ''),
+      clientLabel: client?.razaoSocial || 'Cliente nao localizado',
+      clientDetail: showClientColumn ? formatCnpj(client?.cnpj || row?.cnpjConsulta || '') : '',
+      keyDetail: isControl
+        ? `CNPJ ${formatCnpj(row?.cnpjConsulta || '') || '-'}`
+        : `Catalogo ${String(row?.catalogoId || '-')} • ${mapNfeAmbienteLabel(row?.ambiente)}`,
+      documentLabel: mapDownloadByKeyDocumentLabel(row?.modelo, row?.kind),
+      documentDetail: isControl
+        ? `${mapNfeAmbienteLabel(row?.ambiente)} • ${formatCnpj(row?.cnpjConsulta || '') || '-'}`
+        : mapNfeAmbienteLabel(row?.ambiente),
+      statusLabel: isControl ? 'Erro' : 'Aguardando',
+      statusTone: isControl ? 'danger' : 'neutral',
+      message: String(row?.mensagem || '').trim() || (isControl ? 'Falha ao preparar o controle.' : 'Chave localizada e aguardando download oficial.')
+    };
+  });
+}
+
+function buildDownloadByKeyRunningRows(rows) {
+  return (Array.isArray(rows) ? rows : []).map((row) =>
+    row.kind === 'documento'
+      ? {
+          ...row,
+          statusLabel: 'Baixando',
+          statusTone: 'info',
+          message: 'Aguardando retorno do backend para esta chave...'
+        }
+      : row
+  );
+}
+
+function mapDownloadByKeyFinalStatusLabel(status) {
+  return status === 'persistido' ? 'Baixada' : 'Erro';
+}
+
+function mapDownloadByKeyFinalStatusTone(status) {
+  return status === 'persistido' ? 'success' : 'danger';
+}
+
+function buildDownloadByKeyResolvedRows(rows, response) {
+  const details = Array.isArray(response?.executionDetails) ? response.executionDetails : [];
+  const controlFailures = Array.isArray(response?.failureDetails)
+    ? response.failureDetails.filter((detail) => detail?.kind === 'controle')
+    : [];
+
+  return (Array.isArray(rows) ? rows : []).map((row) => {
+    if (row.kind !== 'documento') {
+      return row;
+    }
+
+    const detail = details.find(
+      (item) =>
+        item?.kind === 'documento' &&
+        String(item?.clientId || '') === row.clientId &&
+        Number(item?.catalogoId || 0) === Number(row.catalogoId || 0)
+    );
+
+    if (detail) {
+      return {
+        ...row,
+        chaveAcesso: String(detail?.chaveAcesso || row.chaveAcesso || ''),
+        modelo: String(detail?.modelo || row.modelo || ''),
+        documentLabel: mapDownloadByKeyDocumentLabel(detail?.modelo || row.modelo),
+        statusLabel: mapDownloadByKeyFinalStatusLabel(detail?.status),
+        statusTone: mapDownloadByKeyFinalStatusTone(detail?.status),
+        message: String(detail?.mensagem || '').trim() || 'Consulta concluida sem mensagem adicional.'
+      };
+    }
+
+    const controlFailure = controlFailures.find(
+      (item) =>
+        String(item?.clientId || '') === row.clientId && String(item?.estabelecimentoId || '') === row.estabelecimentoId
+    );
+
+    if (controlFailure) {
+      return {
+        ...row,
+        statusLabel: 'Erro',
+        statusTone: 'danger',
+        message: String(controlFailure?.mensagem || '').trim() || 'Falha no controle antes do download por chave.'
+      };
+    }
+
+    return {
+      ...row,
+      statusLabel: 'Erro',
+      statusTone: 'danger',
+      message: 'Sem retorno individual desta chave na execucao.'
+    };
+  });
+}
+
+function countDownloadByKeyRowsByStatus(rows, targetStatusLabel) {
+  return (Array.isArray(rows) ? rows : []).filter((row) => String(row?.statusLabel || '') === targetStatusLabel).length;
+}
+
+function countDownloadByKeyErrorRows(rows) {
+  return (Array.isArray(rows) ? rows : []).filter((row) => String(row?.statusTone || '') === 'danger').length;
+}
+
+function resolveDownloadByKeyTimeoutMs(pendingCount) {
+  return Math.min(15 * 60 * 1000, Math.max(5 * 60 * 1000, Number(pendingCount || 0) * 12000));
 }
 
 function buildPastNsuRecoveryAuditRows(summary) {
@@ -8979,7 +9556,17 @@ function mapClientOptions() {
 }
 
 function getNfeSourceMode() {
-  return state.nfeSchedulerStatus?.sourceMode === 'dominio' ? 'dominio' : 'distribuicao';
+  if (state.nfeSchedulerStatus?.sourceMode === 'dominio') {
+    return 'dominio';
+  }
+  if (state.nfeSchedulerStatus?.sourceMode === 'dominio_chave') {
+    return 'dominio_chave';
+  }
+  return 'distribuicao';
+}
+
+function isNfeDownloadByKeyMode() {
+  return getNfeSourceMode() === 'dominio_chave';
 }
 
 function mapNfeSyncStatusOptions(statuses) {

@@ -41,6 +41,8 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - `POST /nfe/sync/pausar`
 - `POST /nfe/sync/rodar-agora`
 - `POST /nfe/sync/rodar-agora-geral`
+- `POST /nfe/sync/download-por-chave/preview`
+- `POST /nfe/sync/download-por-chave/preview-global`
 - `POST /nfe/sync/consultar-nsu`
 - `POST /nfe/sync/consultar-chave`
 - `POST /clientes/:id/nfe/ativar`
@@ -66,6 +68,7 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - Nesse modo, o catalogo da Dominio e filtrado para considerar apenas notas com emissao a partir de `2026-01-02`, isto e, com data maior que `2026-01-01`.
 - Nesse modo, `nfe_sync_controle.ultimo_nsu_consultado` passa a guardar o ultimo `EFATENDIMENTO_NFE_CATALOGO.ID` importado com sucesso para cada `cliente/cnpj/ambiente`.
 - Nesse modo, a leitura por chave da Dominio ocorre apenas nas execucoes manuais/esporadicas; o ciclo automatico e a busca noturna nao a disparam.
+- Nesse modo, o painel manual usa `POST /nfe/sync/download-por-chave/preview` e `POST /nfe/sync/download-por-chave/preview-global` para abrir um overlay de auditoria com as chaves pendentes antes do download oficial.
 - XMLs da Dominio com assinatura ABRASF/NFS-e sao redirecionados para `NfseService.importXml`, preservando a deduplicacao do armazenamento de servicos por `ambiente + chave_acesso`.
 - XMLs da Dominio com raiz `Baixas` sao descartados na importacao, porque representam baixa financeira sem XML fiscal util para os modulos de NF-e/NFS-e.
 - XMLs de CT-e (`cteProc`, `CTe`, `resCTe`, modelo `57`) sao bloqueados no modulo de NF-e. Quando vierem da Dominio, o importador os ignora explicitamente para nao contaminar `nfe_documentos`.

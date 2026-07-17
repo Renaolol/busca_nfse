@@ -1017,6 +1017,73 @@ describe('NfeService', () => {
     });
   });
 
+  it('previsualiza apenas chaves pendentes para o overlay de download por chave', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio_chave';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 10n,
+        ultimoNsuDistribuido: 10n,
+        maxNsu: 10n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 21,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        dataEmissao: '2026-06-29'
+      },
+      {
+        catalogoId: 22,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '35260612345678000199550010000004561000004561',
+        dataEmissao: '2026-06-30'
+      },
+      {
+        catalogoId: 23,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '',
+        dataEmissao: '2026-06-30'
+      }
+    ]);
+    prisma.nfeDocumento.findUnique
+      .mockResolvedValueOnce({ xmlCompletoDisponivel: true })
+      .mockResolvedValueOnce(null);
+
+    const result = await service.previewDownloadByKey({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(result).toEqual({
+      processed: 1,
+      pendingDownloads: 1,
+      failures: 0,
+      rows: [
+        {
+          kind: 'documento',
+          clientId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: NfeAmbiente.producao,
+          cnpjConsulta: '12345678000199',
+          catalogoId: 22,
+          chaveAcesso: '35260612345678000199550010000004561000004561',
+          modelo: '55',
+          mensagem: 'Chave localizada no catalogo Dominio e pronta para download oficial'
+        }
+      ]
+    });
+  });
+
   it('nao executa dominio_chave nos ciclos automaticos e noturnos', async () => {
     process.env.NFE_SYNC_SOURCE_MODE = 'dominio_chave';
     const runNowGlobalSpy = jest.spyOn(service, 'runNowGlobal');

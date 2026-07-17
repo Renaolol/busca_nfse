@@ -85,6 +85,25 @@ type NfeSyncRunResult = {
   failureDetails: NfeSyncRunFailureDetail[];
 };
 
+type NfeDownloadByKeyPreviewRow = {
+  kind: 'documento' | 'controle';
+  clientId: string;
+  estabelecimentoId: string;
+  ambiente: NfeAmbiente;
+  cnpjConsulta: string;
+  catalogoId?: number;
+  chaveAcesso?: string;
+  modelo?: string;
+  mensagem: string;
+};
+
+type NfeDownloadByKeyPreviewResult = {
+  processed: number;
+  pendingDownloads: number;
+  failures: number;
+  rows: NfeDownloadByKeyPreviewRow[];
+};
+
 @Injectable()
 export class NfeService implements OnModuleInit, OnModuleDestroy {
   private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
@@ -931,6 +950,24 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
 
     return this.runNowInternal({
+      limitControles: 50
+    });
+  }
+
+  async previewDownloadByKey(dto: RunNfeSyncDto): Promise<NfeDownloadByKeyPreviewResult> {
+    this.assertDominioChaveSyncSourceEnabled();
+    await this.ensureClientEligibleForNfeSync(dto.clienteId);
+    return this.previewDownloadByKeyInternal({
+      clienteId: dto.clienteId,
+      ambiente: dto.ambiente,
+      estabelecimentoId: dto.estabelecimentoId,
+      limitControles: dto.limitControles
+    });
+  }
+
+  async previewDownloadByKeyGlobal(): Promise<NfeDownloadByKeyPreviewResult> {
+    this.assertDominioChaveSyncSourceEnabled();
+    return this.previewDownloadByKeyInternal({
       limitControles: 50
     });
   }
@@ -1882,6 +1919,102 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       failures,
       executionDetails,
       failureDetails
+    };
+  }
+
+  private async previewDownloadByKeyInternal(params: {
+    clienteId?: string;
+    ambiente?: NfeAmbiente;
+    estabelecimentoId?: string;
+    limitControles?: number;
+  }): Promise<NfeDownloadByKeyPreviewResult> {
+    const controls = await this.prisma.nfeSyncControle.findMany({
+      where: {
+        cliente: {
+          ativo: true,
+          nfeHabilitado: true
+        },
+        status: {
+          in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api]
+        },
+        ...(params.clienteId ? { clienteId: params.clienteId } : {}),
+        ...(params.ambiente ? { ambiente: params.ambiente } : {}),
+        ...(params.estabelecimentoId ? { estabelecimentoId: params.estabelecimentoId } : {})
+      },
+      orderBy: { updatedAt: 'asc' },
+      take: params.limitControles ?? 10
+    });
+
+    const rows: NfeDownloadByKeyPreviewRow[] = [];
+    let failures = 0;
+    const limitPorControle = this.parsePositiveNumberEnv('NFE_DOMINIO_IMPORT_LIMIT_PER_RUN', 500);
+
+    for (const control of controls) {
+      try {
+        const establishment = await this.getEstablishmentOrThrow(control.estabelecimentoId, control.clienteId);
+        await this.findActiveCertificateOrThrow(control.clienteId, control.estabelecimentoId, control.cnpjConsulta);
+
+        const entries = await this.loadDominioCatalogForClient({
+          clienteId: control.clienteId,
+          estabelecimentoId: establishment.id,
+          limit: limitPorControle,
+          dataEmissaoInicio: NfeService.DOMINIO_CHAVE_DATA_EMISSAO_INICIO,
+          catalogoIdMinExclusive: this.toSafeCatalogoCursor(control.ultimoNsuConsultado),
+          sortDirection: 'asc'
+        });
+
+        for (const entry of entries) {
+          const chaveAcesso = this.normalizeChaveAcesso(entry.chaveAcesso);
+          if (!chaveAcesso) {
+            continue;
+          }
+
+          const existing = await this.prisma.nfeDocumento.findUnique({
+            where: {
+              ambiente_chaveAcesso: {
+                ambiente: control.ambiente,
+                chaveAcesso
+              }
+            },
+            select: {
+              xmlCompletoDisponivel: true
+            }
+          });
+
+          if (existing?.xmlCompletoDisponivel) {
+            continue;
+          }
+
+          rows.push({
+            kind: 'documento',
+            clientId: control.clienteId,
+            estabelecimentoId: control.estabelecimentoId,
+            ambiente: control.ambiente,
+            cnpjConsulta: control.cnpjConsulta,
+            catalogoId: entry.catalogoId,
+            chaveAcesso,
+            modelo: this.extractModeloFromChave(chaveAcesso),
+            mensagem: 'Chave localizada no catalogo Dominio e pronta para download oficial'
+          });
+        }
+      } catch (error) {
+        failures += 1;
+        rows.push({
+          kind: 'controle',
+          clientId: control.clienteId,
+          estabelecimentoId: control.estabelecimentoId,
+          ambiente: control.ambiente,
+          cnpjConsulta: control.cnpjConsulta,
+          mensagem: this.toErrorMessage(error)
+        });
+      }
+    }
+
+    return {
+      processed: controls.length,
+      pendingDownloads: rows.filter((row) => row.kind === 'documento').length,
+      failures,
+      rows
     };
   }
 
@@ -3200,6 +3333,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   private isDominioChaveSyncSource(): boolean {
     return this.getSyncSourceMode() === 'dominio_chave';
+  }
+
+  private assertDominioChaveSyncSourceEnabled(): void {
+    if (!this.isDominioChaveSyncSource()) {
+      throw new BadRequestException('O download manual por chave so esta disponivel quando NFE_SYNC_SOURCE_MODE=dominio_chave');
+    }
   }
 
   private extractModeloFromChave(chaveAcesso?: string | null): string | undefined {

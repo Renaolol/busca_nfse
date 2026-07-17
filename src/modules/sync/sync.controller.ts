@@ -7,6 +7,7 @@ import { SyncService } from './sync.service';
 import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
 import { StartSyncDto } from './dto/start-sync.dto';
 import { ReprocessPastNsusDto } from './dto/reprocess-past-nsus.dto';
+import { StartPastNsuRecoveryExecutionDto } from './dto/start-past-nsu-recovery-execution.dto';
 import { UpdateSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
 
 @ApiTags('sync')
@@ -59,6 +60,18 @@ export class SyncController {
   @Roles('admin')
   reprocessPastNsus(@Body() dto: ReprocessPastNsusDto) {
     return this.syncService.reprocessPastNsus(dto);
+  }
+
+  @Post('sync/reprocessar-nsus-passados/execucao')
+  @Roles('admin')
+  startPastNsuRecoveryExecution(@Body() dto: StartPastNsuRecoveryExecutionDto) {
+    return this.syncService.startPastNsuRecoveryExecution(dto.clienteId);
+  }
+
+  @Get('sync/reprocessar-nsus-passados/execucao/:executionId')
+  @Roles('admin')
+  getPastNsuRecoveryExecution(@Param('executionId') executionId: string) {
+    return this.syncService.getPastNsuRecoveryExecution(executionId);
   }
 
   @Post('sync/testar-nsu')

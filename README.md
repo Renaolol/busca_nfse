@@ -320,6 +320,7 @@ Rotas principais:
 - `POST /nfe/sync/iniciar`
 - `POST /nfe/sync/pausar`
 - `POST /nfe/sync/rodar-agora`
+- `POST /nfe/sync/download-por-chave/preview`
 - `POST /nfe/sync/consultar-nsu`
 - `POST /nfe/sync/consultar-chave`
 
@@ -327,6 +328,7 @@ Observacoes:
 
 - `POST /nfe/sync/iniciar` cria ou reativa controles de busca por `cliente/cnpj/ambiente` sem misturar NSU de NFS-e.
 - `POST /nfe/sync/rodar-agora` executa a distribuicao manual e persiste os documentos retornados.
+- `POST /nfe/sync/download-por-chave/preview` monta a fila manual de chaves pendentes da Dominio para o overlay operacional antes de disparar o download real.
 - `POST /nfe/sync/consultar-nsu` consulta um NSU pontual via `consNSU`, com opcao de persistir o documento retornado.
 - `POST /nfe/sync/consultar-chave` consulta uma NF-e especifica via `consChNFe`, com opcao de persistir o retorno.
 - `POST /cte/consultar-chave` consulta um CT-e especifico via `CteConsultaV4`, persiste o resumo/XML retornado e tenta aproveitar eventos quando o autorizador devolver `procEventoCTe`.
@@ -351,6 +353,7 @@ Observacoes:
 - Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, o backend tambem reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, mas faz o download oficial por `consChNFe` para cada chave nova encontrada.
 - Nesse modo, a leitura do catalogo da Dominio considera apenas notas com emissao a partir de `2026-01-02`, o que equivale a buscar somente documentos com data maior que `2026-01-01`.
 - Nesse modo, a consulta por chave da Dominio fica restrita a execucao manual/esporadica; os ciclos automaticos e a busca noturna nao disparam esse processamento.
+- Nesse modo, o frontend usa `POST /nfe/sync/download-por-chave/preview` e `POST /nfe/sync/download-por-chave/preview-global` para abrir o overlay manual com a lista de chaves pendentes antes do download oficial.
 - Se o XML retornado pela Dominio for ABRASF/NFS-e em vez de NF-e, o backend redireciona a importacao para o modulo de NFS-e e reaproveita a deduplicacao por `ambiente + chave_acesso` desse armazenamento.
 - XMLs da Dominio com raiz `Baixas` sao ignorados automaticamente, pois representam baixa financeira e nao documento fiscal armazenavel.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, chaves de CT-e do catalogo tambem entram no processamento automatico/manual, mas a consulta oficial e a persistencia continuam sendo delegadas ao modulo dedicado de CT-e, mantendo as listagens separadas.
