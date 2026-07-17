@@ -155,6 +155,34 @@ describe('CteService', () => {
     );
   });
 
+  it('na listagem ampla por cliente nao exige cnpj do documento quando tipoRelacao nao e informado', async () => {
+    await service.findAll({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '12345678000199'
+    });
+
+    expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([{ clienteId: 'cliente-1' }])
+        })
+      })
+    );
+
+    const where = prisma.nfeDocumento.findMany.mock.calls.at(-1)?.[0]?.where;
+    const hasCnpjRelationFilter = Array.isArray(where?.AND)
+      ? where.AND.some(
+          (condition: { OR?: Array<{ cnpjEmitente?: string; cnpjDestinatario?: string }> }) =>
+            Array.isArray(condition?.OR) &&
+            condition.OR.some(
+              (item) => item?.cnpjEmitente === '12345678000199' || item?.cnpjDestinatario === '12345678000199'
+            )
+        )
+      : false;
+
+    expect(hasCnpjRelationFilter).toBe(false);
+  });
+
   it('retorna estatisticas agregadas do dashboard por cliente', async () => {
     prisma.nfeDocumento.count.mockResolvedValueOnce(7).mockResolvedValueOnce(4);
     prisma.nfeDocumento.groupBy

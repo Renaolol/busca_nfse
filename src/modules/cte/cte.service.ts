@@ -37,7 +37,7 @@ export class CteService {
         andConditions.push({ cnpjEmitente: cnpjConsulta });
       } else if (tipoRelacao === 'recebidos') {
         andConditions.push({ cnpjDestinatario: cnpjConsulta });
-      } else {
+      } else if (!query.clienteId) {
         andConditions.push({
           OR: [{ cnpjEmitente: cnpjConsulta }, { cnpjDestinatario: cnpjConsulta }]
         });
