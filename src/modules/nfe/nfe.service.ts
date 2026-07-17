@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { BadRequestException, forwardRef, Inject, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import {
   Certificado,
   NfeAmbiente,
@@ -18,6 +18,7 @@ import {
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NfseService } from '../nfse/nfse.service';
+import { CteService } from '../cte/cte.service';
 import {
   NFE_DISTRIBUICAO_CLIENT,
   NfeDistribuicaoClient,
@@ -116,6 +117,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     private readonly parser: NfeXmlParserService,
     private readonly nfseService: NfseService,
     private readonly storage: LocalStorageService,
+    @Inject(forwardRef(() => CteService)) private readonly cteService: CteService,
     @Inject(NFE_DISTRIBUICAO_CLIENT) private readonly distribuicaoClient: NfeDistribuicaoClient,
     @Inject(DOMINIO_NFE_XML_SOURCE) private readonly dominioXmlSource: DominioNfeXmlSource
   ) {}
@@ -1580,6 +1582,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           maxCatalogoEncontrado = Math.max(maxCatalogoEncontrado, entry.catalogoId);
           const chaveAcesso = this.normalizeChaveAcesso(entry.chaveAcesso);
           const modelo = this.extractModeloFromChave(chaveAcesso);
+          const documentLabel = modelo === '57' ? 'CT-e' : 'NF-e';
 
           if (!chaveAcesso) {
             if (!travarCursor) {
@@ -1596,25 +1599,6 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
               chaveAcesso: undefined,
               modelo: undefined,
               mensagem: 'Catalogo Dominio sem chave de acesso valida para consulta externa'
-            });
-            continue;
-          }
-
-          if (modelo === '57') {
-            if (!travarCursor) {
-              cursorAtualizadoAte = entry.catalogoId;
-            }
-            executionDetails.push({
-              kind: 'documento',
-              status: 'ignorado_chave_cte',
-              clientId: control.clienteId,
-              estabelecimentoId: control.estabelecimentoId,
-              ambiente: control.ambiente,
-              cnpjConsulta: control.cnpjConsulta,
-              catalogoId: entry.catalogoId,
-              chaveAcesso,
-              modelo,
-              mensagem: 'Chave de CT-e ignorada: o fluxo oficial atual nao suporta consulta por chave para CT-e'
             });
             continue;
           }
@@ -1645,7 +1629,79 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
               catalogoId: entry.catalogoId,
               chaveAcesso,
               modelo,
-              mensagem: 'Chave ignorada porque a NF-e ja possui XML completo armazenado'
+              mensagem: `Chave ignorada porque o ${documentLabel} ja possui XML completo armazenado`
+            });
+            continue;
+          }
+
+          if (modelo === '57') {
+            const result = await this.cteService.consultarChaveInternal({
+              clienteId: control.clienteId,
+              estabelecimentoId: control.estabelecimentoId,
+              chaveAcesso,
+              ambiente: control.ambiente,
+              persistir: true,
+              tentarEventos: true
+            });
+
+            if (result.statusCode !== 200) {
+              controlFailures += 1;
+              travarCursor = true;
+              const detail: NfeSyncRunFailureDetail = {
+                kind: 'documento',
+                status: 'falha',
+                clientId: control.clienteId,
+                estabelecimentoId: control.estabelecimentoId,
+                ambiente: control.ambiente,
+                cnpjConsulta: control.cnpjConsulta,
+                catalogoId: entry.catalogoId,
+                chaveAcesso,
+                modelo,
+                mensagem: result.xMotivo ?? `Falha na consulta por chave do CT-e. HTTP ${result.statusCode}.`
+              };
+              executionDetails.push(detail);
+              failureDetails.push(detail);
+              continue;
+            }
+
+            if (result.documentosEncontrados === 0 && result.eventosEncontrados === 0) {
+              if (!travarCursor) {
+                cursorAtualizadoAte = entry.catalogoId;
+              }
+              executionDetails.push({
+                kind: 'documento',
+                status: 'ignorado_xml_nao_fiscal',
+                clientId: control.clienteId,
+                estabelecimentoId: control.estabelecimentoId,
+                ambiente: control.ambiente,
+                cnpjConsulta: control.cnpjConsulta,
+                catalogoId: entry.catalogoId,
+                chaveAcesso,
+                modelo,
+                mensagem: result.xMotivo || 'Consulta por chave sem documentos retornados'
+              });
+              continue;
+            }
+
+            documentsSaved += result.documentosPersistidos;
+            controlSaved += result.documentosPersistidos;
+            if (!travarCursor) {
+              cursorAtualizadoAte = entry.catalogoId;
+            }
+            executionDetails.push({
+              kind: 'documento',
+              status: 'persistido',
+              clientId: control.clienteId,
+              estabelecimentoId: control.estabelecimentoId,
+              ambiente: control.ambiente,
+              cnpjConsulta: control.cnpjConsulta,
+              catalogoId: entry.catalogoId,
+              chaveAcesso,
+              modelo,
+              mensagem:
+                result.documentosPersistidos === 1
+                  ? 'CT-e consultado por chave e persistido com sucesso'
+                  : `CT-e consultado por chave e persistido com ${result.documentosPersistidos} documento(s)`
             });
             continue;
           }
@@ -2684,6 +2740,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async runAutomaticSyncCycle(): Promise<void> {
+    if (this.isDominioChaveSyncSource()) {
+      return;
+    }
+
     if (this.autoSyncRunning) {
       return;
     }
@@ -2699,6 +2759,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async runNightlySweepCycle(): Promise<void> {
+    if (this.isDominioChaveSyncSource()) {
+      return;
+    }
+
     if (this.nightlySweepRunning) {
       return;
     }

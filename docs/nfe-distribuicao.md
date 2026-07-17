@@ -65,10 +65,11 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, essas mesmas rotas passam a ler a `EFATENDIMENTO_NFE_CATALOGO` incrementalmente e consultar cada NF-e por `consChNFe`, usando o certificado ja cadastrado do estabelecimento correspondente.
 - Nesse modo, o catalogo da Dominio e filtrado para considerar apenas notas com emissao a partir de `2026-01-02`, isto e, com data maior que `2026-01-01`.
 - Nesse modo, `nfe_sync_controle.ultimo_nsu_consultado` passa a guardar o ultimo `EFATENDIMENTO_NFE_CATALOGO.ID` importado com sucesso para cada `cliente/cnpj/ambiente`.
+- Nesse modo, a leitura por chave da Dominio ocorre apenas nas execucoes manuais/esporadicas; o ciclo automatico e a busca noturna nao a disparam.
 - XMLs da Dominio com assinatura ABRASF/NFS-e sao redirecionados para `NfseService.importXml`, preservando a deduplicacao do armazenamento de servicos por `ambiente + chave_acesso`.
 - XMLs da Dominio com raiz `Baixas` sao descartados na importacao, porque representam baixa financeira sem XML fiscal util para os modulos de NF-e/NFS-e.
 - XMLs de CT-e (`cteProc`, `CTe`, `resCTe`, modelo `57`) sao bloqueados no modulo de NF-e. Quando vierem da Dominio, o importador os ignora explicitamente para nao contaminar `nfe_documentos`.
-- No modo `dominio_chave`, chaves de CT-e continuam fora do fluxo `POST /nfe/*`; quando necessario, devem ser consultadas pelo modulo dedicado em `POST /cte/consultar-chave`.
+- No modo `dominio_chave`, chaves de CT-e do catalogo passam a ser processadas automaticamente pelo backend, mas a consulta oficial e a persistencia continuam sendo feitas pelo modulo dedicado de CT-e para manter a separacao operacional entre NF-e e CT-e.
 - O painel da ultima importacao em `Buscas NF-e` pode abrir o XML bruto do catalogo e reimportar um item isolado ou todos os `catalogoIds` retornados na execucao manual.
 - O script `npm run nfe:separar-cte -- --apply` varre `nfe_documentos`, classifica os XMLs salvos e marca CT-es ja persistidos em `schemaDoc`, permitindo que o modulo de NF-e os exclua das listagens e do dashboard sem migration adicional.
 - O modulo `cte` reaproveita `nfe_documentos` como armazenamento, mas expoe consulta separada para documentos de transporte, incluindo `GET /cte`, `GET /cte/:id`, `GET /cte/:id/xml`, `GET /cte/dashboard-stats`, `POST /cte/consultar-chave` e `POST /cte/eventos/sincronizar`.

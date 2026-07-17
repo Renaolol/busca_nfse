@@ -5,6 +5,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { NfeDistribuicaoClient } from '../../../integrations/nfe-distribuicao/nfe-distribuicao.types';
 import { LocalStorageService } from '../../storage/storage.service';
 import type { NfseService as NfseModuleService } from '../../nfse/nfse.service';
+import type { CteService } from '../../cte/cte.service';
 import { NfeService } from '../nfe.service';
 import { NfeXmlParserService } from '../nfe-xml-parser.service';
 
@@ -51,6 +52,10 @@ describe('NfeService', () => {
     importXml: jest.fn()
   };
 
+  const cteService = {
+    consultarChaveInternal: jest.fn()
+  };
+
   const distribuicaoClient: NfeDistribuicaoClient = {
     distribuirPorNsu: jest.fn(),
     consultarPorNsu: jest.fn(),
@@ -67,6 +72,7 @@ describe('NfeService', () => {
     new NfeXmlParserService(),
     nfseService as unknown as NfseModuleService,
     storage as unknown as LocalStorageService,
+    cteService as unknown as CteService,
     distribuicaoClient,
     dominioXmlSource
   );
@@ -121,6 +127,18 @@ describe('NfeService', () => {
       origem: 'importacao_xml',
       xmlPath: 'nfse/producao/123/2026/06/xml/a.xml',
       danfsePath: 'nfse/producao/123/2026/06/danfse/a.pdf'
+    });
+    cteService.consultarChaveInternal.mockResolvedValue({
+      statusCode: 200,
+      cStat: '100',
+      xMotivo: 'Autorizado o uso do CT-e',
+      requestedChave: '42260795849600000135570010000319691243772228',
+      persistido: true,
+      documentosEncontrados: 1,
+      documentosPersistidos: 1,
+      eventosEncontrados: 0,
+      eventosPersistidos: 0,
+      documentos: [{ schema: 'cteProc_v4.00', chaveAcesso: '42260795849600000135570010000319691243772228' }]
     });
     storage.putObject.mockResolvedValue(undefined);
     storage.hasObject.mockResolvedValue(true);
@@ -930,7 +948,7 @@ describe('NfeService', () => {
     });
   });
 
-  it('ignora chaves de CT-e no catalogo Dominio sem consultar webservice de NF-e', async () => {
+  it('consulta chaves de CT-e no catalogo Dominio pelo modulo dedicado e persiste separado de NF-e', async () => {
     process.env.NFE_SYNC_SOURCE_MODE = 'dominio_chave';
     prisma.nfeSyncControle.findMany.mockResolvedValue([
       {
@@ -958,6 +976,14 @@ describe('NfeService', () => {
     const result = await service.runNowGlobal();
 
     expect(distribuicaoClient.consultarPorChave).not.toHaveBeenCalled();
+    expect(cteService.consultarChaveInternal).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      chaveAcesso: '42260795849600000135570010000319691243772228',
+      ambiente: NfeAmbiente.producao,
+      persistir: true,
+      tentarEventos: true
+    });
     expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'ctrl-1' },
@@ -971,12 +997,12 @@ describe('NfeService', () => {
     );
     expect(result).toEqual({
       processed: 1,
-      documentsSaved: 0,
+      documentsSaved: 1,
       failures: 0,
       executionDetails: [
         {
           kind: 'documento',
-          status: 'ignorado_chave_cte',
+          status: 'persistido',
           clientId: 'cliente-1',
           estabelecimentoId: 'estab-1',
           ambiente: NfeAmbiente.producao,
@@ -984,11 +1010,22 @@ describe('NfeService', () => {
           catalogoId: 22,
           chaveAcesso: '42260795849600000135570010000319691243772228',
           modelo: '57',
-          mensagem: 'Chave de CT-e ignorada: o fluxo oficial atual nao suporta consulta por chave para CT-e'
+          mensagem: 'CT-e consultado por chave e persistido com sucesso'
         }
       ],
       failureDetails: []
     });
+  });
+
+  it('nao executa dominio_chave nos ciclos automaticos e noturnos', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio_chave';
+    const runNowGlobalSpy = jest.spyOn(service, 'runNowGlobal');
+
+    await (service as unknown as { runAutomaticSyncCycle(): Promise<void> }).runAutomaticSyncCycle();
+    await (service as unknown as { runNightlySweepCycle(): Promise<void> }).runNightlySweepCycle();
+
+    expect(runNowGlobalSpy).not.toHaveBeenCalled();
+    expect(prisma.nfeSyncControle.findMany).not.toHaveBeenCalled();
   });
 
   it('continua importacao de NF-e quando a tabela nfe_eventos nao existe', async () => {

@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { BadRequestException, forwardRef, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Certificado, NfeAmbiente, NfeDocumentoOrigem, NfeTipoRelacao, Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
@@ -20,7 +20,7 @@ export class CteService {
     private readonly prisma: PrismaService,
     private readonly storage: LocalStorageService,
     private readonly cteXmlParser: CteXmlParserService,
-    private readonly nfeService: NfeService,
+    @Inject(forwardRef(() => NfeService)) private readonly nfeService: NfeService,
     @Inject(CTE_CONSULTA_CLIENT) private readonly cteConsultaClient: CteConsultaClient
   ) {}
 
@@ -156,24 +156,42 @@ export class CteService {
   }
 
   async consultarChave(dto: QueryCteByChaveDto) {
-    await this.ensureClient(dto.clienteId);
-    const establishment = await this.getEstablishmentOrThrow(dto.estabelecimentoId, dto.clienteId);
-    const ambiente = dto.ambiente ?? NfeAmbiente.producao;
-    const certificate = await this.findActiveCertificateOrThrow(dto.clienteId, dto.estabelecimentoId, establishment.cnpj);
-    const result = await this.cteConsultaClient.consultarPorChave({
+    return this.consultarChaveInternal({
+      clienteId: dto.clienteId,
+      estabelecimentoId: dto.estabelecimentoId,
       chaveAcesso: dto.chaveAcesso,
+      ambiente: dto.ambiente,
+      persistir: dto.persistir,
+      tentarEventos: dto.tentarEventos
+    });
+  }
+
+  async consultarChaveInternal(params: {
+    clienteId: string;
+    estabelecimentoId: string;
+    chaveAcesso: string;
+    ambiente?: NfeAmbiente;
+    persistir?: boolean;
+    tentarEventos?: boolean;
+  }) {
+    await this.ensureClient(params.clienteId);
+    const establishment = await this.getEstablishmentOrThrow(params.estabelecimentoId, params.clienteId);
+    const ambiente = params.ambiente ?? NfeAmbiente.producao;
+    const certificate = await this.findActiveCertificateOrThrow(params.clienteId, params.estabelecimentoId, establishment.cnpj);
+    const result = await this.cteConsultaClient.consultarPorChave({
+      chaveAcesso: params.chaveAcesso,
       ambiente,
       certificateId: certificate.id
     });
 
     return this.handleConsultaChaveResult({
-      clienteId: dto.clienteId,
-      estabelecimentoId: dto.estabelecimentoId,
+      clienteId: params.clienteId,
+      estabelecimentoId: params.estabelecimentoId,
       ambiente,
       cnpjConsulta: establishment.cnpj,
-      persistir: dto.persistir !== false,
-      tentarEventos: dto.tentarEventos !== false,
-      requestedChave: dto.chaveAcesso,
+      persistir: params.persistir !== false,
+      tentarEventos: params.tentarEventos !== false,
+      requestedChave: params.chaveAcesso,
       result
     });
   }

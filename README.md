@@ -350,9 +350,10 @@ Observacoes:
 - Quando `NFE_SYNC_SOURCE_MODE=dominio`, o backend reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, evitando reler o historico inteiro a cada execucao.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, o backend tambem reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, mas faz o download oficial por `consChNFe` para cada chave nova encontrada.
 - Nesse modo, a leitura do catalogo da Dominio considera apenas notas com emissao a partir de `2026-01-02`, o que equivale a buscar somente documentos com data maior que `2026-01-01`.
+- Nesse modo, a consulta por chave da Dominio fica restrita a execucao manual/esporadica; os ciclos automaticos e a busca noturna nao disparam esse processamento.
 - Se o XML retornado pela Dominio for ABRASF/NFS-e em vez de NF-e, o backend redireciona a importacao para o modulo de NFS-e e reaproveita a deduplicacao por `ambiente + chave_acesso` desse armazenamento.
 - XMLs da Dominio com raiz `Baixas` sao ignorados automaticamente, pois representam baixa financeira e nao documento fiscal armazenavel.
-- Chaves de CT-e encontradas no catalogo continuam fora do fluxo `POST /nfe/*`; a consulta por chave de CT-e agora ocorre no modulo dedicado `POST /cte/consultar-chave`.
+- Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, chaves de CT-e do catalogo tambem entram no processamento automatico/manual, mas a consulta oficial e a persistencia continuam sendo delegadas ao modulo dedicado de CT-e, mantendo as listagens separadas.
 - O painel da ultima importacao consegue abrir o XML bruto do catalogo e disparar reimportacao pontual ou em lote usando esses `catalogoIds`.
 - Para revisar documentos de transporte que ja foram gravados em `nfe_documentos`, rode `npm run nfe:separar-cte` para gerar um relatorio em `.tmp/nfe-cte-separation` e `npm run nfe:separar-cte -- --apply` para marcar os CT-es detectados em `schemaDoc`, permitindo que o modulo de NF-e deixe de exibi-los nas listagens e indicadores.
 - O frontend agora expõe um menu dedicado `XMLs CT-e`, paralelo a `XMLs NFS-e` e `XMLs NF-e`, com filtros, visualizacao do XML e download por cliente.
