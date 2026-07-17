@@ -1754,14 +1754,35 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           }
 
           if (modelo === '57') {
-            const result = await this.cteService.consultarChaveInternal({
-              clienteId: control.clienteId,
-              estabelecimentoId: control.estabelecimentoId,
-              chaveAcesso,
-              ambiente: control.ambiente,
-              persistir: true,
-              tentarEventos: true
-            });
+            let result;
+            try {
+              result = await this.cteService.consultarChaveInternal({
+                clienteId: control.clienteId,
+                estabelecimentoId: control.estabelecimentoId,
+                chaveAcesso,
+                ambiente: control.ambiente,
+                persistir: true,
+                tentarEventos: true
+              });
+            } catch (error) {
+              controlFailures += 1;
+              travarCursor = true;
+              const detail: NfeSyncRunFailureDetail = {
+                kind: 'documento',
+                status: 'falha',
+                clientId: control.clienteId,
+                estabelecimentoId: control.estabelecimentoId,
+                ambiente: control.ambiente,
+                cnpjConsulta: control.cnpjConsulta,
+                catalogoId: entry.catalogoId,
+                chaveAcesso,
+                modelo,
+                mensagem: this.toErrorMessage(error)
+              };
+              executionDetails.push(detail);
+              failureDetails.push(detail);
+              continue;
+            }
 
             if (result.statusCode !== 200) {
               controlFailures += 1;
