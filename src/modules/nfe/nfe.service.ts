@@ -961,14 +961,16 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       clienteId: dto.clienteId,
       ambiente: dto.ambiente,
       estabelecimentoId: dto.estabelecimentoId,
-      limitControles: dto.limitControles
+      limitControles: dto.limitControles,
+      scanFullHistory: true
     });
   }
 
   async previewDownloadByKeyGlobal(): Promise<NfeDownloadByKeyPreviewResult> {
     this.assertManualDownloadByKeyEnabled();
     return this.previewDownloadByKeyInternal({
-      limitControles: 50
+      limitControles: 50,
+      scanFullHistory: true
     });
   }
 
@@ -979,14 +981,16 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       clienteId: dto.clienteId,
       ambiente: dto.ambiente,
       estabelecimentoId: dto.estabelecimentoId,
-      limitControles: dto.limitControles
+      limitControles: dto.limitControles,
+      scanFullHistory: true
     });
   }
 
   async executeDownloadByKeyGlobal(): Promise<NfeSyncRunResult> {
     this.assertManualDownloadByKeyEnabled();
     return this.runNowViaDominioConsultaChave({
-      limitControles: 50
+      limitControles: 50,
+      scanFullHistory: true
     });
   }
 
@@ -1228,6 +1232,59 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       catalogoIdMinExclusive: params.catalogoIdMinExclusive,
       sortDirection: params.sortDirection
     });
+  }
+
+  private async loadDominioCatalogForKeyDownload(params: {
+    clienteId: string;
+    estabelecimentoId?: string;
+    limit?: number;
+    dataEmissaoInicio?: string;
+    sortDirection?: 'asc' | 'desc';
+    catalogoIdMinExclusive?: number;
+    scanFullHistory?: boolean;
+  }): Promise<DominioNfeCatalogRecord[]> {
+    const batchSize = params.limit ?? this.parsePositiveNumberEnv('NFE_DOMINIO_IMPORT_LIMIT_PER_RUN', 500);
+    if (!params.scanFullHistory) {
+      return this.loadDominioCatalogForClient({
+        clienteId: params.clienteId,
+        estabelecimentoId: params.estabelecimentoId,
+        limit: batchSize,
+        dataEmissaoInicio: params.dataEmissaoInicio,
+        catalogoIdMinExclusive: params.catalogoIdMinExclusive,
+        sortDirection: params.sortDirection
+      });
+    }
+
+    const entries: DominioNfeCatalogRecord[] = [];
+    let currentCursor: number | undefined;
+
+    while (true) {
+      const batch = await this.loadDominioCatalogForClient({
+        clienteId: params.clienteId,
+        estabelecimentoId: params.estabelecimentoId,
+        limit: batchSize,
+        dataEmissaoInicio: params.dataEmissaoInicio,
+        catalogoIdMinExclusive: currentCursor,
+        sortDirection: params.sortDirection
+      });
+
+      if (!batch.length) {
+        break;
+      }
+
+      entries.push(...batch);
+      if (batch.length < batchSize) {
+        break;
+      }
+
+      const lastCatalogId = batch[batch.length - 1]?.catalogoId;
+      if (!lastCatalogId || (typeof currentCursor === 'number' && lastCatalogId <= currentCursor)) {
+        break;
+      }
+      currentCursor = lastCatalogId;
+    }
+
+    return entries;
   }
 
   private async tryImportDominioAsNfse(params: {
@@ -1585,6 +1642,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     ambiente?: NfeAmbiente;
     estabelecimentoId?: string;
     limitControles?: number;
+    scanFullHistory?: boolean;
   }): Promise<NfeSyncRunResult> {
     const controls = await this.prisma.nfeSyncControle.findMany({
       where: {
@@ -1608,6 +1666,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const executionDetails: NfeSyncRunFailureDetail[] = [];
     const failureDetails: NfeSyncRunFailureDetail[] = [];
     const limitPorControle = this.parsePositiveNumberEnv('NFE_DOMINIO_IMPORT_LIMIT_PER_RUN', 500);
+    const executionLabel = params.scanFullHistory
+      ? 'Consulta retroativa manual por chave via catalogo Dominio'
+      : 'Consulta por chave via catalogo Dominio';
 
     for (const control of controls) {
       try {
@@ -1618,20 +1679,23 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           control.cnpjConsulta
         );
         const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
-        const entries = await this.loadDominioCatalogForClient({
+        const savedCursor = this.toSafeCatalogoCursor(control.ultimoNsuConsultado);
+        const entries = await this.loadDominioCatalogForKeyDownload({
           clienteId: control.clienteId,
           estabelecimentoId: control.estabelecimentoId,
           limit: limitPorControle,
           dataEmissaoInicio: NfeService.DOMINIO_CHAVE_DATA_EMISSAO_INICIO,
-          catalogoIdMinExclusive: this.toSafeCatalogoCursor(control.ultimoNsuConsultado),
+          catalogoIdMinExclusive: savedCursor,
+          scanFullHistory: params.scanFullHistory,
           sortDirection: 'asc'
         });
 
-        let cursorAtualizadoAte = this.toSafeCatalogoCursor(control.ultimoNsuConsultado);
+        let cursorAtualizadoAte = savedCursor;
         let maxCatalogoEncontrado = this.toSafeCatalogoCursor(control.maxNsu);
         let controlFailures = 0;
         let controlSaved = 0;
         let travarCursor = false;
+        const shouldAdvanceSavedCursor = !params.scanFullHistory;
 
         for (const entry of entries) {
           maxCatalogoEncontrado = Math.max(maxCatalogoEncontrado, entry.catalogoId);
@@ -1640,7 +1704,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           const documentLabel = modelo === '57' ? 'CT-e' : 'NF-e';
 
           if (!chaveAcesso) {
-            if (!travarCursor) {
+            if (!travarCursor && shouldAdvanceSavedCursor) {
               cursorAtualizadoAte = entry.catalogoId;
             }
             executionDetails.push({
@@ -1671,7 +1735,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           });
 
           if (existing?.xmlCompletoDisponivel) {
-            if (!travarCursor) {
+            if (!travarCursor && shouldAdvanceSavedCursor) {
               cursorAtualizadoAte = entry.catalogoId;
             }
             executionDetails.push({
@@ -1720,7 +1784,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             }
 
             if (result.documentosEncontrados === 0 && result.eventosEncontrados === 0) {
-              if (!travarCursor) {
+              if (!travarCursor && shouldAdvanceSavedCursor) {
                 cursorAtualizadoAte = entry.catalogoId;
               }
               executionDetails.push({
@@ -1740,7 +1804,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
             documentsSaved += result.documentosPersistidos;
             controlSaved += result.documentosPersistidos;
-            if (!travarCursor) {
+            if (!travarCursor && shouldAdvanceSavedCursor) {
               cursorAtualizadoAte = entry.catalogoId;
             }
             executionDetails.push({
@@ -1811,7 +1875,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           }
 
           if (result.documents.length === 0) {
-            if (!travarCursor) {
+            if (!travarCursor && shouldAdvanceSavedCursor) {
               cursorAtualizadoAte = entry.catalogoId;
             }
             executionDetails.push({
@@ -1845,7 +1909,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
             documentsSaved += persistedForKey;
             controlSaved += persistedForKey;
-            if (!travarCursor) {
+            if (!travarCursor && shouldAdvanceSavedCursor) {
               cursorAtualizadoAte = entry.catalogoId;
             }
             executionDetails.push({
@@ -1892,16 +1956,16 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           where: { id: control.id },
           data: {
             status: controlFailures > 0 ? NfeSyncStatus.erro_api : NfeSyncStatus.ativo,
-            ultimoNsuConsultado: BigInt(cursorAtualizadoAte),
-            ultimoNsuDistribuido: BigInt(cursorAtualizadoAte),
-            maxNsu: BigInt(maxCatalogoEncontrado),
+            ultimoNsuConsultado: shouldAdvanceSavedCursor ? BigInt(cursorAtualizadoAte) : control.ultimoNsuConsultado,
+            ultimoNsuDistribuido: shouldAdvanceSavedCursor ? BigInt(cursorAtualizadoAte) : control.ultimoNsuDistribuido,
+            maxNsu: shouldAdvanceSavedCursor ? BigInt(maxCatalogoEncontrado) : control.maxNsu,
             ultimaExecucao: new Date(),
             ultimaMensagem:
               controlFailures > 0
-                ? `Consulta por chave via catalogo Dominio executada com ${controlFailures} falha(s)`
+                ? `${executionLabel} executada com ${controlFailures} falha(s)`
                 : controlSaved > 0
-                  ? `Consulta por chave via catalogo Dominio salvou ${controlSaved} documento(s)`
-                  : 'Consulta por chave via catalogo Dominio sem novos documentos',
+                  ? `${executionLabel} salvou ${controlSaved} documento(s)`
+                  : `${executionLabel} sem novos documentos`,
             totalDocumentosBaixados: {
               increment: controlSaved
             }
@@ -1925,7 +1989,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           data: {
             status: NfeSyncStatus.erro_api,
             ultimaExecucao: new Date(),
-            ultimaMensagem: `Falha na consulta por chave via catalogo Dominio: ${this.toErrorMessage(error)}`
+            ultimaMensagem: `Falha na ${executionLabel.toLowerCase()}: ${this.toErrorMessage(error)}`
           }
         });
       }
@@ -1945,6 +2009,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     ambiente?: NfeAmbiente;
     estabelecimentoId?: string;
     limitControles?: number;
+    scanFullHistory?: boolean;
   }): Promise<NfeDownloadByKeyPreviewResult> {
     const controls = await this.prisma.nfeSyncControle.findMany({
       where: {
@@ -1972,12 +2037,13 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         const establishment = await this.getEstablishmentOrThrow(control.estabelecimentoId, control.clienteId);
         await this.findActiveCertificateOrThrow(control.clienteId, control.estabelecimentoId, control.cnpjConsulta);
 
-        const entries = await this.loadDominioCatalogForClient({
+        const entries = await this.loadDominioCatalogForKeyDownload({
           clienteId: control.clienteId,
           estabelecimentoId: establishment.id,
           limit: limitPorControle,
           dataEmissaoInicio: NfeService.DOMINIO_CHAVE_DATA_EMISSAO_INICIO,
           catalogoIdMinExclusive: this.toSafeCatalogoCursor(control.ultimoNsuConsultado),
+          scanFullHistory: params.scanFullHistory,
           sortDirection: 'asc'
         });
 

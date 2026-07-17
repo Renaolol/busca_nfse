@@ -1019,6 +1019,7 @@ describe('NfeService', () => {
 
   it('previsualiza apenas chaves pendentes para o overlay de download por chave', async () => {
     process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN = '2';
     prisma.nfeSyncControle.findMany.mockResolvedValue([
       {
         id: 'ctrl-1',
@@ -1026,42 +1027,67 @@ describe('NfeService', () => {
         estabelecimentoId: 'estab-1',
         cnpjConsulta: '12345678000199',
         ambiente: NfeAmbiente.producao,
-        ultimoNsuConsultado: 10n,
-        ultimoNsuDistribuido: 10n,
-        maxNsu: 10n,
+        ultimoNsuConsultado: 999n,
+        ultimoNsuDistribuido: 999n,
+        maxNsu: 999n,
         status: NfeSyncStatus.ativo
       }
     ]);
-    (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([
-      {
-        catalogoId: 21,
-        codigoEmpresa: 20,
-        cnpjEmpresa: '12345678000199',
-        chaveAcesso: '35260612345678000199550010000001231000001231',
-        dataEmissao: '2026-06-29'
-      },
-      {
-        catalogoId: 22,
-        codigoEmpresa: 20,
-        cnpjEmpresa: '12345678000199',
-        chaveAcesso: '35260612345678000199550010000004561000004561',
-        dataEmissao: '2026-06-30'
-      },
-      {
-        catalogoId: 23,
-        codigoEmpresa: 20,
-        cnpjEmpresa: '12345678000199',
-        chaveAcesso: '',
-        dataEmissao: '2026-06-30'
-      }
-    ]);
+    (dominioXmlSource.listCatalog as jest.Mock)
+      .mockResolvedValueOnce([
+        {
+          catalogoId: 21,
+          codigoEmpresa: 20,
+          cnpjEmpresa: '12345678000199',
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          dataEmissao: '2026-01-10'
+        },
+        {
+          catalogoId: 22,
+          codigoEmpresa: 20,
+          cnpjEmpresa: '12345678000199',
+          chaveAcesso: '35260612345678000199550010000002221000002221',
+          dataEmissao: '2026-01-11'
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          catalogoId: 23,
+          codigoEmpresa: 20,
+          cnpjEmpresa: '12345678000199',
+          chaveAcesso: '35260612345678000199550010000004561000004561',
+          dataEmissao: '2026-01-12'
+        }
+      ]);
     prisma.nfeDocumento.findUnique
+      .mockResolvedValueOnce({ xmlCompletoDisponivel: true })
       .mockResolvedValueOnce({ xmlCompletoDisponivel: true })
       .mockResolvedValueOnce(null);
 
     const result = await service.previewDownloadByKey({
       clienteId: 'cliente-1',
       ambiente: NfeAmbiente.producao
+    });
+
+    expect(dominioXmlSource.listCatalog).toHaveBeenNthCalledWith(1, {
+      cnpjs: ['12345678000199'],
+      limit: 2,
+      dataEmissaoInicio: '2026-01-02',
+      dataEmissaoFim: undefined,
+      chavesAcesso: undefined,
+      catalogoIds: [],
+      catalogoIdMinExclusive: undefined,
+      sortDirection: 'asc'
+    });
+    expect(dominioXmlSource.listCatalog).toHaveBeenNthCalledWith(2, {
+      cnpjs: ['12345678000199'],
+      limit: 2,
+      dataEmissaoInicio: '2026-01-02',
+      dataEmissaoFim: undefined,
+      chavesAcesso: undefined,
+      catalogoIds: [],
+      catalogoIdMinExclusive: 22,
+      sortDirection: 'asc'
     });
 
     expect(result).toEqual({
@@ -1075,7 +1101,7 @@ describe('NfeService', () => {
           estabelecimentoId: 'estab-1',
           ambiente: NfeAmbiente.producao,
           cnpjConsulta: '12345678000199',
-          catalogoId: 22,
+          catalogoId: 23,
           chaveAcesso: '35260612345678000199550010000004561000004561',
           modelo: '55',
           mensagem: 'Chave localizada no catalogo Dominio e pronta para download oficial'
@@ -1094,9 +1120,9 @@ describe('NfeService', () => {
         estabelecimentoId: 'estab-1',
         cnpjConsulta: '12345678000199',
         ambiente: NfeAmbiente.producao,
-        ultimoNsuConsultado: 10n,
-        ultimoNsuDistribuido: 10n,
-        maxNsu: 10n,
+        ultimoNsuConsultado: 50n,
+        ultimoNsuDistribuido: 50n,
+        maxNsu: 50n,
         status: NfeSyncStatus.ativo
       }
     ]);
@@ -1148,7 +1174,7 @@ describe('NfeService', () => {
       dataEmissaoFim: undefined,
       chavesAcesso: undefined,
       catalogoIds: [],
-      catalogoIdMinExclusive: 10,
+      catalogoIdMinExclusive: undefined,
       sortDirection: 'asc'
     });
     expect(distribuicaoClient.consultarPorChave).toHaveBeenCalledWith({
@@ -1158,6 +1184,17 @@ describe('NfeService', () => {
       ambiente: NfeAmbiente.producao,
       certificateId: 'cert-1'
     });
+    expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ctrl-1' },
+        data: expect.objectContaining({
+          ultimoNsuConsultado: 50n,
+          ultimoNsuDistribuido: 50n,
+          maxNsu: 50n,
+          ultimaMensagem: 'Consulta retroativa manual por chave via catalogo Dominio salvou 1 documento(s)'
+        })
+      })
+    );
     expect(result).toEqual({
       processed: 1,
       documentsSaved: 1,

@@ -6348,7 +6348,7 @@ async function runNfeDownloadByKey(payload = null) {
       pendingCount: 0,
       downloadedCount: 0,
       errorCount: 0,
-      currentMessage: 'Lendo chaves pendentes na Dominio...',
+      currentMessage: 'Lendo chaves pendentes na Dominio desde 02/01/2026...',
       rows: []
     });
 
@@ -6369,8 +6369,8 @@ async function runNfeDownloadByKey(payload = null) {
       errorCount: previewErrorCount,
       currentMessage:
         pendingCount > 0
-          ? 'Chaves localizadas. Iniciando download oficial por chave...'
-          : 'Nenhuma chave pendente foi localizada para esta execucao.',
+          ? 'Chaves localizadas no historico desde 02/01/2026. Iniciando download oficial por chave...'
+          : 'Nenhuma chave pendente foi localizada no historico desde 02/01/2026 para esta execucao.',
       rows: previewRows
     });
 

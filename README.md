@@ -353,6 +353,7 @@ Observacoes:
 - A vinculacao com o cliente local ocorre por CNPJ do estabelecimento ativo; nao foi necessario adicionar coluna de codigo da empresa da Dominio no schema.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio`, o backend reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, evitando reler o historico inteiro a cada execucao.
 - Mesmo quando `NFE_SYNC_SOURCE_MODE=dominio`, o painel passa a expor o botao manual `Download por chave`, que usa `POST /nfe/sync/download-por-chave/preview` e `POST /nfe/sync/download-por-chave/executar` como fluxo complementar para consultar documentos faltantes no gov por chave de acesso.
+- Esse fluxo manual faz uma varredura retroativa desde `2026-01-02` (data maior que `2026-01-01`), ignorando temporariamente o cursor salvo em `nfe_sync_controle` e sem sobrescrever esse cursor ao finalizar a execucao.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, o backend tambem reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, mas faz o download oficial por `consChNFe` para cada chave nova encontrada.
 - Nesse modo, a leitura do catalogo da Dominio considera apenas notas com emissao a partir de `2026-01-02`, o que equivale a buscar somente documentos com data maior que `2026-01-01`.
 - Nesse modo, a consulta por chave da Dominio fica restrita a execucao manual/esporadica; os ciclos automaticos e a busca noturna nao disparam esse processamento.
