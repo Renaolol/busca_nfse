@@ -6414,6 +6414,7 @@ async function runNfeDownloadByKey(payload = null) {
     });
 
     await refreshApiData();
+    await refreshStoredDocumentSearchesAfterDownloadByKey();
     pushToast(
       `Download por chave concluido: ${Number(result?.documentsSaved || 0)} documento(s) salvo(s)${Number(result?.failures || 0) > 0 ? `, ${Number(result?.failures || 0)} falha(s)` : ''}.`,
       Number(result?.failures || 0) > 0 ? 'error' : 'success'
@@ -6443,6 +6444,20 @@ async function runNfeDownloadByKey(payload = null) {
     }
 
     pushToast(`Falha ao executar download por chave: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function refreshStoredDocumentSearchesAfterDownloadByKey() {
+  if (state.dataSource !== 'api') {
+    return;
+  }
+
+  if (state.nfeSearch.hasSearched && state.nfeSearch.lastQuery?.cliente) {
+    await executeNfeDocsSearch();
+  }
+
+  if (state.cteSearch.hasSearched && state.cteSearch.lastQuery?.cliente) {
+    await executeCteDocsSearch();
   }
 }
 
