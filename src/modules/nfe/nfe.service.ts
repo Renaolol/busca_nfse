@@ -955,7 +955,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async previewDownloadByKey(dto: RunNfeSyncDto): Promise<NfeDownloadByKeyPreviewResult> {
-    this.assertDominioChaveSyncSourceEnabled();
+    this.assertManualDownloadByKeyEnabled();
     await this.ensureClientEligibleForNfeSync(dto.clienteId);
     return this.previewDownloadByKeyInternal({
       clienteId: dto.clienteId,
@@ -966,8 +966,26 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async previewDownloadByKeyGlobal(): Promise<NfeDownloadByKeyPreviewResult> {
-    this.assertDominioChaveSyncSourceEnabled();
+    this.assertManualDownloadByKeyEnabled();
     return this.previewDownloadByKeyInternal({
+      limitControles: 50
+    });
+  }
+
+  async executeDownloadByKey(dto: RunNfeSyncDto): Promise<NfeSyncRunResult> {
+    this.assertManualDownloadByKeyEnabled();
+    await this.ensureClientEligibleForNfeSync(dto.clienteId);
+    return this.runNowViaDominioConsultaChave({
+      clienteId: dto.clienteId,
+      ambiente: dto.ambiente,
+      estabelecimentoId: dto.estabelecimentoId,
+      limitControles: dto.limitControles
+    });
+  }
+
+  async executeDownloadByKeyGlobal(): Promise<NfeSyncRunResult> {
+    this.assertManualDownloadByKeyEnabled();
+    return this.runNowViaDominioConsultaChave({
       limitControles: 50
     });
   }
@@ -3335,9 +3353,11 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return this.getSyncSourceMode() === 'dominio_chave';
   }
 
-  private assertDominioChaveSyncSourceEnabled(): void {
-    if (!this.isDominioChaveSyncSource()) {
-      throw new BadRequestException('O download manual por chave so esta disponivel quando NFE_SYNC_SOURCE_MODE=dominio_chave');
+  private assertManualDownloadByKeyEnabled(): void {
+    if (!this.usesDominioSyncSource()) {
+      throw new BadRequestException(
+        'O download manual por chave exige NFE_SYNC_SOURCE_MODE configurado para uma origem da Dominio.'
+      );
     }
   }
 

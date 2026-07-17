@@ -2298,7 +2298,7 @@ function renderNfeSyncPage() {
         : 'Ao ligar a busca, o backend resolve os estabelecimentos ativos do cliente, captura o NSU atual e passa a sincronizar apenas as proximas NF-e.';
   const detailSubtitle =
     sourceMode === 'dominio'
-      ? 'Visao detalhada dos controles usados pelo backend para importar XMLs e manter o cursor incremental por estabelecimento.'
+      ? 'Visao detalhada dos controles usados pelo backend para importar XMLs e manter o cursor incremental por estabelecimento, com download manual por chave disponivel sob demanda.'
       : sourceMode === 'dominio_chave'
         ? 'Visao detalhada dos controles usados pelo backend para varrer o catalogo da Dominio e baixar documentos oficiais por chave.'
         : 'Visao detalhada dos controles realmente mantidos pelo backend para distribuicao DF-e.';
@@ -2313,6 +2313,7 @@ function renderNfeSyncPage() {
     sourceMode === 'dominio' ? 'Importar agora' : sourceMode === 'dominio_chave' ? 'Download por chave' : 'Rodar agora';
   const globalRunAction = sourceMode === 'dominio_chave' ? 'nfe-download-by-key-global' : 'nfe-run-now';
   const rowRunAction = sourceMode === 'dominio_chave' ? 'nfe-download-by-key-control' : 'nfe-sync-run-control';
+  const canUseManualDownloadByKey = canUseNfeManualDownloadByKey();
   const filtersContent = `
     <form id="nfeSyncFilterForm" class="form-grid">
       <label class="field">
@@ -2435,6 +2436,11 @@ function renderNfeSyncPage() {
                   <td>
                     <div class="table-actions">
                       <button class="icon-btn" data-action="${escapeHtml(rowRunAction)}" data-client-id="${control.clientId}" data-estabelecimento-id="${control.estabelecimentoId}" data-ambiente="${control.ambiente}">${escapeHtml(rowRunLabel)}</button>
+                      ${
+                        canUseManualDownloadByKey && sourceMode !== 'dominio_chave'
+                          ? `<button class="icon-btn" data-action="nfe-download-by-key-control" data-client-id="${control.clientId}" data-estabelecimento-id="${control.estabelecimentoId}" data-ambiente="${control.ambiente}">Download por chave</button>`
+                          : ''
+                      }
                       <button class="icon-btn" data-action="nfe-sync-pause-control" data-client-id="${control.clientId}" data-ambiente="${control.ambiente}">Pausar</button>
                     </div>
                   </td>
@@ -2456,6 +2462,9 @@ function renderNfeSyncPage() {
         actions: [
           actionButton('Ligar todos os clientes', 'nfe-enable-auto-search', 'primary'),
           actionButton(globalRunLabel, globalRunAction, 'secondary'),
+          ...(canUseManualDownloadByKey && sourceMode !== 'dominio_chave'
+            ? [actionButton('Download por chave', 'nfe-download-by-key-global', 'secondary')]
+            : []),
           actionButton('Pausar todos', 'nfe-disable-auto-search', 'secondary')
         ]
       })}
@@ -2625,7 +2634,7 @@ function renderNfeSchedulerStatusCard() {
         ${statusBadge(sourceMode === 'dominio' ? 'Banco Dominio' : sourceMode === 'dominio_chave' ? 'Dominio + chave' : 'Distribuicao DF-e', 'info')}
         <p>${
           sourceMode === 'dominio'
-            ? 'Os controles ativos importam XMLs diretamente do banco da Dominio e salvam os arquivos no storage local.'
+            ? 'Os controles ativos importam XMLs diretamente do banco da Dominio e salvam os arquivos no storage local. O download manual por chave fica disponivel como acao complementar.'
             : sourceMode === 'dominio_chave'
               ? 'Os controles ativos usam o catalogo da Dominio para localizar chaves novas e o download oficial ocorre apenas quando voce dispara a rotina manual.'
               : 'Os controles ativos consultam a distribuicao DF-e e persistem os documentos retornados.'
@@ -2670,8 +2679,10 @@ function renderNfeDocumentsPage() {
   const statusOptions = uniqueValues(state.nfeDocuments.map((doc) => doc.statusFiscal).filter(Boolean));
   const schemaOptions = uniqueValues(state.nfeDocuments.map((doc) => doc.schemaDoc).filter(Boolean));
   const selectedClientId = state.filters.nfeDocs.cliente && state.filters.nfeDocs.cliente !== 'Todos' ? state.filters.nfeDocs.cliente : '';
-  const manualClientRunLabel = isNfeDownloadByKeyMode() ? 'Download por chave' : 'Rodar busca do cliente';
-  const manualClientRunAction = isNfeDownloadByKeyMode() ? 'nfe-docs-download-by-key-client' : 'nfe-docs-run-now-client';
+  const sourceMode = getNfeSourceMode();
+  const canUseManualDownloadByKey = canUseNfeManualDownloadByKey();
+  const showDefaultRunButton = sourceMode !== 'dominio_chave';
+  const showManualDownloadButton = canUseManualDownloadByKey;
 
   return `
     <section class="page-section">
@@ -2750,7 +2761,16 @@ function renderNfeDocumentsPage() {
           <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
             <button class="btn primary" type="submit">Buscar NF-e</button>
             <button class="btn secondary" type="button" data-action="nfe-docs-clear-filters">Limpar</button>
-            <button class="btn secondary" type="button" data-action="${escapeHtml(manualClientRunAction)}" ${selectedClientId ? '' : 'disabled'}>${escapeHtml(manualClientRunLabel)}</button>
+            ${
+              showDefaultRunButton
+                ? `<button class="btn secondary" type="button" data-action="nfe-docs-run-now-client" ${selectedClientId ? '' : 'disabled'}>Rodar busca do cliente</button>`
+                : ''
+            }
+            ${
+              showManualDownloadButton
+                ? `<button class="btn secondary" type="button" data-action="nfe-docs-download-by-key-client" ${selectedClientId ? '' : 'disabled'}>Download por chave</button>`
+                : ''
+            }
           </div>
         </form>
       </article>
@@ -6299,8 +6319,8 @@ async function runNfeDownloadByKeyForCurrentDocumentsClient() {
 }
 
 async function runNfeDownloadByKey(payload = null) {
-  if (!isNfeDownloadByKeyMode()) {
-    pushToast('O download por chave so esta disponivel quando NFE_SYNC_SOURCE_MODE=dominio_chave.', 'error');
+  if (!canUseNfeManualDownloadByKey()) {
+    pushToast('O download por chave exige uma origem de NF-e baseada na Dominio.', 'error');
     return;
   }
 
@@ -6371,11 +6391,14 @@ async function runNfeDownloadByKey(payload = null) {
       currentMessage: 'Download oficial em andamento. Aguarde o retorno do backend...'
     });
 
-    const result = await apiRequest(isGlobal ? '/nfe/sync/rodar-agora-geral' : '/nfe/sync/rodar-agora', {
-      method: 'POST',
-      ...(body ? { body } : {}),
-      timeoutMs: resolveDownloadByKeyTimeoutMs(pendingCount)
-    });
+    const result = await apiRequest(
+      isGlobal ? '/nfe/sync/download-por-chave/executar-global' : '/nfe/sync/download-por-chave/executar',
+      {
+        method: 'POST',
+        ...(body ? { body } : {}),
+        timeoutMs: resolveDownloadByKeyTimeoutMs(pendingCount)
+      }
+    );
 
     state.nfeLastRunReport = buildNfeRunReport(result);
     const resolvedRows = buildDownloadByKeyResolvedRows(runningRows, result);
@@ -9565,8 +9588,8 @@ function getNfeSourceMode() {
   return 'distribuicao';
 }
 
-function isNfeDownloadByKeyMode() {
-  return getNfeSourceMode() === 'dominio_chave';
+function canUseNfeManualDownloadByKey() {
+  return getNfeSourceMode() === 'dominio' || getNfeSourceMode() === 'dominio_chave';
 }
 
 function mapNfeSyncStatusOptions(statuses) {

@@ -148,6 +148,18 @@ export class NfeController {
     return this.nfeService.previewDownloadByKeyGlobal();
   }
 
+  @Post('sync/download-por-chave/executar')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  executeDownloadByKey(@Body() dto: RunNfeSyncDto) {
+    return this.nfeService.executeDownloadByKey(dto);
+  }
+
+  @Post('sync/download-por-chave/executar-global')
+  @Roles('admin')
+  executeDownloadByKeyGlobal() {
+    return this.nfeService.executeDownloadByKeyGlobal();
+  }
+
   @Post('sync/consultar-nsu')
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   consultarNsu(@Body() dto: QueryNfeByNsuDto) {

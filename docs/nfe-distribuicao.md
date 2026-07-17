@@ -43,6 +43,8 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - `POST /nfe/sync/rodar-agora-geral`
 - `POST /nfe/sync/download-por-chave/preview`
 - `POST /nfe/sync/download-por-chave/preview-global`
+- `POST /nfe/sync/download-por-chave/executar`
+- `POST /nfe/sync/download-por-chave/executar-global`
 - `POST /nfe/sync/consultar-nsu`
 - `POST /nfe/sync/consultar-chave`
 - `POST /clientes/:id/nfe/ativar`
@@ -64,6 +66,7 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - `POST /nfe/dominio/xml` devolve o XML bruto de um `catalogoId` da Dominio para visualizacao interna mesmo quando a persistencia falhou por chave ausente.
 - O adapter real da Dominio fica desacoplado em `src/integrations/dominio-nfe` e usa `pyodbc` via script Python para evitar acoplamento de driver nativo ao build Node.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio`, as rotas operacionais `POST /nfe/sync/ativar`, `POST /nfe/sync/ativar-todos`, `POST /nfe/sync/rodar-agora` e `POST /nfe/sync/rodar-agora-geral` deixam de consultar NSU e passam a importar incrementalmente da base Dominio.
+- Mesmo em `NFE_SYNC_SOURCE_MODE=dominio`, o operador pode usar o fluxo manual `POST /nfe/sync/download-por-chave/preview` + `POST /nfe/sync/download-por-chave/executar` para baixar notas faltantes por chave sem trocar o modo principal.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, essas mesmas rotas passam a ler a `EFATENDIMENTO_NFE_CATALOGO` incrementalmente e consultar cada NF-e por `consChNFe`, usando o certificado ja cadastrado do estabelecimento correspondente.
 - Nesse modo, o catalogo da Dominio e filtrado para considerar apenas notas com emissao a partir de `2026-01-02`, isto e, com data maior que `2026-01-01`.
 - Nesse modo, `nfe_sync_controle.ultimo_nsu_consultado` passa a guardar o ultimo `EFATENDIMENTO_NFE_CATALOGO.ID` importado com sucesso para cada `cliente/cnpj/ambiente`.
