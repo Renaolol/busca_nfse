@@ -25,10 +25,16 @@ type PemCredentials = {
 };
 
 type MutualTlsCredentials = PfxCredentials | PemCredentials;
+type SoapActionMode = 'default' | 'omit' | 'quoted';
 
 @Injectable()
 export class RealCteConsultaClient implements CteConsultaClient {
   private static readonly SOAP_NAMESPACE = 'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4';
+  private static readonly SOAP_NAMESPACE_ALTERNATES = [
+    RealCteConsultaClient.SOAP_NAMESPACE,
+    'http://www.portalfiscal.inf.br/cte/wsdl/CTeConsultaV4',
+    'http://www.portalfiscal.inf.br/cte/wsdl/CteConsulta'
+  ] as const;
   private static readonly XML_NAMESPACE = 'http://www.portalfiscal.inf.br/cte';
   private static readonly LAYOUT_VERSION = process.env.CTE_CONSULTA_LAYOUT_VERSION?.trim() || '4.00';
 
@@ -45,12 +51,13 @@ export class RealCteConsultaClient implements CteConsultaClient {
   }): Promise<CteConsultaResult> {
     try {
       const certificate = await this.loadCertificate(params.certificateId);
-      const url = this.buildConsultaUrl(params.ambiente);
+      const cUf = this.extractCUfFromChave(params.chaveAcesso);
+      const url = this.buildConsultaUrl(params.ambiente, cUf);
       const response = await this.doSoapRequestWithFallback(
         url,
         certificate,
         this.buildRequestXml(params.chaveAcesso, params.ambiente),
-        this.extractCUfFromChave(params.chaveAcesso)
+        cUf
       );
       const parsed = this.parseSoapResponse(response.body);
       return {
@@ -88,20 +95,21 @@ export class RealCteConsultaClient implements CteConsultaClient {
     return { mode: 'pfx', pfx, passphrase };
   }
 
-  private buildConsultaUrl(ambiente: NfeAmbiente): URL {
+  private buildConsultaUrl(ambiente: NfeAmbiente, cUf: string): URL {
     const configured =
       ambiente === NfeAmbiente.producao
         ? process.env.CTE_CONSULTA_URL_PRODUCAO?.trim()
         : process.env.CTE_CONSULTA_URL_HOMOLOGACAO?.trim();
-    if (!configured) {
-      throw new Error(
-        ambiente === NfeAmbiente.producao
-          ? 'CTE_CONSULTA_URL_PRODUCAO nao configurada'
-          : 'CTE_CONSULTA_URL_HOMOLOGACAO nao configurada'
-      );
+
+    if (configured) {
+      return new URL(configured);
     }
 
-    return new URL(configured);
+    if (ambiente === NfeAmbiente.producao) {
+      return new URL(this.resolveConsultaProducaoUrlByCUf(cUf));
+    }
+
+    throw new Error('CTE_CONSULTA_URL_HOMOLOGACAO nao configurada');
   }
 
   private buildRequestXml(chaveAcesso: string, ambiente: NfeAmbiente): string {
@@ -183,16 +191,89 @@ export class RealCteConsultaClient implements CteConsultaClient {
     cUf: string,
     rejectUnauthorized = process.env.CTE_CONSULTA_REJECT_UNAUTHORIZED !== 'false'
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
-    const attempt12 = await this.doSoapRequest(url, mtls, requestXml, cUf, '1.2', rejectUnauthorized, 'default');
-    if (this.shouldRetryWithSoap12WithoutActionHeader(attempt12)) {
-      return this.doSoapRequest(url, mtls, requestXml, cUf, '1.2', rejectUnauthorized, 'omit');
+    const soap12Attempts: Array<{ actionMode: SoapActionMode; soapNamespace: string; contentTypeIncludesAction: boolean }> = [
+      {
+        actionMode: 'default',
+        soapNamespace: RealCteConsultaClient.SOAP_NAMESPACE_ALTERNATES[0],
+        contentTypeIncludesAction: true
+      },
+      {
+        actionMode: 'omit',
+        soapNamespace: RealCteConsultaClient.SOAP_NAMESPACE_ALTERNATES[0],
+        contentTypeIncludesAction: true
+      },
+      {
+        actionMode: 'omit',
+        soapNamespace: RealCteConsultaClient.SOAP_NAMESPACE_ALTERNATES[0],
+        contentTypeIncludesAction: false
+      },
+      {
+        actionMode: 'default',
+        soapNamespace: RealCteConsultaClient.SOAP_NAMESPACE_ALTERNATES[1],
+        contentTypeIncludesAction: true
+      },
+      {
+        actionMode: 'omit',
+        soapNamespace: RealCteConsultaClient.SOAP_NAMESPACE_ALTERNATES[1],
+        contentTypeIncludesAction: false
+      },
+      {
+        actionMode: 'default',
+        soapNamespace: RealCteConsultaClient.SOAP_NAMESPACE_ALTERNATES[2],
+        contentTypeIncludesAction: true
+      },
+      {
+        actionMode: 'omit',
+        soapNamespace: RealCteConsultaClient.SOAP_NAMESPACE_ALTERNATES[2],
+        contentTypeIncludesAction: false
+      }
+    ];
+
+    let attempt12 = await this.doSoapRequest(
+      url,
+      mtls,
+      requestXml,
+      cUf,
+      '1.2',
+      rejectUnauthorized,
+      soap12Attempts[0].actionMode,
+      soap12Attempts[0].soapNamespace,
+      soap12Attempts[0].contentTypeIncludesAction
+    );
+
+    for (const attempt of soap12Attempts.slice(1)) {
+      if (!this.shouldRetryWithAlternateSoap12Action(attempt12)) {
+        break;
+      }
+
+      attempt12 = await this.doSoapRequest(
+        url,
+        mtls,
+        requestXml,
+        cUf,
+        '1.2',
+        rejectUnauthorized,
+        attempt.actionMode,
+        attempt.soapNamespace,
+        attempt.contentTypeIncludesAction
+      );
     }
 
     if (!this.shouldRetryWithSoap11(attempt12)) {
       return attempt12;
     }
 
-    return this.doSoapRequest(url, mtls, requestXml, cUf, '1.1', rejectUnauthorized, 'quoted');
+    return this.doSoapRequest(
+      url,
+      mtls,
+      requestXml,
+      cUf,
+      '1.1',
+      rejectUnauthorized,
+      'quoted',
+      RealCteConsultaClient.SOAP_NAMESPACE_ALTERNATES[0],
+      false
+    );
   }
 
   private doSoapRequest(
@@ -202,7 +283,9 @@ export class RealCteConsultaClient implements CteConsultaClient {
     cUf: string,
     soapVersion: '1.1' | '1.2',
     rejectUnauthorized: boolean,
-    soapActionMode: 'default' | 'omit' | 'quoted'
+    soapActionMode: SoapActionMode,
+    soapNamespace: string,
+    contentTypeIncludesAction: boolean
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     return new Promise((resolve, reject) => {
       const envelope = this.buildSoapEnvelope(requestXml, cUf, soapVersion);
@@ -210,10 +293,12 @@ export class RealCteConsultaClient implements CteConsultaClient {
         mtls.mode === 'pfx'
           ? { pfx: mtls.pfx, passphrase: mtls.passphrase }
           : { cert: mtls.cert, key: mtls.key };
-      const soapAction = `${RealCteConsultaClient.SOAP_NAMESPACE}/cteConsultaCT`;
+      const soapAction = `${soapNamespace}/cteConsultaCT`;
       const contentType =
         soapVersion === '1.2'
-          ? `application/soap+xml; charset=utf-8; action="${soapAction}"`
+          ? contentTypeIncludesAction
+            ? `application/soap+xml; charset=utf-8; action="${soapAction}"`
+            : 'application/soap+xml; charset=utf-8'
           : 'text/xml; charset=utf-8';
       const soapActionHeader =
         soapActionMode === 'omit' ? undefined : soapActionMode === 'quoted' || soapVersion === '1.1' ? `"${soapAction}"` : soapAction;
@@ -425,6 +510,33 @@ export class RealCteConsultaClient implements CteConsultaClient {
     return digits.slice(0, 2);
   }
 
+  private resolveConsultaProducaoUrlByCUf(cUf: string): string {
+    const directByCUf: Record<string, string> = {
+      '50': 'https://producao.cte.ms.gov.br/ws/CTeConsultaV4',
+      '51': 'https://cte.sefaz.mt.gov.br/ctews2/services/CTeConsultaV4',
+      '31': 'https://cte.fazenda.mg.gov.br/cte/services/CTeConsultaV4',
+      '41': 'https://cte.fazenda.pr.gov.br/cte4/CTeConsultaV4',
+      '43': 'https://cte.svrs.rs.gov.br/ws/CTeConsultaV4/CTeConsultaV4.asmx',
+      '35': 'https://nfe.fazenda.sp.gov.br/CTeWS/WS/CTeConsultaV4.asmx'
+    };
+
+    if (directByCUf[cUf]) {
+      return directByCUf[cUf];
+    }
+
+    const svrsStates = new Set(['11', '12', '13', '15', '17', '21', '22', '23', '24', '25', '27', '28', '29', '32', '33', '42', '52', '53']);
+    if (svrsStates.has(cUf)) {
+      return 'https://cte.svrs.rs.gov.br/ws/CTeConsultaV4/CTeConsultaV4.asmx';
+    }
+
+    const svspStates = new Set(['14', '16', '26']);
+    if (svspStates.has(cUf)) {
+      return 'https://nfe.fazenda.sp.gov.br/CTeWS/WS/CTeConsultaV4.asmx';
+    }
+
+    throw new Error(`Nao existe endpoint padrao de producao mapeado para o cUF ${cUf} no CteConsultaV4`);
+  }
+
   private previewBody(body: string): string {
     const compact = String(body || '').replace(/\s+/g, ' ').trim();
     return compact ? compact.slice(0, 240) : '(vazio)';
@@ -463,7 +575,7 @@ export class RealCteConsultaClient implements CteConsultaClient {
     return response.statusCode === 400 && !body;
   }
 
-  private shouldRetryWithSoap12WithoutActionHeader(response: { statusCode: number; body: string }): boolean {
+  private shouldRetryWithAlternateSoap12Action(response: { statusCode: number; body: string }): boolean {
     const normalizedBody = String(response.body || '').trim().toLowerCase();
     return (
       normalizedBody.includes('action') &&

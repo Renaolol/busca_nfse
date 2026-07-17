@@ -1,6 +1,11 @@
 import { RealCteConsultaClient } from '../real-cte-consulta.client';
 
 describe('RealCteConsultaClient', () => {
+  afterEach(() => {
+    delete process.env.CTE_CONSULTA_URL_PRODUCAO;
+    delete process.env.CTE_CONSULTA_URL_HOMOLOGACAO;
+  });
+
   it('monta payload consSitCTe e envelope SOAP com cUF da chave', () => {
     const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
       buildRequestXml(chaveAcesso: string, ambiente: 'producao' | 'homologacao'): string;
@@ -60,6 +65,18 @@ describe('RealCteConsultaClient', () => {
     expect(result.documents.map((document) => document.schema)).toEqual(['retConsSitCTe_v4.00', 'procEventoCTe_v4.00']);
     expect(result.documents[0].chaveAcesso).toBe('42260795849600000135570010000319691243772228');
     expect(result.documents[1].xml).toContain('<procEventoCTe');
+  });
+
+  it('resolve endpoint de producao por cUF quando nao ha URL fixa configurada', () => {
+    const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
+      buildConsultaUrl(ambiente: 'producao' | 'homologacao', cUf: string): URL;
+    };
+
+    expect(client.buildConsultaUrl('producao', '41').toString()).toBe('https://cte.fazenda.pr.gov.br/cte4/CTeConsultaV4');
+    expect(client.buildConsultaUrl('producao', '42').toString()).toBe(
+      'https://cte.svrs.rs.gov.br/ws/CTeConsultaV4/CTeConsultaV4.asmx'
+    );
+    expect(client.buildConsultaUrl('producao', '50').toString()).toBe('https://producao.cte.ms.gov.br/ws/CTeConsultaV4');
   });
 
   it('refaz a consulta sem validacao da cadeia TLS quando o portal retorna erro de issuer local', async () => {
@@ -154,7 +171,9 @@ describe('RealCteConsultaClient', () => {
       '42',
       '1.2',
       true,
-      'default'
+      'default',
+      'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4',
+      true
     );
     expect(client.doSoapRequest).toHaveBeenNthCalledWith(
       2,
@@ -164,7 +183,9 @@ describe('RealCteConsultaClient', () => {
       '42',
       '1.2',
       true,
-      'omit'
+      'omit',
+      'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4',
+      true
     );
     expect(result).toEqual({
       statusCode: 200,
@@ -214,7 +235,9 @@ describe('RealCteConsultaClient', () => {
       '42',
       '1.2',
       true,
-      'default'
+      'default',
+      'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4',
+      true
     );
     expect(client.doSoapRequest).toHaveBeenNthCalledWith(
       2,
@@ -224,7 +247,66 @@ describe('RealCteConsultaClient', () => {
       '42',
       '1.1',
       true,
-      'quoted'
+      'quoted',
+      'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4',
+      false
+    );
+    expect(result).toEqual({
+      statusCode: 200,
+      headers: {},
+      body: '<ok />'
+    });
+  });
+
+  it('testa variante sem action no content-type antes de desistir do SOAP 1.2', async () => {
+    const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
+      doSoapRequestSequence(
+        url: URL,
+        mtls: Record<string, unknown>,
+        requestXml: string,
+        cUf: string,
+        rejectUnauthorized?: boolean
+      ): Promise<{ statusCode: number; headers: Record<string, unknown>; body: string }>;
+      doSoapRequest: jest.Mock;
+    };
+
+    client.doSoapRequest = jest
+      .fn()
+      .mockResolvedValueOnce({
+        statusCode: 500,
+        headers: {},
+        body: `Unable to handle request. The action 'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4/cteConsultaCT' was not recognized.`
+      })
+      .mockResolvedValueOnce({
+        statusCode: 500,
+        headers: {},
+        body: `Unable to handle request. The action 'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4/cteConsultaCT' was not recognized.`
+      })
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        headers: {},
+        body: '<ok />'
+      });
+
+    const result = await client.doSoapRequestSequence(
+      new URL('https://cte.example.test/ws'),
+      { mode: 'pfx', pfx: Buffer.from('fake'), passphrase: 'senha' },
+      '<xml />',
+      '42',
+      true
+    );
+
+    expect(client.doSoapRequest).toHaveBeenNthCalledWith(
+      3,
+      expect.any(URL),
+      expect.objectContaining({ mode: 'pfx' }),
+      '<xml />',
+      '42',
+      '1.2',
+      true,
+      'omit',
+      'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4',
+      false
     );
     expect(result).toEqual({
       statusCode: 200,
