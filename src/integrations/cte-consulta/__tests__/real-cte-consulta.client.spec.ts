@@ -280,7 +280,7 @@ describe('RealCteConsultaClient', () => {
       .mockResolvedValueOnce({
         statusCode: 500,
         headers: {},
-        body: `Unable to handle request. The action 'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4/cteConsultaCT' was not recognized.`
+        body: `Unable to handle request without a valid action parameter. Please supply a valid soap action.`
       })
       .mockResolvedValueOnce({
         statusCode: 200,

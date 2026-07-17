@@ -578,9 +578,10 @@ export class RealCteConsultaClient implements CteConsultaClient {
   private shouldRetryWithAlternateSoap12Action(response: { statusCode: number; body: string }): boolean {
     const normalizedBody = String(response.body || '').trim().toLowerCase();
     return (
-      normalizedBody.includes('action') &&
-      normalizedBody.includes('was not recognized') &&
-      normalizedBody.includes('cteconsultact')
+      (normalizedBody.includes('action') &&
+        normalizedBody.includes('was not recognized') &&
+        normalizedBody.includes('cteconsultact')) ||
+      (normalizedBody.includes('valid action parameter') && normalizedBody.includes('soap action'))
     );
   }
 
