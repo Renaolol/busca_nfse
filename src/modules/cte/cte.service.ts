@@ -895,7 +895,7 @@ export class CteService {
             document: {
               schema: document.schema,
               xml: document.xml,
-              chaveAcesso: document.chaveAcesso
+              chaveAcesso: document.chaveAcesso || params.requestedChave
             },
             origem: NfeDocumentoOrigem.distribuicao_nsu
           });
@@ -908,7 +908,10 @@ export class CteService {
           estabelecimentoId: params.estabelecimentoId,
           ambiente: params.ambiente,
           cnpjConsulta: params.cnpjConsulta,
-          document,
+          document: {
+            ...document,
+            chaveAcesso: document.chaveAcesso || params.requestedChave
+          },
           origem: NfeDocumentoOrigem.distribuicao_nsu
         });
         documentosPersistidos += 1;

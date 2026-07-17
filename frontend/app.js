@@ -4401,12 +4401,12 @@ function renderDownloadByKeyReportModal() {
     : `${clientName} • revise o resultado chave por chave.`;
 
   const gridTemplate = showClientColumn
-    ? 'minmax(150px, 1.1fr) minmax(250px, 1.8fr) minmax(140px, .9fr) minmax(160px, .9fr) minmax(260px, 1.4fr)'
-    : 'minmax(250px, 1.9fr) minmax(140px, .9fr) minmax(160px, .9fr) minmax(300px, 1.5fr)';
+    ? 'minmax(150px, 1fr) minmax(250px, 1.45fr) minmax(140px, .8fr) minmax(140px, .75fr) minmax(420px, 2fr)'
+    : 'minmax(250px, 1.5fr) minmax(140px, .8fr) minmax(140px, .75fr) minmax(460px, 2.2fr)';
 
   return `
     <div class="overlay" data-action="overlay-close">
-      <div class="modal" role="dialog" aria-modal="true" style="max-width:1120px;">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1440px); max-width:1440px;">
         <div class="modal-header">
           <h3 class="modal-title">Download por chave</h3>
           <p class="modal-subtitle">${escapeHtml(subtitle)}</p>
@@ -4426,8 +4426,8 @@ function renderDownloadByKeyReportModal() {
           ${
             rows.length
               ? `
-                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:hidden; background:#fff;">
-                  <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(68vh, 760px);">
+                  <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:${showClientColumn ? '1220px' : '1080px'}; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7; position:sticky; top:0; z-index:1;">
                     ${showClientColumn ? '<div style="padding:12px 14px;">Cliente</div>' : ''}
                     <div style="padding:12px 14px;">Chave de acesso</div>
                     <div style="padding:12px 14px;">Documento</div>
@@ -4437,7 +4437,7 @@ function renderDownloadByKeyReportModal() {
                   ${rows
                     .map(
                       (row) => `
-                        <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; border-bottom:1px solid #eef0f2; align-items:start;">
+                        <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:${showClientColumn ? '1220px' : '1080px'}; border-bottom:1px solid #eef0f2; align-items:start;">
                           ${
                             showClientColumn
                               ? `<div style="padding:14px;">
@@ -4455,7 +4455,7 @@ function renderDownloadByKeyReportModal() {
                             ${row.documentDetail ? `<div style="margin-top:4px; color:#606062;">${escapeHtml(row.documentDetail)}</div>` : ''}
                           </div>
                           <div style="padding:14px;">${statusBadge(row.statusLabel || '-', row.statusTone || 'neutral')}</div>
-                          <div style="padding:14px; color:#606062;">${escapeHtml(row.message || '-')}</div>
+                          <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
                         </div>
                       `
                     )

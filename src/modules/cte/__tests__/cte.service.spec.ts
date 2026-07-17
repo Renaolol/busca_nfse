@@ -321,6 +321,52 @@ describe('CteService', () => {
     );
   });
 
+  it('usa a chave solicitada como fallback quando o retorno do CT-e nao traz chCTe', async () => {
+    (cteConsultaClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '100',
+      xMotivo: 'Autorizado o uso do CT-e',
+      documents: [
+        {
+          schema: 'retConsSitCTe_v4.00',
+          chaveAcesso: '',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<retConsSitCTe xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <cStat>100</cStat>
+  <xMotivo>Autorizado o uso do CT-e</xMotivo>
+</retConsSitCTe>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.consultarChave({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'est-1',
+      chaveAcesso: '42260795849600000135570010000319691243772228',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(storage.putObject).toHaveBeenCalledWith(
+      expect.stringContaining('/resumos/42260795849600000135570010000319691243772228.xml'),
+      expect.any(String)
+    );
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          chaveAcesso: '42260795849600000135570010000319691243772228'
+        })
+      })
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        statusCode: 200,
+        documentosEncontrados: 1,
+        documentosPersistidos: 1
+      })
+    );
+  });
+
   it('sincroniza eventos de CT-e consultando o autorizador por chave', async () => {
     prisma.nfeDocumento.findMany.mockResolvedValue([
       {
