@@ -26,6 +26,13 @@ type PemCredentials = {
 
 type MutualTlsCredentials = PfxCredentials | PemCredentials;
 type SoapActionMode = 'default' | 'omit' | 'quoted';
+type SoapPayloadMode =
+  | 'wrapped_raw'
+  | 'wrapped_cdata'
+  | 'wrapped_escaped'
+  | 'direct_raw'
+  | 'direct_cdata'
+  | 'direct_escaped';
 
 @Injectable()
 export class RealCteConsultaClient implements CteConsultaClient {
@@ -53,13 +60,26 @@ export class RealCteConsultaClient implements CteConsultaClient {
       const certificate = await this.loadCertificate(params.certificateId);
       const cUf = this.extractCUfFromChave(params.chaveAcesso);
       const url = this.buildConsultaUrl(params.ambiente, cUf);
-      const response = await this.doSoapRequestWithFallback(
-        url,
-        certificate,
-        this.buildRequestXml(params.chaveAcesso, params.ambiente),
-        cUf
-      );
-      const parsed = this.parseSoapResponse(response.body);
+      const requestXml = this.buildRequestXml(params.chaveAcesso, params.ambiente);
+      const payloadModes: SoapPayloadMode[] = [
+        'wrapped_raw',
+        'wrapped_cdata',
+        'wrapped_escaped',
+        'direct_raw',
+        'direct_cdata',
+        'direct_escaped'
+      ];
+      let response = await this.doSoapRequestWithFallback(url, certificate, requestXml, cUf, payloadModes[0]);
+      let parsed = this.parseSoapResponse(response.body);
+
+      for (const payloadMode of payloadModes.slice(1)) {
+        if (!this.shouldRetryWithAlternatePayload(parsed)) {
+          break;
+        }
+        response = await this.doSoapRequestWithFallback(url, certificate, requestXml, cUf, payloadMode);
+        parsed = this.parseSoapResponse(response.body);
+      }
+
       return {
         statusCode: response.statusCode,
         cStat: parsed.cStat,
@@ -122,12 +142,18 @@ export class RealCteConsultaClient implements CteConsultaClient {
     ].join('');
   }
 
-  private buildSoapEnvelope(requestXml: string, cUf: string, soapVersion: '1.1' | '1.2' = '1.2'): string {
+  private buildSoapEnvelope(
+    requestXml: string,
+    cUf: string,
+    soapVersion: '1.1' | '1.2' = '1.2',
+    payloadMode: SoapPayloadMode = 'wrapped_raw'
+  ): string {
     const envelopeNamespace =
       soapVersion === '1.2'
         ? 'http://www.w3.org/2003/05/soap-envelope'
         : 'http://schemas.xmlsoap.org/soap/envelope/';
     const prefix = soapVersion === '1.2' ? 'soap12' : 'soap';
+    const payload = this.buildSoapPayload(requestXml, payloadMode);
 
     return [
       `<?xml version="1.0" encoding="utf-8"?>`,
@@ -141,13 +167,32 @@ export class RealCteConsultaClient implements CteConsultaClient {
       `</cteCabecMsg>`,
       `</${prefix}:Header>`,
       `<${prefix}:Body>`,
-      `<cteConsultaCT xmlns="${RealCteConsultaClient.SOAP_NAMESPACE}">`,
-      `<cteDadosMsg xmlns="${RealCteConsultaClient.SOAP_NAMESPACE}">`,
-      requestXml,
-      `</cteDadosMsg>`,
-      `</cteConsultaCT>`,
+      payload,
       `</${prefix}:Body>`,
       `</${prefix}:Envelope>`
+    ].join('');
+  }
+
+  private buildSoapPayload(requestXml: string, payloadMode: SoapPayloadMode): string {
+    const encodedXml = this.escapeXmlForElementContent(requestXml);
+    const cdataXml = `<![CDATA[${requestXml}]]>`;
+    const bodyContent =
+      payloadMode === 'wrapped_cdata' || payloadMode === 'direct_cdata'
+        ? cdataXml
+        : payloadMode === 'wrapped_escaped' || payloadMode === 'direct_escaped'
+          ? encodedXml
+          : requestXml;
+
+    if (payloadMode.startsWith('direct_')) {
+      return [`<cteDadosMsg xmlns="${RealCteConsultaClient.SOAP_NAMESPACE}">`, bodyContent, `</cteDadosMsg>`].join('');
+    }
+
+    return [
+      `<cteConsultaCT xmlns="${RealCteConsultaClient.SOAP_NAMESPACE}">`,
+      `<cteDadosMsg xmlns="${RealCteConsultaClient.SOAP_NAMESPACE}">`,
+      bodyContent,
+      `</cteDadosMsg>`,
+      `</cteConsultaCT>`
     ].join('');
   }
 
@@ -155,17 +200,18 @@ export class RealCteConsultaClient implements CteConsultaClient {
     url: URL,
     certificate: Certificado,
     requestXml: string,
-    cUf: string
+    cUf: string,
+    payloadMode: SoapPayloadMode = 'wrapped_raw'
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     const pfxCredentials = await this.getPfxCredentials(certificate);
     const rejectUnauthorized = process.env.CTE_CONSULTA_REJECT_UNAUTHORIZED !== 'false';
 
     try {
-      return await this.doSoapRequestSequence(url, pfxCredentials, requestXml, cUf, rejectUnauthorized);
+      return await this.doSoapRequestSequence(url, pfxCredentials, requestXml, cUf, rejectUnauthorized, payloadMode);
     } catch (error) {
       const message = this.toErrorMessage(error);
       if (rejectUnauthorized && this.isLocalIssuerCertificateError(message)) {
-        return this.doSoapRequestSequence(url, pfxCredentials, requestXml, cUf, false);
+        return this.doSoapRequestSequence(url, pfxCredentials, requestXml, cUf, false, payloadMode);
       }
       if (!this.isUnsupportedPkcs12Error(message)) {
         throw error;
@@ -173,11 +219,11 @@ export class RealCteConsultaClient implements CteConsultaClient {
 
       const pemCredentials = await this.convertPfxToPemCredentials(pfxCredentials.pfx, pfxCredentials.passphrase);
       try {
-        return await this.doSoapRequestSequence(url, pemCredentials, requestXml, cUf, rejectUnauthorized);
+        return await this.doSoapRequestSequence(url, pemCredentials, requestXml, cUf, rejectUnauthorized, payloadMode);
       } catch (pemError) {
         const pemMessage = this.toErrorMessage(pemError);
         if (rejectUnauthorized && this.isLocalIssuerCertificateError(pemMessage)) {
-          return this.doSoapRequestSequence(url, pemCredentials, requestXml, cUf, false);
+          return this.doSoapRequestSequence(url, pemCredentials, requestXml, cUf, false, payloadMode);
         }
         throw pemError;
       }
@@ -189,7 +235,8 @@ export class RealCteConsultaClient implements CteConsultaClient {
     mtls: MutualTlsCredentials,
     requestXml: string,
     cUf: string,
-    rejectUnauthorized = process.env.CTE_CONSULTA_REJECT_UNAUTHORIZED !== 'false'
+    rejectUnauthorized = process.env.CTE_CONSULTA_REJECT_UNAUTHORIZED !== 'false',
+    payloadMode: SoapPayloadMode = 'wrapped_raw'
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     const soap12Attempts: Array<{ actionMode: SoapActionMode; soapNamespace: string; contentTypeIncludesAction: boolean }> = [
       {
@@ -238,7 +285,8 @@ export class RealCteConsultaClient implements CteConsultaClient {
       rejectUnauthorized,
       soap12Attempts[0].actionMode,
       soap12Attempts[0].soapNamespace,
-      soap12Attempts[0].contentTypeIncludesAction
+      soap12Attempts[0].contentTypeIncludesAction,
+      payloadMode
     );
 
     for (const attempt of soap12Attempts.slice(1)) {
@@ -255,7 +303,8 @@ export class RealCteConsultaClient implements CteConsultaClient {
         rejectUnauthorized,
         attempt.actionMode,
         attempt.soapNamespace,
-        attempt.contentTypeIncludesAction
+        attempt.contentTypeIncludesAction,
+        payloadMode
       );
     }
 
@@ -272,7 +321,8 @@ export class RealCteConsultaClient implements CteConsultaClient {
       rejectUnauthorized,
       'quoted',
       RealCteConsultaClient.SOAP_NAMESPACE_ALTERNATES[0],
-      false
+      false,
+      payloadMode
     );
   }
 
@@ -285,10 +335,11 @@ export class RealCteConsultaClient implements CteConsultaClient {
     rejectUnauthorized: boolean,
     soapActionMode: SoapActionMode,
     soapNamespace: string,
-    contentTypeIncludesAction: boolean
+    contentTypeIncludesAction: boolean,
+    payloadMode: SoapPayloadMode = 'wrapped_raw'
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     return new Promise((resolve, reject) => {
-      const envelope = this.buildSoapEnvelope(requestXml, cUf, soapVersion);
+      const envelope = this.buildSoapEnvelope(requestXml, cUf, soapVersion, payloadMode);
       const tlsOptions =
         mtls.mode === 'pfx'
           ? { pfx: mtls.pfx, passphrase: mtls.passphrase }
@@ -462,6 +513,17 @@ export class RealCteConsultaClient implements CteConsultaClient {
     }
 
     return this.cleanTextContent(this.decodeXmlEntities(reason)) || null;
+  }
+
+  private shouldRetryWithAlternatePayload(parsed: { cStat?: string; xMotivo?: string }): boolean {
+    return String(parsed.cStat || '').trim() === '243' && /xml mal formado/i.test(String(parsed.xMotivo || ''));
+  }
+
+  private escapeXmlForElementContent(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
   }
 
   private decodeHttpResponseBody(headers: IncomingHttpHeaders, payload: Buffer): string {

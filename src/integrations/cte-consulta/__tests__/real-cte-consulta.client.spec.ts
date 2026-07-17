@@ -9,7 +9,12 @@ describe('RealCteConsultaClient', () => {
   it('monta payload consSitCTe e envelope SOAP com cUF da chave', () => {
     const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
       buildRequestXml(chaveAcesso: string, ambiente: 'producao' | 'homologacao'): string;
-      buildSoapEnvelope(xml: string, cUf: string, soapVersion?: '1.1' | '1.2'): string;
+      buildSoapEnvelope(
+        xml: string,
+        cUf: string,
+        soapVersion?: '1.1' | '1.2',
+        payloadMode?: 'wrapped_raw' | 'wrapped_cdata' | 'wrapped_escaped' | 'direct_raw' | 'direct_cdata' | 'direct_escaped'
+      ): string;
     };
 
     const request = client.buildRequestXml('42260795849600000135570010000319691243772228', 'producao');
@@ -21,6 +26,26 @@ describe('RealCteConsultaClient', () => {
     expect(envelope).toContain('<cUF>42</cUF>');
     expect(envelope).toContain('<versaoDados>4.00</versaoDados>');
     expect(envelope).toContain('<cteConsultaCT xmlns="http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4">');
+    expect(envelope).toContain(request);
+  });
+
+  it('monta envelope alternativo com payload em CDATA sem wrapper da operacao', () => {
+    const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
+      buildRequestXml(chaveAcesso: string, ambiente: 'producao' | 'homologacao'): string;
+      buildSoapEnvelope(
+        xml: string,
+        cUf: string,
+        soapVersion?: '1.1' | '1.2',
+        payloadMode?: 'wrapped_raw' | 'wrapped_cdata' | 'wrapped_escaped' | 'direct_raw' | 'direct_cdata' | 'direct_escaped'
+      ): string;
+    };
+
+    const request = client.buildRequestXml('42260795849600000135570010000319691243772228', 'producao');
+    const envelope = client.buildSoapEnvelope(request, '42', '1.2', 'direct_cdata');
+
+    expect(envelope).toContain('<cteDadosMsg xmlns="http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4">');
+    expect(envelope).not.toContain('<cteConsultaCT xmlns="http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4">');
+    expect(envelope).toContain('<![CDATA[');
     expect(envelope).toContain(request);
   });
 
@@ -85,7 +110,8 @@ describe('RealCteConsultaClient', () => {
         url: URL,
         certificate: Record<string, unknown>,
         requestXml: string,
-        cUf: string
+        cUf: string,
+        payloadMode?: 'wrapped_raw' | 'wrapped_cdata' | 'wrapped_escaped' | 'direct_raw' | 'direct_cdata' | 'direct_escaped'
       ): Promise<{ statusCode: number; headers: Record<string, unknown>; body: string }>;
       getPfxCredentials(certificate: Record<string, unknown>): Promise<{ mode: 'pfx'; pfx: Buffer; passphrase: string }>;
       doSoapRequestSequence: jest.Mock;
@@ -113,7 +139,8 @@ describe('RealCteConsultaClient', () => {
       expect.objectContaining({ mode: 'pfx' }),
       '<xml />',
       '42',
-      true
+      true,
+      'wrapped_raw'
     );
     expect(client.doSoapRequestSequence).toHaveBeenNthCalledWith(
       2,
@@ -121,7 +148,8 @@ describe('RealCteConsultaClient', () => {
       expect.objectContaining({ mode: 'pfx' }),
       '<xml />',
       '42',
-      false
+      false,
+      'wrapped_raw'
     );
     expect(result).toEqual({
       statusCode: 200,
@@ -137,7 +165,8 @@ describe('RealCteConsultaClient', () => {
         mtls: Record<string, unknown>,
         requestXml: string,
         cUf: string,
-        rejectUnauthorized?: boolean
+        rejectUnauthorized?: boolean,
+        payloadMode?: 'wrapped_raw' | 'wrapped_cdata' | 'wrapped_escaped' | 'direct_raw' | 'direct_cdata' | 'direct_escaped'
       ): Promise<{ statusCode: number; headers: Record<string, unknown>; body: string }>;
       doSoapRequest: jest.Mock;
     };
@@ -173,7 +202,8 @@ describe('RealCteConsultaClient', () => {
       true,
       'default',
       'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4',
-      true
+      true,
+      'wrapped_raw'
     );
     expect(client.doSoapRequest).toHaveBeenNthCalledWith(
       2,
@@ -185,7 +215,8 @@ describe('RealCteConsultaClient', () => {
       true,
       'omit',
       'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4',
-      true
+      true,
+      'wrapped_raw'
     );
     expect(result).toEqual({
       statusCode: 200,
@@ -201,7 +232,8 @@ describe('RealCteConsultaClient', () => {
         mtls: Record<string, unknown>,
         requestXml: string,
         cUf: string,
-        rejectUnauthorized?: boolean
+        rejectUnauthorized?: boolean,
+        payloadMode?: 'wrapped_raw' | 'wrapped_cdata' | 'wrapped_escaped' | 'direct_raw' | 'direct_cdata' | 'direct_escaped'
       ): Promise<{ statusCode: number; headers: Record<string, unknown>; body: string }>;
       doSoapRequest: jest.Mock;
     };
@@ -237,7 +269,8 @@ describe('RealCteConsultaClient', () => {
       true,
       'default',
       'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4',
-      true
+      true,
+      'wrapped_raw'
     );
     expect(client.doSoapRequest).toHaveBeenNthCalledWith(
       2,
@@ -249,7 +282,8 @@ describe('RealCteConsultaClient', () => {
       true,
       'quoted',
       'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4',
-      false
+      false,
+      'wrapped_raw'
     );
     expect(result).toEqual({
       statusCode: 200,
@@ -265,7 +299,8 @@ describe('RealCteConsultaClient', () => {
         mtls: Record<string, unknown>,
         requestXml: string,
         cUf: string,
-        rejectUnauthorized?: boolean
+        rejectUnauthorized?: boolean,
+        payloadMode?: 'wrapped_raw' | 'wrapped_cdata' | 'wrapped_escaped' | 'direct_raw' | 'direct_cdata' | 'direct_escaped'
       ): Promise<{ statusCode: number; headers: Record<string, unknown>; body: string }>;
       doSoapRequest: jest.Mock;
     };
@@ -306,12 +341,86 @@ describe('RealCteConsultaClient', () => {
       true,
       'omit',
       'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4',
-      false
+      false,
+      'wrapped_raw'
     );
     expect(result).toEqual({
       statusCode: 200,
       headers: {},
       body: '<ok />'
     });
+  });
+
+  it('repete a consulta com payload alternativo quando o autorizador responde cStat 243', async () => {
+    const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
+      consultarPorChave(params: {
+        chaveAcesso: string;
+        ambiente: 'producao' | 'homologacao';
+        certificateId: string;
+      }): Promise<{
+        statusCode: number;
+        cStat?: string;
+        xMotivo?: string;
+        documents: Array<{ schema: string; xml: string; chaveAcesso?: string }>;
+        rawResponse: unknown;
+      }>;
+      loadCertificate: jest.Mock;
+      buildConsultaUrl: jest.Mock;
+      doSoapRequestWithFallback: jest.Mock;
+      parseSoapResponse: jest.Mock;
+      extractCUfFromChave(chaveAcesso: string): string;
+      buildRequestXml(chaveAcesso: string, ambiente: 'producao' | 'homologacao'): string;
+    };
+
+    client.loadCertificate = jest.fn().mockResolvedValue({ id: 'cert-1' });
+    client.buildConsultaUrl = jest.fn().mockReturnValue(new URL('https://cte.example.test/ws'));
+    client.doSoapRequestWithFallback = jest
+      .fn()
+      .mockResolvedValueOnce({ statusCode: 200, headers: {}, body: '<soap-243 />' })
+      .mockResolvedValueOnce({ statusCode: 200, headers: {}, body: '<soap-100 />' });
+    client.parseSoapResponse = jest
+      .fn()
+      .mockReturnValueOnce({
+        cStat: '243',
+        xMotivo: 'Rejeicao: XML Mal Formado',
+        documents: [{ schema: 'retConsSitCTe_v4.00', xml: '<retConsSitCTe><cStat>243</cStat></retConsSitCTe>' }],
+        rawXml: '<retConsSitCTe><cStat>243</cStat></retConsSitCTe>'
+      })
+      .mockReturnValueOnce({
+        cStat: '100',
+        xMotivo: 'Autorizado o uso do CT-e',
+        documents: [{ schema: 'retConsSitCTe_v4.00', xml: '<retConsSitCTe><cStat>100</cStat></retConsSitCTe>' }],
+        rawXml: '<retConsSitCTe><cStat>100</cStat></retConsSitCTe>'
+      });
+
+    const result = await client.consultarPorChave({
+      chaveAcesso: '42260795849600000135570010000319691243772228',
+      ambiente: 'producao',
+      certificateId: 'cert-1'
+    });
+
+    expect(client.doSoapRequestWithFallback).toHaveBeenNthCalledWith(
+      1,
+      expect.any(URL),
+      expect.objectContaining({ id: 'cert-1' }),
+      expect.stringContaining('<consSitCTe'),
+      '42',
+      'wrapped_raw'
+    );
+    expect(client.doSoapRequestWithFallback).toHaveBeenNthCalledWith(
+      2,
+      expect.any(URL),
+      expect.objectContaining({ id: 'cert-1' }),
+      expect.stringContaining('<consSitCTe'),
+      '42',
+      'wrapped_cdata'
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        statusCode: 200,
+        cStat: '100',
+        xMotivo: 'Autorizado o uso do CT-e'
+      })
+    );
   });
 });
