@@ -146,14 +146,15 @@ export class RealCteConsultaClient implements CteConsultaClient {
     requestXml: string,
     cUf: string,
     soapVersion: '1.1' | '1.2' = '1.2',
-    payloadMode: SoapPayloadMode = 'wrapped_raw'
+    payloadMode: SoapPayloadMode = 'wrapped_raw',
+    soapNamespace: string = RealCteConsultaClient.SOAP_NAMESPACE
   ): string {
     const envelopeNamespace =
       soapVersion === '1.2'
         ? 'http://www.w3.org/2003/05/soap-envelope'
         : 'http://schemas.xmlsoap.org/soap/envelope/';
     const prefix = soapVersion === '1.2' ? 'soap12' : 'soap';
-    const payload = this.buildSoapPayload(requestXml, payloadMode);
+    const payload = this.buildSoapPayload(requestXml, payloadMode, soapNamespace);
 
     return [
       `<?xml version="1.0" encoding="utf-8"?>`,
@@ -161,7 +162,7 @@ export class RealCteConsultaClient implements CteConsultaClient {
       ` xmlns:xsd="http://www.w3.org/2001/XMLSchema"`,
       ` xmlns:${prefix}="${envelopeNamespace}">`,
       `<${prefix}:Header>`,
-      `<cteCabecMsg xmlns="${RealCteConsultaClient.SOAP_NAMESPACE}">`,
+      `<cteCabecMsg xmlns="${soapNamespace}">`,
       `<cUF>${cUf}</cUF>`,
       `<versaoDados>${RealCteConsultaClient.LAYOUT_VERSION}</versaoDados>`,
       `</cteCabecMsg>`,
@@ -173,7 +174,7 @@ export class RealCteConsultaClient implements CteConsultaClient {
     ].join('');
   }
 
-  private buildSoapPayload(requestXml: string, payloadMode: SoapPayloadMode): string {
+  private buildSoapPayload(requestXml: string, payloadMode: SoapPayloadMode, soapNamespace: string): string {
     const encodedXml = this.escapeXmlForElementContent(requestXml);
     const cdataXml = `<![CDATA[${requestXml}]]>`;
     const bodyContent =
@@ -184,12 +185,12 @@ export class RealCteConsultaClient implements CteConsultaClient {
           : requestXml;
 
     if (payloadMode.startsWith('direct_')) {
-      return [`<cteDadosMsg xmlns="${RealCteConsultaClient.SOAP_NAMESPACE}">`, bodyContent, `</cteDadosMsg>`].join('');
+      return [`<cteDadosMsg xmlns="${soapNamespace}">`, bodyContent, `</cteDadosMsg>`].join('');
     }
 
     return [
-      `<cteConsultaCT xmlns="${RealCteConsultaClient.SOAP_NAMESPACE}">`,
-      `<cteDadosMsg xmlns="${RealCteConsultaClient.SOAP_NAMESPACE}">`,
+      `<cteConsultaCT xmlns="${soapNamespace}">`,
+      `<cteDadosMsg xmlns="${soapNamespace}">`,
       bodyContent,
       `</cteDadosMsg>`,
       `</cteConsultaCT>`
@@ -339,7 +340,7 @@ export class RealCteConsultaClient implements CteConsultaClient {
     payloadMode: SoapPayloadMode = 'wrapped_raw'
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     return new Promise((resolve, reject) => {
-      const envelope = this.buildSoapEnvelope(requestXml, cUf, soapVersion, payloadMode);
+      const envelope = this.buildSoapEnvelope(requestXml, cUf, soapVersion, payloadMode, soapNamespace);
       const tlsOptions =
         mtls.mode === 'pfx'
           ? { pfx: mtls.pfx, passphrase: mtls.passphrase }

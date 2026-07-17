@@ -13,7 +13,8 @@ describe('RealCteConsultaClient', () => {
         xml: string,
         cUf: string,
         soapVersion?: '1.1' | '1.2',
-        payloadMode?: 'wrapped_raw' | 'wrapped_cdata' | 'wrapped_escaped' | 'direct_raw' | 'direct_cdata' | 'direct_escaped'
+        payloadMode?: 'wrapped_raw' | 'wrapped_cdata' | 'wrapped_escaped' | 'direct_raw' | 'direct_cdata' | 'direct_escaped',
+        soapNamespace?: string
       ): string;
     };
 
@@ -36,7 +37,8 @@ describe('RealCteConsultaClient', () => {
         xml: string,
         cUf: string,
         soapVersion?: '1.1' | '1.2',
-        payloadMode?: 'wrapped_raw' | 'wrapped_cdata' | 'wrapped_escaped' | 'direct_raw' | 'direct_cdata' | 'direct_escaped'
+        payloadMode?: 'wrapped_raw' | 'wrapped_cdata' | 'wrapped_escaped' | 'direct_raw' | 'direct_cdata' | 'direct_escaped',
+        soapNamespace?: string
       ): string;
     };
 
@@ -47,6 +49,32 @@ describe('RealCteConsultaClient', () => {
     expect(envelope).not.toContain('<cteConsultaCT xmlns="http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4">');
     expect(envelope).toContain('<![CDATA[');
     expect(envelope).toContain(request);
+  });
+
+  it('aplica namespace alternativo tambem no envelope SOAP do CT-e', () => {
+    const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
+      buildRequestXml(chaveAcesso: string, ambiente: 'producao' | 'homologacao'): string;
+      buildSoapEnvelope(
+        xml: string,
+        cUf: string,
+        soapVersion?: '1.1' | '1.2',
+        payloadMode?: 'wrapped_raw' | 'wrapped_cdata' | 'wrapped_escaped' | 'direct_raw' | 'direct_cdata' | 'direct_escaped',
+        soapNamespace?: string
+      ): string;
+    };
+
+    const request = client.buildRequestXml('42260795849600000135570010000319691243772228', 'producao');
+    const envelope = client.buildSoapEnvelope(
+      request,
+      '42',
+      '1.2',
+      'wrapped_raw',
+      'http://www.portalfiscal.inf.br/cte/wsdl/CTeConsultaV4'
+    );
+
+    expect(envelope).toContain('<cteCabecMsg xmlns="http://www.portalfiscal.inf.br/cte/wsdl/CTeConsultaV4">');
+    expect(envelope).toContain('<cteConsultaCT xmlns="http://www.portalfiscal.inf.br/cte/wsdl/CTeConsultaV4">');
+    expect(envelope).toContain('<cteDadosMsg xmlns="http://www.portalfiscal.inf.br/cte/wsdl/CTeConsultaV4">');
   });
 
   it('extrai resumo e evento de retConsSitCTe no SOAP', () => {

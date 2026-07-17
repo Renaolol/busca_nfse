@@ -340,6 +340,7 @@ Observacoes:
 - `POST /nfe/importar-dominio` tambem aceita `catalogoIds` para reimportacao pontual de XMLs ja localizados pela Dominio.
 - `POST /nfe/dominio/xml` retorna o XML bruto de um `catalogoId` da Dominio para visualizacao interna sem depender de persistencia previa.
 - XMLs de `CT-e` (modelo `57`, como `cteProc`, `CTe` e `resCTe`) sao rejeitados no modulo de NF-e e, no fluxo da Dominio, passam a ser ignorados com mensagem explicita para evitar mistura entre dominios fiscais.
+- Rejeicoes antigas de CT-e salvas como `retConsSitCTe_v4.00` com status contendo `Rejeicao` deixam de aparecer nas listagens e indicadores de `XMLs CT-e`.
 
 ### Importacao de NF-e via Dominio
 
@@ -358,6 +359,7 @@ Observacoes:
 - Nesse modo, a leitura do catalogo da Dominio considera apenas notas com emissao a partir de `2026-01-02`, o que equivale a buscar somente documentos com data maior que `2026-01-01`.
 - Nesse modo, a consulta por chave da Dominio fica restrita a execucao manual/esporadica; os ciclos automaticos e a busca noturna nao disparam esse processamento.
 - Nesse modo, o frontend usa `POST /nfe/sync/download-por-chave/preview` e `POST /nfe/sync/download-por-chave/preview-global` para abrir o overlay manual com a lista de chaves pendentes antes do download oficial.
+- Operacionalmente, esse fluxo por chave deve ser tratado como apoio esporadico e nao como trilha principal de captura. Em 17/07/2026, o prazo oficial encontrado para consulta completa na internet e de 180 dias para NF-e e CT-e; no caso de NF-e, a manifestacao conclusiva do destinatario passou para 90 dias a partir de 01/06/2026. Na pratica, chaves antigas tendem a retornar falhas definitivas como `cStat 632`.
 - Se o XML retornado pela Dominio for ABRASF/NFS-e em vez de NF-e, o backend redireciona a importacao para o modulo de NFS-e e reaproveita a deduplicacao por `ambiente + chave_acesso` desse armazenamento.
 - XMLs da Dominio com raiz `Baixas` sao ignorados automaticamente, pois representam baixa financeira e nao documento fiscal armazenavel.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, chaves de CT-e do catalogo tambem entram no processamento automatico/manual, mas a consulta oficial e a persistencia continuam sendo delegadas ao modulo dedicado de CT-e, mantendo as listagens separadas.
@@ -370,6 +372,7 @@ Observacoes:
 - Os tres endpoints tambem aceitam `all=true` para retornar todos os registros que casam com o filtro de uma vez so, ignorando `page`/`pageSize` (limite de seguranca de 10000 itens por chamada). O painel (telas `Notas`/`XMLs NFS-e`, `XMLs NF-e` e `XMLs CT-e`) usa `all=true` por padrao ao clicar em buscar, entao a listagem ja vem completa sem precisar paginar; se o total ultrapassar o limite de seguranca, um aviso informa quantos itens ficaram de fora.
 - Quando `NFE_DISTRIBUICAO_CLIENT_MODE=real`, o sistema consulta `distNSU`, `consNSU` e `consChNFe`, descompacta `docZip` e armazena resumos `resNFe` e XMLs completos retornados pelo Ambiente Nacional.
 - Quando `CTE_CONSULTA_CLIENT_MODE=real`, o sistema usa o endpoint configurado de `CteConsultaV4` para consultar CT-e por chave com o certificado ativo do estabelecimento e pode persistir `retConsSitCTe`, `cteProc`, `CTe`, `procEventoCTe` e `eventoCTe` quando retornados pelo autorizador.
+- O cliente real de CT-e aplica fallback automatico de SOAPAction, versao SOAP, namespace e formato do payload quando o autorizador rejeita a requisicao tecnica. Mesmo assim, retorno `cStat 243` continua significando rejeicao da mensagem enviada, nao XML fiscal valido.
 
 ## Guia de layout do DANFSE
 

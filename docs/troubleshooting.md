@@ -53,6 +53,32 @@ npm run prisma:deploy
 
 - Se `prisma:deploy` falhar com erro de conexao no PostgreSQL, subir/verificar o banco antes de reiniciar a API.
 
+## Download por chave retorna muitas falhas definitivas
+
+- Trate `Download por chave` como operacao manual/esporadica, nao como trilha principal de captura.
+- Em 17/07/2026, os prazos oficiais consultados indicam:
+  - NF-e: consulta completa na internet por 180 dias;
+  - CT-e: consulta completa na internet por 180 dias;
+  - NF-e: manifestacao conclusiva do destinatario em 90 dias desde 01/06/2026.
+- Consequencia pratica:
+  - `cStat 632` em NF-e normalmente indica documento fora da janela operacional de download;
+  - repetir a mesma chave tende a gerar a mesma falha e pouco ganho operacional.
+- Se a intencao for manter captura rotineira, prefira:
+  - distribuicao incremental (`distNSU`) para NF-e;
+  - importacao direta da Dominio quando o XML ja existe la;
+  - execucao por chave apenas para casos pontuais e recentes.
+
+## CT-e por chave retorna `cStat 243 Rejeicao: XML Mal Formado`
+
+- `cStat 243` no CT-e significa rejeicao tecnica da mensagem enviada ao autorizador; nao e XML fiscal valido.
+- O backend atual nao persiste mais esse retorno como documento util e a listagem `XMLs CT-e` oculta resumos antigos de rejeicao.
+- O cliente real de CT-e ja tenta fallbacks de:
+  - versao SOAP,
+  - `SOAPAction`,
+  - namespace do envelope,
+  - formato do payload em `cteDadosMsg`.
+- Se o erro continuar apos atualizar/reiniciar o backend que serve `dist/main.js`, o proximo passo recomendado e capturar logs tecnicos temporarios da variante SOAP usada na tentativa.
+
 ## Erro de escopo (`clienteId`)
 
 - Em endpoints por `id` de NFS-e e logs (`/nfse/:id...`, `/sync/logs`), `clienteId` e obrigatorio.

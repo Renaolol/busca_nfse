@@ -73,14 +73,17 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - Nesse modo, `nfe_sync_controle.ultimo_nsu_consultado` passa a guardar o ultimo `EFATENDIMENTO_NFE_CATALOGO.ID` importado com sucesso para cada `cliente/cnpj/ambiente`.
 - Nesse modo, a leitura por chave da Dominio ocorre apenas nas execucoes manuais/esporadicas; o ciclo automatico e a busca noturna nao a disparam.
 - Nesse modo, o painel manual usa `POST /nfe/sync/download-por-chave/preview` e `POST /nfe/sync/download-por-chave/preview-global` para abrir um overlay de auditoria com as chaves pendentes antes do download oficial.
+- O uso por chave ficou documentado como trilha auxiliar/esporadica. Em 17/07/2026, os prazos oficiais consultados indicam 180 dias para consulta completa de NF-e e CT-e; no ecossistema NF-e, a manifestacao conclusiva do destinatario passou para 90 dias a partir de 01/06/2026. Portanto, chaves antigas frequentemente retornam falhas definitivas como `cStat 632` e nao devem ser tratadas como backlog ordinario.
 - XMLs da Dominio com assinatura ABRASF/NFS-e sao redirecionados para `NfseService.importXml`, preservando a deduplicacao do armazenamento de servicos por `ambiente + chave_acesso`.
 - XMLs da Dominio com raiz `Baixas` sao descartados na importacao, porque representam baixa financeira sem XML fiscal util para os modulos de NF-e/NFS-e.
 - XMLs de CT-e (`cteProc`, `CTe`, `resCTe`, modelo `57`) sao bloqueados no modulo de NF-e. Quando vierem da Dominio, o importador os ignora explicitamente para nao contaminar `nfe_documentos`.
 - No modo `dominio_chave`, chaves de CT-e do catalogo passam a ser processadas automaticamente pelo backend, mas a consulta oficial e a persistencia continuam sendo feitas pelo modulo dedicado de CT-e para manter a separacao operacional entre NF-e e CT-e.
+- O modulo `cte` nao persiste mais resumos invalidos de rejeicao (`retConsSitCTe_v4.00` com `Rejeicao`) como documento util e tambem os oculta das listagens `XMLs CT-e`.
 - O painel da ultima importacao em `Buscas NF-e` pode abrir o XML bruto do catalogo e reimportar um item isolado ou todos os `catalogoIds` retornados na execucao manual.
 - O script `npm run nfe:separar-cte -- --apply` varre `nfe_documentos`, classifica os XMLs salvos e marca CT-es ja persistidos em `schemaDoc`, permitindo que o modulo de NF-e os exclua das listagens e do dashboard sem migration adicional.
 - O modulo `cte` reaproveita `nfe_documentos` como armazenamento, mas expoe consulta separada para documentos de transporte, incluindo `GET /cte`, `GET /cte/:id`, `GET /cte/:id/xml`, `GET /cte/dashboard-stats`, `POST /cte/consultar-chave` e `POST /cte/eventos/sincronizar`.
 - `GET /nfe` e `GET /cte` agora aceitam `page` e `pageSize` (padrao `100`, maximo `200`) e retornam `{ items, total, page, pageSize, totalPages }`, permitindo paginacao real no painel de armazenados.
+- Quando `CTE_CONSULTA_CLIENT_MODE=real`, o cliente SOAP de CT-e aplica fallback automatico de namespace, SOAPAction, versao SOAP e formato de `cteDadosMsg` para reduzir rejeicoes tecnicas de consulta por chave. Se ainda retornar `cStat 243`, a resposta deve ser tratada como falha da requisicao ao autorizador, nao como XML de CT-e valido.
 
 ## Operacao recomendada
 
@@ -93,3 +96,6 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 
 - Portal NF-e - MOC 7.0: `https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=LrBx7WT9PuA%3D`
 - Portal NF-e - NT 2014.002 Web Service de Distribuicao de DF-e: `https://www.nfe.fazenda.gov.br/PORTAl/exibirArquivo.aspx?conteudo=C/xkRclIh74%3D`
+- Portal NF-e - FAQ de consulta na internet: `https://www.nfe.fazenda.gov.br/Portal/perguntasFrequentes.aspx?AspxAutoDetectCookieSupport=1&tipoConteudo=auR4yGlWmRY%3D`
+- Portal NF-e - Informe de manifestacao do destinatario em 90 dias (publicado em 27/05/2026, vigente a partir de 01/06/2026): `https://www.nfe.fazenda.gov.br/portal/informe.aspx?AspxAutoDetectCookieSupport=1&Informe=f9R6A+5SmSE%3D&ehCTG=false`
+- Portal CT-e - FAQ de consulta na internet: `https://www.cte.fazenda.gov.br/portal/perguntasFrequentes.aspx?tipoConteudo=HC%2Fiuy94%2FRk%3D`
