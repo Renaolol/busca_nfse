@@ -6749,6 +6749,7 @@ async function applyNfeDocsFilters(form) {
 
 async function applyCteDocsFilters(form) {
   const data = new FormData(form);
+  const rawTipoEvento = String(data.get('tipoEvento') || '').trim();
   state.filters.cteDocs = {
     cliente: String(data.get('cliente') || ''),
     tipo: String(data.get('tipo') || 'Todos'),
@@ -6759,7 +6760,7 @@ async function applyCteDocsFilters(form) {
     emissaoFim: String(data.get('emissaoFim') || ''),
     status: String(data.get('status') || 'Todos'),
     eventos: String(data.get('eventos') || 'Todos'),
-    tipoEvento: String(data.get('tipoEvento') || '').trim(),
+    tipoEvento: rawTipoEvento === 'Todos' ? '' : rawTipoEvento,
     schemaDoc: String(data.get('schemaDoc') || 'Todos'),
     valorMin: String(data.get('valorMin') || '').trim(),
     valorMax: String(data.get('valorMax') || '').trim(),
@@ -9541,7 +9542,7 @@ function getCteEventTypeFilterOptions() {
 
 function matchesDocumentEventTypeFilter(doc, eventTypeFilter) {
   const normalizedFilter = normalizeSearchText(eventTypeFilter);
-  if (!normalizedFilter) {
+  if (!normalizedFilter || normalizedFilter === 'todos') {
     return true;
   }
 
