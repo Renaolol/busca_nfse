@@ -79,6 +79,13 @@ npm run prisma:deploy
   - formato do payload em `cteDadosMsg`.
 - Se o erro continuar apos atualizar/reiniciar o backend que serve `dist/main.js`, o proximo passo recomendado e capturar logs tecnicos temporarios da variante SOAP usada na tentativa.
 
+## CT-e por chave ou eventos retornam `cStat 410` ou `236`
+
+- `cStat 410` em CT-e significa que a requisicao foi enviada para um WebService que nao atende a UF embutida na chave de acesso.
+- Esse caso aparece com frequencia quando `CTE_CONSULTA_URL_PRODUCAO` foi fixada para uma UF/autorizador e o lote mistura chaves de outras UFs.
+- O backend passou a refazer automaticamente a consulta no endpoint padrao resolvido pelo `cUF` da chave quando a URL fixa de producao devolve `410`.
+- `cStat 236` com mensagem sobre `Modelo diferente de 57 ou 67 ou 64` indica que a chave enviada ao fluxo de CT-e nao pertence a CT-e. O backend agora bloqueia essa consulta antes de chamar o autorizador.
+
 ## Erro de escopo (`clienteId`)
 
 - Em endpoints por `id` de NFS-e e logs (`/nfse/:id...`, `/sync/logs`), `clienteId` e obrigatorio.

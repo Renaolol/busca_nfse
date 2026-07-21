@@ -416,6 +416,19 @@ describe('CteService', () => {
     );
   });
 
+  it('rejeita consulta manual quando a chave informada nao pertence a CT-e', async () => {
+    await expect(
+      service.consultarChave({
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        ambiente: NfeAmbiente.producao
+      })
+    ).rejects.toThrow('A chave informada nao pertence a um CT-e valido para consulta por este endpoint (modelo 55).');
+
+    expect(cteConsultaClient.consultarPorChave).not.toHaveBeenCalled();
+  });
+
   it('nao persiste resumo de CT-e quando a consulta retorna rejeicao', async () => {
     (cteConsultaClient.consultarPorChave as jest.Mock).mockResolvedValue({
       statusCode: 200,
@@ -578,6 +591,49 @@ describe('CteService', () => {
           eventosEncontrados: 1,
           eventosImportados: 1,
           mensagem: 'Consulta realizada'
+        }
+      ]
+    });
+  });
+
+  it('nao consulta o WebService de CT-e para documento salvo com chave de outro modelo', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        numeroNfe: '123',
+        ambiente: NfeAmbiente.producao,
+        origem: 'distribuicao_nsu',
+        eventos: []
+      }
+    ]);
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+
+    expect(cteConsultaClient.consultarPorChave).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      documentosProcessados: 1,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 1,
+      detalhes: [
+        {
+          documentoId: 'doc-1',
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          numeroDocumento: '123',
+          status: 'falha_api',
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          mensagem:
+            'Documento ignorado na sincronizacao de eventos de CT-e porque a chave salva pertence ao modelo 55, nao ao modelo 57.'
         }
       ]
     });

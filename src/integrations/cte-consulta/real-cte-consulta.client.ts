@@ -61,31 +61,19 @@ export class RealCteConsultaClient implements CteConsultaClient {
       const cUf = this.extractCUfFromChave(params.chaveAcesso);
       const url = this.buildConsultaUrl(params.ambiente, cUf);
       const requestXml = this.buildRequestXml(params.chaveAcesso, params.ambiente);
-      const payloadModes: SoapPayloadMode[] = [
-        'wrapped_raw',
-        'wrapped_cdata',
-        'wrapped_escaped',
-        'direct_raw',
-        'direct_cdata',
-        'direct_escaped'
-      ];
-      let response = await this.doSoapRequestWithFallback(url, certificate, requestXml, cUf, payloadModes[0]);
-      let parsed = this.parseSoapResponse(response.body);
+      const fallbackUrl = this.resolveConsultaFallbackUrl(params.ambiente, cUf, url);
+      let consulta = await this.executeConsulta(url, certificate, requestXml, cUf);
 
-      for (const payloadMode of payloadModes.slice(1)) {
-        if (!this.shouldRetryWithAlternatePayload(parsed)) {
-          break;
-        }
-        response = await this.doSoapRequestWithFallback(url, certificate, requestXml, cUf, payloadMode);
-        parsed = this.parseSoapResponse(response.body);
+      if (this.shouldRetryWithAlternateEndpoint(consulta.parsed, fallbackUrl)) {
+        consulta = await this.executeConsulta(fallbackUrl as URL, certificate, requestXml, cUf);
       }
 
       return {
-        statusCode: response.statusCode,
-        cStat: parsed.cStat,
-        xMotivo: parsed.xMotivo,
-        documents: parsed.documents,
-        rawResponse: parsed.rawXml
+        statusCode: consulta.response.statusCode,
+        cStat: consulta.parsed.cStat,
+        xMotivo: consulta.parsed.xMotivo,
+        documents: consulta.parsed.documents,
+        rawResponse: consulta.parsed.rawXml
       };
     } catch (error) {
       return {
@@ -96,6 +84,37 @@ export class RealCteConsultaClient implements CteConsultaClient {
         rawResponse: { error: this.toErrorMessage(error) }
       };
     }
+  }
+
+  private async executeConsulta(
+    url: URL,
+    certificate: Certificado,
+    requestXml: string,
+    cUf: string
+  ): Promise<{
+    response: { statusCode: number; headers: IncomingHttpHeaders; body: string };
+    parsed: { cStat?: string; xMotivo?: string; documents: CteConsultaDocument[]; rawXml: string };
+  }> {
+    const payloadModes: SoapPayloadMode[] = [
+      'wrapped_raw',
+      'wrapped_cdata',
+      'wrapped_escaped',
+      'direct_raw',
+      'direct_cdata',
+      'direct_escaped'
+    ];
+    let response = await this.doSoapRequestWithFallback(url, certificate, requestXml, cUf, payloadModes[0]);
+    let parsed = this.parseSoapResponse(response.body);
+
+    for (const payloadMode of payloadModes.slice(1)) {
+      if (!this.shouldRetryWithAlternatePayload(parsed)) {
+        break;
+      }
+      response = await this.doSoapRequestWithFallback(url, certificate, requestXml, cUf, payloadMode);
+      parsed = this.parseSoapResponse(response.body);
+    }
+
+    return { response, parsed };
   }
 
   private async loadCertificate(certificateId: string): Promise<Certificado> {
@@ -130,6 +149,15 @@ export class RealCteConsultaClient implements CteConsultaClient {
     }
 
     throw new Error('CTE_CONSULTA_URL_HOMOLOGACAO nao configurada');
+  }
+
+  private resolveConsultaFallbackUrl(ambiente: NfeAmbiente, cUf: string, currentUrl: URL): URL | undefined {
+    if (ambiente !== NfeAmbiente.producao || !process.env.CTE_CONSULTA_URL_PRODUCAO?.trim()) {
+      return undefined;
+    }
+
+    const resolved = new URL(this.resolveConsultaProducaoUrlByCUf(cUf));
+    return this.isSameEndpoint(currentUrl, resolved) ? undefined : resolved;
   }
 
   private buildRequestXml(chaveAcesso: string, ambiente: NfeAmbiente): string {
@@ -520,6 +548,10 @@ export class RealCteConsultaClient implements CteConsultaClient {
     return String(parsed.cStat || '').trim() === '243' && /xml mal formado/i.test(String(parsed.xMotivo || ''));
   }
 
+  private shouldRetryWithAlternateEndpoint(parsed: { cStat?: string; xMotivo?: string }, fallbackUrl?: URL): boolean {
+    return Boolean(fallbackUrl) && String(parsed.cStat || '').trim() === '410';
+  }
+
   private escapeXmlForElementContent(value: string): string {
     return value
       .replace(/&/g, '&amp;')
@@ -603,6 +635,10 @@ export class RealCteConsultaClient implements CteConsultaClient {
   private previewBody(body: string): string {
     const compact = String(body || '').replace(/\s+/g, ' ').trim();
     return compact ? compact.slice(0, 240) : '(vazio)';
+  }
+
+  private isSameEndpoint(left: URL, right: URL): boolean {
+    return left.toString() === right.toString();
   }
 
   private onlyDigits(value: string): string {

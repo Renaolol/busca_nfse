@@ -451,4 +451,75 @@ describe('RealCteConsultaClient', () => {
       })
     );
   });
+
+  it('refaz a consulta no endpoint resolvido pela UF quando uma URL fixa de producao retorna cStat 410', async () => {
+    process.env.CTE_CONSULTA_URL_PRODUCAO = 'https://cte.fazenda.pr.gov.br/cte4/CTeConsultaV4';
+
+    const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
+      consultarPorChave(params: {
+        chaveAcesso: string;
+        ambiente: 'producao' | 'homologacao';
+        certificateId: string;
+      }): Promise<{
+        statusCode: number;
+        cStat?: string;
+        xMotivo?: string;
+        documents: Array<{ schema: string; xml: string; chaveAcesso?: string }>;
+        rawResponse: unknown;
+      }>;
+      loadCertificate: jest.Mock;
+      doSoapRequestWithFallback: jest.Mock;
+      parseSoapResponse: jest.Mock;
+    };
+
+    client.loadCertificate = jest.fn().mockResolvedValue({ id: 'cert-1' });
+    client.doSoapRequestWithFallback = jest
+      .fn()
+      .mockResolvedValueOnce({ statusCode: 200, headers: {}, body: '<soap-410 />' })
+      .mockResolvedValueOnce({ statusCode: 200, headers: {}, body: '<soap-100 />' });
+    client.parseSoapResponse = jest
+      .fn()
+      .mockReturnValueOnce({
+        cStat: '410',
+        xMotivo: 'Rejeicao: UF informada no campo cUF nao e atendida pelo WebService',
+        documents: [{ schema: 'retConsSitCTe_v4.00', xml: '<retConsSitCTe><cStat>410</cStat></retConsSitCTe>' }],
+        rawXml: '<retConsSitCTe><cStat>410</cStat></retConsSitCTe>'
+      })
+      .mockReturnValueOnce({
+        cStat: '100',
+        xMotivo: 'Autorizado o uso do CT-e',
+        documents: [{ schema: 'retConsSitCTe_v4.00', xml: '<retConsSitCTe><cStat>100</cStat></retConsSitCTe>' }],
+        rawXml: '<retConsSitCTe><cStat>100</cStat></retConsSitCTe>'
+      });
+
+    const result = await client.consultarPorChave({
+      chaveAcesso: '42260795849600000135570010000319691243772228',
+      ambiente: 'producao',
+      certificateId: 'cert-1'
+    });
+
+    expect(client.doSoapRequestWithFallback).toHaveBeenNthCalledWith(
+      1,
+      new URL('https://cte.fazenda.pr.gov.br/cte4/CTeConsultaV4'),
+      expect.objectContaining({ id: 'cert-1' }),
+      expect.stringContaining('<consSitCTe'),
+      '42',
+      'wrapped_raw'
+    );
+    expect(client.doSoapRequestWithFallback).toHaveBeenNthCalledWith(
+      2,
+      new URL('https://cte.svrs.rs.gov.br/ws/CTeConsultaV4/CTeConsultaV4.asmx'),
+      expect.objectContaining({ id: 'cert-1' }),
+      expect.stringContaining('<consSitCTe'),
+      '42',
+      'wrapped_raw'
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        statusCode: 200,
+        cStat: '100',
+        xMotivo: 'Autorizado o uso do CT-e'
+      })
+    );
+  });
 });

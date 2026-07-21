@@ -176,11 +176,19 @@ export class CteService {
     fallbackDataEmissao?: string;
   }) {
     await this.ensureClient(params.clienteId);
+    const chaveAcesso = this.normalizeChaveAcesso(params.chaveAcesso);
+    const modelo = this.extractModeloFromChave(chaveAcesso);
+    if (!chaveAcesso || modelo !== '57') {
+      throw new BadRequestException(
+        `A chave informada nao pertence a um CT-e valido para consulta por este endpoint${modelo ? ` (modelo ${modelo})` : ''}.`
+      );
+    }
+
     const establishment = await this.getEstablishmentOrThrow(params.estabelecimentoId, params.clienteId);
     const ambiente = params.ambiente ?? NfeAmbiente.producao;
     const certificate = await this.findActiveCertificateOrThrow(params.clienteId, params.estabelecimentoId, establishment.cnpj);
     const result = await this.cteConsultaClient.consultarPorChave({
-      chaveAcesso: params.chaveAcesso,
+      chaveAcesso,
       ambiente,
       certificateId: certificate.id
     });
@@ -192,7 +200,7 @@ export class CteService {
       cnpjConsulta: establishment.cnpj,
       persistir: params.persistir !== false,
       tentarEventos: params.tentarEventos !== false,
-      requestedChave: params.chaveAcesso,
+      requestedChave: chaveAcesso,
       fallbackDataEmissao: params.fallbackDataEmissao,
       result
     });
@@ -248,8 +256,23 @@ export class CteService {
 
     for (const document of documents) {
       const numeroDocumento = document.numeroNfe ?? null;
+      const modelo = this.extractModeloFromChave(document.chaveAcesso);
 
       try {
+        if (modelo !== '57') {
+          falhas += 1;
+          detalhes.push({
+            documentoId: document.id,
+            chaveAcesso: document.chaveAcesso,
+            numeroDocumento,
+            status: 'falha_api',
+            eventosEncontrados: 0,
+            eventosImportados: 0,
+            mensagem: `Documento ignorado na sincronizacao de eventos de CT-e porque a chave salva pertence ao modelo ${modelo ?? 'desconhecido'}, nao ao modelo 57.`
+          });
+          continue;
+        }
+
         const establishment = await this.getEstablishmentOrThrow(document.estabelecimentoId, document.clienteId);
         const certificate = await this.findActiveCertificateOrThrow(document.clienteId, document.estabelecimentoId, establishment.cnpj);
         const result = await this.cteConsultaClient.consultarPorChave({
@@ -815,6 +838,15 @@ export class CteService {
 
     const digits = value.replace(/\D/g, '');
     return digits.length === 44 ? digits : undefined;
+  }
+
+  private extractModeloFromChave(chaveAcesso?: string): string | undefined {
+    const normalized = this.normalizeChaveAcesso(chaveAcesso);
+    if (!normalized || normalized.length < 22) {
+      return undefined;
+    }
+
+    return normalized.slice(20, 22);
   }
 
   private removeEventosRelationFilter(

@@ -104,7 +104,7 @@ Veja `.env.example`.
 - `NFE_DISTRIBUICAO_TIMEOUT_MS`: timeout das chamadas SOAP de distribuicao NF-e.
 - `NFE_DISTRIBUICAO_REJECT_UNAUTHORIZED`: controle de validacao TLS do endpoint NF-e.
 - `CTE_CONSULTA_CLIENT_MODE`: `mock` ou `real` para ativar o adapter de consulta CT-e por chave.
-- `CTE_CONSULTA_URL_PRODUCAO` e `CTE_CONSULTA_URL_HOMOLOGACAO`: endpoint SOAP do `CteConsultaV4` usado pelo backend.
+- `CTE_CONSULTA_URL_PRODUCAO` e `CTE_CONSULTA_URL_HOMOLOGACAO`: endpoint SOAP do `CteConsultaV4` usado pelo backend. Em producao, se a URL fixa responder `cStat 410` para a UF da chave consultada, o cliente tenta automaticamente o endpoint padrao mapeado por `cUF`.
 - `CTE_CONSULTA_LAYOUT_VERSION`: versao do layout SOAP/XML de consulta CT-e (padrao `4.00`).
 - `CTE_CONSULTA_TIMEOUT_MS`: timeout das chamadas SOAP de consulta CT-e.
 - `CTE_CONSULTA_REJECT_UNAUTHORIZED`: controle de validacao TLS do endpoint CT-e.
