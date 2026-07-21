@@ -2621,6 +2621,7 @@ function renderNfeLastRunPanel() {
     : Array.isArray(report?.failureDetails)
       ? report.failureDetails
       : [];
+  const importSummary = normalizeDominioImportSummary(report?.importSummary);
 
   if (!report) {
     return `
@@ -2637,6 +2638,9 @@ function renderNfeLastRunPanel() {
         <span>Falhas: <strong>${escapeHtml(String(report.failures || 0))}</strong></span>
       </div>
     </div>
+    ${renderDominioImportSummaryPanel(importSummary, {
+      subtitle: 'O total bruto inclui documentos e eventos importados pela Dominio.'
+    })}
     <div class="table-actions" style="margin-bottom:12px;">
       <button class="btn secondary" type="button" data-action="nfe-last-run-import-all" ${rows.length ? '' : 'disabled'}>Importar todos os itens</button>
     </div>
@@ -4632,6 +4636,7 @@ function renderDominioImportReportModal() {
   const successfulClients = Number(state.modal.successfulClients || 0);
   const failedClients = Number(state.modal.failedClients || 0);
   const importedDocuments = Number(state.modal.importedDocuments || 0);
+  const importSummary = normalizeDominioImportSummary(state.modal.importSummary);
   const currentMessage = String(state.modal.currentMessage || '').trim();
   const subtitle = running
     ? `${scopeLabel} • ${processedClients}/${totalClients} empresa(s) processada(s).`
@@ -4656,6 +4661,9 @@ function renderDominioImportReportModal() {
             ${detailItem('Empresas com falha', String(failedClients))}
             ${detailItem('XMLs importados', String(importedDocuments))}
           </div>
+          ${renderDominioImportSummaryPanel(importSummary, {
+            subtitle: 'Esse total inclui NF-e, CT-e, NFS-e e eventos importados pela Dominio.'
+          })}
           ${renderOverlayFailureToolbar({
             showOnlyFailures,
             failureRows,
@@ -4690,6 +4698,11 @@ function renderDominioImportReportModal() {
                           <div style="padding:14px; color:#606062;">
                             XMLs: <strong>${escapeHtml(String(Number(row.importedCount || 0)))}</strong><br />
                             Falhas: <strong>${escapeHtml(String(Number(row.failureCount || 0)))}</strong>
+                            ${
+                              Number(row.importedCount || 0) > 0
+                                ? `<div style="margin-top:6px; line-height:1.45;">${escapeHtml(buildDominioImportCompositionLabel(row.importSummary))}</div>`
+                                : ''
+                            }
                           </div>
                           <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
                         </div>
@@ -6320,6 +6333,7 @@ async function submitNfeDominioImportForm(form) {
         successfulClients,
         failedClients,
         importedDocuments: Number(aggregatedReport.documentsSaved || 0),
+        importSummary: aggregatedReport.importSummary,
         currentMessage: `Etapa ${index + 1} de ${targetClients.length}: preparando ${client.razaoSocial}.`,
         rows: overlayRows
       });
@@ -6353,14 +6367,16 @@ async function submitNfeDominioImportForm(form) {
           status: resultFailures > 0 ? 'concluido_com_falhas' : 'concluido',
           stepLabel: resultFailures > 0 ? 'Concluido com falhas' : 'Importacao concluida',
           importedCount: Number(result?.xmlsPersistidos || 0),
+          importSummary: normalizeDominioImportSummary(result?.resumoImportacao),
           failureCount: resultFailures,
-          message: `XMLs importados: ${Number(result?.xmlsPersistidos || 0)}. Falhas: ${resultFailures}.`
+          message: buildDominioImportRowMessage(result)
         });
         updateDominioImportOverlayState({
           processedClients: index + 1,
           successfulClients,
           failedClients,
           importedDocuments: Number(aggregatedReport.documentsSaved || 0),
+          importSummary: aggregatedReport.importSummary,
           currentMessage: `Etapa ${index + 1} de ${targetClients.length}: ${client.razaoSocial} concluida.`,
           rows: overlayRows
         });
@@ -6386,6 +6402,7 @@ async function submitNfeDominioImportForm(form) {
           successfulClients,
           failedClients,
           importedDocuments: Number(aggregatedReport.documentsSaved || 0),
+          importSummary: aggregatedReport.importSummary,
           currentMessage: `Etapa ${index + 1} de ${targetClients.length}: falha ao importar ${client.razaoSocial}.`,
           rows: overlayRows
         });
@@ -6399,12 +6416,13 @@ async function submitNfeDominioImportForm(form) {
       successfulClients,
       failedClients,
       importedDocuments: Number(aggregatedReport.documentsSaved || 0),
-      currentMessage: `Importacao manual concluida: ${Number(aggregatedReport.documentsSaved || 0)} XML(s) importado(s) em ${targetClients.length} empresa(s).`,
+      importSummary: aggregatedReport.importSummary,
+      currentMessage: buildDominioImportCompletionMessage(aggregatedReport, targetClients.length),
       rows: overlayRows
     });
 
     pushToast(
-      `Importacao da Dominio concluida: ${Number(aggregatedReport.documentsSaved || 0)} XML(s) importado(s)${
+      `${buildDominioImportCompletionMessage(aggregatedReport, targetClients.length)}${
         Number(aggregatedReport.failures || 0) > 0 ? `, ${Number(aggregatedReport.failures || 0)} falha(s)` : ''
       }.`,
       Number(aggregatedReport.failures || 0) > 0 ? 'error' : 'success'
@@ -6427,6 +6445,7 @@ function buildNfeRunReport(response) {
     processed: Number(response?.processed || 0),
     documentsSaved: Number(response?.documentsSaved || 0),
     failures: Number(response?.failures || 0),
+    importSummary: normalizeDominioImportSummary(response?.importSummary),
     executionDetails: Array.isArray(response?.executionDetails) ? response.executionDetails : [],
     failureDetails: Array.isArray(response?.failureDetails) ? response.failureDetails : []
   };
@@ -6450,6 +6469,7 @@ function buildNfeRunReportFromDominioImport(response, request) {
       numeroNfe: detail?.numeroNfe || '',
       serie: detail?.serie || '',
       modelo: detail?.modelo || '',
+      categoria: detail?.categoria || '',
       mensagem: detail?.mensagem || ''
     };
   });
@@ -6459,6 +6479,7 @@ function buildNfeRunReportFromDominioImport(response, request) {
     processed: Number(response?.estabelecimentosConsultados || 0),
     documentsSaved: Number(response?.xmlsPersistidos || 0),
     failures: Number(response?.falhas || 0),
+    importSummary: normalizeDominioImportSummary(response?.resumoImportacao),
     executionDetails: rows,
     failureDetails: rows.filter((row) => row.status === 'falha')
   };
@@ -6470,6 +6491,7 @@ function createEmptyNfeRunReport() {
     processed: 0,
     documentsSaved: 0,
     failures: 0,
+    importSummary: normalizeDominioImportSummary(),
     executionDetails: [],
     failureDetails: []
   };
@@ -6488,6 +6510,7 @@ function mergeNfeRunReports(base, addition) {
     processed: Number(current.processed || 0) + Number(incoming.processed || 0),
     documentsSaved: Number(current.documentsSaved || 0) + Number(incoming.documentsSaved || 0),
     failures: Number(current.failures || 0) + Number(incoming.failures || 0),
+    importSummary: mergeDominioImportSummaries(current.importSummary, incoming.importSummary),
     executionDetails,
     failureDetails: executionDetails.filter((row) => row.status === 'falha')
   };
@@ -6499,6 +6522,7 @@ function buildClientLevelDominioImportFailureReport({ clientId, ambiente, messag
     processed: 1,
     documentsSaved: 0,
     failures: 1,
+    importSummary: normalizeDominioImportSummary(),
     executionDetails: [
       {
         kind: 'controle',
@@ -6512,11 +6536,107 @@ function buildClientLevelDominioImportFailureReport({ clientId, ambiente, messag
         numeroNfe: '',
         serie: '',
         modelo: '',
+        categoria: '',
         mensagem: message || 'Falha ao importar XMLs da Dominio'
       }
     ],
     failureDetails: []
   };
+}
+
+function normalizeDominioImportSummary(summary) {
+  return {
+    nfeDocumentos: Number(summary?.nfeDocumentos || 0),
+    nfeEventos: Number(summary?.nfeEventos || 0),
+    cteDocumentos: Number(summary?.cteDocumentos || 0),
+    cteEventos: Number(summary?.cteEventos || 0),
+    nfseDocumentos: Number(summary?.nfseDocumentos || 0),
+    outrosDocumentos: Number(summary?.outrosDocumentos || 0),
+    totalDocumentosPrincipais: Number(summary?.totalDocumentosPrincipais || 0),
+    totalEventos: Number(summary?.totalEventos || 0),
+    totalXmlsImportados: Number(summary?.totalXmlsImportados || 0)
+  };
+}
+
+function mergeDominioImportSummaries(base, addition) {
+  const current = normalizeDominioImportSummary(base);
+  const incoming = normalizeDominioImportSummary(addition);
+  return {
+    nfeDocumentos: current.nfeDocumentos + incoming.nfeDocumentos,
+    nfeEventos: current.nfeEventos + incoming.nfeEventos,
+    cteDocumentos: current.cteDocumentos + incoming.cteDocumentos,
+    cteEventos: current.cteEventos + incoming.cteEventos,
+    nfseDocumentos: current.nfseDocumentos + incoming.nfseDocumentos,
+    outrosDocumentos: current.outrosDocumentos + incoming.outrosDocumentos,
+    totalDocumentosPrincipais: current.totalDocumentosPrincipais + incoming.totalDocumentosPrincipais,
+    totalEventos: current.totalEventos + incoming.totalEventos,
+    totalXmlsImportados: current.totalXmlsImportados + incoming.totalXmlsImportados
+  };
+}
+
+function renderDominioImportSummaryPanel(summary, options = {}) {
+  const normalized = normalizeDominioImportSummary(summary);
+  if (!normalized.totalXmlsImportados) {
+    return '';
+  }
+
+  const extraDocumentLabel = normalized.outrosDocumentos ? ` + ${normalized.outrosDocumentos} outro(s)` : '';
+  return `
+    <div style="margin-bottom:18px; padding:14px; border:1px solid #e4e5e7; border-radius:14px; background:#fafafb;">
+      <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">
+        <div>
+          <strong>Composicao dos XMLs importados</strong>
+          ${
+            options?.subtitle
+              ? `<div style="margin-top:4px; color:#606062; font-size:13px;">${escapeHtml(options.subtitle)}</div>`
+              : ''
+          }
+        </div>
+        <div class="progress-meta">
+          <span>Documentos principais: <strong>${escapeHtml(String(normalized.totalDocumentosPrincipais))}</strong></span>
+          <span>Eventos: <strong>${escapeHtml(String(normalized.totalEventos))}</strong></span>
+        </div>
+      </div>
+      <div class="form-grid four" style="margin-top:14px;">
+        ${detailItem('NF-e documento', String(normalized.nfeDocumentos))}
+        ${detailItem('NF-e evento', String(normalized.nfeEventos))}
+        ${detailItem('CT-e documento', String(normalized.cteDocumentos))}
+        ${detailItem('CT-e evento', String(normalized.cteEventos))}
+        ${detailItem('NFS-e documento', String(normalized.nfseDocumentos))}
+        ${detailItem('Outros documentos', String(normalized.outrosDocumentos))}
+        ${detailItem('Total bruto', String(normalized.totalXmlsImportados))}
+        ${detailItem('Comparacao com dashboard', `NF-e + CT-e exibem documentos, nao eventos${extraDocumentLabel}`)}
+      </div>
+    </div>
+  `;
+}
+
+function buildDominioImportCompositionLabel(summary) {
+  const normalized = normalizeDominioImportSummary(summary);
+  if (!normalized.totalXmlsImportados) {
+    return 'Sem XMLs importados.';
+  }
+
+  const parts = [
+    `NF-e: ${normalized.nfeDocumentos}`,
+    `CT-e: ${normalized.cteDocumentos}`,
+    `NFS-e: ${normalized.nfseDocumentos}`,
+    `Eventos: ${normalized.nfeEventos + normalized.cteEventos}`
+  ];
+  if (normalized.outrosDocumentos) {
+    parts.push(`Outros: ${normalized.outrosDocumentos}`);
+  }
+  return parts.join(' • ');
+}
+
+function buildDominioImportRowMessage(response) {
+  const imported = Number(response?.xmlsPersistidos || 0);
+  const failures = Number(response?.falhas || 0);
+  return `XMLs importados: ${imported}. ${buildDominioImportCompositionLabel(response?.resumoImportacao)} Falhas: ${failures}.`;
+}
+
+function buildDominioImportCompletionMessage(report, totalClients) {
+  return `Importacao manual concluida: ${Number(report?.documentsSaved || 0)} XML(s) importado(s) em ${Number(totalClients || 0)} empresa(s). ${buildDominioImportCompositionLabel(report?.importSummary)}`;
 }
 
 function buildNfeRunToastMessage(prefix, response) {
@@ -8418,6 +8538,7 @@ function openDominioImportReportModal(params) {
     successfulClients: Number(params?.successfulClients || 0),
     failedClients: Number(params?.failedClients || 0),
     importedDocuments: Number(params?.importedDocuments || 0),
+    importSummary: normalizeDominioImportSummary(params?.importSummary),
     currentMessage: params?.currentMessage || 'Preparando importacao manual...',
     rows: Array.isArray(params?.rows) ? params.rows : []
   });
@@ -8479,6 +8600,7 @@ function buildDominioImportOverlayRows(clients, periodLabel) {
     stepLabel: 'Aguardando inicio',
     importedCount: 0,
     failureCount: 0,
+    importSummary: normalizeDominioImportSummary(),
     message: 'Empresa aguardando processamento.'
   }));
 }

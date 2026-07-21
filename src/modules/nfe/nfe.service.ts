@@ -86,6 +86,26 @@ type NfeSyncRunResult = {
   failureDetails: NfeSyncRunFailureDetail[];
 };
 
+type DominioImportCategory =
+  | 'nfe_documento'
+  | 'nfe_evento'
+  | 'cte_documento'
+  | 'cte_evento'
+  | 'nfse_documento'
+  | 'outro_documento';
+
+type DominioImportSummary = {
+  nfeDocumentos: number;
+  nfeEventos: number;
+  cteDocumentos: number;
+  cteEventos: number;
+  nfseDocumentos: number;
+  outrosDocumentos: number;
+  totalDocumentosPrincipais: number;
+  totalEventos: number;
+  totalXmlsImportados: number;
+};
+
 type NfeDownloadByKeyPreviewRow = {
   kind: 'documento' | 'controle';
   clientId: string;
@@ -1063,16 +1083,57 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     let cursorAtualizadoAte = params.catalogoIdMinExclusive ?? 0;
     let maxCatalogoIdEncontrado = params.catalogoIdMinExclusive ?? 0;
     let travarCursor = false;
+    const resumoImportacao: DominioImportSummary = {
+      nfeDocumentos: 0,
+      nfeEventos: 0,
+      cteDocumentos: 0,
+      cteEventos: 0,
+      nfseDocumentos: 0,
+      outrosDocumentos: 0,
+      totalDocumentosPrincipais: 0,
+      totalEventos: 0,
+      totalXmlsImportados: 0
+    };
     const detalhes: Array<{
       catalogoId: number;
       chaveAcesso?: string;
       numeroNfe?: string;
       serie?: string;
       modelo?: string;
+      categoria?: DominioImportCategory;
       cnpjEmpresa: string;
       status: 'persistido' | 'ignorado_sem_vinculo' | 'ignorado_xml_nao_fiscal' | 'ignorado_xml_cte' | 'falha';
       mensagem: string;
     }> = [];
+    const contabilizarImportacao = (categoria: DominioImportCategory) => {
+      switch (categoria) {
+        case 'nfe_documento':
+          resumoImportacao.nfeDocumentos += 1;
+          resumoImportacao.totalDocumentosPrincipais += 1;
+          break;
+        case 'nfe_evento':
+          resumoImportacao.nfeEventos += 1;
+          resumoImportacao.totalEventos += 1;
+          break;
+        case 'cte_documento':
+          resumoImportacao.cteDocumentos += 1;
+          resumoImportacao.totalDocumentosPrincipais += 1;
+          break;
+        case 'cte_evento':
+          resumoImportacao.cteEventos += 1;
+          resumoImportacao.totalEventos += 1;
+          break;
+        case 'nfse_documento':
+          resumoImportacao.nfseDocumentos += 1;
+          resumoImportacao.totalDocumentosPrincipais += 1;
+          break;
+        case 'outro_documento':
+          resumoImportacao.outrosDocumentos += 1;
+          resumoImportacao.totalDocumentosPrincipais += 1;
+          break;
+      }
+      resumoImportacao.totalXmlsImportados += 1;
+    };
 
     for (const document of documents) {
       maxCatalogoIdEncontrado = Math.max(maxCatalogoIdEncontrado, document.catalogoId);
@@ -1132,7 +1193,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             },
             origem: NfeDocumentoOrigem.importacao_xml
           });
+          const categoria: DominioImportCategory = cteResult.tipo === 'evento' ? 'cte_evento' : 'cte_documento';
           xmlsPersistidos += 1;
+          contabilizarImportacao(categoria);
           if (params.sortDirection === 'asc' && !travarCursor) {
             cursorAtualizadoAte = document.catalogoId;
           }
@@ -1142,6 +1205,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             numeroNfe: inspectedXml.numeroNfe,
             serie: inspectedXml.serie,
             modelo: inspectedXml.modelo,
+            categoria,
             cnpjEmpresa: cnpjEmpresa ?? '',
             status: 'persistido',
             mensagem:
@@ -1172,7 +1236,15 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             origem: NfeDocumentoOrigem.importacao_xml
           });
         }
+        const categoria: DominioImportCategory = routedToNfse
+          ? 'nfse_documento'
+          : classifiedXml.contentType === 'evento'
+            ? 'nfe_evento'
+            : classifiedXml.documentType === 'nfe'
+              ? 'nfe_documento'
+              : 'outro_documento';
         xmlsPersistidos += 1;
+        contabilizarImportacao(categoria);
         if (params.sortDirection === 'asc' && !travarCursor) {
           cursorAtualizadoAte = document.catalogoId;
         }
@@ -1182,6 +1254,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           numeroNfe: inspectedXml.numeroNfe,
           serie: inspectedXml.serie,
           modelo: inspectedXml.modelo,
+          categoria,
           cnpjEmpresa: cnpjEmpresa ?? '',
           status: 'persistido',
           mensagem: routedToNfse
@@ -1199,6 +1272,16 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           numeroNfe: inspectedXml.numeroNfe,
           serie: inspectedXml.serie,
           modelo: inspectedXml.modelo,
+          categoria:
+            classifiedXml.documentType === 'cte'
+              ? classifiedXml.contentType === 'evento'
+                ? 'cte_evento'
+                : 'cte_documento'
+              : classifiedXml.contentType === 'evento'
+                ? 'nfe_evento'
+                : classifiedXml.documentType === 'nfe'
+                  ? 'nfe_documento'
+                  : 'outro_documento',
           cnpjEmpresa: cnpjEmpresa ?? '',
           status: 'falha',
           mensagem: this.toErrorMessage(error)
@@ -1212,6 +1295,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       cnpjsConsultados: Array.from(establishmentByCnpj.keys()),
       xmlsEncontrados: documents.length,
       xmlsPersistidos,
+      resumoImportacao,
       ignoradosSemVinculo,
       falhas,
       cursorAtualizadoAte,

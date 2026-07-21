@@ -350,6 +350,19 @@ describe('NfeService', () => {
     expect(result.xmlsEncontrados).toBe(1);
     expect(result.xmlsPersistidos).toBe(1);
     expect(result.falhas).toBe(0);
+    expect(result.resumoImportacao).toEqual(
+      expect.objectContaining({
+        nfeDocumentos: 1,
+        nfeEventos: 0,
+        cteDocumentos: 0,
+        cteEventos: 0,
+        nfseDocumentos: 0,
+        outrosDocumentos: 0,
+        totalDocumentosPrincipais: 1,
+        totalEventos: 0,
+        totalXmlsImportados: 1
+      })
+    );
   });
 
   it('redireciona XML ABRASF da Dominio para o armazenamento de NFS-e sem passar pelo pipeline de NF-e', async () => {
@@ -412,10 +425,19 @@ describe('NfeService', () => {
     expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
     expect(result.xmlsPersistidos).toBe(1);
     expect(result.falhas).toBe(0);
+    expect(result.resumoImportacao).toEqual(
+      expect.objectContaining({
+        nfseDocumentos: 1,
+        totalDocumentosPrincipais: 1,
+        totalEventos: 0,
+        totalXmlsImportados: 1
+      })
+    );
     expect(result.detalhes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           catalogoId: 528449,
+          categoria: 'nfse_documento',
           status: 'persistido',
           mensagem: 'XML da Dominio identificado como NFS-e e importado com sucesso no armazenamento de servicos'
         })
@@ -461,10 +483,19 @@ describe('NfeService', () => {
     expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
     expect(result.xmlsPersistidos).toBe(1);
     expect(result.falhas).toBe(0);
+    expect(result.resumoImportacao).toEqual(
+      expect.objectContaining({
+        nfseDocumentos: 1,
+        totalDocumentosPrincipais: 1,
+        totalEventos: 0,
+        totalXmlsImportados: 1
+      })
+    );
     expect(result.detalhes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           catalogoId: 525833,
+          categoria: 'nfse_documento',
           status: 'persistido',
           mensagem: 'XML da Dominio identificado como NFS-e e importado com sucesso no armazenamento de servicos'
         })
@@ -497,6 +528,13 @@ describe('NfeService', () => {
     expect(nfseService.importXml).not.toHaveBeenCalled();
     expect(result.xmlsPersistidos).toBe(0);
     expect(result.falhas).toBe(0);
+    expect(result.resumoImportacao).toEqual(
+      expect.objectContaining({
+        totalDocumentosPrincipais: 0,
+        totalEventos: 0,
+        totalXmlsImportados: 0
+      })
+    );
     expect(result.detalhes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -558,10 +596,19 @@ describe('NfeService', () => {
     expect(nfseService.importXml).not.toHaveBeenCalled();
     expect(result.xmlsPersistidos).toBe(1);
     expect(result.falhas).toBe(0);
+    expect(result.resumoImportacao).toEqual(
+      expect.objectContaining({
+        cteDocumentos: 1,
+        totalDocumentosPrincipais: 1,
+        totalEventos: 0,
+        totalXmlsImportados: 1
+      })
+    );
     expect(result.detalhes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           catalogoId: 600001,
+          categoria: 'cte_documento',
           status: 'persistido',
           mensagem: 'XML de CT-e importado com sucesso a partir da Dominio'
         })
@@ -620,10 +667,19 @@ describe('NfeService', () => {
     expect(nfseService.importXml).not.toHaveBeenCalled();
     expect(result.xmlsPersistidos).toBe(1);
     expect(result.falhas).toBe(0);
+    expect(result.resumoImportacao).toEqual(
+      expect.objectContaining({
+        cteEventos: 1,
+        totalDocumentosPrincipais: 0,
+        totalEventos: 1,
+        totalXmlsImportados: 1
+      })
+    );
     expect(result.detalhes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           catalogoId: 600002,
+          categoria: 'cte_evento',
           status: 'persistido',
           mensagem: 'XML de evento de CT-e importado com sucesso a partir da Dominio'
         })

@@ -346,6 +346,7 @@ Observacoes:
 - `POST /nfe/importar-dominio` tambem aceita `catalogoIds` para reimportacao pontual de XMLs ja localizados pela Dominio.
 - `POST /nfe/dominio/xml` retorna o XML bruto de um `catalogoId` da Dominio para visualizacao interna sem depender de persistencia previa.
 - XMLs de `CT-e` (modelo `57`, como `cteProc`, `CTe`, `resCTe`, `eventoCTe` e `procEventoCTe`) continuam bloqueados no pipeline de persistencia de NF-e, mas, no fluxo da Dominio, passam a ser roteados automaticamente para o modulo dedicado de CT-e para armazenamento separado.
+- A resposta de `POST /nfe/importar-dominio` inclui `resumoImportacao`, separando o total bruto por `NF-e`, `CT-e`, `NFS-e` e eventos. Esse total bruto nao deve ser comparado diretamente com os cards do dashboard de `NF-e no banco` e `CT-e no banco`, porque esses cards contam apenas documentos principais.
 - Rejeicoes antigas de CT-e salvas como `retConsSitCTe_v4.00` com status contendo `Rejeicao` deixam de aparecer nas listagens e indicadores de `XMLs CT-e`.
 
 ### Importacao de NF-e via Dominio
