@@ -470,6 +470,21 @@ function onDocumentClick(event) {
       closeModal();
       return;
     }
+    case 'overlay-toggle-failures': {
+      if (
+        state.modal?.kind === 'events-sync-report' ||
+        state.modal?.kind === 'past-nsu-recovery-report' ||
+        state.modal?.kind === 'download-by-key-report' ||
+        state.modal?.kind === 'dominio-import-report'
+      ) {
+        state.modal = {
+          ...state.modal,
+          showOnlyFailures: !Boolean(state.modal.showOnlyFailures)
+        };
+        render();
+      }
+      return;
+    }
     case 'close-drawer': {
       closeDrawer();
       return;
@@ -4245,6 +4260,9 @@ function renderEventsSyncReportModal() {
   const documentType = state.modal.documentType || 'nfe';
   const summary = state.modal.summary || {};
   const rows = Array.isArray(state.modal.rows) && state.modal.rows.length ? state.modal.rows : buildEventsSyncAuditRows(documentType, summary);
+  const showOnlyFailures = Boolean(state.modal.showOnlyFailures);
+  const visibleRows = getOverlayVisibleRows('events-sync-report', rows, showOnlyFailures);
+  const failureRows = countOverlayFailureRows('events-sync-report', rows);
   const titleByType = {
     nfse: 'Auditoria da busca de eventos de NFS-e',
     nfe: 'Auditoria da busca de eventos de NF-e',
@@ -4258,13 +4276,15 @@ function renderEventsSyncReportModal() {
   const falhas = Number(state.modal.falhas || summary?.falhas || 0);
   const running = Boolean(state.modal.running);
   const currentMessage = String(state.modal.currentMessage || '').trim();
+  const gridTemplate =
+    'minmax(160px, 1.05fr) minmax(260px, 1.55fr) minmax(280px, 1.45fr) minmax(160px, .85fr) minmax(320px, 1.65fr) 120px';
   const subtitle = running
     ? `Consulta em andamento. ${processedCount}/${totalCount} documento(s) processado(s).`
     : `${subtitlePrefix} Revise o resultado documento por documento.`;
 
   return `
     <div class="overlay" data-action="overlay-close">
-      <div class="modal" role="dialog" aria-modal="true" style="max-width:1120px;">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1460px); max-width:1460px;">
         <div class="modal-header">
           <h3 class="modal-title">${escapeHtml(titleByType[documentType] || 'Auditoria da busca de eventos')}</h3>
           <p class="modal-subtitle">${escapeHtml(subtitle)}</p>
@@ -4281,11 +4301,17 @@ function renderEventsSyncReportModal() {
             ${detailItem('Eventos importados', String(eventosImportados))}
             ${detailItem('Falhas', String(falhas))}
           </div>
+          ${renderOverlayFailureToolbar({
+            showOnlyFailures,
+            failureRows,
+            visibleRows: visibleRows.length,
+            totalRows: rows.length
+          })}
           ${
-            rows.length
+            visibleRows.length
               ? `
-                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:hidden; background:#fff;">
-                  <div style="display:grid; grid-template-columns: minmax(160px, 1.1fr) minmax(250px, 1.8fr) minmax(220px, 1.3fr) minmax(140px, .9fr) minmax(220px, 1.2fr) 120px; gap:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(68vh, 760px);">
+                  <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:1300px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7; position:sticky; top:0; z-index:1;">
                     <div style="padding:12px 14px;">Documento</div>
                     <div style="padding:12px 14px;">Chave de acesso</div>
                     <div style="padding:12px 14px;">Evento</div>
@@ -4293,10 +4319,10 @@ function renderEventsSyncReportModal() {
                     <div style="padding:12px 14px;">Mensagem</div>
                     <div style="padding:12px 14px;">Acao</div>
                   </div>
-                  ${rows
+                  ${visibleRows
                     .map(
                       (row) => `
-                        <div style="display:grid; grid-template-columns: minmax(160px, 1.1fr) minmax(250px, 1.8fr) minmax(220px, 1.3fr) minmax(140px, .9fr) minmax(220px, 1.2fr) 120px; gap:0; border-bottom:1px solid #eef0f2; align-items:start;">
+                        <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:1300px; border-bottom:1px solid #eef0f2; align-items:start;">
                           <div style="padding:14px;">
                             <strong>${escapeHtml(row.documentLabel)}</strong>
                             ${row.secondaryLabel ? `<div style="margin-top:4px; color:#606062;">${escapeHtml(row.secondaryLabel)}</div>` : ''}
@@ -4307,7 +4333,7 @@ function renderEventsSyncReportModal() {
                             <div style="margin-top:4px; color:#606062;">${escapeHtml(row.eventCountLabel)}</div>
                           </div>
                           <div style="padding:14px;">${statusBadge(row.statusLabel, row.statusTone)}</div>
-                          <div style="padding:14px; color:#606062;">${escapeHtml(row.message || '-')}</div>
+                          <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
                           <div style="padding:14px;">
                             ${
                               row.openActionId && !running
@@ -4323,7 +4349,9 @@ function renderEventsSyncReportModal() {
                     .join('')}
                 </div>
               `
-              : `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">Nenhum retorno disponivel para auditoria.</div>`
+              : `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">${
+                  showOnlyFailures ? 'Nenhuma falha encontrada para os filtros atuais.' : 'Nenhum retorno disponivel para auditoria.'
+                }</div>`
           }
         </div>
         <div class="modal-footer">
@@ -4341,6 +4369,9 @@ function renderPastNsuRecoveryReportModal() {
 
   const summary = state.modal.summary || {};
   const rows = Array.isArray(state.modal.rows) ? state.modal.rows : [];
+  const showOnlyFailures = Boolean(state.modal.showOnlyFailures);
+  const visibleRows = getOverlayVisibleRows('past-nsu-recovery-report', rows, showOnlyFailures);
+  const failureRows = countOverlayFailureRows('past-nsu-recovery-report', rows);
   const running = Boolean(state.modal.running);
   const rowMode = state.modal.rowMode || 'controle';
   const currentMessage = String(state.modal.currentMessage || '').trim();
@@ -4356,7 +4387,7 @@ function renderPastNsuRecoveryReportModal() {
 
   return `
     <div class="overlay" data-action="overlay-close">
-      <div class="modal" role="dialog" aria-modal="true" style="max-width:1120px;">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1440px); max-width:1440px;">
         <div class="modal-header">
           <h3 class="modal-title">Auditoria do reprocessamento de NSUs</h3>
           <p class="modal-subtitle">${escapeHtml(clientName)}${running ? ' • reprocessamento em andamento.' : ' • reprocessamento concluido.'}</p>
@@ -4376,12 +4407,18 @@ function renderPastNsuRecoveryReportModal() {
             ${detailItem('Sem documento', String(semDocumento))}
             ${detailItem('Falhas', String(falhas))}
           </div>
+          ${renderOverlayFailureToolbar({
+            showOnlyFailures,
+            failureRows,
+            visibleRows: visibleRows.length,
+            totalRows: rows.length
+          })}
           ${
-            rows.length
+            visibleRows.length
               ? rowMode === 'nsu'
                 ? `
-                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:hidden; background:#fff;">
-                  <div style="display:grid; grid-template-columns: minmax(120px, .7fr) minmax(170px, 1fr) minmax(140px, .8fr) minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(260px, 1.4fr); gap:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(68vh, 760px);">
+                  <div style="display:grid; grid-template-columns: minmax(120px, .7fr) minmax(170px, 1fr) minmax(140px, .8fr) minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1160px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7; position:sticky; top:0; z-index:1;">
                     <div style="padding:12px 14px;">NSU</div>
                     <div style="padding:12px 14px;">CNPJ consulta</div>
                     <div style="padding:12px 14px;">Ambiente</div>
@@ -4389,10 +4426,10 @@ function renderPastNsuRecoveryReportModal() {
                     <div style="padding:12px 14px;">Status</div>
                     <div style="padding:12px 14px;">Mensagem</div>
                   </div>
-                  ${rows
+                  ${visibleRows
                     .map(
                       (row) => `
-                        <div style="display:grid; grid-template-columns: minmax(120px, .7fr) minmax(170px, 1fr) minmax(140px, .8fr) minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(260px, 1.4fr); gap:0; border-bottom:1px solid #eef0f2; align-items:start;">
+                        <div style="display:grid; grid-template-columns: minmax(120px, .7fr) minmax(170px, 1fr) minmax(140px, .8fr) minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1160px; border-bottom:1px solid #eef0f2; align-items:start;">
                           <div style="padding:14px; font-family:monospace; font-size:12px;">${escapeHtml(row.nsuLabel || '-')}</div>
                           <div style="padding:14px; font-family:monospace; font-size:12px;">${escapeHtml(row.cnpjConsulta || '-')}</div>
                           <div style="padding:14px;">${escapeHtml(row.ambienteLabel || '-')}</div>
@@ -4400,7 +4437,7 @@ function renderPastNsuRecoveryReportModal() {
                             ${escapeHtml(row.chaveAcesso || '-')}
                           </div>
                           <div style="padding:14px;">${statusBadge(row.statusLabel || '-', row.statusTone || 'neutral')}</div>
-                          <div style="padding:14px; color:#606062;">${escapeHtml(row.message || '-')}</div>
+                          <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
                         </div>
                       `
                     )
@@ -4408,8 +4445,8 @@ function renderPastNsuRecoveryReportModal() {
                 </div>
               `
                 : `
-                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:hidden; background:#fff;">
-                  <div style="display:grid; grid-template-columns: minmax(170px, 1.1fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(240px, 1.4fr) minmax(160px, .9fr) minmax(220px, 1.2fr); gap:0; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(68vh, 760px);">
+                  <div style="display:grid; grid-template-columns: minmax(170px, 1.1fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(240px, 1.4fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1170px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7; position:sticky; top:0; z-index:1;">
                     <div style="padding:12px 14px;">CNPJ consulta</div>
                     <div style="padding:12px 14px;">Ambiente</div>
                     <div style="padding:12px 14px;">Faixa NSU</div>
@@ -4417,10 +4454,10 @@ function renderPastNsuRecoveryReportModal() {
                     <div style="padding:12px 14px;">Status</div>
                     <div style="padding:12px 14px;">Mensagem</div>
                   </div>
-                  ${rows
+                  ${visibleRows
                     .map(
                       (row) => `
-                        <div style="display:grid; grid-template-columns: minmax(170px, 1.1fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(240px, 1.4fr) minmax(160px, .9fr) minmax(220px, 1.2fr); gap:0; border-bottom:1px solid #eef0f2; align-items:start;">
+                        <div style="display:grid; grid-template-columns: minmax(170px, 1.1fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(240px, 1.4fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1170px; border-bottom:1px solid #eef0f2; align-items:start;">
                           <div style="padding:14px; font-family:monospace; font-size:12px;">${escapeHtml(row.cnpjConsulta)}</div>
                           <div style="padding:14px;">${escapeHtml(row.ambienteLabel)}</div>
                           <div style="padding:14px; font-family:monospace; font-size:12px;">${escapeHtml(row.nsuRangeLabel)}</div>
@@ -4429,14 +4466,16 @@ function renderPastNsuRecoveryReportModal() {
                             <div style="margin-top:4px; color:#606062;">${escapeHtml(row.detailLabel)}</div>
                           </div>
                           <div style="padding:14px;">${statusBadge(row.statusLabel, row.statusTone)}</div>
-                          <div style="padding:14px; color:#606062;">${escapeHtml(row.message)}</div>
+                          <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message)}</div>
                         </div>
                       `
                     )
                     .join('')}
                 </div>
               `
-              : `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">Nenhum detalhe retornado para o reprocessamento.</div>`
+              : `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">${
+                  showOnlyFailures ? 'Nenhuma falha encontrada para os filtros atuais.' : 'Nenhum detalhe retornado para o reprocessamento.'
+                }</div>`
           }
         </div>
         <div class="modal-footer">
@@ -4453,6 +4492,9 @@ function renderDownloadByKeyReportModal() {
   }
 
   const rows = Array.isArray(state.modal.rows) ? state.modal.rows : [];
+  const showOnlyFailures = Boolean(state.modal.showOnlyFailures);
+  const visibleRows = getOverlayVisibleRows('download-by-key-report', rows, showOnlyFailures);
+  const failureRows = countOverlayFailureRows('download-by-key-report', rows);
   const running = Boolean(state.modal.running);
   const showClientColumn = Boolean(state.modal.showClientColumn);
   const pendingCount = Number(state.modal.pendingCount || 0);
@@ -4485,10 +4527,16 @@ function renderDownloadByKeyReportModal() {
             ${detailItem('Chaves pendentes', String(pendingCount))}
             ${detailItem('Baixadas', String(downloadedCount))}
             ${detailItem('Erros', String(errorCount))}
-            ${detailItem('Linhas exibidas', String(rows.length))}
+            ${detailItem('Linhas exibidas', String(visibleRows.length))}
           </div>
+          ${renderOverlayFailureToolbar({
+            showOnlyFailures,
+            failureRows,
+            visibleRows: visibleRows.length,
+            totalRows: rows.length
+          })}
           ${
-            rows.length
+            visibleRows.length
               ? `
                 <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(68vh, 760px);">
                   <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:${showClientColumn ? '1220px' : '1080px'}; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7; position:sticky; top:0; z-index:1;">
@@ -4498,7 +4546,7 @@ function renderDownloadByKeyReportModal() {
                     <div style="padding:12px 14px;">Status</div>
                     <div style="padding:12px 14px;">Mensagem</div>
                   </div>
-                  ${rows
+                  ${visibleRows
                     .map(
                       (row) => `
                         <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:${showClientColumn ? '1220px' : '1080px'}; border-bottom:1px solid #eef0f2; align-items:start;">
@@ -4526,7 +4574,9 @@ function renderDownloadByKeyReportModal() {
                     .join('')}
                 </div>
               `
-              : '<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">Nenhuma chave pendente foi encontrada para esta execucao.</div>'
+              : `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">${
+                  showOnlyFailures ? 'Nenhuma falha encontrada para os filtros atuais.' : 'Nenhuma chave pendente foi encontrada para esta execucao.'
+                }</div>`
           }
         </div>
         <div class="modal-footer">
@@ -4543,6 +4593,9 @@ function renderDominioImportReportModal() {
   }
 
   const rows = Array.isArray(state.modal.rows) ? state.modal.rows : [];
+  const showOnlyFailures = Boolean(state.modal.showOnlyFailures);
+  const visibleRows = getOverlayVisibleRows('dominio-import-report', rows, showOnlyFailures);
+  const failureRows = countOverlayFailureRows('dominio-import-report', rows);
   const running = Boolean(state.modal.running);
   const scopeLabel = String(state.modal.scopeLabel || 'Importacao manual da Dominio');
   const totalClients = Number(state.modal.totalClients || rows.length || 0);
@@ -4574,8 +4627,14 @@ function renderDominioImportReportModal() {
             ${detailItem('Empresas com falha', String(failedClients))}
             ${detailItem('XMLs importados', String(importedDocuments))}
           </div>
+          ${renderOverlayFailureToolbar({
+            showOnlyFailures,
+            failureRows,
+            visibleRows: visibleRows.length,
+            totalRows: rows.length
+          })}
           ${
-            rows.length
+            visibleRows.length
               ? `
                 <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(68vh, 760px);">
                   <div style="display:grid; grid-template-columns:minmax(220px, 1.2fr) minmax(170px, .9fr) minmax(180px, .9fr) minmax(170px, .8fr) minmax(170px, .8fr) minmax(340px, 1.7fr); gap:0; min-width:1250px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7; position:sticky; top:0; z-index:1;">
@@ -4586,7 +4645,7 @@ function renderDominioImportReportModal() {
                     <div style="padding:12px 14px;">Resultado</div>
                     <div style="padding:12px 14px;">Mensagem</div>
                   </div>
-                  ${rows
+                  ${visibleRows
                     .map(
                       (row) => `
                         <div style="display:grid; grid-template-columns:minmax(220px, 1.2fr) minmax(170px, .9fr) minmax(180px, .9fr) minmax(170px, .8fr) minmax(170px, .8fr) minmax(340px, 1.7fr); gap:0; min-width:1250px; border-bottom:1px solid #eef0f2; align-items:start;">
@@ -4610,7 +4669,9 @@ function renderDominioImportReportModal() {
                     .join('')}
                 </div>
               `
-              : '<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">Nenhuma empresa foi preparada para esta importacao.</div>'
+              : `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">${
+                  showOnlyFailures ? 'Nenhuma falha encontrada para os filtros atuais.' : 'Nenhuma empresa foi preparada para esta importacao.'
+                }</div>`
           }
         </div>
         <div class="modal-footer">
@@ -8396,6 +8457,45 @@ function formatDominioImportPeriodLabel(dataEmissaoInicio, dataEmissaoFim) {
   const start = dataEmissaoInicio || 'inicio aberto';
   const end = dataEmissaoFim || 'fim aberto';
   return `${start} ate ${end}`;
+}
+
+function renderOverlayFailureToolbar({ showOnlyFailures, failureRows, visibleRows, totalRows }) {
+  return `
+    <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin:-4px 0 14px;">
+      <div style="color:#606062; font-size:13px;">
+        Exibindo <strong>${escapeHtml(String(visibleRows))}</strong> de <strong>${escapeHtml(String(totalRows))}</strong> linha(s)
+        ${failureRows ? ` • <strong>${escapeHtml(String(failureRows))}</strong> com falha` : ''}
+      </div>
+      <button class="btn secondary" type="button" data-action="overlay-toggle-failures">
+        ${showOnlyFailures ? 'Mostrar tudo' : 'Somente falhas'}
+      </button>
+    </div>
+  `;
+}
+
+function getOverlayVisibleRows(modalKind, rows, showOnlyFailures) {
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+  if (!showOnlyFailures) {
+    return normalizedRows;
+  }
+
+  return normalizedRows.filter((row) => shouldKeepOverlayFailureRow(modalKind, row));
+}
+
+function countOverlayFailureRows(modalKind, rows) {
+  return getOverlayVisibleRows(modalKind, rows, true).length;
+}
+
+function shouldKeepOverlayFailureRow(modalKind, row) {
+  if (!row) {
+    return false;
+  }
+
+  if (modalKind === 'dominio-import-report') {
+    return Number(row.failureCount || 0) > 0 || row.status === 'erro' || row.status === 'concluido_com_falhas';
+  }
+
+  return String(row.statusTone || '') === 'danger';
 }
 
 function mapDownloadByKeyDocumentLabel(modelo, kind = 'documento') {
