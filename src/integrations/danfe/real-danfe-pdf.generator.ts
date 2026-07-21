@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -34,6 +34,7 @@ export class RealDanfePdfGenerator implements DanfePdfGenerator {
         outputPath
       });
 
+      await this.waitForGeneratedPdf(outputPath);
       return await readFile(outputPath);
     } finally {
       await rm(tempDir, { recursive: true, force: true });
@@ -75,5 +76,26 @@ export class RealDanfePdfGenerator implements DanfePdfGenerator {
     const message = error instanceof Error ? error.message : String(error || '');
     const normalized = message.toLowerCase();
     return normalized.includes('could not locate the bindings file') && normalized.includes('libxmljs2');
+  }
+
+  private async waitForGeneratedPdf(outputPath: string): Promise<void> {
+    const timeoutMs = 5000;
+    const intervalMs = 100;
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const fileStats = await stat(outputPath);
+        if (fileStats.isFile() && fileStats.size > 0) {
+          return;
+        }
+      } catch {
+        // O pacote cria o write stream de forma assincrona; aguardar a proxima tentativa.
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+    }
+
+    throw new Error(`O DANFE nao foi gravado no arquivo temporario esperado: ${outputPath}`);
   }
 }
