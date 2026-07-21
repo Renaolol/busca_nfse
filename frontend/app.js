@@ -245,6 +245,7 @@ const state = {
       emissaoFim: '',
       status: 'Todos',
       eventos: 'Todos',
+      tipoEvento: '',
       schemaDoc: 'Todos',
       valorMin: '',
       valorMax: '',
@@ -3048,6 +3049,10 @@ function renderCteDocumentsPage() {
           <label class="field">
             Eventos / cancelamento
             <select name="eventos">${renderOptions(['Todos', 'Com eventos', 'Sem eventos', 'Canceladas'], state.filters.cteDocs.eventos)}</select>
+          </label>
+          <label class="field">
+            Tipo de evento
+            <input name="tipoEvento" value="${escapeHtml(state.filters.cteDocs.tipoEvento || '')}" placeholder="Ex.: rejeicao, cancelamento, 110111" />
           </label>
           <label class="field">
             Schema
@@ -6736,6 +6741,7 @@ async function applyCteDocsFilters(form) {
     emissaoFim: String(data.get('emissaoFim') || ''),
     status: String(data.get('status') || 'Todos'),
     eventos: String(data.get('eventos') || 'Todos'),
+    tipoEvento: String(data.get('tipoEvento') || '').trim(),
     schemaDoc: String(data.get('schemaDoc') || 'Todos'),
     valorMin: String(data.get('valorMin') || '').trim(),
     valorMax: String(data.get('valorMax') || '').trim(),
@@ -7600,6 +7606,7 @@ function getFilteredCteDocumentsFromSource(source) {
       (filters.eventos === 'Com eventos' && doc.temEventos) ||
       (filters.eventos === 'Sem eventos' && !doc.temEventos) ||
       (filters.eventos === 'Canceladas' && doc.cancelada);
+    const matchesTipoEvento = matchesDocumentEventTypeFilter(doc, filters.tipoEvento);
     const matchesSchema = filters.schemaDoc === 'Todos' || doc.schemaDoc === filters.schemaDoc;
     const matchesAmbiente = filters.ambiente === 'Todos' || doc.ambiente === filters.ambiente;
     const matchesXmlCompleto =
@@ -7619,6 +7626,7 @@ function getFilteredCteDocumentsFromSource(source) {
       matchesChave &&
       matchesStatus &&
       matchesEventos &&
+      matchesTipoEvento &&
       matchesSchema &&
       matchesAmbiente &&
       matchesXmlCompleto &&
@@ -7870,6 +7878,7 @@ function resetCteDocsSearch() {
     emissaoFim: '',
     status: 'Todos',
     eventos: 'Todos',
+    tipoEvento: '',
     schemaDoc: 'Todos',
     valorMin: '',
     valorMax: '',
@@ -9441,6 +9450,31 @@ function formatEventoCardTitle(evento) {
 
   const tipoEvento = String(evento?.tipoEvento || '').trim();
   return tipoEvento ? `Evento ${tipoEvento}` : 'Evento fiscal';
+}
+
+function matchesDocumentEventTypeFilter(doc, eventTypeFilter) {
+  const normalizedFilter = normalizeSearchText(eventTypeFilter);
+  if (!normalizedFilter) {
+    return true;
+  }
+
+  const eventos = Array.isArray(doc?.eventos) ? doc.eventos : [];
+  if (!eventos.length) {
+    return false;
+  }
+
+  return eventos.some((evento) => {
+    const searchParts = [
+      String(evento?.tipoEvento || '').trim(),
+      String(evento?.descricao || '').trim(),
+      formatEventoResumoLabel(evento),
+      formatEventoCardTitle(evento)
+    ]
+      .map((value) => normalizeSearchText(value))
+      .filter(Boolean);
+
+    return searchParts.some((part) => part.includes(normalizedFilter));
+  });
 }
 
 function buildNfeDocumentsFromApi(nfeDocs, clients) {
