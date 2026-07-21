@@ -6714,12 +6714,11 @@ async function executeCteDocsSearch() {
     state.cteDocuments = mergeCteDocumentsById(state.cteDocuments, mapped);
     state.cteSearch.results = getFilteredCteDocumentsFromSource(mapped);
     state.cteSearch.lastSearchedAt = new Date().toISOString();
-    state.cteSearch.total = payload.total;
-    state.cteSearch.totalPages = payload.totalPages;
+    state.cteSearch.total = mapped.length;
+    state.cteSearch.totalPages = mapped.length > 0 ? 1 : 0;
     state.cteSearch.page = 1;
-    state.cteSearch.pageSize = payload.pageSize;
+    state.cteSearch.pageSize = mapped.length || SEARCH_PAGE_SIZE;
     state.tableState.cteDocs = 'data';
-    reportIfListingCapped('CT-e', payload);
   } catch (error) {
     state.cteSearch.results = [];
     state.cteSearch.total = 0;
@@ -8916,6 +8915,7 @@ function buildCteDocumentsFromApi(cteDocs, clients) {
   const clientById = Object.fromEntries(clients.map((client) => [client.id, client]));
 
   return docs
+    .filter((doc) => isCteAccessKey(doc?.chaveAcesso))
     .map((doc) => {
       const client = clientById[doc.clienteId] || null;
       const isConsultaResumo = String(doc.schemaDoc || '').startsWith('retConsSitCTe');
@@ -9581,12 +9581,26 @@ function canSyncNfeEvents(doc) {
   );
 }
 
+function extractModeloFromAccessKey(chaveAcesso) {
+  const normalized = normalizeDigits(chaveAcesso || '');
+  if (normalized.length < 22) {
+    return '';
+  }
+
+  return normalized.slice(20, 22);
+}
+
+function isCteAccessKey(chaveAcesso) {
+  return extractModeloFromAccessKey(chaveAcesso) === '57';
+}
+
 function canSyncCteEvents(doc) {
   return Boolean(
     state.dataSource === 'api' &&
       doc?.apiCteId &&
       doc?.clientId &&
-      normalizeDigits(doc?.chaveAcesso || '').length > 0
+      normalizeDigits(doc?.chaveAcesso || '').length > 0 &&
+      isCteAccessKey(doc?.chaveAcesso)
   );
 }
 
