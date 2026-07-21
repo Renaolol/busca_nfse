@@ -166,6 +166,41 @@ export class CteService {
     });
   }
 
+  async persistDocumentFromExternalSource(params: {
+    clienteId: string;
+    estabelecimentoId: string;
+    ambiente: NfeAmbiente;
+    cnpjConsulta?: string;
+    fallbackDataEmissao?: string;
+    document: CteConsultaDocument;
+    origem: NfeDocumentoOrigem;
+  }): Promise<{ tipo: 'documento' | 'evento'; chaveAcesso?: string }> {
+    if (this.isEventDocument(params.document)) {
+      await this.nfeService.persistEventDocumentFromExternalSource({
+        clienteId: params.clienteId,
+        estabelecimentoId: params.estabelecimentoId,
+        ambiente: params.ambiente,
+        cnpjConsulta: params.cnpjConsulta,
+        document: {
+          schema: params.document.schema,
+          xml: params.document.xml,
+          chaveAcesso: params.document.chaveAcesso
+        },
+        origem: params.origem
+      });
+      return {
+        tipo: 'evento',
+        chaveAcesso: params.document.chaveAcesso
+      };
+    }
+
+    await this.persistDocument(params);
+    return {
+      tipo: 'documento',
+      chaveAcesso: params.document.chaveAcesso
+    };
+  }
+
   async consultarChaveInternal(params: {
     clienteId: string;
     estabelecimentoId: string;

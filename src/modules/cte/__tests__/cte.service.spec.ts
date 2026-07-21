@@ -379,6 +379,92 @@ describe('CteService', () => {
     );
   });
 
+  it('persiste XML principal de CT-e vindo de fonte externa no modulo dedicado', async () => {
+    await service.persistDocumentFromExternalSource({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'est-1',
+      ambiente: NfeAmbiente.producao,
+      cnpjConsulta: '12345678000199',
+      fallbackDataEmissao: '2026-07-15',
+      document: {
+        schema: 'cteProc_v4.00',
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        xml: `<?xml version="1.0" encoding="UTF-8"?>
+<cteProc xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <CTe>
+    <infCte Id="CTe42260795849600000135570010000319691243772228">
+      <ide>
+        <mod>57</mod>
+        <serie>1</serie>
+        <nCT>31969</nCT>
+        <dhEmi>2026-07-15T10:00:00-03:00</dhEmi>
+      </ide>
+      <emit><CNPJ>12345678000199</CNPJ><xNome>Empresa Emitente</xNome></emit>
+      <dest><CNPJ>99887766000155</CNPJ><xNome>Empresa Destinataria</xNome></dest>
+      <vPrest><vTPrest>1450.75</vTPrest></vPrest>
+    </infCte>
+  </CTe>
+</cteProc>`
+      },
+      origem: 'importacao_xml'
+    });
+
+    expect(storage.putObject).toHaveBeenCalledWith(
+      expect.stringContaining('/xml/42260795849600000135570010000319691243772228.xml'),
+      expect.any(String)
+    );
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          modelo: '57',
+          schemaDoc: 'cteProc_v4.00',
+          origem: 'importacao_xml'
+        })
+      })
+    );
+    expect(nfeService.persistEventDocumentFromExternalSource).not.toHaveBeenCalled();
+  });
+
+  it('roteia evento de CT-e vindo de fonte externa para o storage compartilhado de eventos', async () => {
+    await service.persistDocumentFromExternalSource({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'est-1',
+      ambiente: NfeAmbiente.producao,
+      cnpjConsulta: '12345678000199',
+      document: {
+        schema: 'procEventoCTe_v4.00',
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        xml: `<?xml version="1.0" encoding="UTF-8"?>
+<procEventoCTe xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <eventoCTe versao="4.00">
+    <infEvento Id="ID1101114226079584960000013557001000031969124377222801">
+      <tpEvento>110111</tpEvento>
+      <chCTe>42260795849600000135570010000319691243772228</chCTe>
+      <dhEvento>2026-07-15T11:00:00-03:00</dhEvento>
+    </infEvento>
+  </eventoCTe>
+</procEventoCTe>`
+      },
+      origem: 'importacao_xml'
+    });
+
+    expect(nfeService.persistEventDocumentFromExternalSource).toHaveBeenCalledWith(
+      expect.objectContaining({
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        ambiente: NfeAmbiente.producao,
+        document: expect.objectContaining({
+          schema: 'procEventoCTe_v4.00',
+          chaveAcesso: '42260795849600000135570010000319691243772228'
+        }),
+        origem: 'importacao_xml'
+      })
+    );
+    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
+  });
+
   it('usa a data de emissao da Dominio como fallback para resumo valido sem dhEmi', async () => {
     (cteConsultaClient.consultarPorChave as jest.Mock).mockResolvedValue({
       statusCode: 200,

@@ -339,7 +339,7 @@ Observacoes:
 - `POST /nfe/importar-dominio` consulta a base da Dominio via ODBC, relaciona `bethadba.geempre.cgce_emp` com `cliente_estabelecimentos.cnpj` e reaproveita o mesmo pipeline de persistencia/deduplicacao do endpoint manual. O exportador prioriza `bethadba.EFATENDIMENTO_NFE_XML_V2` e usa `bethadba.EFATENDIMENTO_NFE_XML` como fallback quando necessario.
 - `POST /nfe/importar-dominio` tambem aceita `catalogoIds` para reimportacao pontual de XMLs ja localizados pela Dominio.
 - `POST /nfe/dominio/xml` retorna o XML bruto de um `catalogoId` da Dominio para visualizacao interna sem depender de persistencia previa.
-- XMLs de `CT-e` (modelo `57`, como `cteProc`, `CTe` e `resCTe`) sao rejeitados no modulo de NF-e e, no fluxo da Dominio, passam a ser ignorados com mensagem explicita para evitar mistura entre dominios fiscais.
+- XMLs de `CT-e` (modelo `57`, como `cteProc`, `CTe`, `resCTe`, `eventoCTe` e `procEventoCTe`) continuam bloqueados no pipeline de persistencia de NF-e, mas, no fluxo da Dominio, passam a ser roteados automaticamente para o modulo dedicado de CT-e para armazenamento separado.
 - Rejeicoes antigas de CT-e salvas como `retConsSitCTe_v4.00` com status contendo `Rejeicao` deixam de aparecer nas listagens e indicadores de `XMLs CT-e`.
 
 ### Importacao de NF-e via Dominio
@@ -362,6 +362,7 @@ Observacoes:
 - Operacionalmente, esse fluxo por chave deve ser tratado como apoio esporadico e nao como trilha principal de captura. Em 17/07/2026, o prazo oficial encontrado para consulta completa na internet e de 180 dias para NF-e e CT-e; no caso de NF-e, a manifestacao conclusiva do destinatario passou para 90 dias a partir de 01/06/2026. Na pratica, chaves antigas tendem a retornar falhas definitivas como `cStat 632`.
 - Se o XML retornado pela Dominio for ABRASF/NFS-e em vez de NF-e, o backend redireciona a importacao para o modulo de NFS-e e reaproveita a deduplicacao por `ambiente + chave_acesso` desse armazenamento.
 - XMLs da Dominio com raiz `Baixas` sao ignorados automaticamente, pois representam baixa financeira e nao documento fiscal armazenavel.
+- Se o XML retornado pela Dominio for `CT-e` ou evento de `CT-e`, o backend redireciona a persistencia para o modulo dedicado de transporte e preserva a separacao operacional entre `XMLs NF-e` e `XMLs CT-e`.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, chaves de CT-e do catalogo tambem entram no processamento automatico/manual, mas a consulta oficial e a persistencia continuam sendo delegadas ao modulo dedicado de CT-e, mantendo as listagens separadas.
 - O painel da ultima importacao consegue abrir o XML bruto do catalogo e disparar reimportacao pontual ou em lote usando esses `catalogoIds`.
 - Para revisar documentos de transporte que ja foram gravados em `nfe_documentos`, rode `npm run nfe:separar-cte` para gerar um relatorio em `.tmp/nfe-cte-separation` e `npm run nfe:separar-cte -- --apply` para marcar os CT-es detectados em `schemaDoc`, permitindo que o modulo de NF-e deixe de exibi-los nas listagens e indicadores.

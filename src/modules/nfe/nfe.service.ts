@@ -1070,23 +1070,6 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
-      if (classifiedXml.documentType === 'cte') {
-        if (params.sortDirection === 'asc' && !travarCursor) {
-          cursorAtualizadoAte = document.catalogoId;
-        }
-        detalhes.push({
-          catalogoId: document.catalogoId,
-          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso) ?? inspectedXml.chaveAcesso,
-          numeroNfe: inspectedXml.numeroNfe,
-          serie: inspectedXml.serie,
-          modelo: inspectedXml.modelo,
-          cnpjEmpresa: cnpjEmpresa ?? '',
-          status: 'ignorado_xml_cte',
-          mensagem: 'XML da Dominio ignorado por se tratar de CT-e; use um fluxo dedicado para documentos de transporte'
-        });
-        continue;
-      }
-
       if (!establishment) {
         ignoradosSemVinculo += 1;
         if (params.sortDirection === 'asc') {
@@ -1106,6 +1089,40 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       }
 
       try {
+        if (classifiedXml.documentType === 'cte') {
+          const cteResult = await this.cteService.persistDocumentFromExternalSource({
+            clienteId: params.clienteId,
+            estabelecimentoId: establishment.id,
+            ambiente: params.ambiente,
+            cnpjConsulta: establishment.cnpj,
+            fallbackDataEmissao: document.dataEmissao,
+            document: {
+              schema: classifiedXml.schemaDoc ?? 'dominio_xml',
+              xml,
+              chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso) ?? inspectedXml.chaveAcesso
+            },
+            origem: NfeDocumentoOrigem.importacao_xml
+          });
+          xmlsPersistidos += 1;
+          if (params.sortDirection === 'asc' && !travarCursor) {
+            cursorAtualizadoAte = document.catalogoId;
+          }
+          detalhes.push({
+            catalogoId: document.catalogoId,
+            chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso) ?? inspectedXml.chaveAcesso,
+            numeroNfe: inspectedXml.numeroNfe,
+            serie: inspectedXml.serie,
+            modelo: inspectedXml.modelo,
+            cnpjEmpresa: cnpjEmpresa ?? '',
+            status: 'persistido',
+            mensagem:
+              cteResult.tipo === 'evento'
+                ? 'XML de evento de CT-e importado com sucesso a partir da Dominio'
+                : 'XML de CT-e importado com sucesso a partir da Dominio'
+          });
+          continue;
+        }
+
         const routedToNfse = await this.tryImportDominioAsNfse({
           clienteId: params.clienteId,
           estabelecimentoId: establishment.id,
@@ -1119,7 +1136,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             ambiente: params.ambiente,
             cnpjConsulta: establishment.cnpj,
             document: {
-              schema: 'dominio_xml',
+              schema: classifiedXml.schemaDoc ?? 'dominio_xml',
               xml,
               chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso)
             },

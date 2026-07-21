@@ -53,7 +53,8 @@ describe('NfeService', () => {
   };
 
   const cteService = {
-    consultarChaveInternal: jest.fn()
+    consultarChaveInternal: jest.fn(),
+    persistDocumentFromExternalSource: jest.fn()
   };
 
   const distribuicaoClient: NfeDistribuicaoClient = {
@@ -140,6 +141,10 @@ describe('NfeService', () => {
       eventosEncontrados: 0,
       eventosPersistidos: 0,
       documentos: [{ schema: 'cteProc_v4.00', chaveAcesso: '42260795849600000135570010000319691243772228' }]
+    });
+    cteService.persistDocumentFromExternalSource.mockResolvedValue({
+      tipo: 'documento',
+      chaveAcesso: '42260795849600000135570010000319691243772228'
     });
     storage.putObject.mockResolvedValue(undefined);
     storage.hasObject.mockResolvedValue(true);
@@ -462,7 +467,7 @@ describe('NfeService', () => {
     );
   });
 
-  it('ignora XML de CT-e retornado pela Dominio sem tentar persistir como NF-e', async () => {
+  it('roteia XML principal de CT-e retornado pela Dominio para o modulo dedicado', async () => {
     (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
       {
         catalogoId: 600001,
@@ -494,17 +499,92 @@ describe('NfeService', () => {
       ambiente: NfeAmbiente.producao
     });
 
+    expect(cteService.persistDocumentFromExternalSource).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: NfeAmbiente.producao,
+      cnpjConsulta: '12345678000199',
+      fallbackDataEmissao: '2026-07-04',
+      document: {
+        schema: 'cteProc_v4.00',
+        xml: expect.stringContaining('<cteProc'),
+        chaveAcesso: '42260795849600000135570010000319691243772228'
+      },
+      origem: 'importacao_xml'
+    });
     expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
     expect(storage.putObject).not.toHaveBeenCalled();
     expect(nfseService.importXml).not.toHaveBeenCalled();
-    expect(result.xmlsPersistidos).toBe(0);
+    expect(result.xmlsPersistidos).toBe(1);
     expect(result.falhas).toBe(0);
     expect(result.detalhes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           catalogoId: 600001,
-          status: 'ignorado_xml_cte',
-          mensagem: 'XML da Dominio ignorado por se tratar de CT-e; use um fluxo dedicado para documentos de transporte'
+          status: 'persistido',
+          mensagem: 'XML de CT-e importado com sucesso a partir da Dominio'
+        })
+      ])
+    );
+  });
+
+  it('roteia XML de evento de CT-e retornado pela Dominio para o modulo dedicado', async () => {
+    cteService.persistDocumentFromExternalSource.mockResolvedValueOnce({
+      tipo: 'evento',
+      chaveAcesso: '42260795849600000135570010000319691243772228'
+    });
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 600002,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: undefined,
+        dataEmissao: '2026-07-04',
+        xmlBase64: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8"?>
+<procEventoCTe xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <eventoCTe versao="4.00">
+    <infEvento Id="ID1101114226079584960000013557001000031969124377222801">
+      <tpEvento>110111</tpEvento>
+      <chCTe>42260795849600000135570010000319691243772228</chCTe>
+      <dhEvento>2026-07-04T10:00:00-03:00</dhEvento>
+    </infEvento>
+  </eventoCTe>
+</procEventoCTe>`,
+          'utf8'
+        ).toString('base64')
+      }
+    ]);
+
+    const result = await service.importFromDominio({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao
+    });
+
+    expect(cteService.persistDocumentFromExternalSource).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: NfeAmbiente.producao,
+      cnpjConsulta: '12345678000199',
+      fallbackDataEmissao: '2026-07-04',
+      document: {
+        schema: 'procEventoCTe_v4.00',
+        xml: expect.stringContaining('<procEventoCTe'),
+        chaveAcesso: '42260795849600000135570010000319691243772228'
+      },
+      origem: 'importacao_xml'
+    });
+    expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
+    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(nfseService.importXml).not.toHaveBeenCalled();
+    expect(result.xmlsPersistidos).toBe(1);
+    expect(result.falhas).toBe(0);
+    expect(result.detalhes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          catalogoId: 600002,
+          status: 'persistido',
+          mensagem: 'XML de evento de CT-e importado com sucesso a partir da Dominio'
         })
       ])
     );
