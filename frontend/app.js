@@ -4,9 +4,12 @@ const drawerRoot = document.getElementById('drawerRoot');
 const toastRoot = document.getElementById('toastRoot');
 const API_TIMEOUT_MS = 20000;
 const SEARCH_PAGE_SIZE = 100;
+const DASHBOARD_AUTO_REFRESH_INTERVAL_MS = 60000;
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
+let dashboardAutoRefreshTimer = null;
+let dashboardAutoRefreshRunning = false;
 
 const navItems = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', route: '/dashboard' },
@@ -322,6 +325,7 @@ async function initializeData() {
 
   setGlobalLoading(false);
   render();
+  syncDashboardAutoRefresh();
 }
 
 async function hydrateFromApi() {
@@ -413,6 +417,8 @@ function wireGlobalEvents() {
     state.route = parseRoute(window.location.hash);
     state.mobileSidebarOpen = false;
     render();
+    syncDashboardAutoRefresh();
+    void refreshDashboardRouteData({ silent: true });
   });
 
   document.addEventListener('click', onDocumentClick);
@@ -8774,7 +8780,7 @@ function createBrowserId() {
   return `id-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-async function refreshApiData() {
+async function refreshApiData(options = {}) {
   if (state.dataSource !== 'api') {
     render();
     return;
@@ -8783,9 +8789,39 @@ async function refreshApiData() {
   try {
     await hydrateFromApi();
   } catch (error) {
-    pushToast(`Falha ao atualizar dados reais: ${toErrorMessage(error)}`, 'error');
+    if (!options.silent) {
+      pushToast(`Falha ao atualizar dados reais: ${toErrorMessage(error)}`, 'error');
+    }
   }
   render();
+}
+
+function syncDashboardAutoRefresh() {
+  if (dashboardAutoRefreshTimer) {
+    window.clearInterval(dashboardAutoRefreshTimer);
+    dashboardAutoRefreshTimer = null;
+  }
+
+  if (!state.dataReady || state.dataSource !== 'api' || state.route.name !== 'dashboard') {
+    return;
+  }
+
+  dashboardAutoRefreshTimer = window.setInterval(() => {
+    void refreshDashboardRouteData({ silent: true });
+  }, DASHBOARD_AUTO_REFRESH_INTERVAL_MS);
+}
+
+async function refreshDashboardRouteData(options = {}) {
+  if (!state.dataReady || state.dataSource !== 'api' || state.route.name !== 'dashboard' || dashboardAutoRefreshRunning) {
+    return;
+  }
+
+  dashboardAutoRefreshRunning = true;
+  try {
+    await refreshApiData(options);
+  } finally {
+    dashboardAutoRefreshRunning = false;
+  }
 }
 
 async function refreshExecutionMonitorNow() {
