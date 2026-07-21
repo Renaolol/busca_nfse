@@ -379,6 +379,60 @@ describe('RealCteConsultaClient', () => {
     });
   });
 
+  it('repete a consulta em SOAP 1.2 quando o endpoint devolve "SOAPAction does not match an operation"', async () => {
+    const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
+      doSoapRequestSequence(
+        url: URL,
+        mtls: Record<string, unknown>,
+        requestXml: string,
+        cUf: string,
+        rejectUnauthorized?: boolean,
+        payloadMode?: 'wrapped_raw' | 'wrapped_cdata' | 'wrapped_escaped' | 'direct_raw' | 'direct_cdata' | 'direct_escaped'
+      ): Promise<{ statusCode: number; headers: Record<string, unknown>; body: string }>;
+      doSoapRequest: jest.Mock;
+    };
+
+    client.doSoapRequest = jest
+      .fn()
+      .mockResolvedValueOnce({
+        statusCode: 500,
+        headers: {},
+        body: `The given SOAPAction http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4/cteConsultaCT does not match an operation.`
+      })
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        headers: {},
+        body: '<ok />'
+      });
+
+    const result = await client.doSoapRequestSequence(
+      new URL('https://cte.example.test/ws'),
+      { mode: 'pfx', pfx: Buffer.from('fake'), passphrase: 'senha' },
+      '<xml />',
+      '41',
+      true
+    );
+
+    expect(client.doSoapRequest).toHaveBeenNthCalledWith(
+      2,
+      expect.any(URL),
+      expect.objectContaining({ mode: 'pfx' }),
+      '<xml />',
+      '41',
+      '1.2',
+      true,
+      'omit',
+      'http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4',
+      true,
+      'wrapped_raw'
+    );
+    expect(result).toEqual({
+      statusCode: 200,
+      headers: {},
+      body: '<ok />'
+    });
+  });
+
   it('repete a consulta com payload alternativo quando o autorizador responde cStat 243', async () => {
     const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
       consultarPorChave(params: {
@@ -442,6 +496,74 @@ describe('RealCteConsultaClient', () => {
       expect.stringContaining('<consSitCTe'),
       '42',
       'wrapped_cdata'
+    );
+    expect(result).toEqual(
+      expect.objectContaining({
+        statusCode: 200,
+        cStat: '100',
+        xMotivo: 'Autorizado o uso do CT-e'
+      })
+    );
+  });
+
+  it('avanca ate o payload direto quando o autorizador nao encontra o dispatch method da operacao', async () => {
+    const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
+      consultarPorChave(params: {
+        chaveAcesso: string;
+        ambiente: 'producao' | 'homologacao';
+        certificateId: string;
+      }): Promise<{
+        statusCode: number;
+        cStat?: string;
+        xMotivo?: string;
+        documents: Array<{ schema: string; xml: string; chaveAcesso?: string }>;
+        rawResponse: unknown;
+      }>;
+      loadCertificate: jest.Mock;
+      buildConsultaUrl: jest.Mock;
+      doSoapRequestWithFallback: jest.Mock;
+      parseSoapResponse: jest.Mock;
+    };
+
+    client.loadCertificate = jest.fn().mockResolvedValue({ id: 'cert-1' });
+    client.buildConsultaUrl = jest.fn().mockReturnValue(new URL('https://cte.example.test/ws'));
+    client.doSoapRequestWithFallback = jest
+      .fn()
+      .mockResolvedValueOnce({ statusCode: 500, headers: {}, body: '<soap-dispatch-1 />' })
+      .mockResolvedValueOnce({ statusCode: 500, headers: {}, body: '<soap-dispatch-2 />' })
+      .mockResolvedValueOnce({ statusCode: 500, headers: {}, body: '<soap-dispatch-3 />' })
+      .mockResolvedValueOnce({ statusCode: 200, headers: {}, body: '<soap-100 />' });
+    client.parseSoapResponse = jest
+      .fn()
+      .mockImplementationOnce(() => {
+        throw new Error('Cannot find dispatch method for {http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4}cteConsultaCT');
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('Cannot find dispatch method for {http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4}cteConsultaCT');
+      })
+      .mockImplementationOnce(() => {
+        throw new Error('Cannot find dispatch method for {http://www.portalfiscal.inf.br/cte/wsdl/CteConsultaV4}cteConsultaCT');
+      })
+      .mockReturnValueOnce({
+        cStat: '100',
+        xMotivo: 'Autorizado o uso do CT-e',
+        documents: [{ schema: 'retConsSitCTe_v4.00', xml: '<retConsSitCTe><cStat>100</cStat></retConsSitCTe>' }],
+        rawXml: '<retConsSitCTe><cStat>100</cStat></retConsSitCTe>'
+      });
+
+    const result = await client.consultarPorChave({
+      chaveAcesso: '31260612015242000138570010000143501247346188',
+      ambiente: 'producao',
+      certificateId: 'cert-1'
+    });
+
+    expect(client.doSoapRequestWithFallback).toHaveBeenNthCalledWith(
+      4,
+      expect.any(URL),
+      expect.objectContaining({ id: 'cert-1' }),
+      expect.stringContaining('<consSitCTe'),
+      '31',
+      'direct_raw'
     );
     expect(result).toEqual(
       expect.objectContaining({

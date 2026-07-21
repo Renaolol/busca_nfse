@@ -103,18 +103,37 @@ export class RealCteConsultaClient implements CteConsultaClient {
       'direct_cdata',
       'direct_escaped'
     ];
-    let response = await this.doSoapRequestWithFallback(url, certificate, requestXml, cUf, payloadModes[0]);
-    let parsed = this.parseSoapResponse(response.body);
+    let lastSuccessfulAttempt:
+      | {
+          response: { statusCode: number; headers: IncomingHttpHeaders; body: string };
+          parsed: { cStat?: string; xMotivo?: string; documents: CteConsultaDocument[]; rawXml: string };
+        }
+      | undefined;
+    let lastError: unknown;
 
-    for (const payloadMode of payloadModes.slice(1)) {
-      if (!this.shouldRetryWithAlternatePayload(parsed)) {
-        break;
+    for (const [index, payloadMode] of payloadModes.entries()) {
+      try {
+        const response = await this.doSoapRequestWithFallback(url, certificate, requestXml, cUf, payloadMode);
+        const parsed = this.parseSoapResponse(response.body);
+        lastSuccessfulAttempt = { response, parsed };
+
+        if (!this.shouldRetryWithAlternatePayload(parsed)) {
+          return { response, parsed };
+        }
+      } catch (error) {
+        lastError = error;
+        if (!this.shouldRetryWithAlternatePayloadError(this.toErrorMessage(error)) || index === payloadModes.length - 1) {
+          throw error;
+        }
+        continue;
       }
-      response = await this.doSoapRequestWithFallback(url, certificate, requestXml, cUf, payloadMode);
-      parsed = this.parseSoapResponse(response.body);
     }
 
-    return { response, parsed };
+    if (lastSuccessfulAttempt) {
+      return lastSuccessfulAttempt;
+    }
+
+    throw lastError instanceof Error ? lastError : new Error('Falha ao executar consulta CT-e por chave');
   }
 
   private async loadCertificate(certificateId: string): Promise<Certificado> {
@@ -548,6 +567,14 @@ export class RealCteConsultaClient implements CteConsultaClient {
     return String(parsed.cStat || '').trim() === '243' && /xml mal formado/i.test(String(parsed.xMotivo || ''));
   }
 
+  private shouldRetryWithAlternatePayloadError(message: string): boolean {
+    const normalized = String(message || '').trim().toLowerCase();
+    return (
+      normalized.includes('cteconsultact') &&
+      (normalized.includes('cannot find dispatch method') || normalized.includes('does not match an operation'))
+    );
+  }
+
   private shouldRetryWithAlternateEndpoint(parsed: { cStat?: string; xMotivo?: string }, fallbackUrl?: URL): boolean {
     return Boolean(fallbackUrl) && String(parsed.cStat || '').trim() === '410';
   }
@@ -678,8 +705,8 @@ export class RealCteConsultaClient implements CteConsultaClient {
     const normalizedBody = String(response.body || '').trim().toLowerCase();
     return (
       (normalizedBody.includes('action') &&
-        normalizedBody.includes('was not recognized') &&
-        normalizedBody.includes('cteconsultact')) ||
+        normalizedBody.includes('cteconsultact') &&
+        (normalizedBody.includes('was not recognized') || normalizedBody.includes('does not match an operation'))) ||
       (normalizedBody.includes('valid action parameter') && normalizedBody.includes('soap action'))
     );
   }
