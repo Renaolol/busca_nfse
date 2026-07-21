@@ -1,5 +1,6 @@
 import { NfeAmbiente, NfeSyncStatus, NfeTipoRelacao, Prisma } from '@prisma/client';
 import { BadRequestException } from '@nestjs/common';
+import { DanfePdfGenerator } from '../../../integrations/danfe/danfe.types';
 import { DominioNfeXmlSource } from '../../../integrations/dominio-nfe/dominio-nfe.types';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { NfeDistribuicaoClient } from '../../../integrations/nfe-distribuicao/nfe-distribuicao.types';
@@ -52,6 +53,10 @@ describe('NfeService', () => {
     importXml: jest.fn()
   };
 
+  const danfePdfGenerator: DanfePdfGenerator = {
+    generateNfePdf: jest.fn()
+  };
+
   const cteService = {
     consultarChaveInternal: jest.fn(),
     persistDocumentFromExternalSource: jest.fn()
@@ -73,6 +78,7 @@ describe('NfeService', () => {
     new NfeXmlParserService(),
     nfseService as unknown as NfseModuleService,
     storage as unknown as LocalStorageService,
+    danfePdfGenerator,
     cteService as unknown as CteService,
     distribuicaoClient,
     dominioXmlSource
@@ -129,6 +135,7 @@ describe('NfeService', () => {
       xmlPath: 'nfse/producao/123/2026/06/xml/a.xml',
       danfsePath: 'nfse/producao/123/2026/06/danfse/a.pdf'
     });
+    (danfePdfGenerator.generateNfePdf as jest.Mock).mockResolvedValue(Buffer.from('%PDF-1.4 fake', 'utf8'));
     cteService.consultarChaveInternal.mockResolvedValue({
       statusCode: 200,
       cStat: '100',
@@ -241,6 +248,40 @@ describe('NfeService', () => {
     expect(result.fileName).toBe('NFE-35260612345678000199550010000001231000001231.xml');
     expect(result.contentType).toBe('application/xml');
     expect(result.contentBase64).toBe(Buffer.from('<xml>conteudo</xml>', 'utf8').toString('base64'));
+  });
+
+  it('gera DANFE da NF-e com XML completo armazenado', async () => {
+    prisma.nfeDocumento.findUnique.mockResolvedValue({
+      id: 'doc-1',
+      clienteId: 'cliente-1',
+      chaveAcesso: '35260612345678000199550010000001231000001231',
+      xmlCompletoPath: 'nfe/producao/123/2026/06/xml/a.xml',
+      xmlResumoPath: null
+    });
+    storage.getObject.mockResolvedValue(Buffer.from('<nfeProc>conteudo</nfeProc>', 'utf8'));
+
+    const result = await service.getDanfe('doc-1', 'cliente-1');
+
+    expect(danfePdfGenerator.generateNfePdf).toHaveBeenCalledWith({
+      xml: '<nfeProc>conteudo</nfeProc>',
+      chaveAcesso: '35260612345678000199550010000001231000001231'
+    });
+    expect(result.fileName).toBe('DANFE-35260612345678000199550010000001231000001231.pdf');
+    expect(result.contentType).toBe('application/pdf');
+    expect(result.contentBase64).toBe(Buffer.from('%PDF-1.4 fake', 'utf8').toString('base64'));
+  });
+
+  it('recusa DANFE quando a NF-e nao possui XML completo armazenado', async () => {
+    prisma.nfeDocumento.findUnique.mockResolvedValue({
+      id: 'doc-1',
+      clienteId: 'cliente-1',
+      chaveAcesso: '35260612345678000199550010000001231000001231',
+      xmlCompletoPath: null,
+      xmlResumoPath: 'nfe/producao/123/2026/06/resumo/a.xml'
+    });
+
+    await expect(service.getDanfe('doc-1', 'cliente-1')).rejects.toThrow(BadRequestException);
+    expect(danfePdfGenerator.generateNfePdf).not.toHaveBeenCalled();
   });
 
   it('importa XMLs da Dominio vinculando estabelecimento por CNPJ', async () => {

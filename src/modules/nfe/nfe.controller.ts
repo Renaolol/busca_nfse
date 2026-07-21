@@ -12,6 +12,7 @@ import { ImportNfeFromDominioDto } from './dto/import-dominio.dto';
 import { EnableAllNfeSyncDto } from './dto/enable-all-sync.dto';
 import { EnableNfeSyncDto } from './dto/enable-sync.dto';
 import { DownloadNfeDocumentDto } from './dto/download-document.dto';
+import { DownloadNfePdfDto } from './dto/download-pdf.dto';
 import { ImportNfeXmlDto } from './dto/import-xml.dto';
 import { PauseNfeSyncDto } from './dto/pause-sync.dto';
 import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
@@ -66,6 +67,14 @@ export class NfeController {
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   getXml(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
     return this.nfeService.getXml(id, query.clienteId);
+  }
+
+  @Get(':id/danfe')
+  @ApiOkResponse({ type: DownloadNfePdfDto })
+  @ApiQuery({ name: 'clienteId', required: true, description: 'Escopo do cliente para acesso ao documento' })
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  getDanfe(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
+    return this.nfeService.getDanfe(id, query.clienteId);
   }
 
   @Post('importar-xml')

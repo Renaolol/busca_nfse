@@ -1,4 +1,5 @@
 import { forwardRef, Module } from '@nestjs/common';
+import { DanfeModule } from '../../integrations/danfe/danfe.module';
 import { CteModule } from '../cte/cte.module';
 import { DominioNfeModule } from '../../integrations/dominio-nfe/dominio-nfe.module';
 import { NfeDistribuicaoModule } from '../../integrations/nfe-distribuicao/nfe-distribuicao.module';
@@ -9,7 +10,7 @@ import { NfeService } from './nfe.service';
 import { NfeXmlParserService } from './nfe-xml-parser.service';
 
 @Module({
-  imports: [StorageModule, NfeDistribuicaoModule, DominioNfeModule, NfseModule, forwardRef(() => CteModule)],
+  imports: [StorageModule, NfeDistribuicaoModule, DominioNfeModule, DanfeModule, NfseModule, forwardRef(() => CteModule)],
   controllers: [NfeController],
   providers: [NfeService, NfeXmlParserService],
   exports: [NfeService, NfeXmlParserService]

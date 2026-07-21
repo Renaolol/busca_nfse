@@ -905,6 +905,14 @@ function onDocumentClick(event) {
       void downloadNfeXmlById(nfeId);
       return;
     }
+    case 'nfe-download-danfe': {
+      const nfeId = actionNode.getAttribute('data-nfe-id');
+      if (!nfeId) {
+        return;
+      }
+      void downloadNfeDanfeById(nfeId);
+      return;
+    }
     case 'nfe-sync-events': {
       const nfeId = actionNode.getAttribute('data-nfe-id');
       if (!nfeId) {
@@ -2962,6 +2970,7 @@ function renderNfeDocumentsTableCard(docs) {
                         <button class="icon-btn" data-action="nfe-details" data-nfe-id="${doc.id}">Visualizar detalhes</button>
                         <button class="icon-btn" data-action="nfe-sync-events" data-nfe-id="${doc.id}" ${syncDisabledRow}>Buscar eventos</button>
                         <button class="icon-btn" data-action="nfe-view" data-nfe-id="${doc.id}">Ver XML</button>
+                        ${doc.xmlCompletoDisponivel ? `<button class="icon-btn" data-action="nfe-download-danfe" data-nfe-id="${doc.id}">Baixar DANFE</button>` : ''}
                         <button class="icon-btn" data-action="nfe-download" data-nfe-id="${doc.id}">Baixar XML</button>
                       </div>
                     </td>
@@ -3003,6 +3012,7 @@ function renderCteDocumentsPage() {
     state.cteSearch.hasSearched || state.tableState.cteDocs === 'loading' || state.tableState.cteDocs === 'error';
   const statusOptions = uniqueValues(state.cteDocuments.map((doc) => doc.statusFiscal).filter(Boolean));
   const schemaOptions = uniqueValues(state.cteDocuments.map((doc) => doc.schemaDoc).filter(Boolean));
+  const eventTypeOptions = getCteEventTypeFilterOptions();
 
   return `
     <section class="page-section">
@@ -3052,7 +3062,7 @@ function renderCteDocumentsPage() {
           </label>
           <label class="field">
             Tipo de evento
-            <input name="tipoEvento" value="${escapeHtml(state.filters.cteDocs.tipoEvento || '')}" placeholder="Ex.: rejeicao, cancelamento, 110111" />
+            <select name="tipoEvento">${renderOptions(['Todos', ...eventTypeOptions], state.filters.cteDocs.tipoEvento || 'Todos')}</select>
           </label>
           <label class="field">
             Schema
@@ -4086,6 +4096,9 @@ function renderNfeDetailsModal(nfeId) {
     return '';
   }
   const syncEventsDisabled = state.nfeEventsSyncRunning || !canSyncNfeEvents(doc) ? 'disabled' : '';
+  const danfeButton = doc.xmlCompletoDisponivel
+    ? `<button class="btn secondary" data-action="nfe-download-danfe" data-nfe-id="${doc.id}">Baixar DANFE</button>`
+    : '';
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -4122,6 +4135,7 @@ function renderNfeDetailsModal(nfeId) {
         <div class="modal-footer">
           <button class="btn secondary" data-action="nfe-sync-events" data-nfe-id="${doc.id}" ${syncEventsDisabled}>Buscar eventos</button>
           <button class="btn secondary" data-action="nfe-view" data-nfe-id="${doc.id}">Ver conteudo XML</button>
+          ${danfeButton}
           <button class="btn primary" data-action="nfe-download" data-nfe-id="${doc.id}">Baixar XML</button>
         </div>
       </div>
@@ -4134,6 +4148,9 @@ function renderNfeViewerModal(nfeId) {
   if (!doc) {
     return '';
   }
+  const danfeButton = doc.xmlCompletoDisponivel
+    ? `<button class="btn secondary" data-action="nfe-download-danfe" data-nfe-id="${doc.id}">Baixar DANFE</button>`
+    : '';
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -4147,6 +4164,7 @@ function renderNfeViewerModal(nfeId) {
         </div>
         <div class="modal-footer">
           <button class="btn secondary" data-action="close-modal">Fechar</button>
+          ${danfeButton}
           <button class="btn primary" data-action="nfe-download" data-nfe-id="${doc.id}">Baixar XML</button>
         </div>
       </div>
@@ -9378,6 +9396,12 @@ function isCancelamentoEventoApi(evento) {
   );
 }
 
+function isRejeicaoEventoApi(evento) {
+  const tipoEvento = normalizeSearchText(evento?.tipoEvento);
+  const descricao = normalizeSearchText(evento?.descricao);
+  return tipoEvento.includes('rejeicao') || tipoEvento.includes('rejei') || descricao.includes('rejeicao') || descricao.includes('rejei');
+}
+
 function buildEventosResumo(eventos) {
   if (!Array.isArray(eventos) || eventos.length === 0) {
     return '';
@@ -9450,6 +9474,69 @@ function formatEventoCardTitle(evento) {
 
   const tipoEvento = String(evento?.tipoEvento || '').trim();
   return tipoEvento ? `Evento ${tipoEvento}` : 'Evento fiscal';
+}
+
+function formatEventoFilterLabel(evento) {
+  if (isRejeicaoEventoApi(evento)) {
+    return 'Rejeicao';
+  }
+
+  if (isCancelamentoEventoApi(evento)) {
+    return 'Cancelamento';
+  }
+
+  const descricao = String(evento?.descricao || '').trim();
+  if (descricao) {
+    return descricao;
+  }
+
+  const tipoEvento = String(evento?.tipoEvento || '').trim();
+  return tipoEvento || '';
+}
+
+function getCteEventTypeFilterOptions() {
+  const primaryOptions = [
+    'Rejeicao',
+    'Cancelamento',
+    'Desacordo',
+    'Registro de Passagem',
+    'MDF-e Autorizado',
+    'Autorizado o uso do CT-e'
+  ];
+  const seen = new Set();
+  const ordered = [];
+  const docs = [...(Array.isArray(state.cteDocuments) ? state.cteDocuments : []), ...(Array.isArray(state.cteSearch.results) ? state.cteSearch.results : [])];
+
+  const pushOption = (value) => {
+    const raw = String(value || '').trim();
+    if (!raw) {
+      return;
+    }
+    const normalized = normalizeSearchText(raw);
+    if (!normalized || seen.has(normalized)) {
+      return;
+    }
+    seen.add(normalized);
+    ordered.push(raw);
+  };
+
+  primaryOptions.forEach(pushOption);
+
+  docs.forEach((doc) => {
+    const eventos = Array.isArray(doc?.eventos) ? doc.eventos : [];
+    eventos.forEach((evento) => {
+      pushOption(formatEventoFilterLabel(evento));
+    });
+  });
+
+  pushOption(state.filters.cteDocs.tipoEvento);
+
+  const primaryNormalized = new Set(primaryOptions.map((value) => normalizeSearchText(value)).filter(Boolean));
+  const dynamicOptions = ordered
+    .filter((value) => !primaryNormalized.has(normalizeSearchText(value)))
+    .sort((left, right) => left.localeCompare(right, 'pt-BR'));
+
+  return [...ordered.filter((value) => primaryNormalized.has(normalizeSearchText(value))), ...dynamicOptions];
 }
 
 function matchesDocumentEventTypeFilter(doc, eventTypeFilter) {
@@ -10670,6 +10757,32 @@ async function downloadNfeXmlById(nfeId) {
   anchor.remove();
   URL.revokeObjectURL(url);
   pushToast(`Download da NF-e ${doc.numeroNfe || doc.chaveAcesso} iniciado.`, 'success');
+}
+
+async function downloadNfeDanfeById(nfeId) {
+  const doc = findNfeById(nfeId);
+  if (!doc) {
+    pushToast('NF-e nao encontrada.', 'error');
+    return;
+  }
+
+  if (!doc.xmlCompletoDisponivel) {
+    pushToast('DANFE indisponivel para NF-e sem XML completo armazenado.', 'error');
+    return;
+  }
+
+  if (!doc.apiNfeId || !doc.clientId) {
+    pushToast('Documento sem referencia para gerar DANFE na API.', 'error');
+    return;
+  }
+
+  try {
+    const payload = await apiRequest(`/nfe/${doc.apiNfeId}/danfe?clienteId=${encodeURIComponent(doc.clientId)}`);
+    downloadFromPayload(payload, `DANFE-${doc.chaveAcesso}.pdf`);
+    pushToast(`Download do DANFE ${doc.numeroNfe || doc.chaveAcesso} iniciado.`, 'success');
+  } catch (error) {
+    pushToast(`Falha ao baixar DANFE da NF-e: ${toErrorMessage(error)}`, 'error');
+  }
 }
 
 async function openCteViewer(cteId) {

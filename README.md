@@ -63,6 +63,12 @@ Para rodar como servico Windows e acessar pela rede interna com hostname, consul
 - `docs/troubleshooting.md`
 - `docs/operational-review-2026-07.md`
 
+## Downloads de PDF fiscal
+
+- NFS-e: o backend continua usando o gerador interno de DANFSE.
+- NF-e: o endpoint `GET /nfe/:id/danfe?clienteId=...` gera o DANFE a partir do XML completo armazenado usando `@nfewizard/danfe`.
+- CT-e: ainda nao ha geracao de DACTE neste projeto. Na versao `1.0.3` do `@nfewizard/danfe`, publicada antes de 21 de julho de 2026, o pacote instalado nao exporta gerador funcional de CT-e apesar da descricao citar DACTE.
+
 ## Desenvolvimento sem container da API
 
 1. Suba apenas a infraestrutura:

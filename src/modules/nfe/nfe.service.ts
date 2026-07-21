@@ -10,6 +10,7 @@ import {
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
+import { DANFE_PDF_GENERATOR, DanfePdfGenerator } from '../../integrations/danfe/danfe.types';
 import {
   DOMINIO_NFE_XML_SOURCE,
   DominioNfeCatalogRecord,
@@ -136,6 +137,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     private readonly parser: NfeXmlParserService,
     private readonly nfseService: NfseService,
     private readonly storage: LocalStorageService,
+    @Inject(DANFE_PDF_GENERATOR) private readonly danfePdfGenerator: DanfePdfGenerator,
     @Inject(forwardRef(() => CteService)) private readonly cteService: CteService,
     @Inject(NFE_DISTRIBUICAO_CLIENT) private readonly distribuicaoClient: NfeDistribuicaoClient,
     @Inject(DOMINIO_NFE_XML_SOURCE) private readonly dominioXmlSource: DominioNfeXmlSource
@@ -591,6 +593,33 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       contentBase64: xmlBuffer.toString('base64'),
       xml
     };
+  }
+
+  async getDanfe(id: string, clienteId: string) {
+    const doc = await this.findOne(id, clienteId);
+    if (!doc.xmlCompletoPath) {
+      throw new BadRequestException('DANFE indisponivel porque a NF-e nao possui XML completo armazenado.');
+    }
+
+    const xmlBuffer = await this.storage.getObject(doc.xmlCompletoPath);
+    const xml = xmlBuffer.toString('utf8');
+
+    try {
+      const pdfBuffer = await this.danfePdfGenerator.generateNfePdf({
+        xml,
+        chaveAcesso: doc.chaveAcesso
+      });
+
+      return {
+        id: doc.id,
+        chaveAcesso: doc.chaveAcesso,
+        fileName: `DANFE-${doc.chaveAcesso}.pdf`,
+        contentType: 'application/pdf',
+        contentBase64: pdfBuffer.toString('base64')
+      };
+    } catch (error) {
+      throw new BadRequestException(`Falha ao gerar DANFE da NF-e: ${this.toErrorMessage(error)}`);
+    }
   }
 
   async sincronizarEventosDocumentos(params: {
