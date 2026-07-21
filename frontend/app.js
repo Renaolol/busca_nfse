@@ -6,6 +6,7 @@ const API_TIMEOUT_MS = 20000;
 const SEARCH_PAGE_SIZE = 100;
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
+const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
 
 const navItems = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', route: '/dashboard' },
@@ -111,6 +112,7 @@ const state = {
   nfeSyncSections: {
     scheduler: true,
     failures: false,
+    manualImport: true,
     filters: false,
     simplified: true,
     technical: false
@@ -456,7 +458,13 @@ function onDocumentClick(event) {
       return;
     }
     case 'close-modal': {
-      if (state.modal?.kind === 'events-sync-report' && state.modal.running) {
+      if (
+        (
+          state.modal?.kind === 'events-sync-report' ||
+          state.modal?.kind === 'dominio-import-report'
+        ) &&
+        state.modal.running
+      ) {
         return;
       }
       closeModal();
@@ -1156,7 +1164,8 @@ function onDocumentClick(event) {
         (
           state.modal?.kind === 'events-sync-report' ||
           state.modal?.kind === 'past-nsu-recovery-report' ||
-          state.modal?.kind === 'download-by-key-report'
+          state.modal?.kind === 'download-by-key-report' ||
+          state.modal?.kind === 'dominio-import-report'
         ) &&
         state.modal.running
       ) {
@@ -1230,6 +1239,11 @@ function onDocumentSubmit(event) {
     case 'nfeSyncFilterForm': {
       event.preventDefault();
       applyNfeSyncFilters(target);
+      return;
+    }
+    case 'nfeDominioImportForm': {
+      event.preventDefault();
+      void submitNfeDominioImportForm(target);
       return;
     }
     case 'xmlsFilterForm': {
@@ -2314,6 +2328,43 @@ function renderNfeSyncPage() {
   const globalRunAction = sourceMode === 'dominio_chave' ? 'nfe-download-by-key-global' : 'nfe-run-now';
   const rowRunAction = sourceMode === 'dominio_chave' ? 'nfe-download-by-key-control' : 'nfe-sync-run-control';
   const canUseManualDownloadByKey = canUseNfeManualDownloadByKey();
+  const dominioManualImportContent =
+    sourceMode === 'dominio'
+      ? `
+        <form id="nfeDominioImportForm" class="form-grid">
+          <label class="field">
+            Cliente
+            <select name="clienteId">${renderOptions([NFE_DOMINIO_ALL_CLIENTS_OPTION, ...nfeEligibleClients.map((client) => client.id)], NFE_DOMINIO_ALL_CLIENTS_OPTION, {
+              [NFE_DOMINIO_ALL_CLIENTS_OPTION]: 'Todas as empresas',
+              ...mapClientOptions()
+            })}</select>
+          </label>
+          <label class="field">
+            Ambiente
+            <select name="ambiente">${renderOptions(['producao', 'homologacao'], 'producao', {
+              producao: 'Producao',
+              homologacao: 'Homologacao'
+            })}</select>
+          </label>
+          <label class="field">
+            Limite
+            <input name="limit" type="number" min="1" max="5000" value="200" />
+          </label>
+          <label class="field">
+            Emissao inicial
+            <input name="dataEmissaoInicio" type="date" />
+          </label>
+          <label class="field">
+            Emissao final
+            <input name="dataEmissaoFim" type="date" />
+          </label>
+          <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
+            <button class="btn primary" type="submit">Importar XMLs da Dominio</button>
+          </div>
+        </form>
+        <p class="card-subtitle" style="margin:12px 0 0;">Use este formulario para buscar um periodo especifico diretamente no catalogo da Dominio. O resultado aparece no painel da ultima execucao logo acima.</p>
+      `
+      : '';
   const filtersContent = `
     <form id="nfeSyncFilterForm" class="form-grid">
       <label class="field">
@@ -2493,6 +2544,17 @@ function renderNfeSyncPage() {
               subtitle: 'Mostra a ultima execucao manual feita nesta tela.',
               contentHtml: renderNfeLastRunPanel(),
               defaultOpen: false
+            })
+          : ''
+      }
+      ${
+        sourceMode === 'dominio'
+          ? renderCollapsibleCard({
+              sectionKey: 'manualImport',
+              title: 'Importacao manual da Dominio',
+              subtitle: 'Busca XMLs por cliente e periodo usando o endpoint direto da Dominio.',
+              contentHtml: dominioManualImportContent,
+              defaultOpen: true
             })
           : ''
       }
@@ -3739,6 +3801,8 @@ function renderModal() {
       return renderPastNsuRecoveryReportModal();
     case 'download-by-key-report':
       return renderDownloadByKeyReportModal();
+    case 'dominio-import-report':
+      return renderDominioImportReportModal();
     case 'dominio-nfe-view':
       return renderDominioNfeViewerModal();
     case 'xml-details':
@@ -4467,6 +4531,90 @@ function renderDownloadByKeyReportModal() {
         </div>
         <div class="modal-footer">
           ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao do download manual por chave...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderDominioImportReportModal() {
+  if (state.modal?.kind !== 'dominio-import-report') {
+    return '';
+  }
+
+  const rows = Array.isArray(state.modal.rows) ? state.modal.rows : [];
+  const running = Boolean(state.modal.running);
+  const scopeLabel = String(state.modal.scopeLabel || 'Importacao manual da Dominio');
+  const totalClients = Number(state.modal.totalClients || rows.length || 0);
+  const processedClients = Number(state.modal.processedClients || 0);
+  const successfulClients = Number(state.modal.successfulClients || 0);
+  const failedClients = Number(state.modal.failedClients || 0);
+  const importedDocuments = Number(state.modal.importedDocuments || 0);
+  const currentMessage = String(state.modal.currentMessage || '').trim();
+  const subtitle = running
+    ? `${scopeLabel} • ${processedClients}/${totalClients} empresa(s) processada(s).`
+    : `${scopeLabel} • revise o resultado empresa por empresa.`;
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1380px); max-width:1380px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Importacao manual da Dominio</h3>
+          <p class="modal-subtitle">${escapeHtml(subtitle)}</p>
+        </div>
+        <div class="modal-body">
+          ${
+            currentMessage
+              ? `<div style="margin-bottom:14px; padding:12px 14px; border:1px solid #d9e7ff; border-radius:12px; background:#f4f8ff; color:#21446b;">${escapeHtml(currentMessage)}</div>`
+              : ''
+          }
+          <div class="form-grid four" style="margin-bottom:18px;">
+            ${detailItem('Empresas processadas', `${processedClients}/${totalClients}`)}
+            ${detailItem('Empresas sem falha', String(successfulClients))}
+            ${detailItem('Empresas com falha', String(failedClients))}
+            ${detailItem('XMLs importados', String(importedDocuments))}
+          </div>
+          ${
+            rows.length
+              ? `
+                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(68vh, 760px);">
+                  <div style="display:grid; grid-template-columns:minmax(220px, 1.2fr) minmax(170px, .9fr) minmax(180px, .9fr) minmax(170px, .8fr) minmax(170px, .8fr) minmax(340px, 1.7fr); gap:0; min-width:1250px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7; position:sticky; top:0; z-index:1;">
+                    <div style="padding:12px 14px;">Empresa</div>
+                    <div style="padding:12px 14px;">Periodo</div>
+                    <div style="padding:12px 14px;">Etapa atual</div>
+                    <div style="padding:12px 14px;">Status</div>
+                    <div style="padding:12px 14px;">Resultado</div>
+                    <div style="padding:12px 14px;">Mensagem</div>
+                  </div>
+                  ${rows
+                    .map(
+                      (row) => `
+                        <div style="display:grid; grid-template-columns:minmax(220px, 1.2fr) minmax(170px, .9fr) minmax(180px, .9fr) minmax(170px, .8fr) minmax(170px, .8fr) minmax(340px, 1.7fr); gap:0; min-width:1250px; border-bottom:1px solid #eef0f2; align-items:start;">
+                          <div style="padding:14px;">
+                            <strong>${escapeHtml(row.clientLabel || '-')}</strong>
+                            ${row.clientDetail ? `<div style="margin-top:4px; color:#606062;">${escapeHtml(row.clientDetail)}</div>` : ''}
+                          </div>
+                          <div style="padding:14px; color:#606062;">${escapeHtml(row.periodLabel || '-')}</div>
+                          <div style="padding:14px;">
+                            <strong>${escapeHtml(row.stepLabel || '-')}</strong>
+                          </div>
+                          <div style="padding:14px;">${statusBadge(mapDominioImportOverlayStatusLabel(row.status), toneFromDominioImportOverlayStatus(row.status))}</div>
+                          <div style="padding:14px; color:#606062;">
+                            XMLs: <strong>${escapeHtml(String(Number(row.importedCount || 0)))}</strong><br />
+                            Falhas: <strong>${escapeHtml(String(Number(row.failureCount || 0)))}</strong>
+                          </div>
+                          <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
+                        </div>
+                      `
+                    )
+                    .join('')}
+                </div>
+              `
+              : '<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">Nenhuma empresa foi preparada para esta importacao.</div>'
+          }
+        </div>
+        <div class="modal-footer">
+          ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao da importacao manual da Dominio...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
         </div>
       </div>
     </div>
@@ -6018,6 +6166,171 @@ async function runNfeSyncNow(payload) {
   }
 }
 
+async function submitNfeDominioImportForm(form) {
+  const data = new FormData(form);
+  const clienteId = String(data.get('clienteId') || NFE_DOMINIO_ALL_CLIENTS_OPTION).trim() || NFE_DOMINIO_ALL_CLIENTS_OPTION;
+  const ambiente = String(data.get('ambiente') || 'producao').trim() || 'producao';
+  const limitValue = Number(data.get('limit') || 200);
+  const dataEmissaoInicio = String(data.get('dataEmissaoInicio') || '').trim();
+  const dataEmissaoFim = String(data.get('dataEmissaoFim') || '').trim();
+
+  if (dataEmissaoInicio && dataEmissaoFim && dataEmissaoInicio > dataEmissaoFim) {
+    pushToast('A data inicial nao pode ser maior que a data final.', 'error');
+    return;
+  }
+
+  const limit = Number.isInteger(limitValue) && limitValue > 0 ? Math.min(limitValue, 5000) : 200;
+  const targetClients =
+    clienteId === NFE_DOMINIO_ALL_CLIENTS_OPTION
+      ? getNfeEligibleClients()
+      : getNfeEligibleClients().filter((client) => client.id === clienteId);
+
+  if (!targetClients.length) {
+    pushToast('Nenhuma empresa elegivel foi encontrada para importar XMLs da Dominio.', 'error');
+    return;
+  }
+
+  try {
+    const scopeLabel =
+      targetClients.length === 1 ? targetClients[0]?.razaoSocial || 'Empresa selecionada' : 'Todas as empresas selecionadas';
+    const periodLabel = formatDominioImportPeriodLabel(dataEmissaoInicio, dataEmissaoFim);
+    const initialRows = buildDominioImportOverlayRows(targetClients, periodLabel);
+
+    openDominioImportReportModal({
+      scopeLabel,
+      totalClients: targetClients.length,
+      currentMessage: `Preparando importacao manual da Dominio para ${targetClients.length} empresa(s)...`,
+      rows: initialRows
+    });
+
+    pushToast(`Importacao manual da Dominio iniciada para ${targetClients.length} empresa(s). Aguarde a conclusao.`, 'info');
+
+    let aggregatedReport = createEmptyNfeRunReport();
+    let successfulClients = 0;
+    let failedClients = 0;
+    let overlayRows = initialRows;
+
+    for (let index = 0; index < targetClients.length; index += 1) {
+      const client = targetClients[index];
+      const body = {
+        clienteId: client.id,
+        ambiente,
+        limit,
+        ...(dataEmissaoInicio ? { dataEmissaoInicio } : {}),
+        ...(dataEmissaoFim ? { dataEmissaoFim } : {})
+      };
+
+      overlayRows = patchDominioImportOverlayRow(overlayRows, client.id, {
+        status: 'preparando',
+        stepLabel: 'Preparando requisicao',
+        message: `Separando filtros de emissao (${periodLabel}) para ${client.razaoSocial}.`
+      });
+      updateDominioImportOverlayState({
+        processedClients: index,
+        successfulClients,
+        failedClients,
+        importedDocuments: Number(aggregatedReport.documentsSaved || 0),
+        currentMessage: `Etapa ${index + 1} de ${targetClients.length}: preparando ${client.razaoSocial}.`,
+        rows: overlayRows
+      });
+
+      overlayRows = patchDominioImportOverlayRow(overlayRows, client.id, {
+        status: 'importando',
+        stepLabel: 'Consultando catalogo',
+        message: 'Aguardando retorno do backend...'
+      });
+      updateDominioImportOverlayState({
+        currentMessage: `Etapa ${index + 1} de ${targetClients.length}: consultando a Dominio para ${client.razaoSocial}.`,
+        rows: overlayRows
+      });
+
+      try {
+        const result = await apiRequest('/nfe/importar-dominio', {
+          method: 'POST',
+          body,
+          timeoutMs: 120000
+        });
+
+        aggregatedReport = mergeNfeRunReports(aggregatedReport, buildNfeRunReportFromDominioImport(result, body));
+        const resultFailures = Number(result?.falhas || 0);
+        if (resultFailures > 0) {
+          failedClients += 1;
+        } else {
+          successfulClients += 1;
+        }
+
+        overlayRows = patchDominioImportOverlayRow(overlayRows, client.id, {
+          status: resultFailures > 0 ? 'concluido_com_falhas' : 'concluido',
+          stepLabel: resultFailures > 0 ? 'Concluido com falhas' : 'Importacao concluida',
+          importedCount: Number(result?.xmlsPersistidos || 0),
+          failureCount: resultFailures,
+          message: `XMLs importados: ${Number(result?.xmlsPersistidos || 0)}. Falhas: ${resultFailures}.`
+        });
+        updateDominioImportOverlayState({
+          processedClients: index + 1,
+          successfulClients,
+          failedClients,
+          importedDocuments: Number(aggregatedReport.documentsSaved || 0),
+          currentMessage: `Etapa ${index + 1} de ${targetClients.length}: ${client.razaoSocial} concluida.`,
+          rows: overlayRows
+        });
+      } catch (error) {
+        failedClients += 1;
+        aggregatedReport = mergeNfeRunReports(
+          aggregatedReport,
+          buildClientLevelDominioImportFailureReport({
+            clientId: client.id,
+            ambiente,
+            message: toErrorMessage(error)
+          })
+        );
+
+        overlayRows = patchDominioImportOverlayRow(overlayRows, client.id, {
+          status: 'erro',
+          stepLabel: 'Falha na API',
+          failureCount: 1,
+          message: toErrorMessage(error)
+        });
+        updateDominioImportOverlayState({
+          processedClients: index + 1,
+          successfulClients,
+          failedClients,
+          importedDocuments: Number(aggregatedReport.documentsSaved || 0),
+          currentMessage: `Etapa ${index + 1} de ${targetClients.length}: falha ao importar ${client.razaoSocial}.`,
+          rows: overlayRows
+        });
+      }
+    }
+
+    state.nfeLastRunReport = aggregatedReport;
+    updateDominioImportOverlayState({
+      running: false,
+      processedClients: targetClients.length,
+      successfulClients,
+      failedClients,
+      importedDocuments: Number(aggregatedReport.documentsSaved || 0),
+      currentMessage: `Importacao manual concluida: ${Number(aggregatedReport.documentsSaved || 0)} XML(s) importado(s) em ${targetClients.length} empresa(s).`,
+      rows: overlayRows
+    });
+
+    pushToast(
+      `Importacao da Dominio concluida: ${Number(aggregatedReport.documentsSaved || 0)} XML(s) importado(s)${
+        Number(aggregatedReport.failures || 0) > 0 ? `, ${Number(aggregatedReport.failures || 0)} falha(s)` : ''
+      }.`,
+      Number(aggregatedReport.failures || 0) > 0 ? 'error' : 'success'
+    );
+    await refreshApiData();
+  } catch (error) {
+    if (state.modal?.kind === 'dominio-import-report') {
+      updateDominioImportOverlayState({
+        running: false,
+        currentMessage: `Falha ao executar importacao manual da Dominio: ${toErrorMessage(error)}`
+      });
+    }
+    pushToast(`Falha ao importar XMLs da Dominio: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
 function buildNfeRunReport(response) {
   return {
     executedAt: new Date().toISOString(),
@@ -6026,6 +6339,93 @@ function buildNfeRunReport(response) {
     failures: Number(response?.failures || 0),
     executionDetails: Array.isArray(response?.executionDetails) ? response.executionDetails : [],
     failureDetails: Array.isArray(response?.failureDetails) ? response.failureDetails : []
+  };
+}
+
+function buildNfeRunReportFromDominioImport(response, request) {
+  const clientId = String(request?.clienteId || '').trim();
+  const ambiente = String(response?.ambiente || request?.ambiente || 'producao').trim() || 'producao';
+  const rows = (Array.isArray(response?.detalhes) ? response.detalhes : []).map((detail) => {
+    const cnpjConsulta = normalizeDigits(detail?.cnpjEmpresa || '');
+    const estabelecimento = findEstablishmentByClientAndCnpj(clientId, cnpjConsulta);
+    return {
+      kind: 'documento',
+      status: detail?.status || 'falha',
+      clientId,
+      estabelecimentoId: estabelecimento?.id || '',
+      ambiente,
+      cnpjConsulta,
+      catalogoId: Number(detail?.catalogoId || 0),
+      chaveAcesso: detail?.chaveAcesso || '',
+      numeroNfe: detail?.numeroNfe || '',
+      serie: detail?.serie || '',
+      modelo: detail?.modelo || '',
+      mensagem: detail?.mensagem || ''
+    };
+  });
+
+  return {
+    executedAt: new Date().toISOString(),
+    processed: Number(response?.estabelecimentosConsultados || 0),
+    documentsSaved: Number(response?.xmlsPersistidos || 0),
+    failures: Number(response?.falhas || 0),
+    executionDetails: rows,
+    failureDetails: rows.filter((row) => row.status === 'falha')
+  };
+}
+
+function createEmptyNfeRunReport() {
+  return {
+    executedAt: new Date().toISOString(),
+    processed: 0,
+    documentsSaved: 0,
+    failures: 0,
+    executionDetails: [],
+    failureDetails: []
+  };
+}
+
+function mergeNfeRunReports(base, addition) {
+  const current = base || createEmptyNfeRunReport();
+  const incoming = addition || createEmptyNfeRunReport();
+  const executionDetails = [
+    ...(Array.isArray(current.executionDetails) ? current.executionDetails : []),
+    ...(Array.isArray(incoming.executionDetails) ? incoming.executionDetails : [])
+  ];
+
+  return {
+    executedAt: incoming.executedAt || current.executedAt || new Date().toISOString(),
+    processed: Number(current.processed || 0) + Number(incoming.processed || 0),
+    documentsSaved: Number(current.documentsSaved || 0) + Number(incoming.documentsSaved || 0),
+    failures: Number(current.failures || 0) + Number(incoming.failures || 0),
+    executionDetails,
+    failureDetails: executionDetails.filter((row) => row.status === 'falha')
+  };
+}
+
+function buildClientLevelDominioImportFailureReport({ clientId, ambiente, message }) {
+  return {
+    executedAt: new Date().toISOString(),
+    processed: 1,
+    documentsSaved: 0,
+    failures: 1,
+    executionDetails: [
+      {
+        kind: 'controle',
+        status: 'falha',
+        clientId,
+        estabelecimentoId: '',
+        ambiente,
+        cnpjConsulta: '',
+        catalogoId: 0,
+        chaveAcesso: '',
+        numeroNfe: '',
+        serie: '',
+        modelo: '',
+        mensagem: message || 'Falha ao importar XMLs da Dominio'
+      }
+    ],
+    failureDetails: []
   };
 }
 
@@ -7913,6 +8313,91 @@ function updateDownloadByKeyOverlayState(patch) {
   render();
 }
 
+function openDominioImportReportModal(params) {
+  openModal({
+    kind: 'dominio-import-report',
+    running: true,
+    scopeLabel: params?.scopeLabel || 'Importacao manual da Dominio',
+    totalClients: Number(params?.totalClients || 0),
+    processedClients: Number(params?.processedClients || 0),
+    successfulClients: Number(params?.successfulClients || 0),
+    failedClients: Number(params?.failedClients || 0),
+    importedDocuments: Number(params?.importedDocuments || 0),
+    currentMessage: params?.currentMessage || 'Preparando importacao manual...',
+    rows: Array.isArray(params?.rows) ? params.rows : []
+  });
+}
+
+function updateDominioImportOverlayState(patch) {
+  if (state.modal?.kind !== 'dominio-import-report') {
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    ...patch
+  };
+  render();
+}
+
+function mapDominioImportOverlayStatusLabel(status) {
+  switch (status) {
+    case 'preparando':
+      return 'Preparando';
+    case 'importando':
+      return 'Consultando';
+    case 'concluido':
+      return 'Concluido';
+    case 'concluido_com_falhas':
+      return 'Concluido com falhas';
+    case 'erro':
+      return 'Erro';
+    default:
+      return 'Na fila';
+  }
+}
+
+function toneFromDominioImportOverlayStatus(status) {
+  switch (status) {
+    case 'preparando':
+      return 'warning';
+    case 'importando':
+      return 'info';
+    case 'concluido':
+      return 'success';
+    case 'concluido_com_falhas':
+      return 'warning';
+    case 'erro':
+      return 'danger';
+    default:
+      return 'neutral';
+  }
+}
+
+function buildDominioImportOverlayRows(clients, periodLabel) {
+  return (Array.isArray(clients) ? clients : []).map((client) => ({
+    clientId: client.id,
+    clientLabel: client.razaoSocial || 'Cliente',
+    clientDetail: formatCnpj(client.cnpj || ''),
+    periodLabel,
+    status: 'na_fila',
+    stepLabel: 'Aguardando inicio',
+    importedCount: 0,
+    failureCount: 0,
+    message: 'Empresa aguardando processamento.'
+  }));
+}
+
+function patchDominioImportOverlayRow(rows, clientId, patch) {
+  return (Array.isArray(rows) ? rows : []).map((row) => (row.clientId === clientId ? { ...row, ...patch } : row));
+}
+
+function formatDominioImportPeriodLabel(dataEmissaoInicio, dataEmissaoFim) {
+  const start = dataEmissaoInicio || 'inicio aberto';
+  const end = dataEmissaoFim || 'fim aberto';
+  return `${start} ate ${end}`;
+}
+
 function mapDownloadByKeyDocumentLabel(modelo, kind = 'documento') {
   if (kind === 'controle') {
     return 'Controle';
@@ -9519,6 +10004,16 @@ function findEstablishmentById(establishmentId) {
   }
 
   return null;
+}
+
+function findEstablishmentByClientAndCnpj(clientId, cnpj) {
+  if (!clientId || !cnpj) {
+    return null;
+  }
+
+  const normalizedCnpj = normalizeDigits(cnpj);
+  const rows = Array.isArray(state.establishmentsByClient?.[clientId]) ? state.establishmentsByClient[clientId] : [];
+  return rows.find((item) => normalizeDigits(item?.cnpj || '') === normalizedCnpj) || null;
 }
 
 function formatNfeFailureNumber(failure) {
