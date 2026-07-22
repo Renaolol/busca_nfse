@@ -3506,7 +3506,7 @@ function renderXmlsTableCard(xmls) {
               </th>
               ${renderXmlSortHeader('numeroNfse', 'Numero NFS-e')}
               ${renderXmlSortHeader('cliente', 'Cliente')}
-              ${renderXmlSortHeader('cnpj', 'CNPJ')}
+              ${renderXmlSortHeader('contraparte', 'Fornecedor / cliente')}
               ${renderXmlSortHeader('municipio', 'Municipio')}
               ${renderXmlSortHeader('dataEmissao', 'Data emissao')}
               ${renderXmlSortHeader('dataDownload', 'Data download')}
@@ -3532,7 +3532,7 @@ function renderXmlsTableCard(xmls) {
                     <td><input type="checkbox" data-action="xml-select" data-xml-id="${escapeHtml(xml.id)}" ${state.selectedXmlIds.has(xml.id) ? 'checked' : ''} ${xml.apiNfseId ? '' : 'disabled'} aria-label="Selecionar NFS-e ${escapeHtml(xml.numeroNfse || '-')}" /></td>
                     <td>${renderNfseNumber(xml)}</td>
                     <td>${escapeHtml(xml.cliente)}</td>
-                    <td>${escapeHtml(formatCnpj(xml.cnpj))}</td>
+                    <td>${escapeHtml(xml.contraparteNome || '-')}</td>
                     <td>${escapeHtml(xml.municipio)}</td>
                     <td>${escapeHtml(formatDate(xml.dataEmissao))}</td>
                     <td>${escapeHtml(formatDateTime(xml.dataDownload))}</td>
@@ -8002,8 +8002,8 @@ function getXmlSortValue(xml, key) {
       return toSortableNumber(xml.numeroNfse);
     case 'cliente':
       return xml.cliente || '';
-    case 'cnpj':
-      return normalizeDigits(xml.cnpj || '');
+    case 'contraparte':
+      return xml.contraparteNome || '';
     case 'municipio':
       return xml.municipio || '';
     case 'dataEmissao':
@@ -9696,6 +9696,11 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
         tipo = 'Tomada';
       }
 
+      const contraparteNome =
+        tipo === 'Tomada'
+          ? doc.razaoSocialPrestador || '-'
+          : client?.razaoSocial || doc.razaoSocialTomador || doc.razaoSocialPrestador || '-';
+
       return {
         id: `xml-${doc.id}`,
         apiNfseId: doc.id,
@@ -9723,6 +9728,7 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
         caminhoServidor: doc.xmlPath || '-',
         prestador: doc.razaoSocialPrestador || '-',
         tomador: doc.razaoSocialTomador || '-',
+        contraparteNome,
         iss: toNumber(doc.valorIss),
         conteudoXml: null
       };
@@ -12447,7 +12453,7 @@ function exportXmlListToCsv() {
   const header = [
     'Numero NFS-e',
     'Cliente',
-    'CNPJ',
+    'Fornecedor / cliente',
     'Municipio',
     'Data emissao',
     'Data download',
@@ -12464,7 +12470,7 @@ function exportXmlListToCsv() {
   const rows = xmls.map((xml) => [
     xml.numeroNfse,
     xml.cliente,
-    formatCnpj(xml.cnpj),
+    xml.contraparteNome || '-',
     xml.municipio,
     formatDate(xml.dataEmissao),
     formatDateTime(xml.dataDownload),

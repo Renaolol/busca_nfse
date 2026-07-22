@@ -17,6 +17,7 @@ export interface ParsedNfse {
   valorServico?: string;
   valorDeducoes?: string;
   valorIss?: string;
+  retencaoIss?: string;
   aliquotaIss?: string;
   codigoServicoNacional?: string;
   itemListaServico?: string;
@@ -100,6 +101,9 @@ export class NfseXmlParserService {
         this.extractNestedAny(xml, ['vServPrest'], ['vServ']),
       valorDeducoes: this.extract(xml, ['valorDeducoes', 'vDeducao', 'vDescCondIncond']),
       valorIss: this.extract(xml, ['valorIss', 'valorISS', 'vISSQN', 'vISS']),
+      retencaoIss:
+        this.extract(xml, ['tpRetISSQN', 'IssRetido']) ??
+        this.extractNestedAny(xml, ['tribMun', 'Servico'], ['tpRetISSQN', 'IssRetido']),
       aliquotaIss: this.extract(xml, ['aliquotaIss', 'aliquotaISS', 'pAliq', 'pAliquota']),
       codigoServicoNacional: this.extract(xml, ['codigoServicoNacional', 'cTribNac']),
       itemListaServico: this.extract(xml, ['itemListaServico', 'ItemListaServico', 'cItemListaServ']),

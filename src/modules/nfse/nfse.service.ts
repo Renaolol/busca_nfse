@@ -364,6 +364,36 @@ export class NfseService {
       .toLowerCase();
   }
 
+  private async enrichDocumentoDetails(
+    doc: NfseDocumento & {
+      eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
+    }
+  ): Promise<
+    NfseDocumento & {
+      eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
+      retencaoIss?: string | null;
+    }
+  > {
+    if (!doc.xmlPath) {
+      return doc;
+    }
+
+    try {
+      const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
+      const parsed = this.parser.parse(xml);
+
+      return {
+        ...doc,
+        razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
+        razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
+        retencaoIss: parsed.retencaoIss ?? null
+      };
+    } catch (error) {
+      this.logger.warn(`Falha ao enriquecer detalhes da NFS-e ${doc.id}: ${this.toErrorMessage(error)}`);
+      return doc;
+    }
+  }
+
   async findOne(id: string, clienteId: string) {
     const found = await this.prisma.nfseDocumento.findUnique({
       where: { id },
@@ -374,7 +404,7 @@ export class NfseService {
     }
     this.assertNfseClientScope(found, clienteId);
 
-    return found;
+    return this.enrichDocumentoDetails(found);
   }
 
   async getXml(id: string, clienteId: string) {
