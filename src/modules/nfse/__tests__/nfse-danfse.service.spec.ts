@@ -171,4 +171,27 @@ describe('NfseDanfseService', () => {
     expect(content).toContain('1.566,72');
     expect(content).toContain('Servico de publicidade institucional');
   });
+
+  it('substitui codigo do municipio pelo nome quando o nome estiver disponivel no fallback', () => {
+    const pdf = service.generatePdf({
+      chaveAcesso: '42110092206960810000176000000000000126019687178145',
+      numeroNfse: '2',
+      cnpjPrestador: '36926971000104',
+      razaoSocialPrestador: 'JAEGER PRESTADORA DE SERVICOS LTDA',
+      municipioPrestador: '4211009 / SC',
+      municipioTomador: '4211009',
+      municipioPrestacaoCodigo: '4211009',
+      municipioPrestacaoNome: 'Mondai',
+      localPrestacao: '4211009 / SC',
+      municipioIncidenciaIssqn: '4211009 / SC',
+      valorServico: '150.00',
+      descricaoServico: 'Prestacao de servico de abertura de porta'
+    });
+
+    const content = pdf.toString('latin1');
+
+      expect(content).toContain('MUNICIPIO DE MONDAI');
+      expect(content).toContain('Mondai - SC');
+      expect(content).toContain('Municipio de Incidencia do ISSQN');
+  });
 });

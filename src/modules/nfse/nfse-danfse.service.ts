@@ -143,16 +143,16 @@ interface PdfPageState {
 export class NfseDanfseService {
   generateFromXml(xml: string, fallback: DanfseRenderInput): Buffer {
     const extracted = this.extractFromXml(xml);
-    const merged = this.mergeDefined(extracted, fallback);
+    const merged = this.normalizeMunicipioDisplayFields(this.mergeDefined(extracted, fallback));
 
     return this.generatePdf({ ...merged, chaveAcesso: this.normalizeChaveAcesso(fallback.chaveAcesso) });
   }
 
   generatePdf(input: DanfseRenderInput): Buffer {
-    const normalizedInput = {
+    const normalizedInput = this.normalizeMunicipioDisplayFields({
       ...input,
       chaveAcesso: this.normalizeChaveAcesso(input.chaveAcesso)
-    };
+    });
     const contentStreams = this.buildOfficialDanfseContentStreams(normalizedInput, new Date());
     return this.buildPdf(contentStreams);
   }
@@ -2716,5 +2716,54 @@ export class NfseDanfseService {
 
   private looksLikeDescricaoMunicipio(value: string): boolean {
     return /[A-Za-zÀ-ÿ]/.test(value);
+  }
+
+  private normalizeMunicipioDisplayFields<T extends Partial<DanfseRenderInput>>(input: T): T {
+    const nomeMunicipio = this.safeValue(input.municipioPrestacaoNome);
+    const codigoMunicipio = this.safeValue(input.municipioPrestacaoCodigo);
+
+    if (nomeMunicipio === '-') {
+      return input;
+    }
+
+    return {
+      ...input,
+      municipioPrestador: this.replaceMunicipioCodeWithName(input.municipioPrestador, nomeMunicipio, codigoMunicipio),
+      municipioTomador: this.replaceMunicipioCodeWithName(input.municipioTomador, nomeMunicipio, codigoMunicipio),
+      municipioDestinatario: this.replaceMunicipioCodeWithName(input.municipioDestinatario, nomeMunicipio, codigoMunicipio),
+      municipioIntermediario: this.replaceMunicipioCodeWithName(input.municipioIntermediario, nomeMunicipio, codigoMunicipio),
+      localPrestacao: this.replaceMunicipioCodeWithName(input.localPrestacao, nomeMunicipio, codigoMunicipio),
+      municipioIncidenciaIssqn: this.replaceMunicipioCodeWithName(
+        input.municipioIncidenciaIssqn,
+        nomeMunicipio,
+        codigoMunicipio
+      )
+    } as T;
+  }
+
+  private replaceMunicipioCodeWithName(
+    value: string | null | undefined,
+    municipioNome: string,
+    expectedCode?: string
+  ): string | undefined {
+    const normalizedValue = this.safeValue(value);
+    if (normalizedValue === '-') {
+      return undefined;
+    }
+
+    const codeMatch = normalizedValue.match(/^\s*([0-9]{6,7})(.*)$/);
+    if (!codeMatch) {
+      return value ?? undefined;
+    }
+
+    const codigo = codeMatch[1];
+    const suffix = codeMatch[2] ?? '';
+    const normalizedExpected = this.safeValue(expectedCode);
+
+    if (normalizedExpected !== '-' && codigo !== normalizedExpected) {
+      return value ?? undefined;
+    }
+
+    return `${municipioNome}${suffix}`;
   }
 }

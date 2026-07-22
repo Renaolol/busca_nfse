@@ -578,6 +578,11 @@ export class NfseService {
       razaoSocialPrestador: parsed.razaoSocialPrestador,
       cnpjTomador: parsed.cnpjTomador,
       razaoSocialTomador: parsed.razaoSocialTomador,
+      municipioPrestador: parsed.municipioPrestacaoNome,
+      municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo,
+      municipioPrestacaoNome: parsed.municipioPrestacaoNome,
+      localPrestacao: parsed.municipioPrestacaoNome,
+      municipioIncidenciaIssqn: parsed.municipioPrestacaoNome,
       valorServico: parsed.valorServico,
       descricaoServico: parsed.descricaoServico
     });
@@ -983,6 +988,11 @@ export class NfseService {
             razaoSocialPrestador: parsed.razaoSocialPrestador ?? doc.razaoSocialPrestador,
             cnpjTomador: parsed.cnpjTomador ?? doc.cnpjTomador,
             razaoSocialTomador: parsed.razaoSocialTomador ?? doc.razaoSocialTomador,
+            municipioPrestador: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome,
+            municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo ?? doc.municipioPrestacaoCodigo,
+            municipioPrestacaoNome: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome,
+            localPrestacao: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome,
+            municipioIncidenciaIssqn: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome,
             valorServico: parsed.valorServico ?? doc.valorServico?.toString(),
             descricaoServico: parsed.descricaoServico ?? doc.descricaoServico
           });
@@ -1353,6 +1363,11 @@ export class NfseService {
       razaoSocialPrestador: doc.razaoSocialPrestador,
       cnpjTomador: doc.cnpjTomador,
       razaoSocialTomador: doc.razaoSocialTomador,
+      municipioPrestador: doc.municipioPrestacaoNome,
+      municipioPrestacaoCodigo: doc.municipioPrestacaoCodigo,
+      municipioPrestacaoNome: doc.municipioPrestacaoNome,
+      localPrestacao: doc.municipioPrestacaoNome,
+      municipioIncidenciaIssqn: doc.municipioPrestacaoNome,
       valorServico: doc.valorServico?.toString(),
       descricaoServico: doc.descricaoServico
     });
