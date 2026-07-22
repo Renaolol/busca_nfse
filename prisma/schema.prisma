@@ -78,6 +78,7 @@ model Cliente {
   nfeDocumentos    NfeDocumento[]
   syncLogs         NfseSyncLog[]
   auditorias       AuditoriaUsuario[]
+  alertResolutions AlertResolution[]
 
   @@map("clientes")
 }
@@ -346,4 +347,20 @@ model AuditoriaUsuario {
   cliente Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
 
   @@map("auditoria_usuario")
+}
+
+model AlertResolution {
+  id         String   @id @default(uuid()) @db.Uuid
+  alertId    String   @unique @map("alert_id") @db.VarChar(255)
+  clienteId  String?  @map("cliente_id") @db.Uuid
+  origem     String?  @db.VarChar(100)
+  titulo     String?  @db.VarChar(255)
+  fingerprint String  @db.Text
+  resolvedAt DateTime @default(now()) @map("resolved_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  cliente Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+
+  @@map("alert_resolutions")
 }

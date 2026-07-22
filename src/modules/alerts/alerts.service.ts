@@ -1,8 +1,10 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { AlertResolution, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AlertResponseDto } from './dto/alert-response.dto';
+import { AlertResolutionResponseDto } from './dto/alert-resolution-response.dto';
 import { QueryAlertsDto } from './dto/query-alerts.dto';
+import { UpdateAlertResolutionDto } from './dto/update-alert-resolution.dto';
 
 type CteDesacordoAlertRow = Prisma.NfeEventoGetPayload<{
   include: {
@@ -101,6 +103,54 @@ export class AlertsService {
     return this.toAlertDto(refreshed);
   }
 
+  async listResolutions(query: QueryAlertsDto = {}): Promise<AlertResolutionResponseDto[]> {
+    const rows = await this.prisma.alertResolution.findMany({
+      where: query.clienteId ? { clienteId: query.clienteId } : undefined,
+      orderBy: { updatedAt: 'desc' },
+      take: 1000
+    });
+
+    return rows.map((row) => this.toResolutionDto(row));
+  }
+
+  async updateResolution(alertId: string, dto: UpdateAlertResolutionDto): Promise<AlertResolutionResponseDto> {
+    if (!dto.resolvido) {
+      await this.prisma.alertResolution.deleteMany({
+        where: { alertId }
+      });
+
+      return {
+        alertId,
+        fingerprint: dto.fingerprint,
+        clientId: dto.clientId ?? null,
+        origem: dto.origem ?? null,
+        titulo: dto.titulo ?? null,
+        resolvedAt: null
+      };
+    }
+
+    const resolution = await this.prisma.alertResolution.upsert({
+      where: { alertId },
+      update: {
+        fingerprint: dto.fingerprint,
+        clienteId: dto.clientId ?? null,
+        origem: dto.origem ?? null,
+        titulo: dto.titulo ?? null,
+        resolvedAt: new Date()
+      },
+      create: {
+        alertId,
+        fingerprint: dto.fingerprint,
+        clienteId: dto.clientId ?? null,
+        origem: dto.origem ?? null,
+        titulo: dto.titulo ?? null,
+        resolvedAt: new Date()
+      }
+    });
+
+    return this.toResolutionDto(resolution);
+  }
+
   private toAlertDto(row: CteDesacordoAlertRow): AlertResponseDto {
     const numeroDocumento = String(row.nfeDocumento.numeroNfe || '').trim() || row.chaveAcesso;
     const eventoDescricao = String(row.descricao || 'Evento de desacordo').trim() || 'Evento de desacordo';
@@ -144,5 +194,16 @@ export class AlertsService {
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
       .trim();
+  }
+
+  private toResolutionDto(row: AlertResolution): AlertResolutionResponseDto {
+    return {
+      alertId: row.alertId,
+      fingerprint: row.fingerprint,
+      clientId: row.clienteId,
+      origem: row.origem,
+      titulo: row.titulo,
+      resolvedAt: row.resolvedAt?.toISOString() ?? null
+    };
   }
 }

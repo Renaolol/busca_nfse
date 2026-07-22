@@ -152,6 +152,7 @@ const state = {
     totalPages: 0
   },
   alerts: [],
+  serverResolvedAlerts: {},
   resolvedAlerts: loadResolvedAlertsStore(),
   establishmentsByClient: {},
   syncByClient: {},
@@ -354,6 +355,7 @@ async function hydrateFromApi() {
     nfeDocs,
     cteDocs,
     persistedAlerts,
+    persistedAlertResolutions,
     auditRows,
     schedulerStatus
   ] = await Promise.all([
@@ -370,6 +372,7 @@ async function hydrateFromApi() {
     apiRequest(`/nfe?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
     apiRequest(`/cte?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
     apiRequest('/alertas').catch(() => []),
+    apiRequest('/alertas/resolucoes').catch(() => []),
     apiRequest('/auditoria').catch(() => []),
     apiRequest('/sync/scheduler-status').catch(() => null)
   ]);
@@ -408,6 +411,7 @@ async function hydrateFromApi() {
   state.nfeDashboardStats = nfeDashboardStats;
   state.cteDashboardStats = cteDashboardStats;
   state.nfeSchedulerStatus = nfeSchedulerStatus;
+  state.serverResolvedAlerts = buildResolvedAlertsStoreFromApi(persistedAlertResolutions);
   state.alerts = applyResolvedAlertState(alerts);
   state.establishmentsByClient = establishmentsByClient;
   state.syncByClient = syncByClient;
@@ -10265,22 +10269,24 @@ function buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, audit
       if (!row?.clienteId) {
         return;
       }
-      if (row?.acao !== 'create' && row?.acao !== 'update') {
+      if (row?.acao !== 'create' && row?.acao !== 'update' && row?.acao !== 'delete') {
         return;
       }
       const client = clientById[row.clienteId];
+      const auditActionMeta = mapAuditActionMeta(row.acao);
+      const auditEntityLabel = mapAuditEntityLabel(row.entidade);
       alerts.push({
         id: `audit-${row.id}`,
         severity: 'Informativo',
-        tipo: 'Cliente',
-        titulo: `Evento de auditoria: ${row.acao}`,
-        descricao: `${row.entidade || 'registro'} alterado no sistema.`,
+        tipo: mapAuditAlertType(row.entidade),
+        titulo: `${auditEntityLabel} ${auditActionMeta.titleSuffix}`,
+        descricao: `A auditoria registrou que ${auditEntityLabel.toLowerCase()} ${auditActionMeta.descriptionSuffix}.`,
         clientId: row.clienteId,
         cliente: client?.razaoSocial || 'Cliente nao identificado',
         dataHora: row.createdAt || new Date().toISOString(),
         status: 'Em analise',
         origem: 'auditoria',
-        mensagemTecnica: row.userAgent || '-',
+        mensagemTecnica: buildAuditTechnicalMessage(row, auditEntityLabel, auditActionMeta),
         sugestaoAcao: 'Registrar acompanhamento interno, se necessario.',
         historicoTentativas: [],
         allowsReprocess: false
@@ -10288,6 +10294,103 @@ function buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, audit
     });
 
   return alerts.sort((a, b) => Date.parse(b.dataHora || 0) - Date.parse(a.dataHora || 0)).slice(0, 120);
+}
+
+function mapAuditActionMeta(action) {
+  switch (String(action || '').toLowerCase()) {
+    case 'create':
+      return {
+        actionLabel: 'criacao',
+        titleSuffix: 'criado no sistema',
+        descriptionSuffix: 'foi criado no sistema'
+      };
+    case 'delete':
+      return {
+        actionLabel: 'exclusao',
+        titleSuffix: 'excluido do sistema',
+        descriptionSuffix: 'foi excluido do sistema'
+      };
+    case 'update':
+      return {
+        actionLabel: 'atualizacao',
+        titleSuffix: 'atualizado no sistema',
+        descriptionSuffix: 'foi atualizado no sistema'
+      };
+    default:
+      return {
+        actionLabel: 'alteracao',
+        titleSuffix: 'alterado no sistema',
+        descriptionSuffix: 'foi alterado no sistema'
+      };
+  }
+}
+
+function mapAuditEntityLabel(entity) {
+  switch (normalizeSearchText(entity)) {
+    case 'cte':
+      return 'CT-e';
+    case 'nfe':
+      return 'NF-e';
+    case 'nfse':
+      return 'NFS-e';
+    case 'certificados':
+    case 'certificado':
+      return 'Certificado';
+    case 'clientes':
+    case 'cliente':
+      return 'Cliente';
+    case 'estabelecimentos':
+    case 'estabelecimento':
+      return 'Estabelecimento';
+    case 'sync':
+      return 'Rotina de sincronizacao';
+    case 'alertas':
+    case 'alerta':
+      return 'Alerta';
+    default:
+      return formatAuditEntityFallback(entity);
+  }
+}
+
+function mapAuditAlertType(entity) {
+  switch (normalizeSearchText(entity)) {
+    case 'cte':
+      return 'CT-e';
+    case 'certificados':
+    case 'certificado':
+      return 'Certificado';
+    case 'sync':
+      return 'Busca';
+    case 'clientes':
+    case 'cliente':
+      return 'Cliente';
+    default:
+      return 'Cliente';
+  }
+}
+
+function buildAuditTechnicalMessage(row, entityLabel, actionMeta) {
+  const details = [
+    `A auditoria registrou uma ${actionMeta.actionLabel} na entidade ${entityLabel}.`,
+    row?.entidadeId ? `ID do registro: ${row.entidadeId}.` : null,
+    row?.ip ? `IP de origem: ${row.ip}.` : null,
+    row?.userAgent ? `User-Agent: ${row.userAgent}` : null
+  ].filter(Boolean);
+
+  return details.join(' ');
+}
+
+function formatAuditEntityFallback(entity) {
+  const value = String(entity || '').trim();
+  if (!value) {
+    return 'Registro';
+  }
+
+  return value
+    .split(/[-_/]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
 }
 
 function buildPersistentAlertsFromApi(alertsRaw) {
@@ -10318,6 +10421,25 @@ function buildPersistentAlertsFromApi(alertsRaw) {
   }));
 }
 
+function buildResolvedAlertsStoreFromApi(resolutionsRaw) {
+  const store = {};
+
+  (Array.isArray(resolutionsRaw) ? resolutionsRaw : []).forEach((resolution) => {
+    const alertId = String(resolution?.alertId || '').trim();
+    const fingerprint = String(resolution?.fingerprint || '').trim();
+    if (!alertId || !fingerprint) {
+      return;
+    }
+
+    store[alertId] = {
+      fingerprint,
+      resolvedAt: resolution?.resolvedAt ? String(resolution.resolvedAt) : new Date().toISOString()
+    };
+  });
+
+  return store;
+}
+
 function applyResolvedAlertState(alerts) {
   const nextStore = {};
 
@@ -10326,10 +10448,16 @@ function applyResolvedAlertState(alerts) {
       return;
     }
     const fingerprint = buildAlertFingerprint(alert);
-    const persisted = state.resolvedAlerts[alert.id];
-    if (persisted?.fingerprint === fingerprint) {
+    const persistedServer = state.serverResolvedAlerts?.[alert.id];
+    if (persistedServer?.fingerprint === fingerprint) {
       alert.status = 'Resolvido';
-      nextStore[alert.id] = persisted;
+      return;
+    }
+
+    const persistedLocal = state.resolvedAlerts[alert.id];
+    if (persistedLocal?.fingerprint === fingerprint) {
+      alert.status = 'Resolvido';
+      nextStore[alert.id] = persistedLocal;
       return;
     }
 
@@ -10371,6 +10499,34 @@ async function setAlertResolved(alert, resolved) {
       body: { resolvido: resolved }
     });
     Object.assign(alert, buildPersistentAlertsFromApi([response])[0] || {});
+    return;
+  }
+
+  if (state.dataSource === 'api') {
+    const fingerprint = buildAlertFingerprint(alert);
+    const response = await apiRequest(`/alertas/resolucoes/${encodeURIComponent(alert.id)}`, {
+      method: 'PUT',
+      body: {
+        resolvido: resolved,
+        fingerprint,
+        clientId: alert.clientId || undefined,
+        origem: alert.origem || undefined,
+        titulo: alert.titulo || undefined
+      }
+    });
+
+    if (resolved) {
+      state.serverResolvedAlerts[alert.id] = {
+        fingerprint: String(response?.fingerprint || fingerprint),
+        resolvedAt: response?.resolvedAt ? String(response.resolvedAt) : new Date().toISOString()
+      };
+      alert.status = 'Resolvido';
+    } else {
+      delete state.serverResolvedAlerts[alert.id];
+      alert.status = 'Aberto';
+    }
+
+    clearLocalResolvedAlertState(alert);
     return;
   }
 

@@ -237,6 +237,8 @@ Valores aceitos:
 - `GET /nfe/sync/scheduler-status`: mostra o status do ciclo automatico e da busca noturna de NF-e.
 - `PUT /nfe/sync/scheduler-settings`: atualiza a configuracao da busca noturna de NF-e.
 - `GET /alertas`: lista alertas persistidos do backend. No momento inclui os alertas de `CT-e` com evento de `desacordo`, com resolucao persistida em banco.
+- `GET /alertas/resolucoes`: lista resolucoes persistidas para alertas genericos do painel, como auditoria, certificado e falhas operacionais.
+- `PUT /alertas/resolucoes/:alertId`: marca ou reabre um alerta generico, persistindo a resolucao em banco por `alertId` e `fingerprint`.
 - `POST /clientes/:id/nfe/ativar`: habilita o cliente para as rotinas de NF-e.
 - `POST /clientes/:id/nfe/pausar`: desabilita o cliente para as rotinas de NF-e e pausa controles existentes.
 

@@ -7,6 +7,11 @@ describe('AlertsService', () => {
       findMany: jest.fn(),
       findUnique: jest.fn()
     },
+    alertResolution: {
+      findMany: jest.fn(),
+      upsert: jest.fn(),
+      deleteMany: jest.fn()
+    },
     cteDesacordoResolucao: {
       upsert: jest.fn(),
       deleteMany: jest.fn()
@@ -137,5 +142,83 @@ describe('AlertsService', () => {
     });
 
     await expect(service.updateCteDesacordoResolution('evento-1', true)).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('lista resolucoes genericas persistidas', async () => {
+    prisma.alertResolution.findMany.mockResolvedValue([
+      {
+        id: 'res-1',
+        alertId: 'audit-1',
+        fingerprint: 'fp-1',
+        clienteId: 'cliente-1',
+        origem: 'auditoria',
+        titulo: 'CT-e criado no sistema',
+        resolvedAt: new Date('2026-07-22T08:00:00.000Z'),
+        createdAt: new Date('2026-07-22T08:00:00.000Z'),
+        updatedAt: new Date('2026-07-22T08:00:00.000Z')
+      }
+    ]);
+
+    const result = await service.listResolutions({ clienteId: 'cliente-1' });
+
+    expect(prisma.alertResolution.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { clienteId: 'cliente-1' }
+      })
+    );
+    expect(result).toEqual([
+      {
+        alertId: 'audit-1',
+        fingerprint: 'fp-1',
+        clientId: 'cliente-1',
+        origem: 'auditoria',
+        titulo: 'CT-e criado no sistema',
+        resolvedAt: '2026-07-22T08:00:00.000Z'
+      }
+    ]);
+  });
+
+  it('persiste resolucao generica por alertId', async () => {
+    prisma.alertResolution.upsert.mockResolvedValue({
+      id: 'res-1',
+      alertId: 'audit-1',
+      fingerprint: 'fp-1',
+      clienteId: 'cliente-1',
+      origem: 'auditoria',
+      titulo: 'CT-e criado no sistema',
+      resolvedAt: new Date('2026-07-22T08:00:00.000Z'),
+      createdAt: new Date('2026-07-22T08:00:00.000Z'),
+      updatedAt: new Date('2026-07-22T08:00:00.000Z')
+    });
+
+    const result = await service.updateResolution('audit-1', {
+      resolvido: true,
+      fingerprint: 'fp-1',
+      clientId: 'cliente-1',
+      origem: 'auditoria',
+      titulo: 'CT-e criado no sistema'
+    });
+
+    expect(prisma.alertResolution.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { alertId: 'audit-1' }
+      })
+    );
+    expect(result.resolvedAt).toBe('2026-07-22T08:00:00.000Z');
+  });
+
+  it('remove resolucao generica ao reabrir alerta', async () => {
+    const result = await service.updateResolution('audit-1', {
+      resolvido: false,
+      fingerprint: 'fp-1',
+      clientId: 'cliente-1',
+      origem: 'auditoria',
+      titulo: 'CT-e criado no sistema'
+    });
+
+    expect(prisma.alertResolution.deleteMany).toHaveBeenCalledWith({
+      where: { alertId: 'audit-1' }
+    });
+    expect(result.resolvedAt).toBeNull();
   });
 });
