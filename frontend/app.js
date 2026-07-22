@@ -9699,7 +9699,7 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
       const contraparteNome =
         tipo === 'Tomada'
           ? doc.razaoSocialPrestador || '-'
-          : client?.razaoSocial || doc.razaoSocialTomador || doc.razaoSocialPrestador || '-';
+          : doc.razaoSocialTomador || '-';
 
       return {
         id: `xml-${doc.id}`,
