@@ -446,6 +446,10 @@ function onDocumentClick(event) {
     return;
   }
 
+  if (action === 'alert-toggle-resolved') {
+    return;
+  }
+
   event.preventDefault();
 
   switch (action) {
@@ -1153,7 +1157,16 @@ function onDocumentClick(event) {
       if (!alertId) {
         return;
       }
+      state.modal = null;
       openDrawer({ kind: 'alert-details', alertId });
+      return;
+    }
+    case 'alert-open-document': {
+      const alertId = actionNode.getAttribute('data-alert-id');
+      if (!alertId) {
+        return;
+      }
+      void openAlertDocument(alertId);
       return;
     }
     case 'alert-resolve': {
@@ -1608,7 +1621,6 @@ function renderDashboardPage() {
                       <div class="alert-row-header">
                         <p class="alert-row-title">${escapeHtml(alert.titulo)}</p>
                         <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                          ${renderAlertResolvedCheckbox(alert, { compact: true })}
                           ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
                         </div>
                       </div>
@@ -3649,9 +3661,10 @@ function renderAlertCards(alerts) {
           <p class="alert-row-sub">Cliente: ${escapeHtml(alert.cliente)} • ${escapeHtml(formatDateTime(alert.dataHora))} • ${statusBadge(alert.status, toneFromAlertStatus(alert.status))}</p>
           ${alert.tipo === 'CT-e' ? `<p class="alert-row-sub">CT-e: ${escapeHtml(renderAlertDocumentLine(alert))}</p>` : ''}
           <div class="table-actions">
-            <button class="icon-btn" data-action="alert-details" data-alert-id="${alert.id}">Ver detalhes</button>
-            ${alert.status === 'Resolvido' ? '' : '<button class="icon-btn" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>'}
-            ${alert.allowsReprocess ? `<button class="icon-btn" data-action="alert-reprocess" data-alert-id="${alert.id}">Reprocessar</button>` : ''}
+            <button class="icon-btn" type="button" data-action="alert-details" data-alert-id="${alert.id}">Ver detalhes</button>
+            ${alert.tipo === 'CT-e' ? `<button class="icon-btn" type="button" data-action="alert-open-document" data-alert-id="${alert.id}">Ver CT-e</button>` : ''}
+            ${alert.status === 'Resolvido' ? '' : '<button class="icon-btn" type="button" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>'}
+            ${alert.allowsReprocess ? `<button class="icon-btn" type="button" data-action="alert-reprocess" data-alert-id="${alert.id}">Reprocessar</button>` : ''}
           </div>
         </article>
       `;
@@ -4846,7 +4859,6 @@ function renderCteDisagreementAlertsModal() {
                                   <p class="dashboard-alert-overlay-subtitle">${escapeHtml(alert.descricao)}</p>
                                 </div>
                                 <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
-                                  ${renderAlertResolvedCheckbox(alert)}
                                   ${statusBadge(alert.status, toneFromAlertStatus(alert.status))}
                                   ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
                                 </div>
@@ -4861,6 +4873,8 @@ function renderCteDisagreementAlertsModal() {
                               </div>
                               <div class="table-actions" style="margin-top:12px;">
                                 <button class="btn secondary" type="button" data-action="alert-details" data-alert-id="${escapeHtml(alert.id)}">Ver detalhes</button>
+                                <button class="btn secondary" type="button" data-action="alert-open-document" data-alert-id="${escapeHtml(alert.id)}">Ver CT-e</button>
+                                ${alert.status === 'Resolvido' ? '' : `<button class="btn primary" type="button" data-action="alert-resolve" data-alert-id="${escapeHtml(alert.id)}">Marcar como resolvido</button>`}
                               </div>
                             </div>
                           </div>
@@ -5014,8 +5028,9 @@ function renderDrawer() {
                 ${alert.historicoTentativas.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}
               </ul>
               <div class="table-actions" style="margin-top:10px;">
-                ${alert.status === 'Resolvido' ? '' : `<button class="btn secondary" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>`}
-                ${alert.allowsReprocess ? `<button class="btn primary" data-action="alert-reprocess" data-alert-id="${alert.id}">Reprocessar</button>` : ''}
+                ${alert.tipo === 'CT-e' ? `<button class="btn secondary" type="button" data-action="alert-open-document" data-alert-id="${alert.id}">Ver CT-e</button>` : ''}
+                ${alert.status === 'Resolvido' ? '' : `<button class="btn secondary" type="button" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>`}
+                ${alert.allowsReprocess ? `<button class="btn primary" type="button" data-action="alert-reprocess" data-alert-id="${alert.id}">Reprocessar</button>` : ''}
               </div>
             </article>
           </div>
@@ -8301,6 +8316,28 @@ function resolveAlert(alertId) {
   })();
 }
 
+async function openAlertDocument(alertId) {
+  const alert = state.alerts.find((item) => item.id === alertId);
+  if (!alert) {
+    return;
+  }
+
+  if (alert.tipo !== 'CT-e') {
+    pushToast('Este alerta nao possui um CT-e vinculado para visualizacao.', 'info');
+    return;
+  }
+
+  const doc = findCteForAlert(alert);
+  if (!doc) {
+    pushToast('Nao foi possivel localizar o CT-e vinculado a este alerta.', 'error');
+    return;
+  }
+
+  state.drawer = null;
+  state.modal = null;
+  openModal({ kind: 'cte-details', cteId: doc.id });
+}
+
 async function executeConfirmAction(payload) {
   if (!payload || !payload.type) {
     return;
@@ -10700,6 +10737,33 @@ function findCteById(cteId) {
     return null;
   }
   return state.cteSearch.results.find((doc) => doc.id === cteId) || state.cteDocuments.find((doc) => doc.id === cteId) || null;
+}
+
+function findCteByChaveAcesso(chaveAcesso) {
+  const chaveNormalizada = normalizeDigits(chaveAcesso || '');
+  if (!chaveNormalizada) {
+    return null;
+  }
+
+  return (
+    state.cteSearch.results.find((doc) => normalizeDigits(doc?.chaveAcesso || '') === chaveNormalizada) ||
+    state.cteDocuments.find((doc) => normalizeDigits(doc?.chaveAcesso || '') === chaveNormalizada) ||
+    null
+  );
+}
+
+function findCteForAlert(alert) {
+  if (!alert || alert.tipo !== 'CT-e') {
+    return null;
+  }
+
+  return (
+    findCteById(alert.documentoId) ||
+    state.cteSearch.results.find((doc) => doc.apiCteId === alert.documentoId) ||
+    state.cteDocuments.find((doc) => doc.apiCteId === alert.documentoId) ||
+    findCteByChaveAcesso(alert.chaveAcesso) ||
+    null
+  );
 }
 
 function canSyncXmlEvents(xml) {

@@ -1158,6 +1158,18 @@ textarea {
   pointer-events: none;
 }
 
+#modalRoot {
+  z-index: 80;
+}
+
+#drawerRoot {
+  z-index: 90;
+}
+
+#toastRoot {
+  z-index: 100;
+}
+
 .overlay {
   position: absolute;
   inset: 0;
@@ -1165,7 +1177,7 @@ textarea {
   display: grid;
   place-items: center;
   pointer-events: auto;
-  z-index: 100;
+  z-index: 1;
 }
 
 .modal {
