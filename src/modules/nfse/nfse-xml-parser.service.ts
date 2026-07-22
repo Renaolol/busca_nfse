@@ -78,19 +78,29 @@ export class NfseXmlParserService {
       status: this.extract(xml, ['status', 'Situacao', 'cStat']),
       cnpjPrestador:
         this.normalizeCnpj(this.extract(xml, ['CnpjPrestador'])) ??
-        this.normalizeCnpj(this.extractNestedAny(xml, ['emit', 'prestador', 'prest'], ['CNPJ', 'cnpj'])),
+        this.normalizeCnpj(
+          this.extractNestedAny(
+            xml,
+            ['emit', 'prestador', 'prest', 'PrestadorServico', 'Prestador'],
+            ['CNPJ', 'cnpj', 'Cnpj', 'CpfCnpj', 'CPF']
+          )
+        ),
       razaoSocialPrestador: this.extractNestedAny(
         xml,
-        ['emit', 'prestador', 'prest'],
-        ['xNome', 'razaoSocial', 'Nome']
+        ['emit', 'prestador', 'prest', 'PrestadorServico', 'Prestador'],
+        ['xNome', 'razaoSocial', 'RazaoSocial', 'Nome', 'NomeFantasia']
       ),
       cnpjTomador: this.normalizeCnpj(
-        this.extractNestedAny(xml, ['tomador', 'toma'], ['CNPJ', 'cnpj', 'CpfCnpj'])
+        this.extractNestedAny(
+          xml,
+          ['tomador', 'toma', 'Tomador', 'TomadorServico'],
+          ['CNPJ', 'cnpj', 'Cnpj', 'CpfCnpj', 'CPF']
+        )
       ),
       razaoSocialTomador: this.extractNestedAny(
         xml,
-        ['tomador', 'toma'],
-        ['xNome', 'razaoSocial', 'Nome']
+        ['tomador', 'toma', 'Tomador', 'TomadorServico'],
+        ['xNome', 'razaoSocial', 'RazaoSocial', 'Nome', 'NomeFantasia']
       ),
       municipioPrestacaoCodigo:
         this.extract(xml, ['municipioPrestacaoCodigo', 'codigoMunicipioPrestacao', 'cLocPrestacao']) ??

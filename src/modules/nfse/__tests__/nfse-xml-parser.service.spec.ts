@@ -113,4 +113,48 @@ describe('NfseXmlParserService', () => {
     expect(parsed.descricaoServico).toContain('consultoria');
     expect(parsed.competencia?.toISOString()).toBe('2024-08-01T00:00:00.000Z');
   });
+
+  it('parseia XML ABRASF classico com prestador e tomador em tags capitalizadas', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse versao="1.00">
+    <InfNfse>
+      <Numero>64</Numero>
+      <CodigoVerificacao>42042022228415329000132000000000006426071542411790</CodigoVerificacao>
+      <DataEmissao>2026-07-08T21:01:32-03:00</DataEmissao>
+      <PrestadorServico>
+        <IdentificacaoPrestador>
+          <CpfCnpj><Cnpj>28415329000132</Cnpj></CpfCnpj>
+        </IdentificacaoPrestador>
+        <RazaoSocial>FRIEDRICH PREPARACAO DE DOCUMENTOS LTDA</RazaoSocial>
+      </PrestadorServico>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <Servico>
+            <Valores><ValorServicos>170.27</ValorServicos></Valores>
+            <IssRetido>2</IssRetido>
+            <ItemListaServico>1703</ItemListaServico>
+            <Discriminacao>Servico de emissao de documentos</Discriminacao>
+          </Servico>
+          <Tomador>
+            <IdentificacaoTomador>
+              <CpfCnpj><Cnpj>39857367000161</Cnpj></CpfCnpj>
+            </IdentificacaoTomador>
+            <RazaoSocial>TRANSPORTES BARBIAN LTDA</RazaoSocial>
+          </Tomador>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`;
+
+    const parsed = parser.parse(xml);
+
+    expect(parsed.chaveAcesso).toBe('42042022228415329000132000000000006426071542411790');
+    expect(parsed.cnpjPrestador).toBe('28415329000132');
+    expect(parsed.razaoSocialPrestador).toBe('FRIEDRICH PREPARACAO DE DOCUMENTOS LTDA');
+    expect(parsed.cnpjTomador).toBe('39857367000161');
+    expect(parsed.razaoSocialTomador).toBe('TRANSPORTES BARBIAN LTDA');
+    expect(parsed.retencaoIss).toBe('2');
+  });
 });

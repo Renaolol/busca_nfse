@@ -51,7 +51,7 @@ export class NfseService {
       }
     }
 
-    const [total, items] = await Promise.all([
+    const [total, rawItems] = await Promise.all([
       this.prisma.nfseDocumento.count({ where }),
       this.prisma.nfseDocumento.findMany({
         where,
@@ -61,6 +61,7 @@ export class NfseService {
         include: this.nfseDocumentoInclude()
       })
     ]);
+    const items = await Promise.all(rawItems.map((item) => this.enrichDocumentoSummary(item)));
 
     return {
       items,
@@ -362,6 +363,30 @@ export class NfseService {
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase();
+  }
+
+  private async enrichDocumentoSummary(
+    doc: NfseDocumento & {
+      eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
+    }
+  ) {
+    if (!doc.xmlPath || (doc.razaoSocialPrestador && doc.razaoSocialTomador)) {
+      return doc;
+    }
+
+    try {
+      const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
+      const parsed = this.parser.parse(xml);
+
+      return {
+        ...doc,
+        razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
+        razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null
+      };
+    } catch (error) {
+      this.logger.warn(`Falha ao enriquecer listagem da NFS-e ${doc.id}: ${this.toErrorMessage(error)}`);
+      return doc;
+    }
   }
 
   private async enrichDocumentoDetails(

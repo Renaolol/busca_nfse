@@ -109,6 +109,64 @@ describe('NfseService', () => {
     });
   });
 
+  it('enriquece a listagem com razao social do prestador a partir do XML quando o banco estiver sem esse campo', async () => {
+    prisma.nfseDocumento.count.mockResolvedValueOnce(1);
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-lista-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42042022228415329000132000000000006426071542411790',
+        numeroNfse: '64',
+        cnpjPrestador: '28415329000132',
+        razaoSocialPrestador: null,
+        cnpjTomador: '39857367000161',
+        razaoSocialTomador: 'TRANSPORTES BARBIAN LTDA',
+        xmlPath: 'nfse/producao/28415329000132/2026/07/xml/doc-lista-1.xml',
+        createdAt: new Date('2026-07-08T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-21T00:00:00.000Z'),
+        eventos: []
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse versao="1.00">
+    <InfNfse>
+      <Numero>64</Numero>
+      <CodigoVerificacao>42042022228415329000132000000000006426071542411790</CodigoVerificacao>
+      <DataEmissao>2026-07-08T21:01:32-03:00</DataEmissao>
+      <PrestadorServico>
+        <IdentificacaoPrestador><CpfCnpj><Cnpj>28415329000132</Cnpj></CpfCnpj></IdentificacaoPrestador>
+        <RazaoSocial>FRIEDRICH PREPARACAO DE DOCUMENTOS LTDA</RazaoSocial>
+      </PrestadorServico>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <Tomador>
+            <IdentificacaoTomador><CpfCnpj><Cnpj>39857367000161</Cnpj></CpfCnpj></IdentificacaoTomador>
+            <RazaoSocial>TRANSPORTES BARBIAN LTDA</RazaoSocial>
+          </Tomador>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`,
+        'utf8'
+      )
+    );
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      page: 1,
+      pageSize: 50
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].razaoSocialPrestador).toBe('FRIEDRICH PREPARACAO DE DOCUMENTOS LTDA');
+  });
+
   it('retorna estatisticas agregadas do dashboard por cliente', async () => {
     prisma.nfseDocumento.count.mockResolvedValueOnce(512).mockResolvedValueOnce(492);
     prisma.nfseDocumento.groupBy
