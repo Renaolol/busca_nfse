@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { AppController } from './app.controller';
 import { JobsModule } from './jobs/jobs.module';
 import { AuditModule } from './modules/audit/audit.module';
+import { AlertsModule } from './modules/alerts/alerts.module';
 import { CertificatesModule } from './modules/certificates/certificates.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { CteModule } from './modules/cte/cte.module';
@@ -20,6 +21,7 @@ import { PrismaModule } from './prisma/prisma.module';
     PrismaModule,
     StorageModule,
     HealthModule,
+    AlertsModule,
     ClientsModule,
     CteModule,
     EstablishmentsModule,

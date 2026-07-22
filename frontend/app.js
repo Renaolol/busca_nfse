@@ -353,6 +353,7 @@ async function hydrateFromApi() {
     nfseDocs,
     nfeDocs,
     cteDocs,
+    persistedAlerts,
     auditRows,
     schedulerStatus
   ] = await Promise.all([
@@ -368,6 +369,7 @@ async function hydrateFromApi() {
     apiRequest(`/nfse?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
     apiRequest(`/nfe?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
     apiRequest(`/cte?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
+    apiRequest('/alertas').catch(() => []),
     apiRequest('/auditoria').catch(() => []),
     apiRequest('/sync/scheduler-status').catch(() => null)
   ]);
@@ -390,7 +392,10 @@ async function hydrateFromApi() {
   const nfeDocuments = buildNfeDocumentsFromApi(nfeDocsPage.items, clients);
   const cteDocuments = buildCteDocumentsFromApi(cteDocsPage.items, clients);
   const nfeSyncControls = buildNfeSyncControlsFromApi(nfeSyncByClient, clients, establishmentsByClient);
-  const alerts = buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, auditRows);
+  const alerts = [
+    ...buildPersistentAlertsFromApi(persistedAlerts),
+    ...buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, auditRows)
+  ];
 
   state.clients = clients;
   state.certificates = certificates;
@@ -1123,7 +1128,7 @@ function onDocumentClick(event) {
       return;
     }
     case 'alerts-mark-selected': {
-      markSelectedAlertsResolved();
+      void markSelectedAlertsResolved();
       return;
     }
     case 'alert-select': {
@@ -1149,7 +1154,7 @@ function onDocumentClick(event) {
     }
     case 'alert-resolve': {
       const alertId = actionNode.getAttribute('data-alert-id');
-      resolveAlert(alertId);
+      void resolveAlert(alertId);
       return;
     }
     case 'alert-reprocess': {
@@ -1323,6 +1328,15 @@ function onDocumentSubmit(event) {
 function onDocumentChange(event) {
   const target = event.target;
   if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement)) {
+    return;
+  }
+
+  if (target instanceof HTMLInputElement && target.getAttribute('data-action') === 'alert-toggle-resolved') {
+    const alertId = target.getAttribute('data-alert-id');
+    if (!alertId) {
+      return;
+    }
+    void toggleAlertResolved(alertId, target.checked);
     return;
   }
 
@@ -1573,9 +1587,12 @@ function renderDashboardPage() {
                     return `<article class="alert-row ${alert.severity.toLowerCase()}">
                       <div class="alert-row-header">
                         <p class="alert-row-title">${escapeHtml(alert.titulo)}</p>
-                        ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
+                        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+                          ${renderAlertResolvedCheckbox(alert, { compact: true })}
+                          ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
+                        </div>
                       </div>
-                      <p class="alert-row-sub">${escapeHtml(alert.cliente)} • ${escapeHtml(formatDateTime(alert.dataHora))}</p>
+                      <p class="alert-row-sub">${escapeHtml(buildAlertPriorityMeta(alert))}</p>
                     </article>`;
                   })
                   .join('')
@@ -3550,7 +3567,7 @@ function renderAlertsPage() {
             </label>
             <label class="field">
               Tipo
-              <select name="tipo">${renderOptions(['Todos', 'Certificado', 'Prefeitura', 'XML', 'Cliente', 'Servidor', 'Busca'], state.filters.alerts.tipo)}</select>
+              <select name="tipo">${renderOptions(['Todos', 'Certificado', 'Prefeitura', 'XML', 'Cliente', 'Servidor', 'Busca', 'CT-e'], state.filters.alerts.tipo)}</select>
             </label>
             <label class="field">
               Status
@@ -3606,13 +3623,17 @@ function renderAlertCards(alerts) {
               <input type="checkbox" data-action="alert-select" data-alert-id="${alert.id}" ${state.selectedAlertIds.has(alert.id) ? 'checked' : ''} aria-label="Selecionar alerta ${escapeHtml(alert.titulo)}" />
               <p class="alert-row-title">${escapeHtml(alert.titulo)}</p>
             </div>
-            ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
+            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+              ${renderAlertResolvedCheckbox(alert)}
+              ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
+            </div>
           </div>
           <p class="alert-row-sub">${escapeHtml(alert.descricao)}</p>
           <p class="alert-row-sub">Cliente: ${escapeHtml(alert.cliente)} • ${escapeHtml(formatDateTime(alert.dataHora))} • ${statusBadge(alert.status, toneFromAlertStatus(alert.status))}</p>
+          ${alert.tipo === 'CT-e' ? `<p class="alert-row-sub">CT-e: ${escapeHtml(renderAlertDocumentLine(alert))}</p>` : ''}
           <div class="table-actions">
             <button class="icon-btn" data-action="alert-details" data-alert-id="${alert.id}">Ver detalhes</button>
-            <button class="icon-btn" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>
+            ${alert.canToggleResolved ? '' : '<button class="icon-btn" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>'}
             ${alert.allowsReprocess ? `<button class="icon-btn" data-action="alert-reprocess" data-alert-id="${alert.id}">Reprocessar</button>` : ''}
           </div>
         </article>
@@ -4894,6 +4915,7 @@ function renderDrawer() {
                 ${detailItem('Cliente', alert.cliente)}
                 ${detailItem('Origem', alert.origem)}
                 ${detailItem('Status', alert.status)}
+                ${detailItem('Documento', renderAlertDocumentLine(alert))}
                 <div style="grid-column: span 2;">${detailItem('Mensagem tecnica', alert.mensagemTecnica)}</div>
                 <div style="grid-column: span 2;">${detailItem('Sugestao de acao', alert.sugestaoAcao)}</div>
               </div>
@@ -4904,7 +4926,8 @@ function renderDrawer() {
                 ${alert.historicoTentativas.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}
               </ul>
               <div class="table-actions" style="margin-top:10px;">
-                <button class="btn secondary" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>
+                ${renderAlertResolvedCheckbox(alert)}
+                ${alert.canToggleResolved ? '' : `<button class="btn secondary" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>`}
                 ${alert.allowsReprocess ? `<button class="btn primary" data-action="alert-reprocess" data-alert-id="${alert.id}">Reprocessar</button>` : ''}
               </div>
             </article>
@@ -8148,15 +8171,30 @@ function markSelectedAlertsResolved() {
     return;
   }
 
-  state.alerts.forEach((alert) => {
-    if (state.selectedAlertIds.has(alert.id)) {
-      markAlertAsResolved(alert);
-    }
-  });
+  const selectedIds = [...state.selectedAlertIds];
+  void (async () => {
+    let resolvedCount = 0;
 
-  pushToast(`${state.selectedAlertIds.size} alerta(s) marcado(s) como resolvido(s).`, 'success');
-  state.selectedAlertIds = new Set();
-  render();
+    for (const alert of state.alerts) {
+      if (!selectedIds.includes(alert.id)) {
+        continue;
+      }
+
+      try {
+        await setAlertResolved(alert, true);
+        resolvedCount += 1;
+      } catch (error) {
+        pushToast(`Falha ao resolver alerta "${alert.titulo}": ${toErrorMessage(error)}`, 'error');
+      }
+    }
+
+    if (resolvedCount > 0) {
+      pushToast(`${resolvedCount} alerta(s) marcado(s) como resolvido(s).`, 'success');
+    }
+
+    state.selectedAlertIds = new Set();
+    render();
+  })();
 }
 
 function resolveAlert(alertId) {
@@ -8165,9 +8203,15 @@ function resolveAlert(alertId) {
     return;
   }
 
-  markAlertAsResolved(alert);
-  pushToast(`Alerta "${alert.titulo}" resolvido.`, 'success');
-  render();
+  void (async () => {
+    try {
+      await setAlertResolved(alert, true);
+      pushToast(`Alerta "${alert.titulo}" resolvido.`, 'success');
+    } catch (error) {
+      pushToast(`Falha ao resolver alerta: ${toErrorMessage(error)}`, 'error');
+    }
+    render();
+  })();
 }
 
 async function executeConfirmAction(payload) {
@@ -10059,10 +10103,41 @@ function buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, audit
   return alerts.sort((a, b) => Date.parse(b.dataHora || 0) - Date.parse(a.dataHora || 0)).slice(0, 120);
 }
 
+function buildPersistentAlertsFromApi(alertsRaw) {
+  return (Array.isArray(alertsRaw) ? alertsRaw : []).map((alert) => ({
+    id: String(alert?.id || ''),
+    eventId: String(alert?.eventId || ''),
+    severity: String(alert?.severity || 'Atencao'),
+    tipo: String(alert?.tipo || 'CT-e'),
+    titulo: String(alert?.titulo || 'Alerta operacional'),
+    descricao: String(alert?.descricao || ''),
+    clientId: String(alert?.clientId || ''),
+    cliente: String(alert?.cliente || 'Cliente nao identificado'),
+    dataHora: String(alert?.dataHora || new Date().toISOString()),
+    status: String(alert?.status || 'Aberto'),
+    origem: String(alert?.origem || 'server'),
+    mensagemTecnica: String(alert?.mensagemTecnica || '-'),
+    sugestaoAcao: String(alert?.sugestaoAcao || '-'),
+    historicoTentativas: Array.isArray(alert?.historicoTentativas) ? alert.historicoTentativas.map((entry) => String(entry)) : [],
+    allowsReprocess: Boolean(alert?.allowsReprocess),
+    persistence: String(alert?.persistence || 'server'),
+    canToggleResolved: Boolean(alert?.canToggleResolved),
+    documentoId: String(alert?.documentoId || ''),
+    chaveAcesso: String(alert?.chaveAcesso || ''),
+    numeroDocumento: String(alert?.numeroDocumento || ''),
+    eventoTipo: String(alert?.eventoTipo || ''),
+    eventoDescricao: String(alert?.eventoDescricao || ''),
+    resolvedAt: alert?.resolvedAt ? String(alert.resolvedAt) : null
+  }));
+}
+
 function applyResolvedAlertState(alerts) {
   const nextStore = {};
 
   alerts.forEach((alert) => {
+    if (isServerPersistedAlert(alert)) {
+      return;
+    }
     const fingerprint = buildAlertFingerprint(alert);
     const persisted = state.resolvedAlerts[alert.id];
     if (persisted?.fingerprint === fingerprint) {
@@ -10093,6 +10168,34 @@ function markAlertAsResolved(alert) {
   saveResolvedAlertsStore(state.resolvedAlerts);
 }
 
+function clearLocalResolvedAlertState(alert) {
+  delete state.resolvedAlerts[alert.id];
+  saveResolvedAlertsStore(state.resolvedAlerts);
+}
+
+function isServerPersistedAlert(alert) {
+  return String(alert?.persistence || '').toLowerCase() === 'server';
+}
+
+async function setAlertResolved(alert, resolved) {
+  if (isServerPersistedAlert(alert)) {
+    const response = await apiRequest(`/alertas/cte-desacordo/${encodeURIComponent(alert.eventId)}/resolucao`, {
+      method: 'PUT',
+      body: { resolvido: resolved }
+    });
+    Object.assign(alert, buildPersistentAlertsFromApi([response])[0] || {});
+    return;
+  }
+
+  if (resolved) {
+    markAlertAsResolved(alert);
+    return;
+  }
+
+  alert.status = 'Aberto';
+  clearLocalResolvedAlertState(alert);
+}
+
 function buildAlertFingerprint(alert) {
   return JSON.stringify([
     alert.id,
@@ -10102,6 +10205,61 @@ function buildAlertFingerprint(alert) {
     alert.descricao || '',
     alert.mensagemTecnica || ''
   ]);
+}
+
+function renderAlertResolvedCheckbox(alert, options = {}) {
+  if (!alert?.canToggleResolved) {
+    return '';
+  }
+
+  return `
+    <label style="display:inline-flex; align-items:center; gap:6px; color:#606062; font-size:${options.compact ? '12px' : '13px'};">
+      <input type="checkbox" data-action="alert-toggle-resolved" data-alert-id="${escapeHtml(alert.id)}" ${alert.status === 'Resolvido' ? 'checked' : ''} />
+      <span>Resolvido</span>
+    </label>
+  `;
+}
+
+function renderAlertDocumentLine(alert) {
+  const numero = String(alert?.numeroDocumento || '').trim();
+  const chave = String(alert?.chaveAcesso || '').trim();
+  if (numero) {
+    return `CT-e ${numero}`;
+  }
+  if (chave) {
+    return `CT-e ${chave}`;
+  }
+  return '-';
+}
+
+function buildAlertPriorityMeta(alert) {
+  const parts = [String(alert?.cliente || 'Cliente nao identificado').trim()];
+  const documentLine = renderAlertDocumentLine(alert);
+  if (documentLine !== '-') {
+    parts.push(documentLine);
+  }
+  parts.push(formatDateTime(alert?.dataHora));
+  return parts.filter(Boolean).join(' • ');
+}
+
+function toggleAlertResolved(alertId, resolved) {
+  const alert = state.alerts.find((item) => item.id === alertId);
+  if (!alert) {
+    return;
+  }
+
+  void (async () => {
+    try {
+      await setAlertResolved(alert, resolved);
+      pushToast(
+        resolved ? `Alerta "${alert.titulo}" resolvido.` : `Alerta "${alert.titulo}" reaberto.`,
+        'success'
+      );
+    } catch (error) {
+      pushToast(`Falha ao atualizar alerta: ${toErrorMessage(error)}`, 'error');
+    }
+    render();
+  })();
 }
 
 function loadResolvedAlertsStore() {

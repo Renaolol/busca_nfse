@@ -84,6 +84,7 @@ npm run prisma:deploy
 - `cStat 410` em CT-e significa que a requisicao foi enviada para um WebService que nao atende a UF embutida na chave de acesso.
 - Esse caso aparece com frequencia quando `CTE_CONSULTA_URL_PRODUCAO` foi fixada para uma UF/autorizador e o lote mistura chaves de outras UFs.
 - O backend passou a refazer automaticamente a consulta no endpoint padrao resolvido pelo `cUF` da chave quando a URL fixa de producao devolve `410`.
+- Alertas de `CT-e` com evento de `desacordo` agora sao lidos do backend via `GET /alertas` e a marcacao de resolvido fica persistida na tabela `cte_desacordo_resolucoes`.
 - `cStat 236` com mensagem sobre `Modelo diferente de 57 ou 67 ou 64` indica que a chave enviada ao fluxo de CT-e nao pertence a CT-e. O backend agora bloqueia essa consulta antes de chamar o autorizador.
 
 ## Erro de escopo (`clienteId`)

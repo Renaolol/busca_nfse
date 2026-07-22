@@ -313,10 +313,23 @@ model NfeEvento {
   hashXml       String?   @map("hash_xml") @db.VarChar(128)
   createdAt     DateTime  @default(now()) @map("created_at")
 
-  nfeDocumento NfeDocumento @relation(fields: [nfeDocumentoId], references: [id], onDelete: Cascade)
+  nfeDocumento           NfeDocumento            @relation(fields: [nfeDocumentoId], references: [id], onDelete: Cascade)
+  cteDesacordoResolucao  CteDesacordoResolucao?
 
   @@unique([nfeDocumentoId, tipoEvento, dataEvento, hashXml], map: "nfe_eventos_documento_tipo_data_hash_key")
   @@map("nfe_eventos")
+}
+
+model CteDesacordoResolucao {
+  id          String   @id @default(uuid()) @db.Uuid
+  nfeEventoId String   @unique @map("nfe_evento_id") @db.Uuid
+  resolvidoEm DateTime @default(now()) @map("resolvido_em")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  nfeEvento NfeEvento @relation(fields: [nfeEventoId], references: [id], onDelete: Cascade)
+
+  @@map("cte_desacordo_resolucoes")
 }
 
 model AuditoriaUsuario {
