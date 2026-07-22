@@ -10273,10 +10273,7 @@ function buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, audit
       if (!row?.clienteId) {
         return;
       }
-      if (row?.acao !== 'create' && row?.acao !== 'update' && row?.acao !== 'delete') {
-        return;
-      }
-      if (row?.acao === 'create' && normalizeSearchText(row?.entidade) === 'cte') {
+      if (row?.acao !== 'update' && row?.acao !== 'delete') {
         return;
       }
       const client = clientById[row.clienteId];
