@@ -10162,39 +10162,43 @@ function buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, audit
   const clientById = Object.fromEntries(clients.map((client) => [client.id, client]));
 
   certificates.forEach((cert) => {
+    const validadeFormatada = cert.validade ? formatDate(cert.validade) : '-';
+    const diasRestantes = Math.max(Number(cert.diasRestantes || 0), 0);
     if (cert.status === 'Vencido') {
       alerts.push({
         id: `cert-vencido-${cert.id}`,
         severity: 'Critico',
         tipo: 'Certificado',
-        titulo: 'Certificado vencido',
-        descricao: `Certificado ${cert.apelido} esta vencido e pode bloquear a sincronizacao.`,
+        titulo: `Certificado vencido em ${validadeFormatada}`,
+        descricao: `O certificado ${cert.apelido} venceu em ${validadeFormatada} e pode bloquear a sincronizacao.`,
         clientId: cert.clientId,
         cliente: cert.cliente,
         dataHora: cert.ultimaValidacao || new Date().toISOString(),
         status: 'Aberto',
         origem: 'validacao-certificado',
-        mensagemTecnica: 'validade_fim expirada',
+        mensagemTecnica: `O certificado ${cert.apelido} do cliente ${cert.cliente} venceu em ${validadeFormatada}.`,
         sugestaoAcao: 'Atualizar certificado digital do cliente.',
         historicoTentativas: [],
-        allowsReprocess: true
+        allowsReprocess: true,
+        validadeCertificado: cert.validade || null
       });
     } else if (cert.status === 'A vencer') {
       alerts.push({
         id: `cert-vencer-${cert.id}`,
         severity: 'Atencao',
         tipo: 'Certificado',
-        titulo: `Certificado vence em ${Math.max(cert.diasRestantes, 0)} dia(s)`,
-        descricao: `Planejar renovacao do certificado ${cert.apelido}.`,
+        titulo: `Certificado vence em ${validadeFormatada}`,
+        descricao: `Planejar renovacao do certificado ${cert.apelido}. Restam ${diasRestantes} dia(s).`,
         clientId: cert.clientId,
         cliente: cert.cliente,
         dataHora: cert.ultimaValidacao || new Date().toISOString(),
         status: 'Em analise',
         origem: 'monitor-validade',
-        mensagemTecnica: `validade_fim=${cert.validade || '-'}`,
+        mensagemTecnica: `O certificado ${cert.apelido} do cliente ${cert.cliente} vence em ${validadeFormatada}. Restam ${diasRestantes} dia(s) para renovacao.`,
         sugestaoAcao: 'Solicitar renovacao antes do vencimento.',
         historicoTentativas: [],
-        allowsReprocess: false
+        allowsReprocess: false,
+        validadeCertificado: cert.validade || null
       });
     }
   });
@@ -10270,6 +10274,9 @@ function buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, audit
         return;
       }
       if (row?.acao !== 'create' && row?.acao !== 'update' && row?.acao !== 'delete') {
+        return;
+      }
+      if (row?.acao === 'create' && normalizeSearchText(row?.entidade) === 'cte') {
         return;
       }
       const client = clientById[row.clienteId];
@@ -10540,6 +10547,15 @@ async function setAlertResolved(alert, resolved) {
 }
 
 function buildAlertFingerprint(alert) {
+  if (alert?.origem === 'monitor-validade' || alert?.origem === 'validacao-certificado') {
+    return JSON.stringify([
+      alert.id,
+      alert.origem || '',
+      alert.clientId || '',
+      alert.validadeCertificado || ''
+    ]);
+  }
+
   return JSON.stringify([
     alert.id,
     alert.origem || '',
