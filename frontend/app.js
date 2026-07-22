@@ -501,6 +501,10 @@ function onDocumentClick(event) {
       closeDrawer();
       return;
     }
+    case 'dashboard-open-cte-disagreement-alerts': {
+      openModal({ kind: 'cte-disagreement-alerts' });
+      return;
+    }
     case 'open-new-client-modal': {
       openModal({ kind: 'client-form', mode: 'create' });
       return;
@@ -1509,6 +1513,7 @@ function renderDashboardPage() {
   const nfeStats = getNfeDashboardStats();
   const cteStats = getCteDashboardStats();
   const certsExpiring = state.certificates.filter((cert) => cert.status === 'A vencer').length;
+  const openCteDisagreementAlerts = getOpenCteDisagreementAlerts();
   const latestSearchRows = [...state.clients]
     .sort((a, b) => Date.parse(b.ultimaBusca || 0) - Date.parse(a.ultimaBusca || 0))
     .slice(0, 8);
@@ -1521,7 +1526,22 @@ function renderDashboardPage() {
           <h2 class="card-title">Resumo da rotina noturna</h2>
           <p class="card-subtitle">${lastRun ? `Execucao iniciada as ${formatHour(lastRun.inicio)} e finalizada as ${formatHour(lastRun.fim)}.` : 'Sem execucoes recentes.'}</p>
         </div>
-        ${statusBadge(lastRun?.status || 'Sem status', summaryTone, 'summary-status')}
+        <div class="summary-actions">
+          ${
+            openCteDisagreementAlerts.length
+              ? `
+                <button class="dashboard-alert-button" type="button" data-action="dashboard-open-cte-disagreement-alerts" aria-label="Abrir alertas de desacordo de CT-e">
+                  <span class="dashboard-alert-button-icon">${icon('alert')}</span>
+                  <span class="dashboard-alert-button-copy">
+                    <strong>${escapeHtml(String(openCteDisagreementAlerts.length))}</strong>
+                    <span>CT-e em desacordo</span>
+                  </span>
+                </button>
+              `
+              : ''
+          }
+          ${statusBadge(lastRun?.status || 'Sem status', summaryTone, 'summary-status')}
+        </div>
       </article>
 
       ${renderSchedulerStatusStrip()}
@@ -3623,17 +3643,14 @@ function renderAlertCards(alerts) {
               <input type="checkbox" data-action="alert-select" data-alert-id="${alert.id}" ${state.selectedAlertIds.has(alert.id) ? 'checked' : ''} aria-label="Selecionar alerta ${escapeHtml(alert.titulo)}" />
               <p class="alert-row-title">${escapeHtml(alert.titulo)}</p>
             </div>
-            <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-              ${renderAlertResolvedCheckbox(alert)}
-              ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
-            </div>
+            ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
           </div>
           <p class="alert-row-sub">${escapeHtml(alert.descricao)}</p>
           <p class="alert-row-sub">Cliente: ${escapeHtml(alert.cliente)} • ${escapeHtml(formatDateTime(alert.dataHora))} • ${statusBadge(alert.status, toneFromAlertStatus(alert.status))}</p>
           ${alert.tipo === 'CT-e' ? `<p class="alert-row-sub">CT-e: ${escapeHtml(renderAlertDocumentLine(alert))}</p>` : ''}
           <div class="table-actions">
             <button class="icon-btn" data-action="alert-details" data-alert-id="${alert.id}">Ver detalhes</button>
-            ${alert.canToggleResolved ? '' : '<button class="icon-btn" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>'}
+            ${alert.status === 'Resolvido' ? '' : '<button class="icon-btn" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>'}
             ${alert.allowsReprocess ? `<button class="icon-btn" data-action="alert-reprocess" data-alert-id="${alert.id}">Reprocessar</button>` : ''}
           </div>
         </article>
@@ -3864,6 +3881,8 @@ function renderModal() {
       return renderDownloadByKeyReportModal();
     case 'dominio-import-report':
       return renderDominioImportReportModal();
+    case 'cte-disagreement-alerts':
+      return renderCteDisagreementAlertsModal();
     case 'dominio-nfe-view':
       return renderDominioNfeViewerModal();
     case 'xml-details':
@@ -4792,6 +4811,75 @@ function renderXmlDetailsModal(xmlId) {
   `;
 }
 
+function renderCteDisagreementAlertsModal() {
+  const alerts = getCteDisagreementAlerts();
+  const openAlerts = alerts.filter((alert) => alert.status !== 'Resolvido');
+  const resolvedAlerts = alerts.filter((alert) => alert.status === 'Resolvido');
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(1100px, calc(100vw - 24px));">
+        <div class="modal-header">
+          <h3 class="modal-title">Alertas de desacordo de CT-e</h3>
+          <p class="modal-subtitle">Acompanhe CT-es que receberam evento de desacordo e marque como resolvido quando o tratamento operacional for concluido.</p>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid four" style="margin-bottom:18px;">
+            ${detailItem('Total', String(alerts.length))}
+            ${detailItem('Em aberto', String(openAlerts.length))}
+            ${detailItem('Resolvidos', String(resolvedAlerts.length))}
+            ${detailItem('Empresas afetadas', String(new Set(openAlerts.map((alert) => alert.clientId).filter(Boolean)).size))}
+          </div>
+          ${
+            alerts.length
+              ? `<div style="display:grid; gap:14px;">
+                  ${alerts
+                    .map(
+                      (alert) => `
+                        <article class="dashboard-alert-overlay-card ${alert.status === 'Resolvido' ? 'resolved' : 'open'}">
+                          <div class="dashboard-alert-overlay-main">
+                            <div class="dashboard-alert-overlay-icon">${icon('alert')}</div>
+                            <div style="min-width:0;">
+                              <div class="dashboard-alert-overlay-header">
+                                <div>
+                                  <h4 class="dashboard-alert-overlay-title">${escapeHtml(alert.titulo)}</h4>
+                                  <p class="dashboard-alert-overlay-subtitle">${escapeHtml(alert.descricao)}</p>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
+                                  ${renderAlertResolvedCheckbox(alert)}
+                                  ${statusBadge(alert.status, toneFromAlertStatus(alert.status))}
+                                  ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
+                                </div>
+                              </div>
+                              <div class="dashboard-alert-overlay-meta">
+                                <span><strong>Cliente:</strong> ${escapeHtml(alert.cliente)}</span>
+                                <span><strong>Data:</strong> ${escapeHtml(formatDateTime(alert.dataHora))}</span>
+                              </div>
+                              <div class="dashboard-alert-overlay-meta">
+                                <span><strong>CT-e:</strong> ${escapeHtml(renderAlertDocumentLine(alert))}</span>
+                                <span><strong>Chave:</strong> ${escapeHtml(alert.chaveAcesso || '-')}</span>
+                              </div>
+                              <div class="table-actions" style="margin-top:12px;">
+                                <button class="btn secondary" type="button" data-action="alert-details" data-alert-id="${escapeHtml(alert.id)}">Ver detalhes</button>
+                              </div>
+                            </div>
+                          </div>
+                        </article>
+                      `
+                    )
+                    .join('')}
+                </div>`
+              : '<div class="table-state">Nenhum alerta de desacordo de CT-e encontrado.</div>'
+          }
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="close-modal">Fechar</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderXmlViewerModal(xmlId) {
   const xml = findXmlById(xmlId);
   if (!xml) {
@@ -4926,8 +5014,7 @@ function renderDrawer() {
                 ${alert.historicoTentativas.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}
               </ul>
               <div class="table-actions" style="margin-top:10px;">
-                ${renderAlertResolvedCheckbox(alert)}
-                ${alert.canToggleResolved ? '' : `<button class="btn secondary" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>`}
+                ${alert.status === 'Resolvido' ? '' : `<button class="btn secondary" data-action="alert-resolve" data-alert-id="${alert.id}">Marcar como resolvido</button>`}
                 ${alert.allowsReprocess ? `<button class="btn primary" data-action="alert-reprocess" data-alert-id="${alert.id}">Reprocessar</button>` : ''}
               </div>
             </article>
@@ -8459,6 +8546,20 @@ function getPriorityAlerts() {
       }
       return Date.parse(b.dataHora) - Date.parse(a.dataHora);
     });
+}
+
+function getCteDisagreementAlerts() {
+  return [...state.alerts]
+    .filter((alert) => alert.origem === 'cte-desacordo' || (alert.tipo === 'CT-e' && alert.canToggleResolved))
+    .sort((a, b) => {
+      const leftResolved = a.status === 'Resolvido' ? 1 : 0;
+      const rightResolved = b.status === 'Resolvido' ? 1 : 0;
+      return leftResolved - rightResolved || Date.parse(b.dataHora || 0) - Date.parse(a.dataHora || 0);
+    });
+}
+
+function getOpenCteDisagreementAlerts() {
+  return getCteDisagreementAlerts().filter((alert) => alert.status !== 'Resolvido');
 }
 
 function openModal(modal) {
