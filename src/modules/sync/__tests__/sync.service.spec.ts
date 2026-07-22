@@ -20,7 +20,8 @@ describe('SyncService', () => {
     },
     clienteEstabelecimento: {
       findUnique: jest.fn(),
-      findMany: jest.fn()
+      findMany: jest.fn(),
+      findFirst: jest.fn()
     },
     certificado: {
       findFirst: jest.fn()
@@ -117,6 +118,7 @@ describe('SyncService', () => {
         ativo: true
       }
     ]);
+    prisma.clienteEstabelecimento.findFirst.mockResolvedValue(undefined);
     prisma.certificado.findFirst.mockResolvedValue({
       id: 'cert-1',
       validadeFim: new Date(Date.now() + 24 * 60 * 60 * 1000)

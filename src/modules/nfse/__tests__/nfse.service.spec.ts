@@ -8,6 +8,9 @@ import { NfseXmlParserService } from '../nfse-xml-parser.service';
 
 describe('NfseService', () => {
   const prisma = {
+    clienteEstabelecimento: {
+      findFirst: jest.fn()
+    },
     nfseDocumento: {
       count: jest.fn(),
       findUnique: jest.fn(),
@@ -47,6 +50,7 @@ describe('NfseService', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    prisma.clienteEstabelecimento.findFirst.mockResolvedValue(undefined);
   });
 
   it('pagina a listagem de NFS-e armazenadas', async () => {
@@ -235,6 +239,49 @@ describe('NfseService', () => {
     expect(prisma.nfseDocumento.update).toHaveBeenCalledTimes(1);
     expect(result.contentType).toBe('application/pdf');
     expect(result.contentBase64.length).toBeGreaterThan(20);
+  });
+
+  it('usa o municipio do cadastro interno quando o XML do tomador traz apenas o codigo', async () => {
+    prisma.nfseDocumento.findUnique.mockResolvedValue({
+      id: 'doc-municipio-tomador',
+      clienteId: 'cliente-1',
+      chaveAcesso: '35150041228505239000132000000000059126035377498902',
+      ambiente: Ambiente.producao,
+      danfsePath: null,
+      xmlPath: 'nfse/producao/28505239000132/2026/03/xml/doc-municipio-tomador.xml',
+      numeroNfse: '591',
+      dataEmissao: new Date('2026-03-14T03:00:00.000Z'),
+      status: 'autorizada',
+      cnpjPrestador: '28505239000132',
+      razaoSocialPrestador: 'LE B WEBS BORRACHARIA LTDA',
+      cnpjTomador: '14044789000197',
+      razaoSocialTomador: '2 K TRANSPORTES LTDA',
+      municipioPrestacaoCodigo: '3515004',
+      municipioPrestacaoNome: 'Embu Das Artes',
+      valorServico: {
+        toString: () => '1500.00'
+      },
+      descricaoServico: 'Prestacao de servicos de borracharia',
+      createdAt: new Date('2026-03-14T03:00:00.000Z')
+    });
+    prisma.clienteEstabelecimento.findFirst
+      .mockResolvedValueOnce({ municipioNome: 'Embu Das Artes' })
+      .mockResolvedValueOnce({ municipioNome: 'Mondai' });
+
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        '<NFSe><nNFSe>591</nNFSe><Tomador><Endereco><CodigoMunicipio>4211009</CodigoMunicipio></Endereco></Tomador></NFSe>',
+        'utf8'
+      )
+    );
+    storage.putObject.mockResolvedValue('/tmp/danfse-municipio.pdf');
+    prisma.nfseDocumento.update.mockResolvedValue({});
+
+    const result = await service.getDanfse('doc-municipio-tomador', 'cliente-1');
+    const content = Buffer.from(result.contentBase64, 'base64').toString('latin1');
+
+    expect(content).toContain('Mondai');
+    expect(content).toContain('Embu Das Artes');
   });
 
   it('reprocessa XML salvo e atualiza campos fiscais', async () => {

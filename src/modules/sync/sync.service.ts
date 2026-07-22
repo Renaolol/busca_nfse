@@ -1744,6 +1744,12 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     const xmlKey = `nfse/${params.control.ambiente}/${cnpjPasta}/${year}/${month}/xml/${chave}.xml`;
     await this.storage.putObject(xmlKey, params.document.xml);
     const danfseKey = `nfse/${params.control.ambiente}/${cnpjPasta}/${year}/${month}/danfse/${chave}.pdf`;
+    const municipioFallback = await this.buildDanfseMunicipioFallback({
+      cnpjPrestador: parsedXml?.cnpjPrestador ?? params.control.cnpjConsulta,
+      cnpjTomador: parsedXml?.cnpjTomador,
+      municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
+      municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome
+    });
     const danfsePdf = this.danfse.generateFromXml(params.document.xml, {
       chaveAcesso: chave,
       numeroNfse: parsedXml?.numeroNfse,
@@ -1753,6 +1759,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       razaoSocialPrestador: parsedXml?.razaoSocialPrestador,
       cnpjTomador: parsedXml?.cnpjTomador,
       razaoSocialTomador: parsedXml?.razaoSocialTomador,
+      ...municipioFallback,
       valorServico: parsedXml?.valorServico,
       descricaoServico: parsedXml?.descricaoServico
     });
@@ -2625,6 +2632,57 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     const digits = value.replace(/\D/g, '');
     return digits || undefined;
+  }
+
+  private async buildDanfseMunicipioFallback(params: {
+    cnpjPrestador?: string | null;
+    cnpjTomador?: string | null;
+    municipioPrestacaoCodigo?: string | null;
+    municipioPrestacaoNome?: string | null;
+  }): Promise<{
+    municipioPrestador?: string;
+    municipioTomador?: string;
+    municipioPrestacaoCodigo?: string;
+    municipioPrestacaoNome?: string;
+    localPrestacao?: string;
+    municipioIncidenciaIssqn?: string;
+  }> {
+    const [municipioPrestador, municipioTomador] = await Promise.all([
+      this.resolveMunicipioNomeByCnpj(params.cnpjPrestador),
+      this.resolveMunicipioNomeByCnpj(params.cnpjTomador)
+    ]);
+    const municipioPrestacaoNome = params.municipioPrestacaoNome ?? undefined;
+
+    return {
+      municipioPrestador: municipioPrestador ?? municipioPrestacaoNome,
+      municipioTomador,
+      municipioPrestacaoCodigo: params.municipioPrestacaoCodigo ?? undefined,
+      municipioPrestacaoNome,
+      localPrestacao: municipioPrestacaoNome,
+      municipioIncidenciaIssqn: municipioPrestacaoNome
+    };
+  }
+
+  private async resolveMunicipioNomeByCnpj(cnpj?: string | null): Promise<string | undefined> {
+    const normalizedCnpj = this.normalizeCnpj(cnpj);
+    if (!normalizedCnpj) {
+      return undefined;
+    }
+
+    const estabelecimento = await this.prisma.clienteEstabelecimento.findFirst({
+      where: {
+        cnpj: normalizedCnpj,
+        municipioNome: {
+          not: null
+        }
+      },
+      select: {
+        municipioNome: true
+      }
+    });
+
+    const municipio = estabelecimento?.municipioNome?.trim();
+    return municipio || undefined;
   }
 
   private normalizeSearchText(value?: string): string {

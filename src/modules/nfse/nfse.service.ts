@@ -8,7 +8,7 @@ import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardStatsQueryDto } from './dto/dashboard-stats.dto';
 import { DownloadLoteDto } from './dto/download-lote.dto';
-import { NfseDanfseService } from './nfse-danfse.service';
+import { DanfseRenderInput, NfseDanfseService } from './nfse-danfse.service';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
 import { ReprocessarDanfsesDto } from './dto/reprocessar-danfses.dto';
@@ -569,6 +569,12 @@ export class NfseService {
     const xmlKey = `nfse/${ambiente}/${cnpj}/${year}/${month}/xml/${parsed.chaveAcesso}.xml`;
     await this.storage.putObject(xmlKey, dto.xml);
     const danfseKey = `nfse/${ambiente}/${cnpj}/${year}/${month}/danfse/${parsed.chaveAcesso}.pdf`;
+    const municipioFallback = await this.buildDanfseMunicipioFallback({
+      cnpjPrestador: parsed.cnpjPrestador,
+      cnpjTomador: parsed.cnpjTomador,
+      municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo,
+      municipioPrestacaoNome: parsed.municipioPrestacaoNome
+    });
     const danfsePdf = this.danfse.generateFromXml(dto.xml, {
       chaveAcesso: parsed.chaveAcesso,
       numeroNfse: parsed.numeroNfse,
@@ -578,11 +584,7 @@ export class NfseService {
       razaoSocialPrestador: parsed.razaoSocialPrestador,
       cnpjTomador: parsed.cnpjTomador,
       razaoSocialTomador: parsed.razaoSocialTomador,
-      municipioPrestador: parsed.municipioPrestacaoNome,
-      municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo,
-      municipioPrestacaoNome: parsed.municipioPrestacaoNome,
-      localPrestacao: parsed.municipioPrestacaoNome,
-      municipioIncidenciaIssqn: parsed.municipioPrestacaoNome,
+      ...municipioFallback,
       valorServico: parsed.valorServico,
       descricaoServico: parsed.descricaoServico
     });
@@ -979,6 +981,12 @@ export class NfseService {
         const danfseKey = `nfse/${doc.ambiente}/${cnpj}/${year}/${month}/danfse/${doc.chaveAcesso}.pdf`;
 
         if (regenerarDanfse) {
+          const municipioFallback = await this.buildDanfseMunicipioFallback({
+            cnpjPrestador: parsed.cnpjPrestador ?? doc.cnpjPrestador,
+            cnpjTomador: parsed.cnpjTomador ?? doc.cnpjTomador,
+            municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo ?? doc.municipioPrestacaoCodigo,
+            municipioPrestacaoNome: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome
+          });
           const pdf = this.danfse.generateFromXml(xml, {
             chaveAcesso: doc.chaveAcesso,
             numeroNfse: parsed.numeroNfse ?? doc.numeroNfse,
@@ -988,11 +996,7 @@ export class NfseService {
             razaoSocialPrestador: parsed.razaoSocialPrestador ?? doc.razaoSocialPrestador,
             cnpjTomador: parsed.cnpjTomador ?? doc.cnpjTomador,
             razaoSocialTomador: parsed.razaoSocialTomador ?? doc.razaoSocialTomador,
-            municipioPrestador: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome,
-            municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo ?? doc.municipioPrestacaoCodigo,
-            municipioPrestacaoNome: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome,
-            localPrestacao: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome,
-            municipioIncidenciaIssqn: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome,
+            ...municipioFallback,
             valorServico: parsed.valorServico ?? doc.valorServico?.toString(),
             descricaoServico: parsed.descricaoServico ?? doc.descricaoServico
           });
@@ -1354,6 +1358,12 @@ export class NfseService {
       'desconhecido';
     const danfseKey = `nfse/${doc.ambiente}/${cnpj}/${year}/${month}/danfse/${doc.chaveAcesso}.pdf`;
 
+    const municipioFallback = await this.buildDanfseMunicipioFallback({
+      cnpjPrestador: doc.cnpjPrestador,
+      cnpjTomador: doc.cnpjTomador,
+      municipioPrestacaoCodigo: doc.municipioPrestacaoCodigo,
+      municipioPrestacaoNome: doc.municipioPrestacaoNome
+    });
     const pdf = this.danfse.generateFromXml(xml, {
       chaveAcesso: doc.chaveAcesso,
       numeroNfse: doc.numeroNfse,
@@ -1363,11 +1373,7 @@ export class NfseService {
       razaoSocialPrestador: doc.razaoSocialPrestador,
       cnpjTomador: doc.cnpjTomador,
       razaoSocialTomador: doc.razaoSocialTomador,
-      municipioPrestador: doc.municipioPrestacaoNome,
-      municipioPrestacaoCodigo: doc.municipioPrestacaoCodigo,
-      municipioPrestacaoNome: doc.municipioPrestacaoNome,
-      localPrestacao: doc.municipioPrestacaoNome,
-      municipioIncidenciaIssqn: doc.municipioPrestacaoNome,
+      ...municipioFallback,
       valorServico: doc.valorServico?.toString(),
       descricaoServico: doc.descricaoServico
     });
@@ -1390,6 +1396,60 @@ export class NfseService {
     }
 
     return !pdf.includes(Buffer.from('DANFSE - pagina', 'utf8'));
+  }
+
+  private async buildDanfseMunicipioFallback(params: {
+    cnpjPrestador?: string | null;
+    cnpjTomador?: string | null;
+    municipioPrestacaoCodigo?: string | null;
+    municipioPrestacaoNome?: string | null;
+  }): Promise<
+    Pick<
+      DanfseRenderInput,
+      | 'municipioPrestador'
+      | 'municipioTomador'
+      | 'municipioPrestacaoCodigo'
+      | 'municipioPrestacaoNome'
+      | 'localPrestacao'
+      | 'municipioIncidenciaIssqn'
+    >
+  > {
+    const [municipioPrestador, municipioTomador] = await Promise.all([
+      this.resolveMunicipioNomeByCnpj(params.cnpjPrestador),
+      this.resolveMunicipioNomeByCnpj(params.cnpjTomador)
+    ]);
+    const municipioPrestacaoNome = params.municipioPrestacaoNome ?? undefined;
+
+    return {
+      municipioPrestador: municipioPrestador ?? municipioPrestacaoNome,
+      municipioTomador,
+      municipioPrestacaoCodigo: params.municipioPrestacaoCodigo ?? undefined,
+      municipioPrestacaoNome,
+      localPrestacao: municipioPrestacaoNome,
+      municipioIncidenciaIssqn: municipioPrestacaoNome
+    };
+  }
+
+  private async resolveMunicipioNomeByCnpj(cnpj?: string | null): Promise<string | undefined> {
+    const normalizedCnpj = this.normalizeCnpj(cnpj);
+    if (!normalizedCnpj) {
+      return undefined;
+    }
+
+    const estabelecimento = await this.prisma.clienteEstabelecimento.findFirst({
+      where: {
+        cnpj: normalizedCnpj,
+        municipioNome: {
+          not: null
+        }
+      },
+      select: {
+        municipioNome: true
+      }
+    });
+
+    const municipio = estabelecimento?.municipioNome?.trim();
+    return municipio || undefined;
   }
 
   private toDecimal(value?: string): Prisma.Decimal | undefined {

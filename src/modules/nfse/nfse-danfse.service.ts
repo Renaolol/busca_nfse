@@ -1148,11 +1148,17 @@ export class NfseDanfseService {
           ['emit', 'enderNac', 'UF'],
           ['PrestadorServico', 'Endereco', 'Uf']
         ]),
-        this.extractFromPaths(xml, [['infNFSe', 'xLocEmi']])
+        this.extractFromPaths(xml, [
+          ['infNFSe', 'xLocEmi'],
+          ['infDPS', 'prest', 'end', 'endNac', 'xMun'],
+          ['emit', 'enderNac', 'xMun'],
+          ['PrestadorServico', 'Endereco', 'Cidade']
+        ])
       ) ??
         this.composeMunicipioUf(
           this.extractFromParentPaths(xml, [['PrestadorServico']], ['CodigoMunicipio']),
-          this.extractFromParentPaths(xml, [['PrestadorServico']], ['Uf'])
+          this.extractFromParentPaths(xml, [['PrestadorServico']], ['Uf']),
+          this.extractFromParentPaths(xml, [['PrestadorServico']], ['Cidade'])
         ),
       codigoIbgeCepPrestador: this.composeIbgeCep(
         this.extractFromPaths(xml, [
@@ -1204,6 +1210,13 @@ export class NfseDanfseService {
           ['infDPS', 'toma', 'end', 'endNac', 'UF'],
           ['Tomador', 'Endereco', 'Uf'],
           ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Uf']
+        ]),
+        this.extractFromPaths(xml, [
+          ['infDPS', 'toma', 'end', 'endNac', 'xMun'],
+          ['Tomador', 'Endereco', 'Cidade'],
+          ['Tomador', 'Endereco', 'xMun'],
+          ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Cidade'],
+          ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'xMun']
         ])
       ) ??
         this.composeMunicipioUf(
@@ -1216,6 +1229,11 @@ export class NfseDanfseService {
             xml,
             [['Tomador'], ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador']],
             ['Uf']
+          ),
+          this.extractFromParentPaths(
+            xml,
+            [['Tomador'], ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador']],
+            ['Cidade']
           )
         ),
       codigoIbgeCepTomador: this.composeIbgeCep(
