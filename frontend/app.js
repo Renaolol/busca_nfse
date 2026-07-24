@@ -79,6 +79,7 @@ const state = {
   selectedClientIds: new Set(),
   selectedAlertIds: new Set(),
   selectedXmlIds: new Set(),
+  selectedNfeIds: new Set(),
   clients: [],
   certificates: [],
   searchRuns: [],
@@ -934,6 +935,39 @@ function onDocumentClick(event) {
         return;
       }
       void downloadNfeDanfeById(nfeId);
+      return;
+    }
+    case 'nfe-select': {
+      const nfeId = actionNode.getAttribute('data-nfe-id');
+      if (!nfeId) {
+        return;
+      }
+      if (actionNode.checked) {
+        state.selectedNfeIds.add(nfeId);
+      } else {
+        state.selectedNfeIds.delete(nfeId);
+      }
+      render();
+      return;
+    }
+    case 'nfe-toggle-all': {
+      const checked = actionNode.checked;
+      getFilteredNfeDocuments().forEach((doc) => {
+        if (!doc.apiNfeId) {
+          return;
+        }
+        if (checked) {
+          state.selectedNfeIds.add(doc.id);
+        } else {
+          state.selectedNfeIds.delete(doc.id);
+        }
+      });
+      render();
+      return;
+    }
+    case 'nfe-batch-download': {
+      const tipoArquivo = actionNode.getAttribute('data-tipo-arquivo') || 'ambos';
+      void downloadSelectedNfeBatch(tipoArquivo);
       return;
     }
     case 'nfe-sync-events': {
@@ -2978,6 +3012,10 @@ function renderNfeSearchSummary() {
 }
 
 function renderNfeDocumentsTableCard(docs) {
+  const selectableDocs = docs.filter((doc) => Boolean(doc.apiNfeId));
+  const selectedVisibleCount = selectableDocs.filter((doc) => state.selectedNfeIds.has(doc.id)).length;
+  const allVisibleSelected = selectableDocs.length > 0 && selectedVisibleCount === selectableDocs.length;
+  const batchDisabled = selectedVisibleCount > 0 ? '' : 'disabled';
   const totalValue = sumListedDocumentValues(docs);
   const totalResults = Number(state.nfeSearch.total || docs.length || 0);
   const syncDisabled =
@@ -2991,16 +3029,22 @@ function renderNfeDocumentsTableCard(docs) {
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">NF-e encontradas</h3>
-          <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(totalResults))} documento(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(totalResults))} documento(s). ${selectedVisibleCount} selecionado(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
         </div>
         <div class="table-actions">
           <button class="btn secondary" type="button" data-action="nfe-sync-events-listed" ${syncDisabled}>${escapeHtml(syncLabel)}</button>
+          <button class="btn secondary" type="button" data-action="nfe-batch-download" data-tipo-arquivo="xml" ${batchDisabled}>Baixar XMLs</button>
+          <button class="btn secondary" type="button" data-action="nfe-batch-download" data-tipo-arquivo="danfe" ${batchDisabled}>Baixar DANFEs</button>
+          <button class="btn primary" type="button" data-action="nfe-batch-download" data-tipo-arquivo="ambos" ${batchDisabled}>Baixar XML + DANFE</button>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
+              <th>
+                <input type="checkbox" data-action="nfe-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableDocs.length ? '' : 'disabled'} aria-label="Selecionar todas as NF-e da listagem" />
+              </th>
               ${renderNfeSortHeader('numeroNfe', 'Numero')}
               ${renderNfeSortHeader('cliente', 'Cliente')}
               ${renderNfeSortHeader('tipo', 'Tipo')}
@@ -3016,11 +3060,12 @@ function renderNfeDocumentsTableCard(docs) {
           <tbody>
             ${renderTableRowsOrState({
               key: 'nfeDocs',
-              colSpan: 10,
+              colSpan: 11,
               rowsHtml: docs
                 .map((doc) => {
                   const syncDisabledRow = state.nfeEventsSyncRunning || !canSyncNfeEvents(doc) ? 'disabled' : '';
                   return `<tr>
+                    <td><input type="checkbox" data-action="nfe-select" data-nfe-id="${escapeHtml(doc.id)}" ${state.selectedNfeIds.has(doc.id) ? 'checked' : ''} ${doc.apiNfeId ? '' : 'disabled'} aria-label="Selecionar NF-e ${escapeHtml(doc.numeroNfe || '-')}" /></td>
                     <td>${escapeHtml(doc.numeroNfe || '-')}</td>
                     <td>${escapeHtml(doc.cliente)}</td>
                     <td>${statusBadge(doc.tipo, doc.tipo === 'Emitida' ? 'success' : doc.tipo === 'Recebida' ? 'info' : 'neutral')}</td>
@@ -7015,6 +7060,7 @@ async function applyNfeDocsFilters(form) {
     xmlCompleto: String(data.get('xmlCompleto') || 'Todos'),
     ambiente: String(data.get('ambiente') || 'Todos')
   };
+  state.selectedNfeIds = new Set();
 
   await executeNfeDocsSearch();
 }
@@ -7412,6 +7458,7 @@ async function executeNfeDocsSearch() {
   state.nfeSearch.results = [];
   state.nfeSearch.lastQuery = { ...state.filters.nfeDocs };
   state.nfeSearch.page = 1;
+  state.selectedNfeIds = new Set();
   state.tableState.nfeDocs = 'loading';
   render();
 
@@ -8131,6 +8178,7 @@ function resetNfeSyncFilters() {
 }
 
 function resetNfeDocsSearch() {
+  state.selectedNfeIds = new Set();
   state.filters.nfeDocs = {
     cliente: 'Todos',
     tipo: 'Todos',
@@ -11651,6 +11699,45 @@ async function downloadSelectedXmlBatch(tipoArquivo = 'ambos') {
     );
   } catch (error) {
     pushToast(`Falha ao baixar lote: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function downloadSelectedNfeBatch(tipoArquivo = 'ambos') {
+  const allowedTypes = ['ambos', 'xml', 'danfe'];
+  const normalizedType = allowedTypes.includes(tipoArquivo) ? tipoArquivo : 'ambos';
+  const selectedDocs = getFilteredNfeDocuments().filter((doc) => state.selectedNfeIds.has(doc.id) && doc.apiNfeId);
+
+  if (!selectedDocs.length) {
+    pushToast('Selecione ao menos uma NF-e da listagem atual.', 'error');
+    return;
+  }
+
+  const ids = [...new Set(selectedDocs.map((doc) => doc.apiNfeId))];
+  const clientIds = [...new Set(selectedDocs.map((doc) => doc.clientId).filter(Boolean))];
+  const body = {
+    ids,
+    tipoArquivo: normalizedType
+  };
+
+  if (clientIds.length === 1) {
+    body.clienteId = clientIds[0];
+  }
+
+  try {
+    const payload = await apiRequest('/nfe/download-lote', {
+      method: 'POST',
+      body,
+      timeoutMs: 2 * 60 * 1000
+    });
+    downloadFromPayload(payload, `nfe-lote-${normalizedType}.zip`);
+    const errorsCount = Array.isArray(payload?.erros) ? payload.erros.length : 0;
+    const included = Number(payload?.totalArquivosIncluidos || 0);
+    pushToast(
+      `Download em lote iniciado: ${included} arquivo(s) no ZIP${errorsCount ? `, ${errorsCount} aviso(s)` : ''}.`,
+      errorsCount ? 'info' : 'success'
+    );
+  } catch (error) {
+    pushToast(`Falha ao baixar lote de NF-e: ${toErrorMessage(error)}`, 'error');
   }
 }
 

@@ -13,6 +13,8 @@ import { EnableAllNfeSyncDto } from './dto/enable-all-sync.dto';
 import { EnableNfeSyncDto } from './dto/enable-sync.dto';
 import { DownloadNfeDocumentDto } from './dto/download-document.dto';
 import { DownloadNfePdfDto } from './dto/download-pdf.dto';
+import { DownloadLoteDto } from './dto/download-lote.dto';
+import { DownloadLoteResponseDto } from './dto/download-lote-response.dto';
 import { ImportNfeXmlDto } from './dto/import-xml.dto';
 import { PauseNfeSyncDto } from './dto/pause-sync.dto';
 import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
@@ -75,6 +77,13 @@ export class NfeController {
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   getDanfe(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
     return this.nfeService.getDanfe(id, query.clienteId);
+  }
+
+  @Post('download-lote')
+  @ApiOkResponse({ type: DownloadLoteResponseDto })
+  @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
+  downloadLote(@Body() dto: DownloadLoteDto) {
+    return this.nfeService.downloadLote(dto);
   }
 
   @Post('importar-xml')

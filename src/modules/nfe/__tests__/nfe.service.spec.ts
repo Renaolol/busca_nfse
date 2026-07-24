@@ -1,5 +1,6 @@
 import { NfeAmbiente, NfeSyncStatus, NfeTipoRelacao, Prisma } from '@prisma/client';
 import { BadRequestException } from '@nestjs/common';
+import JSZip from 'jszip';
 import { DanfePdfGenerator } from '../../../integrations/danfe/danfe.types';
 import { DominioNfeXmlSource } from '../../../integrations/dominio-nfe/dominio-nfe.types';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -282,6 +283,70 @@ describe('NfeService', () => {
 
     await expect(service.getDanfe('doc-1', 'cliente-1')).rejects.toThrow(BadRequestException);
     expect(danfePdfGenerator.generateNfePdf).not.toHaveBeenCalled();
+  });
+
+  it('gera ZIP de lote com XML e DANFE', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-lote-1',
+        clienteId: 'cliente-1',
+        chaveAcesso: '35260612345678000199550010000001231000009999',
+        xmlCompletoPath: 'nfe/producao/123/2026/06/xml/a.xml',
+        xmlResumoPath: null,
+        xmlCompletoDisponivel: true,
+        resumoDisponivel: false
+      }
+    ]);
+    storage.getObject.mockResolvedValue(Buffer.from('<nfeProc>conteudo</nfeProc>', 'utf8'));
+    (danfePdfGenerator.generateNfePdf as jest.Mock).mockResolvedValue(Buffer.from('%PDF-1.4 nf-e', 'utf8'));
+
+    const result = await service.downloadLote({
+      ids: ['doc-lote-1'],
+      tipoArquivo: 'ambos',
+      clienteId: 'cliente-1'
+    });
+
+    expect(result.contentType).toBe('application/zip');
+    expect(result.totalSolicitados).toBe(1);
+    expect(result.totalDocumentosEncontrados).toBe(1);
+    expect(result.totalArquivosIncluidos).toBe(2);
+    expect(result.idsNaoEncontrados).toEqual([]);
+    expect(result.erros).toEqual([]);
+    expect(storage.getObject).toHaveBeenCalledTimes(1);
+    expect(danfePdfGenerator.generateNfePdf).toHaveBeenCalledWith({
+      xml: '<nfeProc>conteudo</nfeProc>',
+      chaveAcesso: '35260612345678000199550010000001231000009999'
+    });
+
+    const zip = await JSZip.loadAsync(Buffer.from(result.contentBase64, 'base64'));
+    expect(zip.file('xml/NFE-35260612345678000199550010000001231000009999.xml')).toBeTruthy();
+    expect(zip.file('danfe/DANFE-35260612345678000199550010000001231000009999.pdf')).toBeTruthy();
+    expect(zip.file('manifest.json')).toBeTruthy();
+  });
+
+  it('retorna IDs nao encontrados no lote de NF-e', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-lote-2',
+        clienteId: 'cliente-1',
+        chaveAcesso: '35260612345678000199550010000001231000008888',
+        xmlCompletoPath: 'nfe/producao/123/2026/06/xml/b.xml',
+        xmlResumoPath: null,
+        xmlCompletoDisponivel: true,
+        resumoDisponivel: false
+      }
+    ]);
+    storage.getObject.mockResolvedValue(Buffer.from('<nfeProc>conteudo-2</nfeProc>', 'utf8'));
+
+    const result = await service.downloadLote({
+      ids: ['doc-lote-2', 'doc-lote-inexistente'],
+      tipoArquivo: 'xml',
+      clienteId: 'cliente-1'
+    });
+
+    expect(result.idsNaoEncontrados).toEqual(['doc-lote-inexistente']);
+    const zip = await JSZip.loadAsync(Buffer.from(result.contentBase64, 'base64'));
+    expect(zip.file('xml/NFE-35260612345678000199550010000001231000008888.xml')).toBeTruthy();
   });
 
   it('importa XMLs da Dominio vinculando estabelecimento por CNPJ', async () => {
