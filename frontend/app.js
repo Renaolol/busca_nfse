@@ -13088,7 +13088,7 @@ async function submitCompareSpedForm(form, submitter = null) {
     const fileText = await file.text();
     const parsed = parseCompareSpedFile(fileText);
     const dateRange = resolveCompareSpedDateRange(parsed.documents, competence);
-    const dominioDocs = await fetchCompareSpedDominioDocuments({
+    const dominioDocs = await fetchCompareSpedCompanyDocuments({
       client,
       dateRange
     });
@@ -13205,7 +13205,46 @@ function parseCompareSpedFile(text) {
   return { documents, warnings };
 }
 
-async function fetchCompareSpedDominioDocuments({ client, dateRange }) {
+async function fetchCompareSpedCompanyDocuments({ client, dateRange }) {
+  const [storedDocs, dominioDocs] = await Promise.all([
+    fetchCompareSpedStoredDocuments({ client, dateRange }),
+    fetchCompareSpedDominioPreviewDocuments({ client, dateRange })
+  ]);
+
+  return mergeCompareSpedCompanyDocuments(storedDocs, dominioDocs);
+}
+
+async function fetchCompareSpedStoredDocuments({ client, dateRange }) {
+  const query = buildNfeSearchQuery(
+    {
+      cliente: client.id,
+      tipo: 'Recebida',
+      ambiente: 'Todos',
+      emissaoInicio: dateRange?.dataInicio || '',
+      emissaoFim: dateRange?.dataFim || '',
+      status: 'Todos',
+      eventos: 'Todos',
+      schemaDoc: 'Todos',
+      xmlCompleto: 'Todos',
+      cnpj: '',
+      numero: '',
+      chave: '',
+      valorMin: '',
+      valorMax: ''
+    },
+    1,
+    SEARCH_PAGE_SIZE,
+    true
+  );
+
+  const payload = normalizePaginatedResponse(await apiRequest(`/nfe?${query.toString()}`));
+  return buildNfeDocumentsFromApi(payload.items, state.clients).map((doc) => ({
+    ...doc,
+    tipoDocumento: describeCompareSpedModel(doc.modelo || '55')
+  }));
+}
+
+async function fetchCompareSpedDominioPreviewDocuments({ client, dateRange }) {
   const response = normalizePaginatedResponse(
     await apiRequest('/nfe/dominio/documentos/preview', {
       method: 'POST',
@@ -13251,6 +13290,30 @@ async function fetchCompareSpedDominioDocuments({ client, dateRange }) {
     eventosResumo: [],
     conteudoXml: null
   }));
+}
+
+function mergeCompareSpedCompanyDocuments(storedDocs, dominioDocs) {
+  const merged = [];
+  const seenKeys = new Set();
+  const appendDocument = (doc) => {
+    if (!doc) {
+      return;
+    }
+
+    const candidateKeys = buildCompareCandidateKeys(doc).filter(Boolean);
+    const dedupeKey = candidateKeys[0] || `${normalizeDigits(doc.chaveAcesso || '')}-${normalizeDigits(doc.numeroNfe || doc.numero || '')}-${normalizeDigits(doc.serie || '')}-${formatCompareMonth(doc.dataEmissao || '')}`;
+    if (!dedupeKey || seenKeys.has(dedupeKey)) {
+      return;
+    }
+
+    seenKeys.add(dedupeKey);
+    merged.push(doc);
+  };
+
+  (Array.isArray(storedDocs) ? storedDocs : []).forEach(appendDocument);
+  (Array.isArray(dominioDocs) ? dominioDocs : []).forEach(appendDocument);
+
+  return merged.sort((left, right) => Date.parse(right?.dataEmissao || 0) - Date.parse(left?.dataEmissao || 0));
 }
 
 function buildCompareSpedReport({ client, competence, sourceFileName, parsedDocuments, dominioDocuments, parsingWarnings, outputFormat }) {
