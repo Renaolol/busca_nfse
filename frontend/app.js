@@ -3856,7 +3856,7 @@ function renderComparaSpedPage() {
           </div>
 
           <form id="compareSpedForm" class="form-grid compare-form">
-            <label class="field">
+            <label class="field compare-span-2">
               Empresa
               <select name="empresa" ${hasClients ? '' : 'disabled'} required>
                 ${renderOptions(clientOptions, compareState.sourceCompanyId || '', mapClientOptions(), 'Selecione a empresa')}
@@ -11093,7 +11093,20 @@ function getEditableValue(value) {
 }
 
 function toNumber(value) {
-  const parsed = Number(value);
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  const raw = String(value ?? '').trim();
+  if (!raw) {
+    return 0;
+  }
+
+  const normalized = raw
+    .replace(/\s+/g, '')
+    .replace(/\.(?=\d{3}(?:\D|$))/g, '')
+    .replace(/,(?=\d{2}(?:\D|$)|\d+$)/g, '.');
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
