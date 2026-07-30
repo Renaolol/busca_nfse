@@ -35,6 +35,7 @@ import { EnableNfeSyncDto } from './dto/enable-sync.dto';
 import { DownloadLoteDto } from './dto/download-lote.dto';
 import { ImportNfeXmlDto } from './dto/import-xml.dto';
 import { PauseNfeSyncDto } from './dto/pause-sync.dto';
+import { PreviewDominioDocumentsDto } from './dto/preview-dominio-documents.dto';
 import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
 import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
@@ -966,6 +967,86 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       chavesAcesso: dto.chavesAcesso,
       catalogoIds: dto.catalogoIds
     });
+  }
+
+  async previewDominioDocuments(dto: PreviewDominioDocumentsDto) {
+    const batchSize = Math.min(Math.max(1, dto.limit ?? 500), 500);
+    const maxDocuments = Math.min(Math.max(1, dto.limit ?? 5000), 5000);
+    const collected: Array<{
+      catalogoId: number;
+      chaveAcesso: string;
+      numeroNfe: string;
+      serie: string;
+      modelo: string;
+      dataEmissao: string | Date | null;
+      valor: number;
+      emitenteNome: string;
+      emitenteCnpj: string;
+      destinatarioNome: string;
+      destinatarioCnpj: string;
+    }> = [];
+    let cursor: number | undefined;
+
+    while (collected.length < maxDocuments) {
+      const documents = await this.loadDominioDocumentsForClient({
+        clienteId: dto.clienteId,
+        estabelecimentoId: dto.estabelecimentoId,
+        limit: Math.min(batchSize, maxDocuments - collected.length),
+        dataEmissaoInicio: dto.dataEmissaoInicio,
+        dataEmissaoFim: dto.dataEmissaoFim,
+        catalogoIdMinExclusive: cursor,
+        sortDirection: 'asc'
+      });
+
+      if (!documents.length) {
+        break;
+      }
+
+      for (const document of documents) {
+        cursor = Math.max(cursor ?? 0, document.catalogoId);
+
+        const xml = this.decodeXml(document.xmlBase64);
+        if (this.isIgnorableDominioXml(xml)) {
+          continue;
+        }
+
+        const classifiedXml = this.parser.classify(xml);
+        if (classifiedXml.documentType !== 'nfe' || classifiedXml.contentType === 'evento') {
+          continue;
+        }
+
+        const parsed = this.parser.parse(xml);
+        collected.push({
+          catalogoId: document.catalogoId,
+          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso) ?? parsed.chaveAcesso,
+          numeroNfe: parsed.numeroNfe ?? '',
+          serie: parsed.serie ?? '',
+          modelo: parsed.modelo ?? '55',
+          dataEmissao: parsed.dataEmissao ?? document.dataEmissao ?? null,
+          valor: Number(this.toDecimal(parsed.valorTotal)),
+          emitenteNome: parsed.razaoSocialEmitente ?? '-',
+          emitenteCnpj: parsed.cnpjEmitente ?? '',
+          destinatarioNome: parsed.razaoSocialDestinatario ?? '-',
+          destinatarioCnpj: parsed.cnpjDestinatario ?? ''
+        });
+
+        if (collected.length >= maxDocuments) {
+          break;
+        }
+      }
+
+      if (documents.length < batchSize) {
+        break;
+      }
+    }
+
+    return {
+      items: collected,
+      total: collected.length,
+      page: 1,
+      pageSize: collected.length,
+      totalPages: collected.length ? 1 : 0
+    };
   }
 
   async getDominioXml(dto: GetDominioNfeXmlDto) {

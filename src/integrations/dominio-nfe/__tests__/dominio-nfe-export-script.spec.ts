@@ -2,9 +2,10 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { resolveDominioPythonBin } from '../python-bin';
 
 describe('dominio_nfe_export.py', () => {
-  const pythonBin = process.env.DOMINIO_PYTHON_BIN || 'python';
+  const pythonBin = resolveDominioPythonBin();
   const scriptPath = join(process.cwd(), 'scripts', 'dominio_nfe_export.py');
 
   it('consulta EFATENDIMENTO_NFE_XML_V2 com fallback para EFATENDIMENTO_NFE_XML', () => {

@@ -17,6 +17,7 @@ import { DownloadLoteDto } from './dto/download-lote.dto';
 import { DownloadLoteResponseDto } from './dto/download-lote-response.dto';
 import { ImportNfeXmlDto } from './dto/import-xml.dto';
 import { PauseNfeSyncDto } from './dto/pause-sync.dto';
+import { PreviewDominioDocumentsDto } from './dto/preview-dominio-documents.dto';
 import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
 import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
@@ -103,6 +104,12 @@ export class NfeController {
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   importFromDominio(@Body() dto: ImportNfeFromDominioDto) {
     return this.nfeService.importFromDominio(dto);
+  }
+
+  @Post('dominio/documentos/preview')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  previewDominioDocuments(@Body() dto: PreviewDominioDocumentsDto) {
+    return this.nfeService.previewDominioDocuments(dto);
   }
 
   @Post('dominio/xml')

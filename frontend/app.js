@@ -13206,45 +13206,51 @@ function parseCompareSpedFile(text) {
 }
 
 async function fetchCompareSpedDominioDocuments({ client, dateRange }) {
-  const pageSize = 200;
-  const collected = [];
-  const seenIds = new Set();
-  let page = 1;
-  let totalPages = 1;
-
-  do {
-    const query = new URLSearchParams();
-    query.set('clienteId', client.id);
-    query.set('page', String(page));
-    query.set('pageSize', String(pageSize));
-
-    if (dateRange?.dataInicio) {
-      query.set('dataInicio', toCompareApiDateRangeBoundary(dateRange.dataInicio, false));
-    }
-
-    if (dateRange?.dataFim) {
-      query.set('dataFim', toCompareApiDateRangeBoundary(dateRange.dataFim, true));
-    }
-
-    const response = await apiRequest(`/nfe?${query.toString()}`);
-    const payload = normalizePaginatedResponse(response);
-    const normalizedItems = buildNfeDocumentsFromApi(payload.items, [client]);
-    totalPages = Math.max(1, Number(payload.totalPages || 1));
-
-    normalizedItems.forEach((item) => {
-      const key = String(item?.id || item?.chaveAcesso || `${page}-${collected.length}`);
-      if (seenIds.has(key)) {
-        return;
+  const response = normalizePaginatedResponse(
+    await apiRequest('/nfe/dominio/documentos/preview', {
+      method: 'POST',
+      body: {
+        clienteId: client.id,
+        limit: 5000,
+        ...(dateRange?.dataInicio ? { dataEmissaoInicio: dateRange.dataInicio } : {}),
+        ...(dateRange?.dataFim ? { dataEmissaoFim: dateRange.dataFim } : {})
       }
+    })
+  );
 
-      seenIds.add(key);
-      collected.push(item);
-    });
-
-    page += 1;
-  } while (page <= totalPages);
-
-  return collected;
+  return response.items.map((item, index) => ({
+    id: `dominio-preview-${item.catalogoId || index}`,
+    apiNfeId: null,
+    clientId: client.id,
+    cliente: client.razaoSocial || 'Cliente nao identificado',
+    estabelecimentoId: null,
+    chaveAcesso: item.chaveAcesso || '-',
+    numeroNfe: item.numeroNfe || '-',
+    serie: item.serie || '-',
+    modelo: item.modelo || '55',
+    ambiente: 'producao',
+    dataEmissao: item.dataEmissao || null,
+    dataAutorizacao: item.dataEmissao || null,
+    valor: toNumber(item.valor),
+    tipoDocumento: describeCompareSpedModel(item.modelo || '55'),
+    tipo: 'Recebida',
+    statusFiscal: 'Disponivel na Dominio',
+    cancelada: false,
+    schemaDoc: 'dominio_xml',
+    xmlCompletoDisponivel: true,
+    resumoDisponivel: true,
+    caminhoServidor: '-',
+    emitenteNome: item.emitenteNome || '-',
+    emitenteCnpj: normalizeDigits(item.emitenteCnpj || ''),
+    destinatarioNome: item.destinatarioNome || '-',
+    destinatarioCnpj: normalizeDigits(item.destinatarioCnpj || ''),
+    contraparteNome: item.emitenteNome || '-',
+    contraparteCnpj: normalizeDigits(item.emitenteCnpj || ''),
+    eventos: [],
+    temEventos: false,
+    eventosResumo: [],
+    conteudoXml: null
+  }));
 }
 
 function buildCompareSpedReport({ client, competence, sourceFileName, parsedDocuments, dominioDocuments, parsingWarnings, outputFormat }) {
@@ -13631,24 +13637,30 @@ function buildCompareSpreadsheetXml(report) {
       <Font ss:FontName="Calibri" ss:Size="10" />
     </Style>
     <Style ss:ID="SheetTitle">
-      <Font ss:Bold="1" ss:Size="14" ss:Color="#123A5A" />
-      <Interior ss:Color="#F7F1DC" ss:Pattern="Solid" />
+      <Font ss:Bold="1" ss:Size="14" ss:Color="#0E3E70" />
+      <Interior ss:Color="#B8CBE8" ss:Pattern="Solid" />
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#8EA9CF" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#8EA9CF" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#8EA9CF" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#8EA9CF" />
+      </Borders>
     </Style>
     <Style ss:ID="MetaLabel">
-      <Font ss:Bold="1" ss:Color="#4B5563" />
+      <Font ss:Bold="1" ss:Color="#1F9D55" />
     </Style>
     <Style ss:ID="MetaValue">
       <Font ss:Color="#111827" />
     </Style>
     <Style ss:ID="MetaLabelAlt" ss:Parent="MetaLabel">
-      <Interior ss:Color="#EAF2FB" ss:Pattern="Solid" />
+      <Interior ss:Color="#E7EFF9" ss:Pattern="Solid" />
     </Style>
     <Style ss:ID="MetaValueAlt" ss:Parent="MetaValue">
-      <Interior ss:Color="#EAF2FB" ss:Pattern="Solid" />
+      <Interior ss:Color="#E7EFF9" ss:Pattern="Solid" />
     </Style>
     <Style ss:ID="Header">
       <Font ss:Bold="1" ss:Color="#FFFFFF" />
-      <Interior ss:Color="#25507A" ss:Pattern="Solid" />
+      <Interior ss:Color="#1F4E78" ss:Pattern="Solid" />
       <Borders>
         <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
         <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
@@ -13665,7 +13677,7 @@ function buildCompareSpreadsheetXml(report) {
       </Borders>
     </Style>
     <Style ss:ID="CellAlt" ss:Parent="Cell">
-      <Interior ss:Color="#EAF2FB" ss:Pattern="Solid" />
+      <Interior ss:Color="#E7EFF9" ss:Pattern="Solid" />
     </Style>
     <Style ss:ID="CellDate" ss:Parent="Cell">
       <NumberFormat ss:Format="dd/mm/yyyy" />
