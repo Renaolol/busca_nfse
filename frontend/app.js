@@ -3804,6 +3804,17 @@ function renderComparaSpedPage() {
         : compareState.status === 'error'
           ? 'Falha na comparacao'
           : 'Aguardando arquivo';
+  const topStats = report
+    ? [
+        statCard('file', 'TXT', String(report.summary.spedDocs), 'documentos lidos no arquivo', 'neutral'),
+        statCard('search', 'Dominio x SPED', String(report.summary.dominioDocs), 'documentos no banco', 'info'),
+        statCard('alert', 'Pendentes', String(report.summary.issuesCount), 'divergencias a serem analisadas', 'warning')
+      ]
+    : [
+        statCard('file', 'TXT', 'TXT', 'arquivo SPED upload e leitura linha a linha', 'neutral'),
+        statCard('search', 'Dominio x SPED', 'Dominio x SPED', 'conferencia comparacao por documento', 'info'),
+        statCard('alert', 'Pendentes', 'Pendentes', 'divergencias a serem analisadas', 'warning')
+      ];
 
   return `
     <section class="page-section compare-page">
@@ -3829,9 +3840,7 @@ function renderComparaSpedPage() {
       </article>
 
       <section class="stats-grid compare-stats">
-        ${statCard('file', 'Arquivo SPED', 'TXT', 'upload e leitura linha a linha', 'neutral')}
-        ${statCard('search', 'Conferencia', 'Dominio x SPED', 'comparacao por documento', 'info')}
-        ${statCard('alert', 'Divergencias', 'Pendentes', 'a serem analisadas', 'warning')}
+        ${topStats.join('')}
       </section>
 
       <section class="split-grid compare-layout">
@@ -3906,18 +3915,6 @@ function renderComparaSpedPage() {
                 }
               </p>
             </div>
-
-            ${
-              report
-                ? `
-                  <div class="compare-result-summary">
-                    ${statCard('file', 'SPED', String(report.summary.spedDocs), 'documentos lidos no arquivo', 'neutral')}
-                    ${statCard('file', 'Domínio', String(report.summary.dominioDocs), 'documentos no banco', 'info')}
-                    ${statCard('alert', 'Divergências', String(report.summary.issuesCount), 'itens fora do padrão', 'warning')}
-                  </div>
-                `
-                : ''
-            }
 
             <div class="compare-result-actions">
               <button class="btn secondary" type="button" data-action="compare-sped-download" ${artifactReady ? '' : 'disabled'}>${downloadLabel}</button>
@@ -13075,11 +13072,18 @@ async function submitCompareSpedForm(form) {
   try {
     const fileText = await file.text();
     const parsed = parseCompareSpedFile(fileText);
+    const dateRange = resolveCompareSpedDateRange(parsed.documents, competence);
+    const dominioDocs = await fetchCompareSpedDominioDocuments({
+      clientId: client.id,
+      dateRange
+    });
+    const effectiveCompetence = String(competence || '').trim() || getCompareSpedCompetence(parsed.documents) || formatCompareMonth(dateRange?.dataInicio || '');
     const report = buildCompareSpedReport({
       client,
-      competence,
+      competence: effectiveCompetence,
       sourceFileName: file.name,
       parsedDocuments: parsed.documents,
+      dominioDocuments: dominioDocs,
       parsingWarnings: parsed.warnings,
       outputFormat
     });
@@ -13121,6 +13125,8 @@ function parseCompareSpedFile(text) {
   const documents = [];
   const warnings = [];
   const seenKeys = new Set();
+  const participants = new Map();
+  const pendingDocuments = [];
   const rawLines = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
 
   rawLines.forEach((line, index) => {
@@ -13131,116 +13137,90 @@ function parseCompareSpedFile(text) {
 
     const fields = trimmed.split('|').slice(1, -1);
     const recordType = fields[0];
+    if (recordType === '0150') {
+      const participantCode = String(fields[1] || '').trim();
+      if (participantCode) {
+        participants.set(participantCode, {
+          codigo: participantCode,
+          nome: String(fields[2] || '').trim() || '-',
+          cnpj: normalizeDigits(fields[4] || fields[5] || ''),
+          cpf: normalizeDigits(fields[5] || ''),
+          rawFields: fields
+        });
+      }
+      return;
+    }
+
     if (recordType !== 'C100') {
       return;
     }
 
-    const spedDocument = {
+    pendingDocuments.push({
       sourceLine: index + 1,
       recordType,
+      modelo: String(fields[4] || '').trim(),
+      codPart: String(fields[3] || '').trim(),
       serie: String(fields[6] || '').trim(),
       numero: String(fields[7] || '').trim(),
       chaveAcesso: normalizeDigits(fields[8] || ''),
       dataEmissao: parseCompareSpedDate(fields[9]),
       valor: toNumber(fields[11]),
       rawFields: fields
+    });
+  });
+
+  pendingDocuments.forEach((spedDocument) => {
+    const participant = participants.get(spedDocument.codPart) || null;
+    const enrichedDocument = {
+      ...spedDocument,
+      tipoDocumento: describeCompareSpedModel(spedDocument.modelo),
+      emitenteNome: participant?.nome || '-',
+      emitenteCnpj: participant?.cnpj || participant?.cpf || ''
     };
-    const fingerprint = buildCompareFingerprint(spedDocument);
+    const fingerprint = buildCompareCandidateKeys(enrichedDocument)[0] || '';
     if (seenKeys.has(fingerprint)) {
-      warnings.push(`Documento repetido no SPED: linha ${index + 1}, chave ${spedDocument.chaveAcesso || spedDocument.numero || '-'}.`);
+      warnings.push(`Documento repetido no SPED: linha ${enrichedDocument.sourceLine}, chave ${enrichedDocument.chaveAcesso || enrichedDocument.numero || '-'} .`);
       return;
     }
 
     seenKeys.add(fingerprint);
-    documents.push(spedDocument);
+    documents.push(enrichedDocument);
   });
 
   return { documents, warnings };
 }
 
-function buildCompareSpedReport({ client, competence, sourceFileName, parsedDocuments, parsingWarnings, outputFormat }) {
+async function fetchCompareSpedDominioDocuments({ clientId, dateRange }) {
+  const query = new URLSearchParams();
+  query.set('clienteId', clientId);
+  query.set('all', 'true');
+  query.set('pageSize', '200');
+
+  if (dateRange?.dataInicio) {
+    query.set('dataInicio', dateRange.dataInicio);
+  }
+
+  if (dateRange?.dataFim) {
+    query.set('dataFim', dateRange.dataFim);
+  }
+
+  const response = await apiRequest(`/nfe?${query.toString()}`);
+  return normalizePaginatedResponse(response).items;
+}
+
+function buildCompareSpedReport({ client, competence, sourceFileName, parsedDocuments, dominioDocuments, parsingWarnings, outputFormat }) {
   const normalizedCompetence = String(competence || '').trim();
   const inferredCompetence = getCompareSpedCompetence(parsedDocuments);
   const activeCompetence = normalizedCompetence || inferredCompetence || '';
-  const companyDocs = (Array.isArray(state.nfeDocuments) ? state.nfeDocuments : []).filter((doc) => doc.clientId === client.id);
+  const companyDocs = Array.isArray(dominioDocuments) ? dominioDocuments : [];
   const spedDocs = filterCompareSpedByCompetence(parsedDocuments, activeCompetence);
   const dominioDocs = filterCompareDominioByCompetence(companyDocs, activeCompetence);
-
-  const spedMap = new Map(spedDocs.map((doc) => [buildCompareFingerprint(doc), doc]));
-  const dominioMap = new Map(dominioDocs.map((doc) => [buildCompareFingerprint(doc), doc]));
-  const allKeys = new Set([...spedMap.keys(), ...dominioMap.keys()]);
-
-  const rows = [];
-  let matchedCount = 0;
-  let onlySpedCount = 0;
-  let onlyDominioCount = 0;
-  let divergentCount = 0;
-
-  [...allKeys].sort((left, right) => left.localeCompare(right, 'pt-BR')).forEach((key) => {
-    const spedDoc = spedMap.get(key) || null;
-    const dominioDoc = dominioMap.get(key) || null;
-
-    if (spedDoc && dominioDoc) {
-      const diffs = compareSpedAndDominioDocs(spedDoc, dominioDoc);
-      const status = diffs.length ? 'Divergente' : 'OK';
-      if (status === 'OK') {
-        matchedCount += 1;
-      } else {
-        divergentCount += 1;
-      }
-
-      rows.push({
-        status,
-        chave: spedDoc.chaveAcesso || dominioDoc.chaveAcesso || '-',
-        numeroSped: spedDoc.numero || '-',
-        numeroDominio: dominioDoc.numeroNfe || '-',
-        serieSped: spedDoc.serie || '-',
-        serieDominio: dominioDoc.serie || '-',
-        dataSped: spedDoc.dataEmissao || '-',
-        dataDominio: formatDate(dominioDoc.dataEmissao || ''),
-        valorSped: spedDoc.valor,
-        valorDominio: dominioDoc.valor,
-        diferencaValor: toNumber(dominioDoc.valor) - toNumber(spedDoc.valor),
-        observacao: diffs.join('; ') || 'Documento encontrado nas duas bases.'
-      });
-      return;
-    }
-
-    if (spedDoc) {
-      onlySpedCount += 1;
-      rows.push({
-        status: 'Somente no SPED',
-        chave: spedDoc.chaveAcesso || '-',
-        numeroSped: spedDoc.numero || '-',
-        numeroDominio: '-',
-        serieSped: spedDoc.serie || '-',
-        serieDominio: '-',
-        dataSped: spedDoc.dataEmissao || '-',
-        dataDominio: '-',
-        valorSped: spedDoc.valor,
-        valorDominio: null,
-        diferencaValor: null,
-        observacao: 'Documento localizado apenas no SPED.'
-      });
-      return;
-    }
-
-    onlyDominioCount += 1;
-    rows.push({
-      status: 'Somente no Dominio',
-      chave: dominioDoc?.chaveAcesso || '-',
-      numeroSped: '-',
-      numeroDominio: dominioDoc?.numeroNfe || '-',
-      serieSped: '-',
-      serieDominio: dominioDoc?.serie || '-',
-      dataSped: '-',
-      dataDominio: formatDate(dominioDoc?.dataEmissao || ''),
-      valorSped: null,
-      valorDominio: dominioDoc?.valor ?? null,
-      diferencaValor: null,
-      observacao: 'Documento localizado apenas na Dominio.'
-    });
-  });
+  const matchResult = matchCompareSpedDocuments(spedDocs, dominioDocs);
+  const rows = matchResult.rows;
+  const matchedCount = matchResult.matchedCount;
+  const onlySpedCount = matchResult.onlySpedCount;
+  const onlyDominioCount = matchResult.onlyDominioCount;
+  const divergentCount = matchResult.divergentCount;
 
   const issuesCount = rows.filter((row) => row.status !== 'OK').length;
   const warnings = [...(Array.isArray(parsingWarnings) ? parsingWarnings : [])];
@@ -13258,6 +13238,7 @@ function buildCompareSpedReport({ client, competence, sourceFileName, parsedDocu
   return {
     clientId: client.id,
     companyName: client.razaoSocial || 'Empresa selecionada',
+    clientCnpj: normalizeDigits(client.cnpj || ''),
     competence: activeCompetence,
     sourceFileName,
     generatedAt: new Date().toISOString(),
@@ -13288,6 +13269,131 @@ function filterCompareDominioByCompetence(documents, competence) {
   return documents.filter((doc) => formatCompareMonth(doc.dataEmissao) === competence);
 }
 
+function matchCompareSpedDocuments(spedDocs, dominioDocs) {
+  const rows = [];
+  const usedSped = new Set();
+  const usedDominio = new Set();
+  const spedIndexed = (Array.isArray(spedDocs) ? spedDocs : []).map((doc, idx) => ({ ...doc, __compareIndex: idx }));
+  const dominioIndexed = (Array.isArray(dominioDocs) ? dominioDocs : []).map((doc, idx) => ({ ...doc, __compareIndex: idx }));
+  const spedIndex = buildCompareIndex(spedIndexed);
+  const dominioIndex = buildCompareIndex(dominioIndexed);
+  let matchedCount = 0;
+  let onlySpedCount = 0;
+  let onlyDominioCount = 0;
+  let divergentCount = 0;
+
+  const consumeMatch = (spedDoc, dominioDoc) => {
+    const diffs = compareSpedAndDominioDocs(spedDoc, dominioDoc);
+    const status = diffs.length ? 'Divergente' : 'OK';
+    if (status === 'OK') {
+      matchedCount += 1;
+    } else {
+      divergentCount += 1;
+    }
+
+    rows.push({
+      status,
+      chave: spedDoc.chaveAcesso || dominioDoc.chaveAcesso || '-',
+      tipoSped: spedDoc.tipoDocumento || describeCompareSpedModel(spedDoc.modelo) || '-',
+      tipoDominio: dominioDoc.tipoDocumento || describeCompareSpedModel(dominioDoc.modelo) || '-',
+      numeroSped: spedDoc.numero || spedDoc.numeroNfe || '-',
+      numeroDominio: dominioDoc.numeroNfe || dominioDoc.numero || '-',
+      serieSped: spedDoc.serie || '-',
+      serieDominio: dominioDoc.serie || '-',
+      dataSped: spedDoc.dataEmissao || '-',
+      dataDominio: formatDate(dominioDoc.dataEmissao || ''),
+      valorSped: spedDoc.valor,
+      valorDominio: dominioDoc.valor,
+      diferencaValor: toNumber(dominioDoc.valor) - toNumber(spedDoc.valor),
+      emitenteNomeSped: spedDoc.emitenteNome || '-',
+      emitenteCnpjSped: spedDoc.emitenteCnpj || '',
+      emitenteNomeDominio: dominioDoc.emitenteNome || '-',
+      emitenteCnpjDominio: dominioDoc.emitenteCnpj || '',
+      observacao: diffs.join('; ') || 'Documento encontrado nas duas bases.'
+    });
+  };
+
+  const tryMatchByKey = (keys) => {
+    for (const key of keys) {
+      const spedBucket = spedIndex.get(key) || [];
+      const dominioBucket = dominioIndex.get(key) || [];
+      const spedDoc = spedBucket.find((doc) => !usedSped.has(doc.__compareIndex));
+      const dominioDoc = dominioBucket.find((doc) => !usedDominio.has(doc.__compareIndex));
+
+      if (spedDoc && dominioDoc) {
+        usedSped.add(spedDoc.__compareIndex);
+        usedDominio.add(dominioDoc.__compareIndex);
+        consumeMatch(spedDoc, dominioDoc);
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  spedIndexed.forEach((spedDoc) => {
+    const keys = buildCompareCandidateKeys(spedDoc);
+    const matched = tryMatchByKey(keys);
+    if (!matched) {
+      onlySpedCount += 1;
+      rows.push({
+        status: 'Somente no SPED',
+        chave: spedDoc.chaveAcesso || '-',
+        tipoSped: spedDoc.tipoDocumento || describeCompareSpedModel(spedDoc.modelo) || '-',
+        tipoDominio: '-',
+        numeroSped: spedDoc.numero || '-',
+        numeroDominio: '-',
+        serieSped: spedDoc.serie || '-',
+        serieDominio: '-',
+        dataSped: spedDoc.dataEmissao || '-',
+        dataDominio: '-',
+        valorSped: spedDoc.valor,
+        valorDominio: null,
+        diferencaValor: null,
+        emitenteNomeSped: spedDoc.emitenteNome || '-',
+        emitenteCnpjSped: spedDoc.emitenteCnpj || '',
+        emitenteNomeDominio: '-',
+        emitenteCnpjDominio: '',
+        observacao: 'Documento localizado apenas no SPED.'
+      });
+    }
+  });
+
+  dominioIndexed.forEach((dominioDoc) => {
+    if (!usedDominio.has(dominioDoc.__compareIndex)) {
+      onlyDominioCount += 1;
+      rows.push({
+        status: 'Somente no Dominio',
+        chave: dominioDoc?.chaveAcesso || '-',
+        tipoSped: '-',
+        tipoDominio: dominioDoc?.tipoDocumento || describeCompareSpedModel(dominioDoc?.modelo) || '-',
+        numeroSped: '-',
+        numeroDominio: dominioDoc?.numeroNfe || '-',
+        serieSped: '-',
+        serieDominio: dominioDoc?.serie || '-',
+        dataSped: '-',
+        dataDominio: formatDate(dominioDoc?.dataEmissao || ''),
+        valorSped: null,
+        valorDominio: dominioDoc?.valor ?? null,
+        diferencaValor: null,
+        emitenteNomeSped: '-',
+        emitenteCnpjSped: '',
+        emitenteNomeDominio: dominioDoc?.emitenteNome || '-',
+        emitenteCnpjDominio: dominioDoc?.emitenteCnpj || '',
+        observacao: 'Documento localizado apenas na Dominio.'
+      });
+    }
+  });
+
+  return {
+    rows,
+    matchedCount,
+    onlySpedCount,
+    onlyDominioCount,
+    divergentCount
+  };
+}
+
 function compareSpedAndDominioDocs(spedDoc, dominioDoc) {
   const diffs = [];
 
@@ -13314,17 +13420,37 @@ function compareSpedAndDominioDocs(spedDoc, dominioDoc) {
   return diffs;
 }
 
-function buildCompareFingerprint(doc) {
+function buildCompareIndex(documents) {
+  const index = new Map();
+  (Array.isArray(documents) ? documents : []).forEach((doc, idx) => {
+    const enriched = doc.__compareIndex == null ? { ...doc, __compareIndex: idx } : doc;
+    buildCompareCandidateKeys(enriched).forEach((key) => {
+      if (!index.has(key)) {
+        index.set(key, []);
+      }
+      index.get(key).push(enriched);
+    });
+  });
+  return index;
+}
+
+function buildCompareCandidateKeys(doc) {
+  const keys = [];
   const chave = normalizeDigits(doc?.chaveAcesso || '');
   if (chave.length >= 40) {
-    return `CHAVE:${chave}`;
+    keys.push(`CHAVE:${chave}`);
   }
 
   const serie = String(doc?.serie || '').trim() || '-';
   const numero = String(doc?.numero || doc?.numeroNfe || '').trim() || '-';
-  const date = formatCompareMonth(doc?.dataEmissao || '') || '-';
+  const date = normalizeCompareDateKey(doc?.dataEmissao || '') || formatCompareMonth(doc?.dataEmissao || '') || '-';
   const value = Number.isFinite(Number(doc?.valor)) ? Number(toNumber(doc.valor)).toFixed(2) : '0.00';
-  return `FALLBACK:${serie}|${numero}|${date}|${value}`;
+  keys.push(`FALLBACK:${serie}|${numero}|${date}|${value}`);
+  return [...new Set(keys)];
+}
+
+function buildCompareFingerprint(doc) {
+  return buildCompareCandidateKeys(doc)[0] || '';
 }
 
 function parseCompareSpedDate(value) {
@@ -13337,6 +13463,49 @@ function parseCompareSpedDate(value) {
   const month = raw.slice(2, 4);
   const year = raw.slice(4, 8);
   return `${year}-${month}-${day}`;
+}
+
+function normalizeCompareDateKey(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime())) {
+    return date.toISOString().slice(0, 10);
+  }
+
+  if (/^\d{8}$/.test(text)) {
+    return parseCompareSpedDate(text);
+  }
+
+  return '';
+}
+
+function resolveCompareSpedDateRange(documents, competence) {
+  const normalizedCompetence = String(competence || '').trim();
+  if (/^\d{4}-\d{2}$/.test(normalizedCompetence)) {
+    const [year, month] = normalizedCompetence.split('-');
+    const start = `${year}-${month}-01`;
+    const endDate = new Date(Number(year), Number(month), 0);
+    const end = endDate.toISOString().slice(0, 10);
+    return { dataInicio: start, dataFim: end };
+  }
+
+  const dates = (Array.isArray(documents) ? documents : [])
+    .map((doc) => normalizeCompareDateKey(doc.dataEmissao))
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
+
+  if (!dates.length) {
+    return null;
+  }
+
+  return {
+    dataInicio: dates[0],
+    dataFim: dates[dates.length - 1]
+  };
 }
 
 function getCompareSpedCompetence(documents) {
@@ -13388,8 +13557,85 @@ function buildCompareSpedArtifact(report, outputFormat) {
 }
 
 function buildCompareExcelBlob(report) {
+  const xml = buildCompareSpreadsheetXml(report);
+  return new Blob([`\ufeff${xml}`], { type: 'application/vnd.ms-excel;charset=utf-8' });
+}
+
+function buildCompareSpreadsheetXml(report) {
+  const sheetNames = ['Resumo', 'Faltantes no SPED', 'Faltantes na Dominio'];
+  const worksheets = [
+    buildCompareSummaryWorksheet(report),
+    buildCompareDocumentWorksheet(report, 'Faltantes no SPED', 'dominio'),
+    buildCompareDocumentWorksheet(report, 'Faltantes na Dominio', 'sped')
+  ];
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+  <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
+    <Author>NotaSync</Author>
+    <LastAuthor>NotaSync</LastAuthor>
+    <Created>${escapeHtml(new Date().toISOString())}</Created>
+    <Company>NotaSync</Company>
+  </DocumentProperties>
+  <ExcelWorkbook xmlns="urn:schemas-microsoft-com:office:excel">
+    <ProtectStructure>False</ProtectStructure>
+    <ProtectWindows>False</ProtectWindows>
+  </ExcelWorkbook>
+  <Styles>
+    <Style ss:ID="Default" ss:Name="Normal">
+      <Alignment ss:Vertical="Center" />
+      <Font ss:FontName="Calibri" ss:Size="10" />
+    </Style>
+    <Style ss:ID="SheetTitle">
+      <Font ss:Bold="1" ss:Size="14" ss:Color="#123A5A" />
+      <Interior ss:Color="#F7F1DC" ss:Pattern="Solid" />
+    </Style>
+    <Style ss:ID="MetaLabel">
+      <Font ss:Bold="1" ss:Color="#4B5563" />
+    </Style>
+    <Style ss:ID="MetaValue">
+      <Font ss:Color="#111827" />
+    </Style>
+    <Style ss:ID="Header">
+      <Font ss:Bold="1" ss:Color="#FFFFFF" />
+      <Interior ss:Color="#25507A" ss:Pattern="Solid" />
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
+      </Borders>
+    </Style>
+    <Style ss:ID="Cell">
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
+      </Borders>
+    </Style>
+    <Style ss:ID="CellDate" ss:Parent="Cell">
+      <NumberFormat ss:Format="dd/mm/yyyy" />
+    </Style>
+    <Style ss:ID="CellMoney" ss:Parent="Cell">
+      <NumberFormat ss:Format="R$ #,##0.00" />
+    </Style>
+  </Styles>
+  ${sheetNames
+    .map((sheetName, index) => `<Worksheet ss:Name="${escapeHtml(sheetName)}">${worksheets[index]}</Worksheet>`)
+    .join('')}
+</Workbook>`;
+}
+
+function buildCompareSummaryWorksheet(report) {
   const summaryRows = [
     ['Empresa', report.companyName],
+    ['CNPJ', formatCnpj(report.clientCnpj || '')],
     ['Arquivo SPED', report.sourceFileName],
     ['Competencia', report.competence || 'Nao informada'],
     ['SPED documentos', report.summary.spedDocs],
@@ -13401,126 +13647,175 @@ function buildCompareExcelBlob(report) {
     ['Avisos', report.summary.warningsCount]
   ];
 
-  const resultHeaders = [
-    'Status',
-    'Chave',
-    'Numero SPED',
-    'Numero Dominio',
-    'Serie SPED',
-    'Serie Dominio',
-    'Data SPED',
-    'Data Dominio',
-    'Valor SPED',
-    'Valor Dominio',
-    'Diferenca',
-    'Observacao'
-  ];
+  const warningRows = report.warnings.length
+    ? report.warnings.map((warning) => [warning])
+    : [['Nenhum aviso encontrado.']];
 
-  const summaryTable = `
-    <table>
-      <thead>
-        <tr><th colspan="2">Resumo</th></tr>
-      </thead>
-      <tbody>
-        ${summaryRows
-          .map((row) => `<tr><td>${escapeHtml(String(row[0]))}</td><td>${escapeHtml(String(row[1] ?? ''))}</td></tr>`)
-          .join('')}
-      </tbody>
-    </table>
+  return `
+    <Table>
+      <Column ss:Width="220" />
+      <Column ss:Width="420" />
+      <Row ss:Height="22">
+        <Cell ss:MergeAcross="1" ss:StyleID="SheetTitle"><Data ss:Type="String">Comparacao SPED x Dominio</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Empresa</Data></Cell>
+        <Cell ss:StyleID="MetaValue"><Data ss:Type="String">${escapeHtml(report.companyName)}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Arquivo</Data></Cell>
+        <Cell ss:StyleID="MetaValue"><Data ss:Type="String">${escapeHtml(report.sourceFileName)}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Competencia</Data></Cell>
+        <Cell ss:StyleID="MetaValue"><Data ss:Type="String">${escapeHtml(report.competence || 'Nao informada')}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:Index="1" ss:StyleID="MetaLabel"><Data ss:Type="String">SPED documentos</Data></Cell>
+        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.spedDocs || 0)}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Dominio documentos</Data></Cell>
+        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.dominioDocs || 0)}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Encontrados nas duas bases</Data></Cell>
+        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.matchedDocs || 0)}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Somente no SPED</Data></Cell>
+        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.onlySpedDocs || 0)}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Somente na Dominio</Data></Cell>
+        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.onlyDominioDocs || 0)}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Divergentes</Data></Cell>
+        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.divergentDocs || 0)}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Avisos</Data></Cell>
+        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.warningsCount || 0)}</Data></Cell>
+      </Row>
+      <Row />
+      <Row ss:Height="22">
+        <Cell ss:MergeAcross="0" ss:StyleID="SheetTitle"><Data ss:Type="String">Avisos</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="Header"><Data ss:Type="String">Mensagem</Data></Cell>
+      </Row>
+      ${warningRows.map((row) => `<Row><Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[0] || ''))}</Data></Cell></Row>`).join('')}
+    </Table>
   `;
+}
 
-  const warningsTable = report.warnings.length
-    ? `
-      <table>
-        <thead>
-          <tr><th colspan="1">Avisos</th></tr>
-        </thead>
-        <tbody>
-          ${report.warnings.map((warning) => `<tr><td>${escapeHtml(String(warning))}</td></tr>`).join('')}
-        </tbody>
-      </table>
-    `
-    : '';
+function buildCompareDocumentWorksheet(report, title, source) {
+  const rows = source === 'dominio'
+    ? report.rows.filter((row) => row.status === 'Somente no Dominio')
+    : report.rows.filter((row) => row.status === 'Somente no SPED');
+  const headers = ['Tipo', 'Serie', 'Numero', 'Data', 'Cnpj_Cpf_Emit', 'Rz_Social_Emit', 'Valor', 'Chave'];
+  const sheetRows = rows.map((row) => {
+    const isDominio = source === 'dominio';
+    const tipo = isDominio ? row.tipoDominio || '-' : row.tipoSped || '-';
+    const serie = isDominio ? row.serieDominio || '-' : row.serieSped || '-';
+    const numero = isDominio ? row.numeroDominio || '-' : row.numeroSped || '-';
+    const data = isDominio ? row.dataDominio || '-' : row.dataSped || '-';
+    const cnpj = isDominio ? row.emitenteCnpjDominio || '' : row.emitenteCnpjSped || '';
+    const nome = isDominio ? row.emitenteNomeDominio || '-' : row.emitenteNomeSped || '-';
+    const valor = isDominio ? row.valorDominio : row.valorSped;
 
-  const resultsTable = `
-    <table>
-      <thead>
-        <tr>${resultHeaders.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>
-      </thead>
-      <tbody>
-        ${report.rows
-          .map(
-            (row) => `
-              <tr>
-                <td>${escapeHtml(row.status)}</td>
-                <td>${escapeHtml(row.chave)}</td>
-                <td>${escapeHtml(String(row.numeroSped || '-'))}</td>
-                <td>${escapeHtml(String(row.numeroDominio || '-'))}</td>
-                <td>${escapeHtml(String(row.serieSped || '-'))}</td>
-                <td>${escapeHtml(String(row.serieDominio || '-'))}</td>
-                <td>${escapeHtml(String(row.dataSped || '-'))}</td>
-                <td>${escapeHtml(String(row.dataDominio || '-'))}</td>
-                <td>${escapeHtml(row.valorSped == null ? '-' : formatCurrency(row.valorSped))}</td>
-                <td>${escapeHtml(row.valorDominio == null ? '-' : formatCurrency(row.valorDominio))}</td>
-                <td>${escapeHtml(row.diferencaValor == null ? '-' : formatCurrency(row.diferencaValor))}</td>
-                <td>${escapeHtml(row.observacao || '-')}</td>
-              </tr>
-            `
-          )
-          .join('')}
-      </tbody>
-    </table>
+    return [tipo, serie, numero, data, cnpj, nome, valor, row.chave || '-'];
+  });
+
+  return `
+    <Table>
+      <Column ss:Width="90" />
+      <Column ss:Width="70" />
+      <Column ss:Width="90" />
+      <Column ss:Width="95" />
+      <Column ss:Width="150" />
+      <Column ss:Width="280" />
+      <Column ss:Width="95" />
+      <Column ss:Width="250" />
+      <Row ss:Height="22">
+        <Cell ss:MergeAcross="7" ss:StyleID="SheetTitle"><Data ss:Type="String">${escapeHtml(title)}</Data></Cell>
+      </Row>
+      <Row>
+        ${headers.map((header) => `<Cell ss:StyleID="Header"><Data ss:Type="String">${escapeHtml(header)}</Data></Cell>`).join('')}
+      </Row>
+      ${
+        sheetRows.length
+          ? sheetRows
+              .map(
+                (row) => `
+                  <Row>
+                    <Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[0] || '-'))}</Data></Cell>
+                    <Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[1] || '-'))}</Data></Cell>
+                    <Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[2] || '-'))}</Data></Cell>
+                    ${
+                      toSpreadsheetDateTime(row[3])
+                        ? `<Cell ss:StyleID="CellDate"><Data ss:Type="DateTime">${escapeHtml(toSpreadsheetDateTime(row[3]))}</Data></Cell>`
+                        : `<Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[3] || '-'))}</Data></Cell>`
+                    }
+                    <Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(formatCnpj(row[4] || ''))}</Data></Cell>
+                    <Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[5] || '-'))}</Data></Cell>
+                    <Cell ss:StyleID="CellMoney"><Data ss:Type="Number">${Number.isFinite(Number(row[6])) ? Number(row[6]) : 0}</Data></Cell>
+                    <Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[7] || '-'))}</Data></Cell>
+                  </Row>
+                `
+              )
+              .join('')
+          : `<Row><Cell ss:StyleID="Cell" ss:MergeAcross="7"><Data ss:Type="String">Nenhum documento localizado.</Data></Cell></Row>`
+      }
+    </Table>
   `;
+}
 
-  const html = `
-    <!DOCTYPE html>
-    <html>
-      <head>
-        <meta charset="utf-8" />
-        <title>Comparacao SPED</title>
-        <style>
-          body { font-family: Arial, sans-serif; color: #222; padding: 24px; }
-          h1, h2 { margin: 0 0 10px; }
-          h1 { font-size: 20px; }
-          h2 { font-size: 16px; margin-top: 18px; }
-          p { margin: 4px 0; }
-          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-          th, td { border: 1px solid #cfd2d7; padding: 8px; font-size: 12px; vertical-align: top; }
-          th { background: #f4f5f7; text-align: left; }
-          .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-          .section { margin-top: 18px; }
-        </style>
-      </head>
-      <body>
-        <h1>Comparacao SPED x Dominio</h1>
-        <div class="summary-grid">
-          <div>
-            <p><strong>Empresa:</strong> ${escapeHtml(report.companyName)}</p>
-            <p><strong>Arquivo:</strong> ${escapeHtml(report.sourceFileName)}</p>
-            <p><strong>Competencia:</strong> ${escapeHtml(report.competence || 'Nao informada')}</p>
-          </div>
-          <div>
-            <p><strong>SPED:</strong> ${escapeHtml(String(report.summary.spedDocs))} documento(s)</p>
-            <p><strong>Dominio:</strong> ${escapeHtml(String(report.summary.dominioDocs))} documento(s)</p>
-            <p><strong>Gerado em:</strong> ${escapeHtml(formatDateTime(report.generatedAt))}</p>
-          </div>
-        </div>
-        <div class="section">
-          ${summaryTable}
-        </div>
-        ${
-          warningsTable
-            ? `<div class="section">${warningsTable}</div>`
-            : ''
-        }
-        <div class="section">
-          ${resultsTable}
-        </div>
-      </body>
-    </html>
-  `;
+function describeCompareSpedModel(modelo) {
+  const code = String(modelo || '').trim();
+  if (!code) {
+    return '-';
+  }
+  if (code === '55') {
+    return 'NF-e';
+  }
+  if (code === '57') {
+    return 'CT-e';
+  }
+  if (code === '65') {
+    return 'NFC-e';
+  }
+  return `Modelo ${code}`;
+}
 
-  return new Blob([`\ufeff${html}`], { type: 'application/vnd.ms-excel;charset=utf-8' });
+function toSpreadsheetDateTime(value) {
+  const text = String(value || '').trim();
+  if (!text || text === '-') {
+    return '';
+  }
+
+  const slashMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch;
+    return `${year}-${month}-${day}T00:00:00.000`;
+  }
+
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return `${year}-${month}-${day}T00:00:00.000`;
+  }
+
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    const year = String(parsed.getFullYear());
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}T00:00:00.000`;
+  }
+
+  return '';
 }
 
 function buildComparePdfBlob(report) {
