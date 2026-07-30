@@ -160,6 +160,17 @@ const state = {
   alerts: [],
   serverResolvedAlerts: {},
   resolvedAlerts: loadResolvedAlertsStore(),
+  compareSped: {
+    status: 'idle',
+    sourceFileName: '',
+    sourceCompetence: '',
+    sourceCompanyId: '',
+    outputFormat: 'Excel',
+    generatedAt: null,
+    report: null,
+    artifact: null,
+    lastError: ''
+  },
   establishmentsByClient: {},
   syncByClient: {},
   dashboardStats: null,
@@ -468,6 +479,19 @@ function onDocumentClick(event) {
       if (route) {
         navigate(route);
       }
+      return;
+    }
+    case 'compare-sped-download': {
+      void downloadCompareSpedArtifact();
+      return;
+    }
+    case 'compare-sped-reset': {
+      resetCompareSpedState();
+      render();
+      return;
+    }
+    case 'compare-sped-open-last': {
+      openCompareSpedReportModal();
       return;
     }
     case 'toggle-sidebar': {
@@ -1364,6 +1388,11 @@ function onDocumentSubmit(event) {
     case 'alertsFilterForm': {
       event.preventDefault();
       applyAlertsFilters(target);
+      return;
+    }
+    case 'compareSpedForm': {
+      event.preventDefault();
+      void submitCompareSpedForm(target);
       return;
     }
     case 'clientSearchConfigForm': {
@@ -3763,6 +3792,18 @@ function renderSettingsPage() {
 function renderComparaSpedPage() {
   const clientOptions = state.clients.map((client) => client.id);
   const hasClients = clientOptions.length > 0;
+  const compareState = state.compareSped;
+  const report = compareState.report;
+  const artifactReady = Boolean(compareState.artifact?.blobUrl && report);
+  const downloadLabel = compareState.outputFormat === 'PDF' ? 'Baixar PDF' : 'Baixar Excel';
+  const generationStatus =
+    compareState.status === 'processing'
+      ? 'Processando arquivo...'
+      : artifactReady
+        ? 'Arquivo pronto para download'
+        : compareState.status === 'error'
+          ? 'Falha na comparacao'
+          : 'Aguardando arquivo';
 
   return `
     <section class="page-section compare-page">
@@ -3778,12 +3819,12 @@ function renderComparaSpedPage() {
           <div>
             <h3 class="card-title">Comparação em SPED</h3>
             <p class="card-subtitle">
-              Escolha uma empresa cadastrada na Dominio, envie o arquivo SPED e monte o relatório com documentos faltantes e divergências.
+              Escolha uma empresa cadastrada na Dominio, envie o arquivo SPED Fiscal e gere o arquivo de conferência para baixar no painel ao lado.
             </p>
           </div>
         </div>
         <p class="compare-hero-note">
-          O objetivo é concentrar a conferência em um fluxo único, aproveitando a integração já existente com a Dominio e deixando o resultado pronto para auditoria interna.
+          O primeiro passo já pode ler o TXT do SPED, cruzar com os documentos da Domínio que estão carregados no sistema e entregar um Excel ou PDF para download.
         </p>
       </article>
 
@@ -3797,56 +3838,49 @@ function renderComparaSpedPage() {
         <article class="card compare-main-card">
           <div class="compare-card-header">
             <div>
-              <h3 class="card-title">Preparar comparação</h3>
+              <h3 class="card-title">Gerar arquivo</h3>
               <p class="card-subtitle">
-                A estrutura abaixo segue o fluxo operacional do app: selecionar empresa, anexar o arquivo e iniciar a comparação.
+                O upload fica aqui. A saída escolhida define se o resultado será Excel ou PDF, e o download acontece no bloco ao lado.
               </p>
             </div>
-            ${statusBadge(hasClients ? 'Pronto para configurar' : 'Sem empresas cadastradas', hasClients ? 'success' : 'warning')}
+            ${statusBadge(generationStatus, compareState.status === 'processing' ? 'info' : artifactReady ? 'success' : compareState.status === 'error' ? 'danger' : 'neutral')}
           </div>
 
-          <form class="form-grid compare-form">
+          <form id="compareSpedForm" class="form-grid compare-form">
             <label class="field">
               Empresa
               <select name="empresa" ${hasClients ? '' : 'disabled'} required>
-                ${renderOptions(clientOptions, '', mapClientOptions(), 'Selecione a empresa')}
+                ${renderOptions(clientOptions, compareState.sourceCompanyId || '', mapClientOptions(), 'Selecione a empresa')}
               </select>
             </label>
             <label class="field">
               Competência
-              <input name="competencia" type="month" />
+              <input name="competencia" type="month" value="${escapeHtml(compareState.sourceCompetence || '')}" />
             </label>
             <label class="field compare-span-2">
               Arquivo SPED Fiscal
-              <input name="arquivoSped" type="file" accept=".txt,.zip,text/plain" />
+              <input name="arquivoSped" type="file" accept=".txt,text/plain" required />
             </label>
             <label class="field">
               Saída
               <select name="saida">
-                ${renderOptions(['Excel', 'PDF', 'Excel e PDF'], 'Excel', {
+                ${renderOptions(['Excel', 'PDF'], compareState.outputFormat || 'Excel', {
                   Excel: 'Excel',
-                  PDF: 'PDF',
-                  'Excel e PDF': 'Excel e PDF'
+                  PDF: 'PDF'
                 })}
               </select>
             </label>
             <label class="field">
-              Escopo da análise
-              <select name="escopo">
-                ${renderOptions(['Todos', 'Somente faltantes', 'Somente divergencias'], 'Todos', {
-                  Todos: 'Todos',
-                  'Somente faltantes': 'Somente faltantes',
-                  'Somente divergencias': 'Somente divergencias'
-                })}
-              </select>
+              Status
+              <input value="${escapeHtml(compareState.status === 'processing' ? 'Lendo arquivo...' : compareState.status === 'done' ? 'Comparacao concluida' : 'Pronto para gerar')}" disabled />
             </label>
             <div class="compare-upload-hint compare-span-3">
               <span class="compare-upload-dot"></span>
-              <span>O arquivo deve ser o texto do SPED Fiscal, no mesmo padrão importado pelo seu processo atual.</span>
+              <span>Use o TXT do SPED Fiscal. Nesta primeira etapa a comparação cruza o arquivo enviado com os documentos de NF-e já carregados do cliente selecionado.</span>
             </div>
             <div class="stack-actions compare-actions compare-span-3">
-              <button class="btn primary" type="button" disabled>Gerar comparação</button>
-              <button class="btn secondary" type="button" disabled>Baixar modelo</button>
+              <button class="btn primary" type="submit" ${hasClients ? '' : 'disabled'}>${compareState.status === 'processing' ? 'Processando...' : 'Gerar arquivo'}</button>
+              <button class="btn secondary" type="button" data-action="compare-sped-reset" ${compareState.status === 'processing' ? 'disabled' : ''}>Limpar</button>
             </div>
           </form>
         </article>
@@ -3856,20 +3890,38 @@ function renderComparaSpedPage() {
             <div class="compare-card-header">
               <div>
                 <h3 class="card-title">Relatório de saída</h3>
-                <p class="card-subtitle">O arquivo consolidado aparece aqui depois da geração.</p>
+                <p class="card-subtitle">O arquivo gerado aparece aqui para download imediato.</p>
               </div>
-              ${statusBadge('Aguardando arquivo', 'neutral')}
+              ${statusBadge(generationStatus, compareState.status === 'processing' ? 'info' : artifactReady ? 'success' : compareState.status === 'error' ? 'danger' : 'neutral')}
             </div>
 
             <div class="compare-result-placeholder">
               <div class="compare-result-icon">${icon('file')}</div>
-              <h4>Nenhum relatório gerado ainda</h4>
-              <p>Quando a comparação for executada, este espaço pode exibir o resumo e o atalho para download.</p>
+              <h4>${artifactReady ? compareState.artifact.fileName : 'Nenhum arquivo gerado ainda'}</h4>
+              <p>
+                ${
+                  artifactReady
+                    ? `Gerado em ${escapeHtml(formatDateTime(compareState.generatedAt || ''))}. Clique no botão abaixo para baixar novamente.`
+                    : 'Depois de gerar, este painel mostrará o nome do arquivo e o atalho para download.'
+                }
+              </p>
             </div>
 
+            ${
+              report
+                ? `
+                  <div class="compare-result-summary">
+                    ${statCard('file', 'SPED', String(report.summary.spedDocs), 'documentos lidos no arquivo', 'neutral')}
+                    ${statCard('file', 'Domínio', String(report.summary.dominioDocs), 'documentos no banco', 'info')}
+                    ${statCard('alert', 'Divergências', String(report.summary.issuesCount), 'itens fora do padrão', 'warning')}
+                  </div>
+                `
+                : ''
+            }
+
             <div class="compare-result-actions">
-              <button class="btn secondary" type="button" disabled>Visualizar relatório</button>
-              <button class="btn primary" type="button" disabled>Baixar Excel</button>
+              <button class="btn secondary" type="button" data-action="compare-sped-download" ${artifactReady ? '' : 'disabled'}>${downloadLabel}</button>
+              <button class="btn primary" type="button" data-action="compare-sped-open-last" ${artifactReady ? '' : 'disabled'}>Abrir resumo</button>
             </div>
           </article>
 
@@ -3883,9 +3935,9 @@ function renderComparaSpedPage() {
             </div>
 
             <div class="compare-step-list">
-              ${renderCompareStep(1, 'Selecione a empresa', 'Use o cadastro já sincronizado com a Dominio para definir a base da comparação.')}
-              ${renderCompareStep(2, 'Envie o SPED', 'Carregue o arquivo TXT da competência desejada e deixe o sistema processar as linhas.')}
-              ${renderCompareStep(3, 'Baixe o resultado', 'Receba a planilha com os documentos faltantes e as diferenças encontradas.')}
+              ${renderCompareStep(1, 'Selecione a empresa', 'Use o cadastro já sincronizado com a Domínio para definir a base da comparação.')}
+              ${renderCompareStep(2, 'Envie o SPED', 'Carregue o TXT da competência desejada e deixe o sistema processar as linhas do arquivo.')}
+              ${renderCompareStep(3, 'Baixe o resultado', 'Receba a planilha ou o PDF com faltantes e divergências prontas para auditoria.')}
             </div>
           </article>
         </div>
@@ -4097,6 +4149,8 @@ function renderModal() {
       return renderCteDisagreementAlertsModal();
     case 'dominio-nfe-view':
       return renderDominioNfeViewerModal();
+    case 'compare-sped-report':
+      return renderCompareSpedReportModal();
     case 'xml-details':
       return renderXmlDetailsModal(state.modal.xmlId);
     case 'xml-view':
@@ -12957,6 +13011,761 @@ function triggerBrowserDownload(fileName, blob) {
   anchor.click();
   anchor.remove();
   URL.revokeObjectURL(url);
+}
+
+function resetCompareSpedState() {
+  if (state.compareSped.artifact?.blobUrl) {
+    URL.revokeObjectURL(state.compareSped.artifact.blobUrl);
+  }
+
+  state.compareSped.status = 'idle';
+  state.compareSped.sourceFileName = '';
+  state.compareSped.sourceCompetence = '';
+  state.compareSped.sourceCompanyId = '';
+  state.compareSped.outputFormat = 'Excel';
+  state.compareSped.generatedAt = null;
+  state.compareSped.report = null;
+  state.compareSped.artifact = null;
+  state.compareSped.lastError = '';
+}
+
+async function submitCompareSpedForm(form) {
+  const data = new FormData(form);
+  const companyId = String(data.get('empresa') || '').trim();
+  const competence = String(data.get('competencia') || '').trim();
+  const outputFormat = String(data.get('saida') || 'Excel').trim() === 'PDF' ? 'PDF' : 'Excel';
+  const file = data.get('arquivoSped');
+
+  if (!companyId) {
+    pushToast('Selecione uma empresa antes de gerar a comparacao.', 'error');
+    return;
+  }
+
+  if (!(file instanceof File) || !file.name) {
+    pushToast('Envie o arquivo TXT do SPED Fiscal.', 'error');
+    return;
+  }
+
+  if (!file.name.toLowerCase().endsWith('.txt')) {
+    pushToast('Nesta primeira etapa utilize um arquivo TXT do SPED Fiscal.', 'error');
+    return;
+  }
+
+  const client = findClientById(companyId);
+  if (!client) {
+    pushToast('Empresa selecionada nao encontrada.', 'error');
+    return;
+  }
+
+  if (state.compareSped.artifact?.blobUrl) {
+    URL.revokeObjectURL(state.compareSped.artifact.blobUrl);
+  }
+
+  state.compareSped.status = 'processing';
+  state.compareSped.sourceCompanyId = companyId;
+  state.compareSped.sourceCompetence = competence;
+  state.compareSped.sourceFileName = file.name;
+  state.compareSped.outputFormat = outputFormat;
+  state.compareSped.generatedAt = null;
+  state.compareSped.report = null;
+  state.compareSped.artifact = null;
+  state.compareSped.lastError = '';
+  render();
+
+  try {
+    const fileText = await file.text();
+    const parsed = parseCompareSpedFile(fileText);
+    const report = buildCompareSpedReport({
+      client,
+      competence,
+      sourceFileName: file.name,
+      parsedDocuments: parsed.documents,
+      parsingWarnings: parsed.warnings,
+      outputFormat
+    });
+    const artifact = buildCompareSpedArtifact(report, outputFormat);
+
+    state.compareSped.status = 'done';
+    state.compareSped.report = report;
+    state.compareSped.artifact = artifact;
+    state.compareSped.generatedAt = new Date().toISOString();
+    state.compareSped.lastError = '';
+    render();
+    pushToast(`Comparacao gerada com sucesso em formato ${outputFormat === 'PDF' ? 'PDF' : 'Excel'}.`, 'success');
+  } catch (error) {
+    state.compareSped.status = 'error';
+    state.compareSped.lastError = toErrorMessage(error);
+    render();
+    pushToast(`Falha ao gerar comparacao: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function downloadCompareSpedArtifact() {
+  const artifact = state.compareSped.artifact;
+  if (!artifact?.blobUrl) {
+    pushToast('Gere a comparacao antes de baixar o arquivo.', 'error');
+    return;
+  }
+
+  const anchor = document.createElement('a');
+  anchor.href = artifact.blobUrl;
+  anchor.download = artifact.fileName;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  pushToast(`Download de ${artifact.fileName} iniciado.`, 'success');
+}
+
+function parseCompareSpedFile(text) {
+  const documents = [];
+  const warnings = [];
+  const seenKeys = new Set();
+  const rawLines = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+
+  rawLines.forEach((line, index) => {
+    const trimmed = String(line || '').trim();
+    if (!trimmed || !trimmed.startsWith('|')) {
+      return;
+    }
+
+    const fields = trimmed.split('|').slice(1, -1);
+    const recordType = fields[0];
+    if (recordType !== 'C100') {
+      return;
+    }
+
+    const spedDocument = {
+      sourceLine: index + 1,
+      recordType,
+      serie: String(fields[6] || '').trim(),
+      numero: String(fields[7] || '').trim(),
+      chaveAcesso: normalizeDigits(fields[8] || ''),
+      dataEmissao: parseCompareSpedDate(fields[9]),
+      valor: toNumber(fields[11]),
+      rawFields: fields
+    };
+    const fingerprint = buildCompareFingerprint(spedDocument);
+    if (seenKeys.has(fingerprint)) {
+      warnings.push(`Documento repetido no SPED: linha ${index + 1}, chave ${spedDocument.chaveAcesso || spedDocument.numero || '-'}.`);
+      return;
+    }
+
+    seenKeys.add(fingerprint);
+    documents.push(spedDocument);
+  });
+
+  return { documents, warnings };
+}
+
+function buildCompareSpedReport({ client, competence, sourceFileName, parsedDocuments, parsingWarnings, outputFormat }) {
+  const normalizedCompetence = String(competence || '').trim();
+  const inferredCompetence = getCompareSpedCompetence(parsedDocuments);
+  const activeCompetence = normalizedCompetence || inferredCompetence || '';
+  const companyDocs = (Array.isArray(state.nfeDocuments) ? state.nfeDocuments : []).filter((doc) => doc.clientId === client.id);
+  const spedDocs = filterCompareSpedByCompetence(parsedDocuments, activeCompetence);
+  const dominioDocs = filterCompareDominioByCompetence(companyDocs, activeCompetence);
+
+  const spedMap = new Map(spedDocs.map((doc) => [buildCompareFingerprint(doc), doc]));
+  const dominioMap = new Map(dominioDocs.map((doc) => [buildCompareFingerprint(doc), doc]));
+  const allKeys = new Set([...spedMap.keys(), ...dominioMap.keys()]);
+
+  const rows = [];
+  let matchedCount = 0;
+  let onlySpedCount = 0;
+  let onlyDominioCount = 0;
+  let divergentCount = 0;
+
+  [...allKeys].sort((left, right) => left.localeCompare(right, 'pt-BR')).forEach((key) => {
+    const spedDoc = spedMap.get(key) || null;
+    const dominioDoc = dominioMap.get(key) || null;
+
+    if (spedDoc && dominioDoc) {
+      const diffs = compareSpedAndDominioDocs(spedDoc, dominioDoc);
+      const status = diffs.length ? 'Divergente' : 'OK';
+      if (status === 'OK') {
+        matchedCount += 1;
+      } else {
+        divergentCount += 1;
+      }
+
+      rows.push({
+        status,
+        chave: spedDoc.chaveAcesso || dominioDoc.chaveAcesso || '-',
+        numeroSped: spedDoc.numero || '-',
+        numeroDominio: dominioDoc.numeroNfe || '-',
+        serieSped: spedDoc.serie || '-',
+        serieDominio: dominioDoc.serie || '-',
+        dataSped: spedDoc.dataEmissao || '-',
+        dataDominio: formatDate(dominioDoc.dataEmissao || ''),
+        valorSped: spedDoc.valor,
+        valorDominio: dominioDoc.valor,
+        diferencaValor: toNumber(dominioDoc.valor) - toNumber(spedDoc.valor),
+        observacao: diffs.join('; ') || 'Documento encontrado nas duas bases.'
+      });
+      return;
+    }
+
+    if (spedDoc) {
+      onlySpedCount += 1;
+      rows.push({
+        status: 'Somente no SPED',
+        chave: spedDoc.chaveAcesso || '-',
+        numeroSped: spedDoc.numero || '-',
+        numeroDominio: '-',
+        serieSped: spedDoc.serie || '-',
+        serieDominio: '-',
+        dataSped: spedDoc.dataEmissao || '-',
+        dataDominio: '-',
+        valorSped: spedDoc.valor,
+        valorDominio: null,
+        diferencaValor: null,
+        observacao: 'Documento localizado apenas no SPED.'
+      });
+      return;
+    }
+
+    onlyDominioCount += 1;
+    rows.push({
+      status: 'Somente no Dominio',
+      chave: dominioDoc?.chaveAcesso || '-',
+      numeroSped: '-',
+      numeroDominio: dominioDoc?.numeroNfe || '-',
+      serieSped: '-',
+      serieDominio: dominioDoc?.serie || '-',
+      dataSped: '-',
+      dataDominio: formatDate(dominioDoc?.dataEmissao || ''),
+      valorSped: null,
+      valorDominio: dominioDoc?.valor ?? null,
+      diferencaValor: null,
+      observacao: 'Documento localizado apenas na Dominio.'
+    });
+  });
+
+  const issuesCount = rows.filter((row) => row.status !== 'OK').length;
+  const warnings = [...(Array.isArray(parsingWarnings) ? parsingWarnings : [])];
+  const summary = {
+    spedDocs: spedDocs.length,
+    dominioDocs: dominioDocs.length,
+    matchedDocs: matchedCount,
+    onlySpedDocs: onlySpedCount,
+    onlyDominioDocs: onlyDominioCount,
+    divergentDocs: divergentCount,
+    issuesCount,
+    warningsCount: warnings.length
+  };
+
+  return {
+    clientId: client.id,
+    companyName: client.razaoSocial || 'Empresa selecionada',
+    competence: activeCompetence,
+    sourceFileName,
+    generatedAt: new Date().toISOString(),
+    outputFormat,
+    summary,
+    rows,
+    warnings,
+    source: {
+      parsedDocs: parsedDocuments.length,
+      companyDocs: companyDocs.length
+    }
+  };
+}
+
+function filterCompareSpedByCompetence(documents, competence) {
+  if (!competence) {
+    return [...documents];
+  }
+
+  return documents.filter((doc) => formatCompareMonth(doc.dataEmissao) === competence);
+}
+
+function filterCompareDominioByCompetence(documents, competence) {
+  if (!competence) {
+    return [...documents];
+  }
+
+  return documents.filter((doc) => formatCompareMonth(doc.dataEmissao) === competence);
+}
+
+function compareSpedAndDominioDocs(spedDoc, dominioDoc) {
+  const diffs = [];
+
+  if (String(spedDoc.numero || '').trim() !== String(dominioDoc.numeroNfe || '').trim()) {
+    diffs.push(`Numero ${spedDoc.numero || '-'} x ${dominioDoc.numeroNfe || '-'}`);
+  }
+
+  if (String(spedDoc.serie || '').trim() !== String(dominioDoc.serie || '').trim()) {
+    diffs.push(`Serie ${spedDoc.serie || '-'} x ${dominioDoc.serie || '-'}`);
+  }
+
+  const valorSped = toNumber(spedDoc.valor);
+  const valorDominio = toNumber(dominioDoc.valor);
+  if (Math.abs(valorSped - valorDominio) > 0.01) {
+    diffs.push(`Valor ${formatCurrency(valorSped)} x ${formatCurrency(valorDominio)}`);
+  }
+
+  const dataSped = String(spedDoc.dataEmissao || '').trim();
+  const dataDominio = formatDate(dominioDoc.dataEmissao || '');
+  if (dataSped && dataDominio && dataSped !== dataDominio) {
+    diffs.push(`Data ${dataSped} x ${dataDominio}`);
+  }
+
+  return diffs;
+}
+
+function buildCompareFingerprint(doc) {
+  const chave = normalizeDigits(doc?.chaveAcesso || '');
+  if (chave.length >= 40) {
+    return `CHAVE:${chave}`;
+  }
+
+  const serie = String(doc?.serie || '').trim() || '-';
+  const numero = String(doc?.numero || doc?.numeroNfe || '').trim() || '-';
+  const date = formatCompareMonth(doc?.dataEmissao || '') || '-';
+  const value = Number.isFinite(Number(doc?.valor)) ? Number(toNumber(doc.valor)).toFixed(2) : '0.00';
+  return `FALLBACK:${serie}|${numero}|${date}|${value}`;
+}
+
+function parseCompareSpedDate(value) {
+  const raw = String(value || '').trim();
+  if (!/^\d{8}$/.test(raw)) {
+    return '';
+  }
+
+  const day = raw.slice(0, 2);
+  const month = raw.slice(2, 4);
+  const year = raw.slice(4, 8);
+  return `${year}-${month}-${day}`;
+}
+
+function getCompareSpedCompetence(documents) {
+  const months = new Set(
+    (Array.isArray(documents) ? documents : [])
+      .map((doc) => formatCompareMonth(doc.dataEmissao))
+      .filter(Boolean)
+  );
+
+  return months.size === 1 ? [...months][0] : '';
+}
+
+function formatCompareMonth(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) {
+    const match = text.match(/^(\d{4})-(\d{2})/);
+    return match ? `${match[1]}-${match[2]}` : '';
+  }
+
+  return `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function buildCompareSpedArtifact(report, outputFormat) {
+  const fileName = `comparacao-sped-${toSafeFileName(report.companyName)}-${report.competence || 'geral'}-${compactDate(report.generatedAt)}.${outputFormat === 'PDF' ? 'pdf' : 'xls'}`;
+  if (outputFormat === 'PDF') {
+    const blob = buildComparePdfBlob(report);
+    const blobUrl = URL.createObjectURL(blob);
+    return {
+      fileName,
+      contentType: 'application/pdf',
+      blob,
+      blobUrl
+    };
+  }
+
+  const blob = buildCompareExcelBlob(report);
+  const blobUrl = URL.createObjectURL(blob);
+  return {
+    fileName,
+    contentType: 'application/vnd.ms-excel',
+    blob,
+    blobUrl
+  };
+}
+
+function buildCompareExcelBlob(report) {
+  const summaryRows = [
+    ['Empresa', report.companyName],
+    ['Arquivo SPED', report.sourceFileName],
+    ['Competencia', report.competence || 'Nao informada'],
+    ['SPED documentos', report.summary.spedDocs],
+    ['Dominio documentos', report.summary.dominioDocs],
+    ['Encontrados nas duas bases', report.summary.matchedDocs],
+    ['Somente no SPED', report.summary.onlySpedDocs],
+    ['Somente na Dominio', report.summary.onlyDominioDocs],
+    ['Divergentes', report.summary.divergentDocs],
+    ['Avisos', report.summary.warningsCount]
+  ];
+
+  const resultHeaders = [
+    'Status',
+    'Chave',
+    'Numero SPED',
+    'Numero Dominio',
+    'Serie SPED',
+    'Serie Dominio',
+    'Data SPED',
+    'Data Dominio',
+    'Valor SPED',
+    'Valor Dominio',
+    'Diferenca',
+    'Observacao'
+  ];
+
+  const summaryTable = `
+    <table>
+      <thead>
+        <tr><th colspan="2">Resumo</th></tr>
+      </thead>
+      <tbody>
+        ${summaryRows
+          .map((row) => `<tr><td>${escapeHtml(String(row[0]))}</td><td>${escapeHtml(String(row[1] ?? ''))}</td></tr>`)
+          .join('')}
+      </tbody>
+    </table>
+  `;
+
+  const warningsTable = report.warnings.length
+    ? `
+      <table>
+        <thead>
+          <tr><th colspan="1">Avisos</th></tr>
+        </thead>
+        <tbody>
+          ${report.warnings.map((warning) => `<tr><td>${escapeHtml(String(warning))}</td></tr>`).join('')}
+        </tbody>
+      </table>
+    `
+    : '';
+
+  const resultsTable = `
+    <table>
+      <thead>
+        <tr>${resultHeaders.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr>
+      </thead>
+      <tbody>
+        ${report.rows
+          .map(
+            (row) => `
+              <tr>
+                <td>${escapeHtml(row.status)}</td>
+                <td>${escapeHtml(row.chave)}</td>
+                <td>${escapeHtml(String(row.numeroSped || '-'))}</td>
+                <td>${escapeHtml(String(row.numeroDominio || '-'))}</td>
+                <td>${escapeHtml(String(row.serieSped || '-'))}</td>
+                <td>${escapeHtml(String(row.serieDominio || '-'))}</td>
+                <td>${escapeHtml(String(row.dataSped || '-'))}</td>
+                <td>${escapeHtml(String(row.dataDominio || '-'))}</td>
+                <td>${escapeHtml(row.valorSped == null ? '-' : formatCurrency(row.valorSped))}</td>
+                <td>${escapeHtml(row.valorDominio == null ? '-' : formatCurrency(row.valorDominio))}</td>
+                <td>${escapeHtml(row.diferencaValor == null ? '-' : formatCurrency(row.diferencaValor))}</td>
+                <td>${escapeHtml(row.observacao || '-')}</td>
+              </tr>
+            `
+          )
+          .join('')}
+      </tbody>
+    </table>
+  `;
+
+  const html = `
+    <!DOCTYPE html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>Comparacao SPED</title>
+        <style>
+          body { font-family: Arial, sans-serif; color: #222; padding: 24px; }
+          h1, h2 { margin: 0 0 10px; }
+          h1 { font-size: 20px; }
+          h2 { font-size: 16px; margin-top: 18px; }
+          p { margin: 4px 0; }
+          table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+          th, td { border: 1px solid #cfd2d7; padding: 8px; font-size: 12px; vertical-align: top; }
+          th { background: #f4f5f7; text-align: left; }
+          .summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+          .section { margin-top: 18px; }
+        </style>
+      </head>
+      <body>
+        <h1>Comparacao SPED x Dominio</h1>
+        <div class="summary-grid">
+          <div>
+            <p><strong>Empresa:</strong> ${escapeHtml(report.companyName)}</p>
+            <p><strong>Arquivo:</strong> ${escapeHtml(report.sourceFileName)}</p>
+            <p><strong>Competencia:</strong> ${escapeHtml(report.competence || 'Nao informada')}</p>
+          </div>
+          <div>
+            <p><strong>SPED:</strong> ${escapeHtml(String(report.summary.spedDocs))} documento(s)</p>
+            <p><strong>Dominio:</strong> ${escapeHtml(String(report.summary.dominioDocs))} documento(s)</p>
+            <p><strong>Gerado em:</strong> ${escapeHtml(formatDateTime(report.generatedAt))}</p>
+          </div>
+        </div>
+        <div class="section">
+          ${summaryTable}
+        </div>
+        ${
+          warningsTable
+            ? `<div class="section">${warningsTable}</div>`
+            : ''
+        }
+        <div class="section">
+          ${resultsTable}
+        </div>
+      </body>
+    </html>
+  `;
+
+  return new Blob([`\ufeff${html}`], { type: 'application/vnd.ms-excel;charset=utf-8' });
+}
+
+function buildComparePdfBlob(report) {
+  const lines = buildComparePdfLines(report);
+  const pdfBytes = buildMinimalPdf(lines, `Comparacao SPED - ${report.companyName}`);
+  return new Blob([pdfBytes], { type: 'application/pdf' });
+}
+
+function buildComparePdfLines(report) {
+  const lines = [
+    'Comparacao SPED x Dominio',
+    `Empresa: ${stripPdfText(report.companyName)}`,
+    `Arquivo: ${stripPdfText(report.sourceFileName)}`,
+    `Competencia: ${stripPdfText(report.competence || 'Nao informada')}`,
+    `SPED: ${report.summary.spedDocs} | Dominio: ${report.summary.dominioDocs} | OK: ${report.summary.matchedDocs} | Divergencias: ${report.summary.issuesCount}`,
+    ''
+  ];
+
+  if (report.warnings.length) {
+    lines.push('Avisos:');
+    report.warnings.slice(0, 12).forEach((warning) => {
+      lines.push(`- ${stripPdfText(warning)}`);
+    });
+    lines.push('');
+  }
+
+  lines.push('Detalhes:');
+  report.rows.slice(0, 200).forEach((row) => {
+    const detail = [
+      `[${stripPdfText(row.status)}]`,
+      `Chave ${stripPdfText(row.chave)}`,
+      `N Sped ${stripPdfText(row.numeroSped)}`,
+      `N Dom ${stripPdfText(row.numeroDominio)}`,
+      `Ser Sped ${stripPdfText(row.serieSped)}`,
+      `Ser Dom ${stripPdfText(row.serieDominio)}`,
+      row.valorSped == null ? 'V Sped -' : `V Sped ${stripPdfText(formatCurrency(row.valorSped))}`,
+      row.valorDominio == null ? 'V Dom -' : `V Dom ${stripPdfText(formatCurrency(row.valorDominio))}`,
+      `Obs ${stripPdfText(row.observacao || '-')}`
+    ].join(' | ');
+    wrapPdfText(detail, 95).forEach((part) => lines.push(part));
+  });
+
+  return lines;
+}
+
+function wrapPdfText(text, maxLength) {
+  const normalized = stripPdfText(text || '');
+  if (normalized.length <= maxLength) {
+    return [normalized];
+  }
+
+  const words = normalized.split(/\s+/);
+  const lines = [];
+  let current = '';
+
+  words.forEach((word) => {
+    if (!word) {
+      return;
+    }
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > maxLength) {
+      if (current) {
+        lines.push(current);
+      }
+      current = word;
+    } else {
+      current = candidate;
+    }
+  });
+
+  if (current) {
+    lines.push(current);
+  }
+
+  return lines.length ? lines : [normalized];
+}
+
+function stripPdfText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7E]/g, '?');
+}
+
+function buildMinimalPdf(lines, title) {
+  const sanitizedTitle = stripPdfText(title || 'Relatorio');
+  const normalizedLines = (Array.isArray(lines) ? lines : []).map((line) => stripPdfText(line));
+  const pageWidth = 595;
+  const pageHeight = 842;
+  const margin = 40;
+  const titleFontSize = 16;
+  const bodyFontSize = 10;
+  const lineHeight = 14;
+  const linesPerPage = Math.max(1, Math.floor((pageHeight - margin * 2 - 60) / lineHeight));
+  const pages = [];
+
+  for (let index = 0; index < normalizedLines.length; index += linesPerPage) {
+    pages.push(normalizedLines.slice(index, index + linesPerPage));
+  }
+
+  if (!pages.length) {
+    pages.push(['Sem dados para exibir.']);
+  }
+
+  const pageObjects = [];
+  const contentObjects = [];
+  pages.forEach((pageLines, index) => {
+    const contentObjectNumber = 4 + index * 2;
+    const pageObjectNumber = 5 + index * 2;
+    const content = buildPdfPageContent({
+      title: sanitizedTitle,
+      pageLines,
+      pageNumber: index + 1,
+      totalPages: pages.length,
+      pageWidth,
+      pageHeight,
+      margin,
+      titleFontSize,
+      bodyFontSize,
+      lineHeight
+    });
+    contentObjects.push(`${contentObjectNumber} 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`);
+    pageObjects.push(
+      `${pageObjectNumber} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObjectNumber} 0 R >>\nendobj\n`
+    );
+  });
+
+  const kids = pages.map((_, index) => `${5 + index * 2} 0 R`).join(' ');
+  const objects = [
+    `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`,
+    `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>\nendobj\n`,
+    `3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`,
+    ...contentObjects,
+    ...pageObjects
+  ];
+
+  let pdf = '%PDF-1.4\n';
+  const offsets = ['0000000000 65535 f \n'];
+  objects.forEach((objectString) => {
+    offsets.push(`${String(pdf.length).padStart(10, '0')} 00000 n \n`);
+    pdf += objectString;
+  });
+
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n${offsets.join('')}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  return new TextEncoder().encode(pdf);
+}
+
+function buildPdfPageContent({
+  title,
+  pageLines,
+  pageNumber,
+  totalPages,
+  pageWidth,
+  pageHeight,
+  margin,
+  titleFontSize,
+  bodyFontSize,
+  lineHeight
+}) {
+  const lines = [];
+  const safeTitle = escapePdfText(title);
+  const topY = pageHeight - margin - titleFontSize;
+  lines.push(`BT /F1 ${titleFontSize} Tf ${margin} ${topY} Td (${safeTitle}) Tj ET`);
+  lines.push(`BT /F1 9 Tf ${margin} ${topY - 22} Td (Pagina ${pageNumber} de ${totalPages}) Tj ET`);
+
+  let currentY = topY - 48;
+  pageLines.forEach((line) => {
+    const safeLine = escapePdfText(line);
+    lines.push(`BT /F1 ${bodyFontSize} Tf ${margin} ${currentY} Td (${safeLine}) Tj ET`);
+    currentY -= lineHeight;
+  });
+
+  return lines.join('\n');
+}
+
+function escapePdfText(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
+}
+
+function openCompareSpedReportModal() {
+  if (!state.compareSped.report) {
+    pushToast('Gere a comparacao antes de abrir o resumo.', 'info');
+    return;
+  }
+
+  openModal({ kind: 'compare-sped-report' });
+}
+
+function renderCompareSpedReportModal() {
+  const report = state.compareSped.report;
+  if (!report) {
+    return '';
+  }
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal compare-report-modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Resumo da comparacao</h3>
+          <p class="modal-subtitle">${escapeHtml(report.companyName)} - ${escapeHtml(report.competence || 'competencia nao informada')}</p>
+        </div>
+        <div class="modal-body">
+          <div class="compare-report-grid">
+            ${statCard('file', 'SPED', String(report.summary.spedDocs), 'documentos lidos', 'neutral')}
+            ${statCard('file', 'Dominio', String(report.summary.dominioDocs), 'documentos comparados', 'info')}
+            ${statCard('alert', 'Divergencias', String(report.summary.issuesCount), 'itens fora do esperado', 'warning')}
+          </div>
+          <div class="table-wrap compare-report-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Chave</th>
+                  <th>Numero SPED</th>
+                  <th>Numero Dominio</th>
+                  <th>Observacao</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${
+                  report.rows.slice(0, 20).map((row) => `
+                    <tr>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.chave)}</td>
+                      <td>${escapeHtml(String(row.numeroSped || '-'))}</td>
+                      <td>${escapeHtml(String(row.numeroDominio || '-'))}</td>
+                      <td>${escapeHtml(row.observacao || '-')}</td>
+                    </tr>
+                  `).join('')
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" type="button" data-action="close-modal">Fechar</button>
+          <button class="btn primary" type="button" data-action="compare-sped-download">Baixar ${escapeHtml(state.compareSped.outputFormat === 'PDF' ? 'PDF' : 'Excel')}</button>
+        </div>
+      </div>
+    </div>
+  `;
 }
 
 async function copyTextToClipboard(value) {

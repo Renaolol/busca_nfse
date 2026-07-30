@@ -792,6 +792,17 @@ textarea:focus-visible,
   flex-wrap: wrap;
 }
 
+.compare-result-summary,
+.compare-report-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.compare-result-summary .card {
+  padding: 14px;
+}
+
 .compare-step-list {
   display: grid;
   gap: 12px;
@@ -835,6 +846,20 @@ textarea:focus-visible,
   color: var(--text-secondary);
   font-size: 0.82rem;
   line-height: 1.5;
+}
+
+.compare-report-modal {
+  width: min(1080px, calc(100vw - 28px));
+}
+
+.compare-report-modal .modal-body {
+  display: grid;
+  gap: 14px;
+}
+
+.compare-report-table {
+  max-height: 420px;
+  overflow: auto;
 }
 
 .table-wrap {
@@ -1639,6 +1664,11 @@ textarea {
   .compare-hero-main,
   .compare-card-header {
     flex-direction: column;
+  }
+
+  .compare-result-summary,
+  .compare-report-grid {
+    grid-template-columns: 1fr;
   }
 
   .compare-span-2,
