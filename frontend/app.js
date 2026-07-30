@@ -13204,21 +13204,44 @@ function parseCompareSpedFile(text) {
 }
 
 async function fetchCompareSpedDominioDocuments({ clientId, dateRange }) {
-  const query = new URLSearchParams();
-  query.set('clienteId', clientId);
-  query.set('all', 'true');
-  query.set('pageSize', '200');
+  const pageSize = 200;
+  const collected = [];
+  const seenIds = new Set();
+  let page = 1;
+  let totalPages = 1;
 
-  if (dateRange?.dataInicio) {
-    query.set('dataInicio', dateRange.dataInicio);
-  }
+  do {
+    const query = new URLSearchParams();
+    query.set('clienteId', clientId);
+    query.set('page', String(page));
+    query.set('pageSize', String(pageSize));
 
-  if (dateRange?.dataFim) {
-    query.set('dataFim', dateRange.dataFim);
-  }
+    if (dateRange?.dataInicio) {
+      query.set('dataInicio', toCompareApiDateRangeBoundary(dateRange.dataInicio, false));
+    }
 
-  const response = await apiRequest(`/nfe?${query.toString()}`);
-  return normalizePaginatedResponse(response).items;
+    if (dateRange?.dataFim) {
+      query.set('dataFim', toCompareApiDateRangeBoundary(dateRange.dataFim, true));
+    }
+
+    const response = await apiRequest(`/nfe?${query.toString()}`);
+    const payload = normalizePaginatedResponse(response);
+    totalPages = Math.max(1, Number(payload.totalPages || 1));
+
+    payload.items.forEach((item) => {
+      const key = String(item?.id || item?.chaveAcesso || `${page}-${collected.length}`);
+      if (seenIds.has(key)) {
+        return;
+      }
+
+      seenIds.add(key);
+      collected.push(item);
+    });
+
+    page += 1;
+  } while (page <= totalPages);
+
+  return collected;
 }
 
 function buildCompareSpedReport({ client, competence, sourceFileName, parsedDocuments, dominioDocuments, parsingWarnings, outputFormat }) {
@@ -13741,7 +13764,7 @@ function buildCompareDocumentWorksheet(report, title, source) {
     const data = isDominio ? row.dataDominio || '-' : row.dataSped || '-';
     const cnpj = isDominio ? row.emitenteCnpjDominio || '' : row.emitenteCnpjSped || '';
     const nome = isDominio ? row.emitenteNomeDominio || '-' : row.emitenteNomeSped || '-';
-    const valor = isDominio ? row.valorDominio : row.valorSped;
+    const valor = isDominio ? pickCompareRowValue(row.valorDominio, row.valorSped) : pickCompareRowValue(row.valorSped, row.valorDominio);
 
     return [tipo, serie, numero, data, cnpj, nome, valor, row.chave || '-'];
   });
@@ -13869,6 +13892,31 @@ function toSpreadsheetDateTime(value) {
   return '';
 }
 
+function toCompareApiDateRangeBoundary(value, endOfDay) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return `${text}${endOfDay ? 'T23:59:59.999Z' : 'T00:00:00.000Z'}`;
+  }
+
+  return text;
+}
+
+function pickCompareRowValue(primaryValue, fallbackValue) {
+  if (primaryValue != null && primaryValue !== '' && Number.isFinite(Number(primaryValue))) {
+    return Number(primaryValue);
+  }
+
+  if (fallbackValue != null && fallbackValue !== '' && Number.isFinite(Number(fallbackValue))) {
+    return Number(fallbackValue);
+  }
+
+  return 0;
+}
+
 function buildComparePdfBlob(report) {
   const lines = buildComparePdfLines(report);
   const pdfBytes = buildMinimalPdf(lines, `Comparacao SPED - ${report.companyName}`);
@@ -13876,38 +13924,96 @@ function buildComparePdfBlob(report) {
 }
 
 function buildComparePdfLines(report) {
+  const totals = getCompareReportTotals(report);
+  const onlySpedRows = report.rows.filter((row) => row.status === 'Somente no SPED');
+  const onlyDominioRows = report.rows.filter((row) => row.status === 'Somente no Dominio');
+  const divergentRows = report.rows.filter((row) => row.status === 'Divergente');
   const lines = [
     'Comparacao SPED x Dominio',
-    `Empresa: ${stripPdfText(report.companyName)}`,
-    `Arquivo: ${stripPdfText(report.sourceFileName)}`,
-    `Competencia: ${stripPdfText(report.competence || 'Nao informada')}`,
-    `SPED: ${report.summary.spedDocs} | Dominio: ${report.summary.dominioDocs} | OK: ${report.summary.matchedDocs} | Divergencias: ${report.summary.issuesCount}`,
+    '=====================================================================',
+    `Empresa.....: ${stripPdfText(report.companyName)}`,
+    `CNPJ........: ${stripPdfText(formatCnpj(report.clientCnpj || ''))}`,
+    `Arquivo.....: ${stripPdfText(report.sourceFileName)}`,
+    `Competencia.: ${stripPdfText(report.competence || 'Nao informada')}`,
+    `Gerado em...: ${stripPdfText(formatDateTime(report.generatedAt || ''))}`,
     ''
   ];
 
+  lines.push('RESUMO');
+  lines.push('---------------------------------------------------------------------');
+  lines.push(`SPED documentos...........: ${report.summary.spedDocs}`);
+  lines.push(`SPED valor total..........: ${stripPdfText(formatCurrency(totals.totalSpedValue))}`);
+  lines.push(`Dominio documentos........: ${report.summary.dominioDocs}`);
+  lines.push(`Dominio valor total.......: ${stripPdfText(formatCurrency(totals.totalDominioValue))}`);
+  lines.push(`Encontrados nas duas bases: ${report.summary.matchedDocs}`);
+  lines.push(`Somente no SPED...........: ${report.summary.onlySpedDocs}`);
+  lines.push(`Valor faltante no SPED....: ${stripPdfText(formatCurrency(totals.onlyDominioValue))}`);
+  lines.push(`Somente na Dominio........: ${report.summary.onlyDominioDocs}`);
+  lines.push(`Valor faltante na Dominio.: ${stripPdfText(formatCurrency(totals.onlySpedValue))}`);
+  lines.push(`Divergencias..............: ${report.summary.divergentDocs}`);
+  lines.push('');
+
   if (report.warnings.length) {
-    lines.push('Avisos:');
+    lines.push('AVISOS');
+    lines.push('---------------------------------------------------------------------');
     report.warnings.slice(0, 12).forEach((warning) => {
       lines.push(`- ${stripPdfText(warning)}`);
     });
     lines.push('');
   }
 
-  lines.push('Detalhes:');
-  report.rows.slice(0, 200).forEach((row) => {
-    const detail = [
-      `[${stripPdfText(row.status)}]`,
-      `Chave ${stripPdfText(row.chave)}`,
-      `N Sped ${stripPdfText(row.numeroSped)}`,
-      `N Dom ${stripPdfText(row.numeroDominio)}`,
-      `Ser Sped ${stripPdfText(row.serieSped)}`,
-      `Ser Dom ${stripPdfText(row.serieDominio)}`,
-      row.valorSped == null ? 'V Sped -' : `V Sped ${stripPdfText(formatCurrency(row.valorSped))}`,
-      row.valorDominio == null ? 'V Dom -' : `V Dom ${stripPdfText(formatCurrency(row.valorDominio))}`,
-      `Obs ${stripPdfText(row.observacao || '-')}`
-    ].join(' | ');
-    wrapPdfText(detail, 95).forEach((part) => lines.push(part));
+  appendComparePdfSection(lines, 'FALTANTES NO SPED', onlyDominioRows, 'dominio');
+  appendComparePdfSection(lines, 'FALTANTES NA DOMINIO', onlySpedRows, 'sped');
+  appendComparePdfSection(lines, 'DIVERGENCIAS', divergentRows, 'compare');
+
+  return lines;
+}
+
+function appendComparePdfSection(lines, title, rows, mode) {
+  lines.push(title);
+  lines.push('---------------------------------------------------------------------');
+
+  if (!rows.length) {
+    lines.push('Nenhum item encontrado.');
+    lines.push('');
+    return;
+  }
+
+  rows.slice(0, 120).forEach((row, index) => {
+    buildComparePdfRowBlock(row, mode, index + 1).forEach((line) => lines.push(line));
+    lines.push('');
   });
+}
+
+function buildComparePdfRowBlock(row, mode, index) {
+  const useDominio = mode === 'dominio';
+  const useCompare = mode === 'compare';
+  const tipo = useCompare ? `${row.tipoSped || '-'} / ${row.tipoDominio || '-'}` : useDominio ? row.tipoDominio || '-' : row.tipoSped || '-';
+  const numero = useCompare ? `${row.numeroSped || '-'} / ${row.numeroDominio || '-'}` : useDominio ? row.numeroDominio || '-' : row.numeroSped || '-';
+  const serie = useCompare ? `${row.serieSped || '-'} / ${row.serieDominio || '-'}` : useDominio ? row.serieDominio || '-' : row.serieSped || '-';
+  const data = useCompare ? `${row.dataSped || '-'} / ${row.dataDominio || '-'}` : useDominio ? row.dataDominio || '-' : row.dataSped || '-';
+  const cnpj = useCompare
+    ? `${formatCnpj(row.emitenteCnpjSped || '')} / ${formatCnpj(row.emitenteCnpjDominio || '')}`
+    : formatCnpj(useDominio ? row.emitenteCnpjDominio || '' : row.emitenteCnpjSped || '');
+  const nome = useCompare
+    ? `${row.emitenteNomeSped || '-'} / ${row.emitenteNomeDominio || '-'}`
+    : useDominio ? row.emitenteNomeDominio || '-' : row.emitenteNomeSped || '-';
+  const valor = useCompare
+    ? `${formatOptionalCurrency(row.valorSped)} / ${formatOptionalCurrency(row.valorDominio)}`
+    : formatCurrency(pickCompareRowValue(useDominio ? row.valorDominio : row.valorSped, useDominio ? row.valorSped : row.valorDominio));
+  const lines = [
+    `${String(index).padStart(3, '0')} | ${stripPdfText(row.status || '-')}`,
+    `Tipo..: ${stripPdfText(tipo)}`,
+    `Serie.: ${stripPdfText(String(serie || '-'))}  Numero: ${stripPdfText(String(numero || '-'))}`,
+    `Data..: ${stripPdfText(String(data || '-'))}  Valor.: ${stripPdfText(String(valor || '-'))}`,
+    `CNPJ..: ${stripPdfText(String(cnpj || '-'))}`,
+    `Nome..: ${stripPdfText(String(nome || '-'))}`,
+    `Chave.: ${stripPdfText(row.chave || '-')}`
+  ];
+
+  if (row.observacao) {
+    wrapPdfText(`Obs...: ${stripPdfText(row.observacao)}`, 95).forEach((line) => lines.push(line));
+  }
 
   return lines;
 }
