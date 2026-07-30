@@ -503,6 +503,7 @@ textarea:focus-visible,
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
   border-left: 4px solid var(--accent);
+  padding-left: 12px;
 }
 
 .scheduler-item {

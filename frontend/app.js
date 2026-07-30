@@ -17,8 +17,8 @@ const navItems = [
   { key: 'certificados', label: 'Certificados', icon: 'shield', route: '/certificados' },
   { key: 'buscas', label: 'Buscas', icon: 'search', route: '/buscas' },
   { key: 'armazenados', label: 'Armazenados', icon: 'file', route: '/xmls' },
-  { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' },
   { key: 'compara-sped', label: 'Compara SPED', icon: 'compare', route: '/compara-sped' },
+  { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' },
   { key: 'alertas', label: 'Alertas', icon: 'alert', route: '/alertas' }
 ];
 
