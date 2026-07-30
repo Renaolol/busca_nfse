@@ -1392,7 +1392,7 @@ function onDocumentSubmit(event) {
     }
     case 'compareSpedForm': {
       event.preventDefault();
-      void submitCompareSpedForm(target);
+      void submitCompareSpedForm(target, event.submitter);
       return;
     }
     case 'clientSearchConfigForm': {
@@ -3872,12 +3872,7 @@ function renderComparaSpedPage() {
             </label>
             <label class="field">
               Saída
-              <select name="saida">
-                ${renderOptions(['Excel', 'PDF'], compareState.outputFormat || 'Excel', {
-                  Excel: 'Excel',
-                  PDF: 'PDF'
-                })}
-              </select>
+              <input value="${escapeHtml(compareState.outputFormat === 'PDF' ? 'PDF selecionado para a proxima geracao' : 'Excel selecionado para a proxima geracao')}" disabled />
             </label>
             <label class="field">
               Status
@@ -3888,7 +3883,8 @@ function renderComparaSpedPage() {
               <span>Use o TXT do SPED Fiscal. Nesta primeira etapa a comparação cruza o arquivo enviado com os documentos de NF-e já carregados do cliente selecionado.</span>
             </div>
             <div class="stack-actions compare-actions compare-span-3">
-              <button class="btn primary" type="submit" ${hasClients ? '' : 'disabled'}>${compareState.status === 'processing' ? 'Processando...' : 'Gerar arquivo'}</button>
+              <button class="btn secondary" type="submit" data-output-format="Excel" ${hasClients && compareState.status !== 'processing' ? '' : 'disabled'}>${compareState.status === 'processing' && compareState.outputFormat === 'Excel' ? 'Processando Excel...' : 'Gerar Excel'}</button>
+              <button class="btn primary" type="submit" data-output-format="PDF" ${hasClients && compareState.status !== 'processing' ? '' : 'disabled'}>${compareState.status === 'processing' && compareState.outputFormat === 'PDF' ? 'Processando PDF...' : 'Gerar PDF'}</button>
               <button class="btn secondary" type="button" data-action="compare-sped-reset" ${compareState.status === 'processing' ? 'disabled' : ''}>Limpar</button>
             </div>
           </form>
@@ -13039,11 +13035,13 @@ function resetCompareSpedState() {
   state.compareSped.lastError = '';
 }
 
-async function submitCompareSpedForm(form) {
+async function submitCompareSpedForm(form, submitter = null) {
   const data = new FormData(form);
   const companyId = String(data.get('empresa') || '').trim();
   const competence = String(data.get('competencia') || '').trim();
-  const outputFormat = String(data.get('saida') || 'Excel').trim() === 'PDF' ? 'PDF' : 'Excel';
+  const submitterFormat = String(submitter?.getAttribute?.('data-output-format') || '').trim();
+  const selectedOutput = submitterFormat || String(data.get('saida') || 'Excel').trim();
+  const outputFormat = selectedOutput === 'PDF' ? 'PDF' : 'Excel';
   const file = data.get('arquivoSped');
 
   if (!companyId) {
@@ -13655,10 +13653,19 @@ function buildCompareSpreadsheetXml(report) {
         <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
       </Borders>
     </Style>
+    <Style ss:ID="CellAlt" ss:Parent="Cell">
+      <Interior ss:Color="#EAF2FB" ss:Pattern="Solid" />
+    </Style>
     <Style ss:ID="CellDate" ss:Parent="Cell">
       <NumberFormat ss:Format="dd/mm/yyyy" />
     </Style>
+    <Style ss:ID="CellDateAlt" ss:Parent="CellAlt">
+      <NumberFormat ss:Format="dd/mm/yyyy" />
+    </Style>
     <Style ss:ID="CellMoney" ss:Parent="Cell">
+      <NumberFormat ss:Format="R$ #,##0.00" />
+    </Style>
+    <Style ss:ID="CellMoneyAlt" ss:Parent="CellAlt">
       <NumberFormat ss:Format="R$ #,##0.00" />
     </Style>
   </Styles>
@@ -13746,7 +13753,7 @@ function buildCompareSummaryWorksheet(report) {
       <Row>
         <Cell ss:StyleID="Header"><Data ss:Type="String">Mensagem</Data></Cell>
       </Row>
-      ${warningRows.map((row) => `<Row><Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[0] || ''))}</Data></Cell></Row>`).join('')}
+      ${warningRows.map((row, index) => `<Row><Cell ss:StyleID="${index % 2 === 0 ? 'Cell' : 'CellAlt'}"><Data ss:Type="String">${escapeHtml(String(row[0] || ''))}</Data></Cell></Row>`).join('')}
     </Table>
   `;
 }
@@ -13796,22 +13803,27 @@ function buildCompareDocumentWorksheet(report, title, source) {
         sheetRows.length
           ? sheetRows
               .map(
-                (row) => `
+                (row, index) => {
+                  const baseStyle = index % 2 === 0 ? 'Cell' : 'CellAlt';
+                  const dateStyle = index % 2 === 0 ? 'CellDate' : 'CellDateAlt';
+                  const moneyStyle = index % 2 === 0 ? 'CellMoney' : 'CellMoneyAlt';
+                  return `
                   <Row>
-                    <Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[0] || '-'))}</Data></Cell>
-                    <Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[1] || '-'))}</Data></Cell>
-                    <Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[2] || '-'))}</Data></Cell>
+                    <Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(String(row[0] || '-'))}</Data></Cell>
+                    <Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(String(row[1] || '-'))}</Data></Cell>
+                    <Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(String(row[2] || '-'))}</Data></Cell>
                     ${
                       toSpreadsheetDateTime(row[3])
-                        ? `<Cell ss:StyleID="CellDate"><Data ss:Type="DateTime">${escapeHtml(toSpreadsheetDateTime(row[3]))}</Data></Cell>`
-                        : `<Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[3] || '-'))}</Data></Cell>`
+                        ? `<Cell ss:StyleID="${dateStyle}"><Data ss:Type="DateTime">${escapeHtml(toSpreadsheetDateTime(row[3]))}</Data></Cell>`
+                        : `<Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(String(row[3] || '-'))}</Data></Cell>`
                     }
-                    <Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(formatCnpj(row[4] || ''))}</Data></Cell>
-                    <Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[5] || '-'))}</Data></Cell>
-                    <Cell ss:StyleID="CellMoney"><Data ss:Type="Number">${Number.isFinite(Number(row[6])) ? Number(row[6]) : 0}</Data></Cell>
-                    <Cell ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(String(row[7] || '-'))}</Data></Cell>
+                    <Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(formatCnpj(row[4] || ''))}</Data></Cell>
+                    <Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(String(row[5] || '-'))}</Data></Cell>
+                    <Cell ss:StyleID="${moneyStyle}"><Data ss:Type="Number">${Number.isFinite(Number(row[6])) ? Number(row[6]) : 0}</Data></Cell>
+                    <Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(String(row[7] || '-'))}</Data></Cell>
                   </Row>
-                `
+                `;
+                }
               )
               .join('')
           : `<Row><Cell ss:StyleID="Cell" ss:MergeAcross="7"><Data ss:Type="String">Nenhum documento localizado.</Data></Cell></Row>`
