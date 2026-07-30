@@ -13633,16 +13633,21 @@ function buildCompareSpreadsheetXml(report) {
 }
 
 function buildCompareSummaryWorksheet(report) {
+  const totals = getCompareReportTotals(report);
   const summaryRows = [
     ['Empresa', report.companyName],
     ['CNPJ', formatCnpj(report.clientCnpj || '')],
     ['Arquivo SPED', report.sourceFileName],
     ['Competencia', report.competence || 'Nao informada'],
     ['SPED documentos', report.summary.spedDocs],
+    ['SPED valor total', formatCurrency(totals.totalSpedValue)],
     ['Dominio documentos', report.summary.dominioDocs],
+    ['Dominio valor total', formatCurrency(totals.totalDominioValue)],
     ['Encontrados nas duas bases', report.summary.matchedDocs],
     ['Somente no SPED', report.summary.onlySpedDocs],
+    ['Somente no SPED valor', formatCurrency(totals.onlySpedValue)],
     ['Somente na Dominio', report.summary.onlyDominioDocs],
+    ['Somente na Dominio valor', formatCurrency(totals.onlyDominioValue)],
     ['Divergentes', report.summary.divergentDocs],
     ['Avisos', report.summary.warningsCount]
   ];
@@ -13727,6 +13732,7 @@ function buildCompareDocumentWorksheet(report, title, source) {
 
     return [tipo, serie, numero, data, cnpj, nome, valor, row.chave || '-'];
   });
+  const totalValue = sheetRows.reduce((sum, row) => sum + (Number.isFinite(Number(row[6])) ? Number(row[6]) : 0), 0);
 
   return `
     <Table>
@@ -13740,6 +13746,12 @@ function buildCompareDocumentWorksheet(report, title, source) {
       <Column ss:Width="250" />
       <Row ss:Height="22">
         <Cell ss:MergeAcross="7" ss:StyleID="SheetTitle"><Data ss:Type="String">${escapeHtml(title)}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Qtd. notas</Data></Cell>
+        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${rows.length}</Data></Cell>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Valor total</Data></Cell>
+        <Cell ss:StyleID="CellMoney"><Data ss:Type="Number">${totalValue}</Data></Cell>
       </Row>
       <Row>
         ${headers.map((header) => `<Cell ss:StyleID="Header"><Data ss:Type="String">${escapeHtml(header)}</Data></Cell>`).join('')}
@@ -13787,6 +13799,32 @@ function describeCompareSpedModel(modelo) {
     return 'NFC-e';
   }
   return `Modelo ${code}`;
+}
+
+function getCompareReportTotals(report) {
+  const rows = Array.isArray(report?.rows) ? report.rows : [];
+  return rows.reduce(
+    (acc, row) => {
+      acc.totalSpedValue += Number.isFinite(Number(row?.valorSped)) ? Number(row.valorSped) : 0;
+      acc.totalDominioValue += Number.isFinite(Number(row?.valorDominio)) ? Number(row.valorDominio) : 0;
+
+      if (row?.status === 'Somente no SPED') {
+        acc.onlySpedValue += Number.isFinite(Number(row?.valorSped)) ? Number(row.valorSped) : 0;
+      }
+
+      if (row?.status === 'Somente no Dominio') {
+        acc.onlyDominioValue += Number.isFinite(Number(row?.valorDominio)) ? Number(row.valorDominio) : 0;
+      }
+
+      return acc;
+    },
+    {
+      totalSpedValue: 0,
+      totalDominioValue: 0,
+      onlySpedValue: 0,
+      onlyDominioValue: 0
+    }
+  );
 }
 
 function toSpreadsheetDateTime(value) {
