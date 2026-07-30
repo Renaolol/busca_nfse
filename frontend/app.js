@@ -3872,7 +3872,12 @@ function renderComparaSpedPage() {
             </label>
             <label class="field">
               Saída
-              <input value="${escapeHtml(compareState.outputFormat === 'PDF' ? 'PDF selecionado para a proxima geracao' : 'Excel selecionado para a proxima geracao')}" disabled />
+              <select name="saida">
+                ${renderOptions(['Excel', 'PDF'], compareState.outputFormat || 'Excel', {
+                  Excel: 'Excel',
+                  PDF: 'PDF'
+                })}
+              </select>
             </label>
             <label class="field">
               Status
@@ -3883,8 +3888,7 @@ function renderComparaSpedPage() {
               <span>Use o TXT do SPED Fiscal. Nesta primeira etapa a comparação cruza o arquivo enviado com os documentos de NF-e já carregados do cliente selecionado.</span>
             </div>
             <div class="stack-actions compare-actions compare-span-3">
-              <button class="btn secondary" type="submit" data-output-format="Excel" ${hasClients && compareState.status !== 'processing' ? '' : 'disabled'}>${compareState.status === 'processing' && compareState.outputFormat === 'Excel' ? 'Processando Excel...' : 'Gerar Excel'}</button>
-              <button class="btn primary" type="submit" data-output-format="PDF" ${hasClients && compareState.status !== 'processing' ? '' : 'disabled'}>${compareState.status === 'processing' && compareState.outputFormat === 'PDF' ? 'Processando PDF...' : 'Gerar PDF'}</button>
+              <button class="btn primary" type="submit" ${hasClients && compareState.status !== 'processing' ? '' : 'disabled'}>${compareState.status === 'processing' ? `Processando ${escapeHtml(compareState.outputFormat || 'arquivo')}...` : 'Gerar arquivo'}</button>
               <button class="btn secondary" type="button" data-action="compare-sped-reset" ${compareState.status === 'processing' ? 'disabled' : ''}>Limpar</button>
             </div>
           </form>
@@ -13085,7 +13089,7 @@ async function submitCompareSpedForm(form, submitter = null) {
     const parsed = parseCompareSpedFile(fileText);
     const dateRange = resolveCompareSpedDateRange(parsed.documents, competence);
     const dominioDocs = await fetchCompareSpedDominioDocuments({
-      clientId: client.id,
+      client,
       dateRange
     });
     const effectiveCompetence = String(competence || '').trim() || getCompareSpedCompetence(parsed.documents) || formatCompareMonth(dateRange?.dataInicio || '');
@@ -13201,7 +13205,7 @@ function parseCompareSpedFile(text) {
   return { documents, warnings };
 }
 
-async function fetchCompareSpedDominioDocuments({ clientId, dateRange }) {
+async function fetchCompareSpedDominioDocuments({ client, dateRange }) {
   const pageSize = 200;
   const collected = [];
   const seenIds = new Set();
@@ -13210,7 +13214,7 @@ async function fetchCompareSpedDominioDocuments({ clientId, dateRange }) {
 
   do {
     const query = new URLSearchParams();
-    query.set('clienteId', clientId);
+    query.set('clienteId', client.id);
     query.set('page', String(page));
     query.set('pageSize', String(pageSize));
 
@@ -13224,9 +13228,10 @@ async function fetchCompareSpedDominioDocuments({ clientId, dateRange }) {
 
     const response = await apiRequest(`/nfe?${query.toString()}`);
     const payload = normalizePaginatedResponse(response);
+    const normalizedItems = buildNfeDocumentsFromApi(payload.items, [client]);
     totalPages = Math.max(1, Number(payload.totalPages || 1));
 
-    payload.items.forEach((item) => {
+    normalizedItems.forEach((item) => {
       const key = String(item?.id || item?.chaveAcesso || `${page}-${collected.length}`);
       if (seenIds.has(key)) {
         return;
@@ -13635,6 +13640,12 @@ function buildCompareSpreadsheetXml(report) {
     <Style ss:ID="MetaValue">
       <Font ss:Color="#111827" />
     </Style>
+    <Style ss:ID="MetaLabelAlt" ss:Parent="MetaLabel">
+      <Interior ss:Color="#EAF2FB" ss:Pattern="Solid" />
+    </Style>
+    <Style ss:ID="MetaValueAlt" ss:Parent="MetaValue">
+      <Interior ss:Color="#EAF2FB" ss:Pattern="Solid" />
+    </Style>
     <Style ss:ID="Header">
       <Font ss:Bold="1" ss:Color="#FFFFFF" />
       <Interior ss:Color="#25507A" ss:Pattern="Solid" />
@@ -13698,6 +13709,20 @@ function buildCompareSummaryWorksheet(report) {
   const warningRows = report.warnings.length
     ? report.warnings.map((warning) => [warning])
     : [['Nenhum aviso encontrado.']];
+  const summaryBodyRows = summaryRows
+    .map((row, index) => {
+      const labelStyle = index % 2 === 0 ? 'MetaLabel' : 'MetaLabelAlt';
+      const valueStyle = index % 2 === 0 ? 'MetaValue' : 'MetaValueAlt';
+      const value = row[1];
+      const isNumeric = typeof value === 'number' && Number.isFinite(value);
+
+      return `
+      <Row>
+        <Cell ss:StyleID="${labelStyle}"><Data ss:Type="String">${escapeHtml(String(row[0] || ''))}</Data></Cell>
+        <Cell ss:StyleID="${valueStyle}"><Data ss:Type="${isNumeric ? 'Number' : 'String'}">${escapeHtml(String(value ?? ''))}</Data></Cell>
+      </Row>`;
+    })
+    .join('');
 
   return `
     <Table>
@@ -13706,46 +13731,7 @@ function buildCompareSummaryWorksheet(report) {
       <Row ss:Height="22">
         <Cell ss:MergeAcross="1" ss:StyleID="SheetTitle"><Data ss:Type="String">Comparacao SPED x Dominio</Data></Cell>
       </Row>
-      <Row>
-        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Empresa</Data></Cell>
-        <Cell ss:StyleID="MetaValue"><Data ss:Type="String">${escapeHtml(report.companyName)}</Data></Cell>
-      </Row>
-      <Row>
-        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Arquivo</Data></Cell>
-        <Cell ss:StyleID="MetaValue"><Data ss:Type="String">${escapeHtml(report.sourceFileName)}</Data></Cell>
-      </Row>
-      <Row>
-        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Competencia</Data></Cell>
-        <Cell ss:StyleID="MetaValue"><Data ss:Type="String">${escapeHtml(report.competence || 'Nao informada')}</Data></Cell>
-      </Row>
-      <Row>
-        <Cell ss:Index="1" ss:StyleID="MetaLabel"><Data ss:Type="String">SPED documentos</Data></Cell>
-        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.spedDocs || 0)}</Data></Cell>
-      </Row>
-      <Row>
-        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Dominio documentos</Data></Cell>
-        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.dominioDocs || 0)}</Data></Cell>
-      </Row>
-      <Row>
-        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Encontrados nas duas bases</Data></Cell>
-        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.matchedDocs || 0)}</Data></Cell>
-      </Row>
-      <Row>
-        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Somente no SPED</Data></Cell>
-        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.onlySpedDocs || 0)}</Data></Cell>
-      </Row>
-      <Row>
-        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Somente na Dominio</Data></Cell>
-        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.onlyDominioDocs || 0)}</Data></Cell>
-      </Row>
-      <Row>
-        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Divergentes</Data></Cell>
-        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.divergentDocs || 0)}</Data></Cell>
-      </Row>
-      <Row>
-        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Avisos</Data></Cell>
-        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${Number(report.summary.warningsCount || 0)}</Data></Cell>
-      </Row>
+      ${summaryBodyRows}
       <Row />
       <Row ss:Height="22">
         <Cell ss:MergeAcross="0" ss:StyleID="SheetTitle"><Data ss:Type="String">Avisos</Data></Cell>
