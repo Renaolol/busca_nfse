@@ -1354,6 +1354,52 @@ describe('NfeService', () => {
     });
   });
 
+  it('permite retroagir a previsualizacao do download por chave para 2026-01-01', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN = '2';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 999n,
+        ultimoNsuDistribuido: 999n,
+        maxNsu: 999n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 24,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '35260612345678000199550010000009991000009991',
+        dataEmissao: '2026-01-01'
+      }
+    ]);
+    prisma.nfeDocumento.findUnique.mockResolvedValueOnce(null);
+
+    const result = await service.previewDownloadByKey({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao,
+      dataEmissaoInicio: '2026-01-01'
+    });
+
+    expect(dominioXmlSource.listCatalog).toHaveBeenCalledWith({
+      cnpjs: ['12345678000199'],
+      limit: 2,
+      dataEmissaoInicio: '2026-01-01',
+      dataEmissaoFim: undefined,
+      chavesAcesso: undefined,
+      catalogoIds: [],
+      catalogoIdMinExclusive: undefined,
+      sortDirection: 'asc'
+    });
+    expect(result.pendingDownloads).toBe(1);
+  });
+
   it('ignora CT-e ja armazenado em resumo na previsualizacao do download por chave', async () => {
     process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
     prisma.nfeSyncControle.findMany.mockResolvedValue([
@@ -1505,6 +1551,77 @@ describe('NfeService', () => {
       ],
       failureDetails: []
     });
+  });
+
+  it('permite retroagir o download manual por chave para 2026-01-01', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN = '300';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 50n,
+        ultimoNsuDistribuido: 50n,
+        maxNsu: 50n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 10,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '35260112345678000199550010000001091000001091',
+        dataEmissao: '2026-01-01'
+      }
+    ]);
+    (distribuicaoClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado',
+      ultNsu: 0n,
+      maxNsu: 0n,
+      documents: [
+        {
+          schema: 'procNFe_v4.00',
+          chaveAcesso: '35260112345678000199550010000001091000001091',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe35260112345678000199550010000001091000001091">
+      <ide><mod>55</mod><serie>1</serie><nNF>109</nNF><dhEmi>2026-01-01T10:00:00-03:00</dhEmi></ide>
+      <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
+      <dest><CNPJ>99888777000166</CNPJ><xNome>Cliente Teste</xNome></dest>
+      <total><ICMSTot><vNF>150.00</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat><dhRecbto>2026-01-01T10:00:01-03:00</dhRecbto></infProt></protNFe>
+</nfeProc>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.executeDownloadByKey({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao,
+      dataEmissaoInicio: '2026-01-01'
+    });
+
+    expect(dominioXmlSource.listCatalog).toHaveBeenCalledWith({
+      cnpjs: ['12345678000199'],
+      limit: 300,
+      dataEmissaoInicio: '2026-01-01',
+      dataEmissaoFim: undefined,
+      chavesAcesso: undefined,
+      catalogoIds: [],
+      catalogoIdMinExclusive: undefined,
+      sortDirection: 'asc'
+    });
+    expect(result.documentsSaved).toBe(1);
   });
 
   it('continua processando NF-e apos falha individual de CT-e no download manual por chave', async () => {

@@ -1205,6 +1205,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       ambiente: dto.ambiente,
       estabelecimentoId: dto.estabelecimentoId,
       limitControles: dto.limitControles,
+      dataEmissaoInicio: dto.dataEmissaoInicio,
       scanFullHistory: true
     });
   }
@@ -1225,6 +1226,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       ambiente: dto.ambiente,
       estabelecimentoId: dto.estabelecimentoId,
       limitControles: dto.limitControles,
+      dataEmissaoInicio: dto.dataEmissaoInicio,
       scanFullHistory: true
     });
   }
@@ -1966,6 +1968,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     ambiente?: NfeAmbiente;
     estabelecimentoId?: string;
     limitControles?: number;
+    dataEmissaoInicio?: string;
     scanFullHistory?: boolean;
   }): Promise<NfeSyncRunResult> {
     const controls = await this.prisma.nfeSyncControle.findMany({
@@ -2008,7 +2011,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           clienteId: control.clienteId,
           estabelecimentoId: control.estabelecimentoId,
           limit: limitPorControle,
-          dataEmissaoInicio: NfeService.DOMINIO_CHAVE_DATA_EMISSAO_INICIO,
+          dataEmissaoInicio: params.dataEmissaoInicio ?? NfeService.DOMINIO_CHAVE_DATA_EMISSAO_INICIO,
           catalogoIdMinExclusive: savedCursor,
           scanFullHistory: params.scanFullHistory,
           sortDirection: 'asc'
@@ -2379,6 +2382,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     ambiente?: NfeAmbiente;
     estabelecimentoId?: string;
     limitControles?: number;
+    dataEmissaoInicio?: string;
     scanFullHistory?: boolean;
   }): Promise<NfeDownloadByKeyPreviewResult> {
     const controls = await this.prisma.nfeSyncControle.findMany({
@@ -2411,7 +2415,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           clienteId: control.clienteId,
           estabelecimentoId: establishment.id,
           limit: limitPorControle,
-          dataEmissaoInicio: NfeService.DOMINIO_CHAVE_DATA_EMISSAO_INICIO,
+          dataEmissaoInicio: params.dataEmissaoInicio ?? NfeService.DOMINIO_CHAVE_DATA_EMISSAO_INICIO,
           catalogoIdMinExclusive: this.toSafeCatalogoCursor(control.ultimoNsuConsultado),
           scanFullHistory: params.scanFullHistory,
           sortDirection: 'asc'
