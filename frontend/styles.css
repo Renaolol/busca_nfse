@@ -637,6 +637,206 @@ textarea:focus-visible,
   gap: 16px;
 }
 
+.compare-page {
+  gap: 18px;
+}
+
+.compare-hero {
+  display: grid;
+  gap: 12px;
+  border-left: 4px solid var(--accent);
+  background: linear-gradient(180deg, #fffdf0 0%, #ffffff 100%);
+}
+
+.compare-hero-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.compare-hero-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: #fff4bf;
+  color: #8f6d00;
+  border: 1px solid rgba(241, 198, 2, 0.28);
+  flex: 0 0 auto;
+}
+
+.compare-hero-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.compare-hero-note {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  max-width: 980px;
+}
+
+.compare-stats {
+  margin-top: 2px;
+}
+
+.compare-layout {
+  align-items: start;
+}
+
+.compare-main-card,
+.compare-result-card,
+.compare-steps-card {
+  display: grid;
+  gap: 16px;
+}
+
+.compare-side-stack {
+  display: grid;
+  gap: 16px;
+}
+
+.compare-card-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.compare-card-header .card-subtitle {
+  max-width: 680px;
+}
+
+.compare-form {
+  align-items: start;
+}
+
+.compare-span-2 {
+  grid-column: span 2;
+}
+
+.compare-span-3 {
+  grid-column: span 3;
+}
+
+.compare-upload-hint {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 12px;
+  background: #fcfcfd;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.compare-upload-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex: 0 0 auto;
+}
+
+.compare-result-placeholder {
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 22px 18px;
+  background: linear-gradient(180deg, #fffef7 0%, #ffffff 100%);
+  display: grid;
+  gap: 10px;
+  justify-items: center;
+  text-align: center;
+}
+
+.compare-result-icon {
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  display: grid;
+  place-items: center;
+  background: #f5f5f8;
+  color: #45454a;
+  border: 1px solid var(--line);
+}
+
+.compare-result-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.compare-result-placeholder h4 {
+  margin: 0;
+  font-size: 1rem;
+  font-family: 'Sora', 'Manrope', sans-serif;
+}
+
+.compare-result-placeholder p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  line-height: 1.5;
+  max-width: 320px;
+}
+
+.compare-result-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.compare-step-list {
+  display: grid;
+  gap: 12px;
+}
+
+.compare-step {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.compare-step:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.compare-step-number {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #fff3bf;
+  border: 1px solid rgba(241, 198, 2, 0.26);
+  color: #7a5c00;
+  font-weight: 800;
+  font-family: 'Sora', 'Manrope', sans-serif;
+}
+
+.compare-step h4 {
+  margin: 0;
+  font-size: 0.94rem;
+  font-family: 'Sora', 'Manrope', sans-serif;
+}
+
+.compare-step p {
+  margin: 4px 0 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
 .table-wrap {
   width: 100%;
   overflow-x: auto;
@@ -1333,6 +1533,11 @@ textarea {
   .form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .compare-span-2,
+  .compare-span-3 {
+    grid-column: span 2;
+  }
 }
 
 @media (max-width: 920px) {
@@ -1429,5 +1634,23 @@ textarea {
 
   .dashboard-alert-overlay-header {
     flex-direction: column;
+  }
+
+  .compare-hero-main,
+  .compare-card-header {
+    flex-direction: column;
+  }
+
+  .compare-span-2,
+  .compare-span-3 {
+    grid-column: auto;
+  }
+
+  .compare-result-actions {
+    width: 100%;
+  }
+
+  .compare-result-actions .btn {
+    flex: 1;
   }
 }

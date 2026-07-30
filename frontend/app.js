@@ -17,8 +17,9 @@ const navItems = [
   { key: 'certificados', label: 'Certificados', icon: 'shield', route: '/certificados' },
   { key: 'buscas', label: 'Buscas', icon: 'search', route: '/buscas' },
   { key: 'armazenados', label: 'Armazenados', icon: 'file', route: '/xmls' },
-  { key: 'alertas', label: 'Alertas', icon: 'alert', route: '/alertas' },
-  { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' }
+  { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' },
+  { key: 'compara-sped', label: 'Compara SPED', icon: 'compare', route: '/compara-sped' },
+  { key: 'alertas', label: 'Alertas', icon: 'alert', route: '/alertas' }
 ];
 
 const pageMeta = {
@@ -65,6 +66,10 @@ const pageMeta = {
   configuracoes: {
     title: 'Configuracoes',
     description: 'Ajuste parametros da rotina de busca e do armazenamento interno.'
+  },
+  'compara-sped': {
+    title: 'Compara SPED',
+    description: 'Compare arquivos SPED Fiscal com os documentos integrados da Dominio.'
   }
 };
 
@@ -1530,6 +1535,8 @@ function renderCurrentPage() {
       return renderNfeDocumentsPage();
     case 'xmls-cte':
       return renderCteDocumentsPage();
+    case 'compara-sped':
+      return renderComparaSpedPage();
     case 'alertas':
       return renderAlertsPage();
     case 'configuracoes':
@@ -3753,6 +3760,140 @@ function renderSettingsPage() {
   `;
 }
 
+function renderComparaSpedPage() {
+  const clientOptions = state.clients.map((client) => client.id);
+  const hasClients = clientOptions.length > 0;
+
+  return `
+    <section class="page-section compare-page">
+      ${renderPageHeader({
+        title: 'Compara SPED',
+        description: 'Importe o SPED Fiscal, selecione a empresa e gere a comparacao com a base da Dominio.',
+        actions: []
+      })}
+
+      <article class="card compare-hero">
+        <div class="compare-hero-main">
+          <div class="compare-hero-icon" aria-hidden="true">${icon('compare')}</div>
+          <div>
+            <h3 class="card-title">Comparação em SPED</h3>
+            <p class="card-subtitle">
+              Escolha uma empresa cadastrada na Dominio, envie o arquivo SPED e monte o relatório com documentos faltantes e divergências.
+            </p>
+          </div>
+        </div>
+        <p class="compare-hero-note">
+          O objetivo é concentrar a conferência em um fluxo único, aproveitando a integração já existente com a Dominio e deixando o resultado pronto para auditoria interna.
+        </p>
+      </article>
+
+      <section class="stats-grid compare-stats">
+        ${statCard('file', 'Arquivo SPED', 'TXT', 'upload e leitura linha a linha', 'neutral')}
+        ${statCard('search', 'Conferencia', 'Dominio x SPED', 'comparacao por documento', 'info')}
+        ${statCard('alert', 'Divergencias', 'Pendentes', 'a serem analisadas', 'warning')}
+      </section>
+
+      <section class="split-grid compare-layout">
+        <article class="card compare-main-card">
+          <div class="compare-card-header">
+            <div>
+              <h3 class="card-title">Preparar comparação</h3>
+              <p class="card-subtitle">
+                A estrutura abaixo segue o fluxo operacional do app: selecionar empresa, anexar o arquivo e iniciar a comparação.
+              </p>
+            </div>
+            ${statusBadge(hasClients ? 'Pronto para configurar' : 'Sem empresas cadastradas', hasClients ? 'success' : 'warning')}
+          </div>
+
+          <form class="form-grid compare-form">
+            <label class="field">
+              Empresa
+              <select name="empresa" ${hasClients ? '' : 'disabled'} required>
+                ${renderOptions(clientOptions, '', mapClientOptions(), 'Selecione a empresa')}
+              </select>
+            </label>
+            <label class="field">
+              Competência
+              <input name="competencia" type="month" />
+            </label>
+            <label class="field compare-span-2">
+              Arquivo SPED Fiscal
+              <input name="arquivoSped" type="file" accept=".txt,.zip,text/plain" />
+            </label>
+            <label class="field">
+              Saída
+              <select name="saida">
+                ${renderOptions(['Excel', 'PDF', 'Excel e PDF'], 'Excel', {
+                  Excel: 'Excel',
+                  PDF: 'PDF',
+                  'Excel e PDF': 'Excel e PDF'
+                })}
+              </select>
+            </label>
+            <label class="field">
+              Escopo da análise
+              <select name="escopo">
+                ${renderOptions(['Todos', 'Somente faltantes', 'Somente divergencias'], 'Todos', {
+                  Todos: 'Todos',
+                  'Somente faltantes': 'Somente faltantes',
+                  'Somente divergencias': 'Somente divergencias'
+                })}
+              </select>
+            </label>
+            <div class="compare-upload-hint compare-span-3">
+              <span class="compare-upload-dot"></span>
+              <span>O arquivo deve ser o texto do SPED Fiscal, no mesmo padrão importado pelo seu processo atual.</span>
+            </div>
+            <div class="stack-actions compare-actions compare-span-3">
+              <button class="btn primary" type="button" disabled>Gerar comparação</button>
+              <button class="btn secondary" type="button" disabled>Baixar modelo</button>
+            </div>
+          </form>
+        </article>
+
+        <div class="compare-side-stack">
+          <article class="card compare-result-card">
+            <div class="compare-card-header">
+              <div>
+                <h3 class="card-title">Relatório de saída</h3>
+                <p class="card-subtitle">O arquivo consolidado aparece aqui depois da geração.</p>
+              </div>
+              ${statusBadge('Aguardando arquivo', 'neutral')}
+            </div>
+
+            <div class="compare-result-placeholder">
+              <div class="compare-result-icon">${icon('file')}</div>
+              <h4>Nenhum relatório gerado ainda</h4>
+              <p>Quando a comparação for executada, este espaço pode exibir o resumo e o atalho para download.</p>
+            </div>
+
+            <div class="compare-result-actions">
+              <button class="btn secondary" type="button" disabled>Visualizar relatório</button>
+              <button class="btn primary" type="button" disabled>Baixar Excel</button>
+            </div>
+          </article>
+
+          <article class="card compare-steps-card">
+            <div class="compare-card-header">
+              <div>
+                <h3 class="card-title">Fluxo simples</h3>
+                <p class="card-subtitle">A ideia é manter a operação rápida e clara para o usuário.</p>
+              </div>
+              ${statusBadge('3 etapas', 'info')}
+            </div>
+
+            <div class="compare-step-list">
+              ${renderCompareStep(1, 'Selecione a empresa', 'Use o cadastro já sincronizado com a Dominio para definir a base da comparação.')}
+              ${renderCompareStep(2, 'Envie o SPED', 'Carregue o arquivo TXT da competência desejada e deixe o sistema processar as linhas.')}
+              ${renderCompareStep(3, 'Baixe o resultado', 'Receba a planilha com os documentos faltantes e as diferenças encontradas.')}
+            </div>
+          </article>
+        </div>
+      </section>
+    </section>
+  `;
+}
+
 function renderSettingsTabPanel() {
   switch (state.settings.tab) {
     case 'geral':
@@ -5151,6 +5292,18 @@ function statCard(iconKey, label, value, caption, tone) {
   `;
 }
 
+function renderCompareStep(number, title, description) {
+  return `
+    <article class="compare-step">
+      <div class="compare-step-number">${escapeHtml(String(number))}</div>
+      <div>
+        <h4>${escapeHtml(title)}</h4>
+        <p>${escapeHtml(description)}</p>
+      </div>
+    </article>
+  `;
+}
+
 function renderSchedulerStatusStrip() {
   const nightly = getNightlyScheduleInfo();
   const autoSync = getAutoSyncInfo();
@@ -5385,6 +5538,7 @@ function parseRoute(hash) {
     '/buscas-nfe': 'buscas-nfe',
     '/xmls-nfe': 'xmls-nfe',
     '/xmls-cte': 'xmls-cte',
+    '/compara-sped': 'compara-sped',
     '/alertas': 'alertas',
     '/configuracoes': 'configuracoes'
   };
@@ -12874,6 +13028,8 @@ function icon(name) {
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><circle cx="12" cy="17" r="1"></circle></svg>',
     settings:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1z"></path></svg>',
+    compare:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 4v16"></path><path d="M4 8l4-4 4 4"></path><path d="M16 20V4"></path><path d="M12 16l4 4 4-4"></path></svg>',
     menu:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18"></path><path d="M3 12h18"></path><path d="M3 18h18"></path></svg>',
     'arrow-left':
