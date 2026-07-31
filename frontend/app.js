@@ -169,6 +169,7 @@ const state = {
     generatedAt: null,
     report: null,
     artifact: null,
+    history: [],
     lastError: ''
   },
   establishmentsByClient: {},
@@ -483,6 +484,14 @@ function onDocumentClick(event) {
     }
     case 'compare-sped-download': {
       void downloadCompareSpedArtifact();
+      return;
+    }
+    case 'compare-sped-redownload': {
+      const compareId = actionNode.getAttribute('data-compare-id');
+      if (!compareId) {
+        return;
+      }
+      void downloadCompareSpedHistoryItem(compareId);
       return;
     }
     case 'compare-sped-reset': {
@@ -3794,6 +3803,7 @@ function renderComparaSpedPage() {
   const hasClients = clientOptions.length > 0;
   const compareState = state.compareSped;
   const report = compareState.report;
+  const recentComparisons = Array.isArray(compareState.history) ? compareState.history : [];
   const artifactReady = Boolean(compareState.artifact?.blobUrl && report);
   const downloadLabel = compareState.outputFormat === 'PDF' ? 'Baixar PDF' : 'Baixar Excel';
   const generationStatus =
@@ -3939,6 +3949,54 @@ function renderComparaSpedPage() {
           </article>
         </div>
       </section>
+
+      <article class="card compare-history-card">
+        <div class="compare-card-header">
+          <div>
+            <h3 class="card-title">Ultimas comparacoes</h3>
+            <p class="card-subtitle">Reabra ou baixe novamente os arquivos gerados recentemente nesta sessao.</p>
+          </div>
+          ${statusBadge(`${recentComparisons.length} itens`, recentComparisons.length ? 'info' : 'neutral')}
+        </div>
+
+        ${
+          recentComparisons.length
+            ? `
+              <div class="compare-history-list">
+                ${recentComparisons
+                  .map((item) => {
+                    const outputLabel = item.outputFormat === 'PDF' ? 'PDF' : 'Excel';
+                    return `
+                      <div class="compare-history-item">
+                        <div class="compare-history-item-main">
+                          <div class="compare-history-item-title">${escapeHtml(item.clientName || 'Comparacao sem cliente')}</div>
+                          <div class="compare-history-meta">
+                            <span>${escapeHtml(item.competence ? `Competencia: ${item.competence}` : 'Competencia nao informada')}</span>
+                            <span>${escapeHtml(item.generatedAt ? `Gerada em: ${formatDateTime(item.generatedAt)}` : 'Data nao informada')}</span>
+                            <span>${escapeHtml(`Arquivo: ${item.sourceFileName || 'comparacao'}`)}</span>
+                            <span>${escapeHtml(`Saida: ${outputLabel}`)}</span>
+                          </div>
+                        </div>
+                        <div class="compare-history-actions">
+                          <button class="btn secondary small" type="button" data-action="compare-sped-redownload" data-compare-id="${escapeHtml(item.id)}">Baixar de novo</button>
+                        </div>
+                      </div>
+                    `;
+                  })
+                  .join('')}
+              </div>
+            `
+            : `
+              <div class="compare-history-empty">
+                <div class="compare-history-empty-icon">${icon('clock')}</div>
+                <div>
+                  <h4>Nenhuma comparacao recente</h4>
+                  <p>Quando voce gerar um arquivo, as ultimas comparacoes aparecem aqui com a opcao de baixar novamente.</p>
+                </div>
+              </div>
+            `
+        }
+      </article>
     </section>
   `;
 }
@@ -13024,10 +13082,6 @@ function triggerBrowserDownload(fileName, blob) {
 }
 
 function resetCompareSpedState() {
-  if (state.compareSped.artifact?.blobUrl) {
-    URL.revokeObjectURL(state.compareSped.artifact.blobUrl);
-  }
-
   state.compareSped.status = 'idle';
   state.compareSped.sourceFileName = '';
   state.compareSped.sourceCompetence = '';
@@ -13037,6 +13091,30 @@ function resetCompareSpedState() {
   state.compareSped.report = null;
   state.compareSped.artifact = null;
   state.compareSped.lastError = '';
+}
+
+function addCompareSpedHistoryItem(item) {
+  const currentHistory = Array.isArray(state.compareSped.history) ? state.compareSped.history : [];
+  const history = [item, ...currentHistory];
+
+  while (history.length > 5) {
+    const removed = history.pop();
+    if (removed?.artifact?.blobUrl) {
+      URL.revokeObjectURL(removed.artifact.blobUrl);
+    }
+  }
+
+  state.compareSped.history = history;
+}
+
+function triggerBrowserDownloadFromUrl(fileName, blobUrl) {
+  const anchor = document.createElement('a');
+  anchor.href = blobUrl;
+  anchor.download = fileName;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
 }
 
 async function submitCompareSpedForm(form, submitter = null) {
@@ -13069,10 +13147,6 @@ async function submitCompareSpedForm(form, submitter = null) {
     return;
   }
 
-  if (state.compareSped.artifact?.blobUrl) {
-    URL.revokeObjectURL(state.compareSped.artifact.blobUrl);
-  }
-
   state.compareSped.status = 'processing';
   state.compareSped.sourceCompanyId = companyId;
   state.compareSped.sourceCompetence = competence;
@@ -13103,11 +13177,24 @@ async function submitCompareSpedForm(form, submitter = null) {
       outputFormat
     });
     const artifact = buildCompareSpedArtifact(report, outputFormat);
+    const generatedAt = new Date().toISOString();
+    const historyItem = {
+      id: `${generatedAt}-${Math.random().toString(36).slice(2, 8)}`,
+      generatedAt,
+      clientId: client.id,
+      clientName: client.razaoSocial || 'Cliente selecionado',
+      competence: effectiveCompetence,
+      sourceFileName: file.name,
+      outputFormat,
+      report,
+      artifact
+    };
 
     state.compareSped.status = 'done';
     state.compareSped.report = report;
     state.compareSped.artifact = artifact;
-    state.compareSped.generatedAt = new Date().toISOString();
+    state.compareSped.generatedAt = generatedAt;
+    addCompareSpedHistoryItem(historyItem);
     state.compareSped.lastError = '';
     render();
     pushToast(`Comparacao gerada com sucesso em formato ${outputFormat === 'PDF' ? 'PDF' : 'Excel'}.`, 'success');
@@ -13126,14 +13213,31 @@ async function downloadCompareSpedArtifact() {
     return;
   }
 
-  const anchor = document.createElement('a');
-  anchor.href = artifact.blobUrl;
-  anchor.download = artifact.fileName;
-  anchor.style.display = 'none';
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
+  triggerBrowserDownloadFromUrl(artifact.fileName, artifact.blobUrl);
   pushToast(`Download de ${artifact.fileName} iniciado.`, 'success');
+}
+
+async function downloadCompareSpedHistoryItem(compareId) {
+  const history = Array.isArray(state.compareSped.history) ? state.compareSped.history : [];
+  const historyItem = history.find((item) => item.id === compareId);
+  if (!historyItem) {
+    pushToast('Nao foi possivel localizar a comparacao selecionada.', 'error');
+    return;
+  }
+
+  let artifact = historyItem.artifact;
+  if (!artifact?.blobUrl && historyItem.report) {
+    artifact = buildCompareSpedArtifact(historyItem.report, historyItem.outputFormat || 'Excel');
+    historyItem.artifact = artifact;
+  }
+
+  if (!artifact?.blobUrl) {
+    pushToast('Nao foi possivel recriar o arquivo para download novamente.', 'error');
+    return;
+  }
+
+  triggerBrowserDownloadFromUrl(artifact.fileName, artifact.blobUrl);
+  pushToast(`Download de ${artifact.fileName} iniciado novamente.`, 'success');
 }
 
 function parseCompareSpedFile(text) {
