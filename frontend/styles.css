@@ -694,6 +694,12 @@ textarea:focus-visible,
   align-items: start;
 }
 
+.compare-left-stack {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
 .compare-main-card,
 .compare-result-card,
 .compare-steps-card {
@@ -716,7 +722,7 @@ textarea:focus-visible,
 .compare-history-card {
   display: grid;
   gap: 16px;
-  margin-top: 16px;
+  margin-top: 0;
 }
 
 .compare-history-list {

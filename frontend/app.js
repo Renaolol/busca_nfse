@@ -3854,6 +3854,7 @@ function renderComparaSpedPage() {
       </section>
 
       <section class="split-grid compare-layout">
+        <div class="compare-left-stack">
         <article class="card compare-main-card">
           <div class="compare-card-header">
             <div>
@@ -3904,6 +3905,55 @@ function renderComparaSpedPage() {
           </form>
         </article>
 
+          <article class="card compare-history-card">
+            <div class="compare-card-header">
+              <div>
+                <h3 class="card-title">Ultimas comparacoes</h3>
+                <p class="card-subtitle">Reabra ou baixe novamente os arquivos gerados recentemente nesta sessao.</p>
+              </div>
+              ${statusBadge(`${recentComparisons.length} itens`, recentComparisons.length ? 'info' : 'neutral')}
+            </div>
+
+            ${
+              recentComparisons.length
+                ? `
+                  <div class="compare-history-list">
+                    ${recentComparisons
+                      .map((item) => {
+                        const outputLabel = item.outputFormat === 'PDF' ? 'PDF' : 'Excel';
+                        return `
+                          <div class="compare-history-item">
+                            <div class="compare-history-item-main">
+                              <div class="compare-history-item-title">${escapeHtml(item.clientName || 'Comparacao sem cliente')}</div>
+                              <div class="compare-history-meta">
+                                <span>${escapeHtml(item.competence ? `Competencia: ${item.competence}` : 'Competencia nao informada')}</span>
+                                <span>${escapeHtml(item.generatedAt ? `Gerada em: ${formatDateTime(item.generatedAt)}` : 'Data nao informada')}</span>
+                                <span>${escapeHtml(`Arquivo: ${item.sourceFileName || 'comparacao'}`)}</span>
+                                <span>${escapeHtml(`Saida: ${outputLabel}`)}</span>
+                              </div>
+                            </div>
+                            <div class="compare-history-actions">
+                              <button class="btn secondary small" type="button" data-action="compare-sped-redownload" data-compare-id="${escapeHtml(item.id)}">Baixar de novo</button>
+                            </div>
+                          </div>
+                        `;
+                      })
+                      .join('')}
+                  </div>
+                `
+                : `
+                  <div class="compare-history-empty">
+                    <div class="compare-history-empty-icon">${icon('clock')}</div>
+                    <div>
+                      <h4>Nenhuma comparacao recente</h4>
+                      <p>Quando voce gerar um arquivo, as ultimas comparacoes aparecem aqui com a opcao de baixar novamente.</p>
+                    </div>
+                  </div>
+                `
+            }
+          </article>
+        </div>
+
         <div class="compare-side-stack">
           <article class="card compare-result-card">
             <div class="compare-card-header">
@@ -3950,53 +4000,6 @@ function renderComparaSpedPage() {
         </div>
       </section>
 
-      <article class="card compare-history-card">
-        <div class="compare-card-header">
-          <div>
-            <h3 class="card-title">Ultimas comparacoes</h3>
-            <p class="card-subtitle">Reabra ou baixe novamente os arquivos gerados recentemente nesta sessao.</p>
-          </div>
-          ${statusBadge(`${recentComparisons.length} itens`, recentComparisons.length ? 'info' : 'neutral')}
-        </div>
-
-        ${
-          recentComparisons.length
-            ? `
-              <div class="compare-history-list">
-                ${recentComparisons
-                  .map((item) => {
-                    const outputLabel = item.outputFormat === 'PDF' ? 'PDF' : 'Excel';
-                    return `
-                      <div class="compare-history-item">
-                        <div class="compare-history-item-main">
-                          <div class="compare-history-item-title">${escapeHtml(item.clientName || 'Comparacao sem cliente')}</div>
-                          <div class="compare-history-meta">
-                            <span>${escapeHtml(item.competence ? `Competencia: ${item.competence}` : 'Competencia nao informada')}</span>
-                            <span>${escapeHtml(item.generatedAt ? `Gerada em: ${formatDateTime(item.generatedAt)}` : 'Data nao informada')}</span>
-                            <span>${escapeHtml(`Arquivo: ${item.sourceFileName || 'comparacao'}`)}</span>
-                            <span>${escapeHtml(`Saida: ${outputLabel}`)}</span>
-                          </div>
-                        </div>
-                        <div class="compare-history-actions">
-                          <button class="btn secondary small" type="button" data-action="compare-sped-redownload" data-compare-id="${escapeHtml(item.id)}">Baixar de novo</button>
-                        </div>
-                      </div>
-                    `;
-                  })
-                  .join('')}
-              </div>
-            `
-            : `
-              <div class="compare-history-empty">
-                <div class="compare-history-empty-icon">${icon('clock')}</div>
-                <div>
-                  <h4>Nenhuma comparacao recente</h4>
-                  <p>Quando voce gerar um arquivo, as ultimas comparacoes aparecem aqui com a opcao de baixar novamente.</p>
-                </div>
-              </div>
-            `
-        }
-      </article>
     </section>
   `;
 }
