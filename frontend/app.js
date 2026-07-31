@@ -8,7 +8,6 @@ const DASHBOARD_AUTO_REFRESH_INTERVAL_MS = 60000;
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
-const NFE_DOMINIO_DEFAULT_DATA_EMISSAO_INICIO = '2026-01-01';
 let dashboardAutoRefreshTimer = null;
 let dashboardAutoRefreshRunning = false;
 
@@ -2520,7 +2519,7 @@ function renderNfeSyncPage() {
           </label>
           <label class="field">
             Emissao inicial
-            <input name="dataEmissaoInicio" type="date" value="${NFE_DOMINIO_DEFAULT_DATA_EMISSAO_INICIO}" />
+            <input name="dataEmissaoInicio" type="date" />
           </label>
           <label class="field">
             Emissao final

@@ -67,10 +67,10 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - O adapter real da Dominio fica desacoplado em `src/integrations/dominio-nfe` e usa `pyodbc` via script Python para evitar acoplamento de driver nativo ao build Node.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio`, as rotas operacionais `POST /nfe/sync/ativar`, `POST /nfe/sync/ativar-todos`, `POST /nfe/sync/rodar-agora` e `POST /nfe/sync/rodar-agora-geral` deixam de consultar NSU e passam a importar incrementalmente da base Dominio.
 - Mesmo em `NFE_SYNC_SOURCE_MODE=dominio`, o operador pode usar o fluxo manual `POST /nfe/sync/download-por-chave/preview` + `POST /nfe/sync/download-por-chave/executar` para baixar notas faltantes por chave sem trocar o modo principal.
-- Nesse fluxo manual, o backend pagina todo o catalogo da Dominio desde `2026-01-01`, ignora o cursor incremental salvo e preserva `ultimo_nsu_consultado`/`max_nsu` ao concluir a execucao.
+- Nesse fluxo manual, o backend pagina todo o catalogo da Dominio desde `2026-01-02`, ignora o cursor incremental salvo e preserva `ultimo_nsu_consultado`/`max_nsu` ao concluir a execucao.
 - O mesmo fluxo manual aceita `dataEmissaoInicio` opcional no body para retroagir a busca, por exemplo `2026-01-01` quando o catalogo da empresa tiver notas no primeiro dia do ano.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, essas mesmas rotas passam a ler a `EFATENDIMENTO_NFE_CATALOGO` incrementalmente e consultar cada NF-e por `consChNFe`, usando o certificado ja cadastrado do estabelecimento correspondente.
-- Nesse modo, o catalogo da Dominio e filtrado para considerar apenas notas com emissao a partir de `2026-01-01`, isto e, com data maior ou igual a `2026-01-01`.
+- Nesse modo, o catalogo da Dominio e filtrado para considerar apenas notas com emissao a partir de `2026-01-02`, isto e, com data maior que `2026-01-01`.
 - Nesse modo, `nfe_sync_controle.ultimo_nsu_consultado` passa a guardar o ultimo `EFATENDIMENTO_NFE_CATALOGO.ID` importado com sucesso para cada `cliente/cnpj/ambiente`.
 - Nesse modo, a leitura por chave da Dominio ocorre apenas nas execucoes manuais/esporadicas; o ciclo automatico e a busca noturna nao a disparam.
 - Nesse modo, o painel manual usa `POST /nfe/sync/download-por-chave/preview` e `POST /nfe/sync/download-por-chave/preview-global` para abrir um overlay de auditoria com as chaves pendentes antes do download oficial.

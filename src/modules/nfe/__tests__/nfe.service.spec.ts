@@ -1141,7 +1141,7 @@ describe('NfeService', () => {
     expect(dominioXmlSource.listCatalog).toHaveBeenCalledWith({
       cnpjs: ['12345678000199'],
       limit: 300,
-      dataEmissaoInicio: '2026-01-01',
+      dataEmissaoInicio: '2026-01-02',
       dataEmissaoFim: undefined,
       chavesAcesso: undefined,
       catalogoIds: [],
@@ -1316,7 +1316,7 @@ describe('NfeService', () => {
     expect(dominioXmlSource.listCatalog).toHaveBeenNthCalledWith(1, {
       cnpjs: ['12345678000199'],
       limit: 2,
-      dataEmissaoInicio: '2026-01-01',
+      dataEmissaoInicio: '2026-01-02',
       dataEmissaoFim: undefined,
       chavesAcesso: undefined,
       catalogoIds: [],
@@ -1326,7 +1326,7 @@ describe('NfeService', () => {
     expect(dominioXmlSource.listCatalog).toHaveBeenNthCalledWith(2, {
       cnpjs: ['12345678000199'],
       limit: 2,
-      dataEmissaoInicio: '2026-01-01',
+      dataEmissaoInicio: '2026-01-02',
       dataEmissaoFim: undefined,
       chavesAcesso: undefined,
       catalogoIds: [],
@@ -1504,7 +1504,7 @@ describe('NfeService', () => {
     expect(dominioXmlSource.listCatalog).toHaveBeenCalledWith({
       cnpjs: ['12345678000199'],
       limit: 300,
-      dataEmissaoInicio: '2026-01-01',
+      dataEmissaoInicio: '2026-01-02',
       dataEmissaoFim: undefined,
       chavesAcesso: undefined,
       catalogoIds: [],
