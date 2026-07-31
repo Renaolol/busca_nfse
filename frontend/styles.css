@@ -691,7 +691,7 @@ textarea:focus-visible,
 }
 
 .compare-layout {
-  align-items: stretch;
+  align-items: start;
 }
 
 .compare-main-card,
@@ -699,16 +699,14 @@ textarea:focus-visible,
 .compare-steps-card {
   display: grid;
   gap: 16px;
-  height: 100%;
   min-height: 0;
 }
 
 .compare-side-stack {
   display: grid;
   gap: 16px;
-  height: 100%;
   min-height: 0;
-  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-template-rows: auto auto;
 }
 
 .compare-side-stack > .card {
