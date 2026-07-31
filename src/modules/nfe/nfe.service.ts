@@ -132,7 +132,7 @@ type NfeDownloadByKeyPreviewResult = {
 export class NfeService implements OnModuleInit, OnModuleDestroy {
   private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
   private static readonly NIGHTLY_SWEEP_CONFIG_STORAGE_KEY = 'settings/nfe-nightly-sweep.json';
-  private static readonly DOMINIO_CHAVE_DATA_EMISSAO_INICIO = '2026-01-02';
+  private static readonly DOMINIO_CHAVE_DATA_EMISSAO_INICIO = '2026-01-01';
   private readonly logger = new Logger(NfeService.name);
   private autoSyncTimer: NodeJS.Timeout | null = null;
   private nightlySweepTimer: NodeJS.Timeout | null = null;

@@ -19,7 +19,7 @@ export class RunNfeSyncDto {
   estabelecimentoId?: string;
 
   @ApiPropertyOptional({
-    description: 'Data inicial para varrer o catalogo Dominio no download manual por chave (YYYY-MM-DD). Padrao: 2026-01-02'
+    description: 'Data inicial para varrer o catalogo Dominio no download manual por chave (YYYY-MM-DD). Padrao: 2026-01-01'
   })
   @IsOptional()
   @IsDateString()
