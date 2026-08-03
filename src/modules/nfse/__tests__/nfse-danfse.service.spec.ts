@@ -194,4 +194,60 @@ describe('NfseDanfseService', () => {
       expect(content).toContain('Mondai - SC');
       expect(content).toContain('Municipio de Incidencia do ISSQN');
   });
+
+  it('preenche tributacao municipal a partir de vBC e pAliqAplic do layout nacional', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS23044001241109394000106000000000010926070838769673">
+    <xLocEmi>FORTALEZA</xLocEmi>
+    <nNFSe>109</nNFSe>
+    <dhProc>2026-07-02T11:48:09-00:00</dhProc>
+    <emit>
+      <CNPJ>41109394000106</CNPJ>
+      <xNome>LABRAND SCHOOL LTDA</xNome>
+    </emit>
+    <valores>
+      <vBC>890.00</vBC>
+      <pAliqAplic>2.40</pAliqAplic>
+      <vISSQN>21.36</vISSQN>
+    </valores>
+    <DPS versao="1.00">
+      <infDPS Id="DPS230440024110939400010600001000000000000109">
+        <dhEmi>2026-07-02T11:48:09-00:00</dhEmi>
+        <dCompet>2026-07-01</dCompet>
+        <prest>
+          <CNPJ>41109394000106</CNPJ>
+        </prest>
+        <toma>
+          <CNPJ>23743325000160</CNPJ>
+          <xNome>ALBRECHT &amp; BORNHOLDT LTDA ME</xNome>
+        </toma>
+        <serv>
+          <cServ>
+            <xDescServ>Edição de Materiais</xDescServ>
+          </cServ>
+        </serv>
+        <valores>
+          <vServPrest>
+            <vServ>890.00</vServ>
+          </vServPrest>
+        </valores>
+      </infDPS>
+    </DPS>
+  </infNFSe>
+</NFSe>`;
+
+    const pdf = service.generateFromXml(xml, {
+      chaveAcesso: '23044001241109394000106000000000010926070838769673'
+    });
+
+    const content = pdf.toString('latin1');
+
+    expect(content).toContain('BC ISSQN');
+    expect(content).toContain('R$ 890,00');
+    expect(content).toContain('Aliquota Aplicada');
+    expect(content).toContain('2,40 %');
+    expect(content).toContain('ISSQN Apurado');
+    expect(content).toContain('R$ 21,36');
+  });
 });
