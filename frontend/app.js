@@ -6,6 +6,8 @@ const API_TIMEOUT_MS = 20000;
 const SEARCH_PAGE_SIZE = 100;
 const DASHBOARD_AUTO_REFRESH_INTERVAL_MS = 60000;
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
+const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
+const COMPARE_SPED_HISTORY_LIMIT = 10;
 const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
 let dashboardAutoRefreshTimer = null;
@@ -169,7 +171,7 @@ const state = {
     generatedAt: null,
     report: null,
     artifact: null,
-    history: [],
+    history: loadCompareSpedHistoryStore(),
     lastError: ''
   },
   establishmentsByClient: {},
@@ -375,7 +377,8 @@ async function hydrateFromApi() {
     persistedAlerts,
     persistedAlertResolutions,
     auditRows,
-    schedulerStatus
+    schedulerStatus,
+    compareSpedHistoryRaw
   ] = await Promise.all([
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/estabelecimentos`, []),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/certificados`, []),
@@ -392,7 +395,8 @@ async function hydrateFromApi() {
     apiRequest('/alertas').catch(() => []),
     apiRequest('/alertas/resolucoes').catch(() => []),
     apiRequest('/auditoria').catch(() => []),
-    apiRequest('/sync/scheduler-status').catch(() => null)
+    apiRequest('/sync/scheduler-status').catch(() => null),
+    apiRequest(`/comparacoes-sped?limit=${COMPARE_SPED_HISTORY_LIMIT}`).catch(() => [])
   ]);
 
   const nfseDocsPage = normalizePaginatedResponse(nfseDocs);
@@ -435,6 +439,10 @@ async function hydrateFromApi() {
   state.syncByClient = syncByClient;
   state.dashboardStats = dashboardStats;
   state.schedulerStatus = schedulerStatus;
+  state.compareSped.history = mergeCompareSpedHistorySources(
+    loadCompareSpedHistoryStore(),
+    Array.isArray(compareSpedHistoryRaw) ? compareSpedHistoryRaw : []
+  );
   applySchedulerStatusToSettings(schedulerStatus);
   syncExecutionMonitorWithData();
 }
@@ -10961,6 +10969,131 @@ function saveResolvedAlertsStore(store) {
   }
 }
 
+function loadCompareSpedHistoryStore() {
+  try {
+    const raw = window.localStorage.getItem(COMPARE_SPED_HISTORY_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.map((item) => normalizeCompareSpedHistoryItem(item)).filter(Boolean);
+  } catch (error) {
+    console.warn('Falha ao carregar historico de comparacoes SPED do navegador.', error);
+    return [];
+  }
+}
+
+function saveCompareSpedHistoryStore(history) {
+  try {
+    const serializable = (Array.isArray(history) ? history : [])
+      .map((item) => normalizeCompareSpedHistoryItem(item))
+      .filter(Boolean)
+      .map(({ artifact, ...item }) => item)
+      .slice(0, COMPARE_SPED_HISTORY_LIMIT);
+    window.localStorage.setItem(COMPARE_SPED_HISTORY_STORAGE_KEY, JSON.stringify(serializable));
+  } catch (error) {
+    console.warn('Falha ao persistir historico de comparacoes SPED no navegador.', error);
+  }
+}
+
+function normalizeCompareSpedHistoryItem(item) {
+  if (!item || typeof item !== 'object') {
+    return null;
+  }
+
+  const report = item.report && typeof item.report === 'object' ? item.report : null;
+  const generatedAt = String(item.generatedAt || report?.generatedAt || new Date().toISOString());
+  const clientIdValue = item.clientId ?? report?.clientId ?? '';
+  const clientNameValue = item.clientName || report?.companyName || 'Cliente selecionado';
+  const clientCnpjValue = item.clientCnpj || report?.clientCnpj || '';
+  const competenceValue = item.competence || report?.competence || '';
+  const sourceFileNameValue = item.sourceFileName || report?.sourceFileName || 'comparacao-sped.txt';
+  const outputFormatValue = item.outputFormat || report?.outputFormat || 'Excel';
+  return {
+    id: String(item.id || `${generatedAt}-${Math.random().toString(36).slice(2, 8)}`),
+    clientId: clientIdValue == null ? '' : String(clientIdValue),
+    clientName: String(clientNameValue || 'Cliente selecionado'),
+    clientCnpj: clientCnpjValue == null ? '' : String(clientCnpjValue),
+    competence: competenceValue == null ? '' : String(competenceValue),
+    sourceFileName: String(sourceFileNameValue || 'comparacao-sped.txt'),
+    outputFormat: outputFormatValue === 'PDF' ? 'PDF' : 'Excel',
+    generatedAt,
+    report: report || {},
+    artifact: item.artifact && item.artifact.blobUrl ? item.artifact : null
+  };
+}
+
+function buildCompareSpedHistoryItem(item) {
+  return normalizeCompareSpedHistoryItem(item);
+}
+
+function compareSpedHistoryKey(item) {
+  const normalized = normalizeCompareSpedHistoryItem(item);
+  if (!normalized) {
+    return '';
+  }
+
+  return [
+    normalized.clientId || '',
+    normalized.clientName || '',
+    normalized.competence || '',
+    normalized.sourceFileName || '',
+    normalized.generatedAt || '',
+    normalized.outputFormat || ''
+  ].join('|');
+}
+
+function mergeCompareSpedHistorySources(...sources) {
+  const merged = [];
+  const seen = new Map();
+
+  sources.forEach((source) => {
+    (Array.isArray(source) ? source : []).forEach((item) => {
+      const normalized = normalizeCompareSpedHistoryItem(item);
+      if (!normalized) {
+        return;
+      }
+
+      const key = compareSpedHistoryKey(normalized);
+      seen.set(key, normalized);
+    });
+  });
+
+  seen.forEach((item) => {
+    merged.push(item);
+  });
+
+  return merged.sort((left, right) => Date.parse(String(right.generatedAt || 0)) - Date.parse(String(left.generatedAt || 0)));
+}
+
+async function persistCompareSpedHistoryItem(item) {
+  const payload = normalizeCompareSpedHistoryItem(item);
+  if (!payload) {
+    throw new Error('Historico de comparacao invalido.');
+  }
+
+  const response = await apiRequest('/comparacoes-sped', {
+    method: 'POST',
+    body: {
+      clienteId: payload.clientId || undefined,
+      clientName: payload.clientName,
+      clientCnpj: payload.clientCnpj || undefined,
+      competence: payload.competence || undefined,
+      sourceFileName: payload.sourceFileName,
+      outputFormat: payload.outputFormat,
+      generatedAt: payload.generatedAt,
+      report: payload.report
+    }
+  });
+
+  return response ? normalizeCompareSpedHistoryItem({ ...response, artifact: payload.artifact }) : payload;
+}
+
 function isSyncControlErrorStatus(status) {
   return String(status || '').startsWith('erro_');
 }
@@ -13098,9 +13231,10 @@ function resetCompareSpedState() {
 
 function addCompareSpedHistoryItem(item) {
   const currentHistory = Array.isArray(state.compareSped.history) ? state.compareSped.history : [];
-  const history = [item, ...currentHistory];
+  const incoming = normalizeCompareSpedHistoryItem(item);
+  const history = [incoming, ...currentHistory.filter((entry) => compareSpedHistoryKey(entry) !== compareSpedHistoryKey(incoming))];
 
-  while (history.length > 5) {
+  while (history.length > COMPARE_SPED_HISTORY_LIMIT) {
     const removed = history.pop();
     if (removed?.artifact?.blobUrl) {
       URL.revokeObjectURL(removed.artifact.blobUrl);
@@ -13108,6 +13242,7 @@ function addCompareSpedHistoryItem(item) {
   }
 
   state.compareSped.history = history;
+  saveCompareSpedHistoryStore(history);
 }
 
 function triggerBrowserDownloadFromUrl(fileName, blobUrl) {
@@ -13181,23 +13316,33 @@ async function submitCompareSpedForm(form, submitter = null) {
     });
     const artifact = buildCompareSpedArtifact(report, outputFormat);
     const generatedAt = new Date().toISOString();
-    const historyItem = {
+    const pendingHistoryItem = buildCompareSpedHistoryItem({
       id: `${generatedAt}-${Math.random().toString(36).slice(2, 8)}`,
       generatedAt,
       clientId: client.id,
       clientName: client.razaoSocial || 'Cliente selecionado',
+      clientCnpj: client.cnpj || '',
       competence: effectiveCompetence,
       sourceFileName: file.name,
       outputFormat,
       report,
       artifact
-    };
+    });
+
+    let savedHistoryItem = pendingHistoryItem;
+    try {
+      const persisted = await persistCompareSpedHistoryItem(pendingHistoryItem);
+      savedHistoryItem = persisted || pendingHistoryItem;
+    } catch (persistError) {
+      console.warn('Falha ao persistir historico de comparacao SPED.', persistError);
+      pushToast('Comparacao gerada, mas o historico foi salvo apenas neste navegador.', 'warning');
+    }
 
     state.compareSped.status = 'done';
     state.compareSped.report = report;
     state.compareSped.artifact = artifact;
     state.compareSped.generatedAt = generatedAt;
-    addCompareSpedHistoryItem(historyItem);
+    addCompareSpedHistoryItem(savedHistoryItem);
     state.compareSped.lastError = '';
     render();
     pushToast(`Comparacao gerada com sucesso em formato ${outputFormat === 'PDF' ? 'PDF' : 'Excel'}.`, 'success');
@@ -14422,12 +14567,12 @@ function buildComparePdfSectionPageContent({ section, rows, pageWidth, pageHeigh
   const tableTop = headerTop + headerHeight + 14;
   const content = [];
   const columns = [
-    { key: 'numero', label: 'Numero', width: 48, align: 'left' },
+    { key: 'numero', label: 'Numero', width: 54, align: 'left' },
     { key: 'data', label: 'Data', width: 72, align: 'left' },
-    { key: 'valor', label: 'Valor', width: 68, align: 'right' },
-    { key: 'fornecedor', label: 'Fornecedor / cliente', width: 150, align: 'left' },
-    { key: 'chave', label: 'Chave', width: 120, align: 'left' },
-    { key: 'obs', label: 'Observacao', width: 73, align: 'left' }
+    { key: 'valor', label: 'Valor', width: 72, align: 'right' },
+    { key: 'fornecedor', label: 'Fornecedor / cliente', width: 144, align: 'left' },
+    { key: 'chave', label: 'Chave', width: 122, align: 'left' },
+    { key: 'obs', label: 'Observacao', width: 67, align: 'left' }
   ];
   const tableWidth = columns.reduce((acc, column) => acc + column.width, 0);
   const countLabel = `${rows.length} itens`;
@@ -14484,7 +14629,7 @@ function buildComparePdfSectionPageContent({ section, rows, pageWidth, pageHeigh
     });
     drawPdfText(content, column.label, x + 6, tableTop + 16, {
       pageHeight,
-      size: 8.2,
+      size: 8,
       bold: true,
       color: '#FFFFFF'
     });
@@ -14519,8 +14664,8 @@ function buildComparePdfSectionPageContent({ section, rows, pageWidth, pageHeigh
         const cellValue = row[column.key] || '-';
         drawPdfTextBlock(content, cellValue, cellX + 6, currentY + 8, {
           pageHeight,
-          width: column.width - 12,
-          size: column.key === 'valor' ? 8.2 : 7.9,
+          width: column.width - 16,
+          size: column.key === 'valor' ? 8 : 7.6,
           bold: column.key === 'valor',
           color: '#0F172A',
           align: column.align
@@ -14558,14 +14703,14 @@ function buildComparePdfSectionRow(section, row) {
   const chave = stripPdfText(row.chave || '-');
   const observacao = useCompare ? stripPdfText(row.observacao || '-') : stripPdfText(row.observacao || (useSped ? 'Documento localizado apenas no SPED.' : 'Documento localizado apenas na Dominio.'));
   const rowHeight = Math.max(
-    28,
-    computePdfTextLines(numero, 48, 7.9) * 10,
-    computePdfTextLines(data, 72, 7.9) * 10,
-    computePdfTextLines(valor, 68, 8.2) * 10,
-    computePdfTextLines(fornecedor, 150, 7.9) * 10,
-    computePdfTextLines(chave, 120, 7.9) * 10,
-    computePdfTextLines(observacao, 73, 7.7) * 10
-  ) + 12;
+    30,
+    computePdfTextLines(numero, 54, 7.6) * 11,
+    computePdfTextLines(data, 72, 7.6) * 11,
+    computePdfTextLines(valor, 72, 8) * 11,
+    computePdfTextLines(fornecedor, 144, 7.6) * 11,
+    computePdfTextLines(chave, 122, 7.6) * 11,
+    computePdfTextLines(observacao, 67, 7.4) * 11
+  ) + 14;
 
   return {
     numero,
@@ -14625,7 +14770,7 @@ function drawPdfFooter(content, pageWidth, pageHeight, pageNumber, totalPages) {
 
 function drawPdfTextBlock(content, text, x, yTop, options) {
   const lines = wrapPdfTextToWidth(text, options.width, options.size || 8.5, options.bold);
-  const lineHeight = options.lineHeight || Math.max(9.5, (options.size || 8.5) * 1.25);
+  const lineHeight = options.lineHeight || Math.max(10.2, (options.size || 8.5) * 1.35);
   lines.forEach((line, index) => {
     drawPdfText(content, line, x, yTop + index * lineHeight, options);
   });
@@ -14636,16 +14781,19 @@ function drawPdfText(content, text, x, yTop, options = {}) {
   const size = options.size || 10;
   const font = options.bold ? 'F2' : 'F1';
   const color = options.color || '#111827';
-  const width = measurePdfTextWidth(text, size, Boolean(options.bold));
+  const sanitizedText = stripPdfText(text);
+  const width = measurePdfTextWidth(sanitizedText, size, Boolean(options.bold));
   const xPos = options.align === 'right' ? x - width : options.align === 'center' ? x - width / 2 : x;
   const yPos = pageHeight - yTop - size;
   const [r, g, b] = hexToPdfRgb(color);
-  content.push(`BT /${font} ${size} Tf ${r} ${g} ${b} rg ${formatPdfNumber(xPos)} ${formatPdfNumber(yPos)} Td (${escapePdfText(stripPdfText(text))}) Tj ET`);
+  content.push(
+    `BT /${font} ${size} Tf ${r} ${g} ${b} rg 1 0 0 1 ${formatPdfNumber(xPos)} ${formatPdfNumber(yPos)} Tm (${escapePdfText(sanitizedText)}) Tj ET`
+  );
 }
 
 function measurePdfTextWidth(text, size, bold = false) {
   const sanitized = stripPdfText(text || '');
-  const factor = bold ? 0.58 : 0.53;
+  const factor = bold ? 0.61 : 0.56;
   return sanitized.length * size * factor;
 }
 
@@ -14693,7 +14841,7 @@ function wrapPdfTextToWidth(text, width, size, bold = false) {
     return [''];
   }
 
-  const averageCharWidth = size * (bold ? 0.58 : 0.53);
+  const averageCharWidth = size * (bold ? 0.61 : 0.56);
   const maxChars = Math.max(6, Math.floor(width / averageCharWidth));
   const words = sanitized.split(/\s+/);
   const lines = [];

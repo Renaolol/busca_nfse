@@ -79,6 +79,7 @@ model Cliente {
   syncLogs         NfseSyncLog[]
   auditorias       AuditoriaUsuario[]
   alertResolutions AlertResolution[]
+  compareSpedHistoricos CompareSpedHistorico[]
 
   @@map("clientes")
 }
@@ -363,4 +364,24 @@ model AlertResolution {
   cliente Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
 
   @@map("alert_resolutions")
+}
+
+model CompareSpedHistorico {
+  id            String   @id @default(uuid()) @db.Uuid
+  clienteId     String?  @map("cliente_id") @db.Uuid
+  clientName    String   @map("client_name") @db.VarChar(255)
+  clientCnpj    String?  @map("client_cnpj") @db.VarChar(14)
+  competence    String?  @db.VarChar(20)
+  sourceFileName String  @map("source_file_name") @db.Text
+  outputFormat  String   @map("output_format") @db.VarChar(10)
+  generatedAt   DateTime @map("generated_at")
+  report        Json
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  cliente Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+
+  @@index([clienteId, generatedAt], map: "compare_sped_historicos_cliente_id_generated_at_idx")
+  @@index([createdAt], map: "compare_sped_historicos_created_at_idx")
+  @@map("compare_sped_historicos")
 }

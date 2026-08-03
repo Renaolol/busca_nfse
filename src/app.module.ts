@@ -5,6 +5,7 @@ import { JobsModule } from './jobs/jobs.module';
 import { AuditModule } from './modules/audit/audit.module';
 import { AlertsModule } from './modules/alerts/alerts.module';
 import { CertificatesModule } from './modules/certificates/certificates.module';
+import { CompareSpedModule } from './modules/compare-sped/compare-sped.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { CteModule } from './modules/cte/cte.module';
 import { EstablishmentsModule } from './modules/establishments/establishments.module';
@@ -26,6 +27,7 @@ import { PrismaModule } from './prisma/prisma.module';
     CteModule,
     EstablishmentsModule,
     CertificatesModule,
+    CompareSpedModule,
     SyncModule,
     NfseModule,
     NfeModule,

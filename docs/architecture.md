@@ -23,6 +23,7 @@ A aplicacao segue arquitetura backend-first:
 5. Armazenamento de XML/PDF via provider de storage (implementacao local no MVP)
 6. API interna com validacoes de escopo por `clienteId` nos endpoints multi-tenant
 7. Frontend operacional interno servido pela propria API em `frontend/app.js`
+8. Historicos operacionais persistidos em banco quando fazem sentido para analise futura, como comparacoes SPED
 
 ## Regras de elegibilidade operacional
 
@@ -41,11 +42,19 @@ A aplicacao segue arquitetura backend-first:
 - `certificates`
 - `sync`
 - `nfse`
+- `compare-sped`
 - `nfe`
 - `audit`
 - `storage`
 - `jobs`
 - `health`
+
+## Persistencia de comparacoes SPED
+
+- O frontend de `Compara SPED` envia cada resultado gerado para `POST /comparacoes-sped`.
+- O backend salva o relatorio completo em `compare_sped_historicos` para permitir reabertura e download novamente mesmo apos atualizar a aba.
+- A listagem de `GET /comparacoes-sped` devolve os ultimos itens persistidos e alimenta o bloco `Ultimas comparacoes` da interface.
+- O frontend tambem espelha o historico em `localStorage` para manter a experiencia caso a API fique indisponivel temporariamente.
 
 ## Pontos arquiteturais que merecem atencao
 
