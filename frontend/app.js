@@ -14098,136 +14098,8 @@ function pickCompareRowValue(primaryValue, fallbackValue) {
 }
 
 function buildComparePdfBlob(report) {
-  const lines = buildComparePdfLines(report);
-  const pdfBytes = buildMinimalPdf(lines, `Comparacao SPED - ${report.companyName}`);
+  const pdfBytes = buildComparePdfDocument(report);
   return new Blob([pdfBytes], { type: 'application/pdf' });
-}
-
-function buildComparePdfLines(report) {
-  const totals = getCompareReportTotals(report);
-  const onlySpedRows = report.rows.filter((row) => row.status === 'Somente no SPED');
-  const onlyDominioRows = report.rows.filter((row) => row.status === 'Somente no Dominio');
-  const divergentRows = report.rows.filter((row) => row.status === 'Divergente');
-  const lines = [
-    'Comparacao SPED x Dominio',
-    '=====================================================================',
-    `Empresa.....: ${stripPdfText(report.companyName)}`,
-    `CNPJ........: ${stripPdfText(formatCnpj(report.clientCnpj || ''))}`,
-    `Arquivo.....: ${stripPdfText(report.sourceFileName)}`,
-    `Competencia.: ${stripPdfText(report.competence || 'Nao informada')}`,
-    `Gerado em...: ${stripPdfText(formatDateTime(report.generatedAt || ''))}`,
-    ''
-  ];
-
-  lines.push('RESUMO');
-  lines.push('---------------------------------------------------------------------');
-  lines.push(`SPED documentos...........: ${report.summary.spedDocs}`);
-  lines.push(`SPED valor total..........: ${stripPdfText(formatCurrency(totals.totalSpedValue))}`);
-  lines.push(`Dominio documentos........: ${report.summary.dominioDocs}`);
-  lines.push(`Dominio valor total.......: ${stripPdfText(formatCurrency(totals.totalDominioValue))}`);
-  lines.push(`Encontrados nas duas bases: ${report.summary.matchedDocs}`);
-  lines.push(`Somente no SPED...........: ${report.summary.onlySpedDocs}`);
-  lines.push(`Valor faltante no SPED....: ${stripPdfText(formatCurrency(totals.onlyDominioValue))}`);
-  lines.push(`Somente na Dominio........: ${report.summary.onlyDominioDocs}`);
-  lines.push(`Valor faltante na Dominio.: ${stripPdfText(formatCurrency(totals.onlySpedValue))}`);
-  lines.push(`Divergencias..............: ${report.summary.divergentDocs}`);
-  lines.push('');
-
-  if (report.warnings.length) {
-    lines.push('AVISOS');
-    lines.push('---------------------------------------------------------------------');
-    report.warnings.slice(0, 12).forEach((warning) => {
-      lines.push(`- ${stripPdfText(warning)}`);
-    });
-    lines.push('');
-  }
-
-  appendComparePdfSection(lines, 'FALTANTES NO SPED', onlyDominioRows, 'dominio');
-  appendComparePdfSection(lines, 'FALTANTES NA DOMINIO', onlySpedRows, 'sped');
-  appendComparePdfSection(lines, 'DIVERGENCIAS', divergentRows, 'compare');
-
-  return lines;
-}
-
-function appendComparePdfSection(lines, title, rows, mode) {
-  lines.push(title);
-  lines.push('---------------------------------------------------------------------');
-
-  if (!rows.length) {
-    lines.push('Nenhum item encontrado.');
-    lines.push('');
-    return;
-  }
-
-  rows.slice(0, 120).forEach((row, index) => {
-    buildComparePdfRowBlock(row, mode, index + 1).forEach((line) => lines.push(line));
-    lines.push('');
-  });
-}
-
-function buildComparePdfRowBlock(row, mode, index) {
-  const useDominio = mode === 'dominio';
-  const useCompare = mode === 'compare';
-  const tipo = useCompare ? `${row.tipoSped || '-'} / ${row.tipoDominio || '-'}` : useDominio ? row.tipoDominio || '-' : row.tipoSped || '-';
-  const numero = useCompare ? `${row.numeroSped || '-'} / ${row.numeroDominio || '-'}` : useDominio ? row.numeroDominio || '-' : row.numeroSped || '-';
-  const serie = useCompare ? `${row.serieSped || '-'} / ${row.serieDominio || '-'}` : useDominio ? row.serieDominio || '-' : row.serieSped || '-';
-  const data = useCompare ? `${row.dataSped || '-'} / ${row.dataDominio || '-'}` : useDominio ? row.dataDominio || '-' : row.dataSped || '-';
-  const cnpj = useCompare
-    ? `${formatCnpj(row.emitenteCnpjSped || '')} / ${formatCnpj(row.emitenteCnpjDominio || '')}`
-    : formatCnpj(useDominio ? row.emitenteCnpjDominio || '' : row.emitenteCnpjSped || '');
-  const nome = useCompare
-    ? `${row.emitenteNomeSped || '-'} / ${row.emitenteNomeDominio || '-'}`
-    : useDominio ? row.emitenteNomeDominio || '-' : row.emitenteNomeSped || '-';
-  const valor = useCompare
-    ? `${formatOptionalCurrency(row.valorSped)} / ${formatOptionalCurrency(row.valorDominio)}`
-    : formatCurrency(pickCompareRowValue(useDominio ? row.valorDominio : row.valorSped, useDominio ? row.valorSped : row.valorDominio));
-  const lines = [
-    `${String(index).padStart(3, '0')} | ${stripPdfText(row.status || '-')}`,
-    `Tipo..: ${stripPdfText(tipo)}`,
-    `Serie.: ${stripPdfText(String(serie || '-'))}  Numero: ${stripPdfText(String(numero || '-'))}`,
-    `Data..: ${stripPdfText(String(data || '-'))}  Valor.: ${stripPdfText(String(valor || '-'))}`,
-    `CNPJ..: ${stripPdfText(String(cnpj || '-'))}`,
-    `Nome..: ${stripPdfText(String(nome || '-'))}`,
-    `Chave.: ${stripPdfText(row.chave || '-')}`
-  ];
-
-  if (row.observacao) {
-    wrapPdfText(`Obs...: ${stripPdfText(row.observacao)}`, 95).forEach((line) => lines.push(line));
-  }
-
-  return lines;
-}
-
-function wrapPdfText(text, maxLength) {
-  const normalized = stripPdfText(text || '');
-  if (normalized.length <= maxLength) {
-    return [normalized];
-  }
-
-  const words = normalized.split(/\s+/);
-  const lines = [];
-  let current = '';
-
-  words.forEach((word) => {
-    if (!word) {
-      return;
-    }
-    const candidate = current ? `${current} ${word}` : word;
-    if (candidate.length > maxLength) {
-      if (current) {
-        lines.push(current);
-      }
-      current = word;
-    } else {
-      current = candidate;
-    }
-  });
-
-  if (current) {
-    lines.push(current);
-  }
-
-  return lines.length ? lines : [normalized];
 }
 
 function stripPdfText(value) {
@@ -14237,57 +14109,492 @@ function stripPdfText(value) {
     .replace(/[^\x20-\x7E]/g, '?');
 }
 
-function buildMinimalPdf(lines, title) {
-  const sanitizedTitle = stripPdfText(title || 'Relatorio');
-  const normalizedLines = (Array.isArray(lines) ? lines : []).map((line) => stripPdfText(line));
+function escapePdfText(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
+}
+
+function buildComparePdfDocument(report) {
   const pageWidth = 595;
   const pageHeight = 842;
-  const margin = 40;
-  const titleFontSize = 16;
-  const bodyFontSize = 10;
-  const lineHeight = 14;
-  const linesPerPage = Math.max(1, Math.floor((pageHeight - margin * 2 - 60) / lineHeight));
-  const pages = [];
+  const totals = getCompareReportTotals(report);
+  const onlySpedRows = (Array.isArray(report.rows) ? report.rows : []).filter((row) => row.status === 'Somente no SPED');
+  const onlyDominioRows = (Array.isArray(report.rows) ? report.rows : []).filter((row) => row.status === 'Somente no Dominio');
+  const divergentRows = (Array.isArray(report.rows) ? report.rows : []).filter((row) => row.status === 'Divergente');
+  const sections = [
+    {
+      title: 'Faltantes no SPED',
+      description: 'Documentos presentes na Dominio e ausentes no arquivo enviado.',
+      tone: 'warning',
+      rows: onlyDominioRows,
+      source: 'dominio',
+      total: totals.onlyDominioValue,
+      count: report.summary.onlyDominioDocs
+    },
+    {
+      title: 'Faltantes na Dominio',
+      description: 'Documentos presentes no SPED e ainda nao localizados na base.',
+      tone: 'info',
+      rows: onlySpedRows,
+      source: 'sped',
+      total: totals.onlySpedValue,
+      count: report.summary.onlySpedDocs
+    },
+    {
+      title: 'Divergencias',
+      description: 'Documentos encontrados nas duas bases, mas com diferencas de dados.',
+      tone: 'danger',
+      rows: divergentRows,
+      source: 'compare',
+      total: null,
+      count: report.summary.divergentDocs
+    }
+  ];
 
-  for (let index = 0; index < normalizedLines.length; index += linesPerPage) {
-    pages.push(normalizedLines.slice(index, index + linesPerPage));
-  }
+  const pageModels = [
+    {
+      kind: 'overview',
+      report,
+      totals,
+      sections
+    }
+  ];
 
-  if (!pages.length) {
-    pages.push(['Sem dados para exibir.']);
-  }
-
-  const pageObjects = [];
-  const contentObjects = [];
-  pages.forEach((pageLines, index) => {
-    const contentObjectNumber = 4 + index * 2;
-    const pageObjectNumber = 5 + index * 2;
-    const content = buildPdfPageContent({
-      title: sanitizedTitle,
-      pageLines,
-      pageNumber: index + 1,
-      totalPages: pages.length,
-      pageWidth,
-      pageHeight,
-      margin,
-      titleFontSize,
-      bodyFontSize,
-      lineHeight
-    });
-    contentObjects.push(`${contentObjectNumber} 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`);
-    pageObjects.push(
-      `${pageObjectNumber} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObjectNumber} 0 R >>\nendobj\n`
+  sections.forEach((section) => {
+    pageModels.push(
+      ...buildComparePdfSectionPageModels({
+        report,
+        section,
+        pageWidth,
+        pageHeight
+      })
     );
   });
 
-  const kids = pages.map((_, index) => `${5 + index * 2} 0 R`).join(' ');
+  const pages = pageModels.map((pageModel, index) =>
+    buildComparePdfPageContent({
+      ...pageModel,
+      pageWidth,
+      pageHeight,
+      pageNumber: index + 1,
+      totalPages: pageModels.length
+    })
+  );
+
+  return buildComparePdfBinary(pages, pageWidth, pageHeight);
+}
+
+function buildComparePdfSectionPageModels({ report, section, pageWidth, pageHeight }) {
+  const preparedRows = (Array.isArray(section.rows) ? section.rows : []).map((row) => buildComparePdfSectionRow(section, row));
+  const rowsByPage = chunkComparePdfSectionRows(preparedRows, pageHeight);
+  return rowsByPage.map((rows) => ({
+    kind: 'section',
+    report,
+    section,
+    rows,
+    pageWidth,
+    pageHeight
+  }));
+}
+
+function chunkComparePdfSectionRows(rows, pageHeight) {
+  const headerTop = 22;
+  const headerHeight = 56;
+  const tableTop = headerTop + headerHeight + 14;
+  const tableHeaderHeight = 24;
+  const bottomLimit = pageHeight - 34;
+  const rowGap = 4;
+  const chunks = [];
+  let current = [];
+  let cursorTop = tableTop + tableHeaderHeight;
+
+  (Array.isArray(rows) ? rows : []).forEach((row) => {
+    if (current.length && cursorTop + row.height > bottomLimit) {
+      chunks.push(current);
+      current = [];
+      cursorTop = tableTop + tableHeaderHeight;
+    }
+
+    current.push(row);
+    cursorTop += row.height + rowGap;
+  });
+
+  if (current.length || !chunks.length) {
+    chunks.push(current);
+  }
+
+  return chunks;
+}
+
+function buildComparePdfPageContent(pageModel) {
+  if (pageModel.kind === 'section') {
+    return buildComparePdfSectionPageContent(pageModel);
+  }
+
+  return buildComparePdfOverviewPageContent(pageModel);
+}
+
+function buildComparePdfOverviewPageContent({ report, totals, sections, pageWidth, pageHeight, pageNumber, totalPages }) {
+  const marginX = 28;
+  const content = [];
+  const topBannerHeight = 116;
+  const cardGap = 10;
+  const cardWidth = Math.floor((pageWidth - marginX * 2 - cardGap) / 2);
+  const cardHeight = 58;
+  const cardXs = [marginX, marginX + cardWidth + cardGap];
+
+  drawPdfRect(content, 0, 0, pageWidth, pageHeight, { fill: '#F7F9FC', pageHeight });
+  drawPdfRect(content, 0, 0, pageWidth, topBannerHeight, { fill: '#173B6C', pageHeight });
+  drawPdfRect(content, 0, topBannerHeight - 8, pageWidth, 8, { fill: '#F2C94C', pageHeight });
+
+  drawPdfText(content, 'Comparacao SPED x Dominio', marginX, 34, {
+    pageHeight,
+    size: 19,
+    bold: true,
+    color: '#FFFFFF'
+  });
+  drawPdfText(content, stripPdfText(report.companyName || 'Empresa selecionada'), marginX, 58, {
+    pageHeight,
+    size: 11.5,
+    color: '#EAF1FF'
+  });
+  drawPdfText(content, `CNPJ ${stripPdfText(formatCnpj(report.clientCnpj || ''))}`, marginX, 74, {
+    pageHeight,
+    size: 9.2,
+    color: '#EAF1FF'
+  });
+  drawPdfText(content, `Arquivo ${stripPdfText(report.sourceFileName || '-')}`, marginX, 90, {
+    pageHeight,
+    size: 9,
+    color: '#D7E4F8'
+  });
+  drawPdfText(content, `Competencia ${stripPdfText(report.competence || 'Nao informada')}`, marginX, 104, {
+    pageHeight,
+    size: 9,
+    color: '#D7E4F8'
+  });
+
+  drawPdfRect(content, pageWidth - 182, 18, 154, 78, { fill: '#214F8A', pageHeight });
+  drawPdfText(content, 'Gerado em', pageWidth - 166, 36, {
+    pageHeight,
+    size: 8.5,
+    color: '#DDE8F9'
+  });
+  drawPdfText(content, stripPdfText(formatDateTime(report.generatedAt || '')), pageWidth - 166, 52, {
+    pageHeight,
+    size: 11,
+    bold: true,
+    color: '#FFFFFF'
+  });
+  drawPdfText(content, `${sections.length} secoes`, pageWidth - 166, 72, {
+    pageHeight,
+    size: 8.5,
+    color: '#DDE8F9'
+  });
+
+  const summaryCards = [
+    { label: 'SPED lidos', value: String(report.summary.spedDocs || 0), accent: '#1F4E78', note: `Total ${formatCurrency(totals.totalSpedValue)}` },
+    { label: 'Dominio lidos', value: String(report.summary.dominioDocs || 0), accent: '#0F9D58', note: `Total ${formatCurrency(totals.totalDominioValue)}` },
+    { label: 'Somente no SPED', value: String(report.summary.onlySpedDocs || 0), accent: '#D97706', note: `Valor ${formatCurrency(totals.onlySpedValue)}` },
+    { label: 'Somente na Dominio', value: String(report.summary.onlyDominioDocs || 0), accent: '#2563EB', note: `Valor ${formatCurrency(totals.onlyDominioValue)}` }
+  ];
+
+  summaryCards.forEach((card, index) => {
+    const x = cardXs[index % 2];
+    const y = 136 + Math.floor(index / 2) * (cardHeight + cardGap);
+    drawPdfRect(content, x, y, cardWidth, cardHeight, {
+      fill: '#FFFFFF',
+      stroke: '#D5DCE8',
+      lineWidth: 1,
+      pageHeight
+    });
+    drawPdfRect(content, x, y, 8, cardHeight, { fill: card.accent, pageHeight });
+    drawPdfText(content, card.label, x + 16, y + 18, {
+      pageHeight,
+      size: 9,
+      bold: true,
+      color: '#3A4A61'
+    });
+    drawPdfText(content, card.value, x + 16, y + 38, {
+      pageHeight,
+      size: 17,
+      bold: true,
+      color: '#0F172A'
+    });
+    drawPdfText(content, card.note, x + 92, y + 40, {
+      pageHeight,
+      size: 8.5,
+      color: '#64748B'
+    });
+  });
+
+  drawPdfRect(content, marginX, 260, pageWidth - marginX * 2, 88, {
+    fill: '#FFFFFF',
+    stroke: '#D5DCE8',
+    lineWidth: 1,
+    pageHeight
+  });
+  drawPdfText(content, 'Resumo da comparacao', marginX + 16, 280, {
+    pageHeight,
+    size: 11,
+    bold: true,
+    color: '#1F2937'
+  });
+  drawPdfText(content, `Encontrados nas duas bases ${String(report.summary.matchedDocs || 0)}`, marginX + 16, 300, {
+    pageHeight,
+    size: 9.5,
+    color: '#334155'
+  });
+  drawPdfText(content, `Divergencias ${String(report.summary.divergentDocs || 0)}`, marginX + 16, 316, {
+    pageHeight,
+    size: 9.5,
+    color: '#334155'
+  });
+  drawPdfText(content, `Avisos ${String(report.summary.warningsCount || 0)}`, marginX + 16, 332, {
+    pageHeight,
+    size: 9.5,
+    color: '#334155'
+  });
+  drawPdfText(content, `Entrada SPED ${stripPdfText(report.sourceFileName || '-')}`, marginX + 220, 300, {
+    pageHeight,
+    size: 9.5,
+    color: '#334155'
+  });
+  drawPdfText(content, `Gerado no formato ${stripPdfText(report.outputFormat || 'Excel')}`, marginX + 220, 316, {
+    pageHeight,
+    size: 9.5,
+    color: '#334155'
+  });
+  drawPdfText(content, `Ultima atualizacao ${stripPdfText(formatDateTime(report.generatedAt || ''))}`, marginX + 220, 332, {
+    pageHeight,
+    size: 9.5,
+    color: '#334155'
+  });
+
+  if (Array.isArray(report.warnings) && report.warnings.length) {
+    drawPdfRect(content, marginX, 382, pageWidth - marginX * 2, 132, {
+      fill: '#FFF8E7',
+      stroke: '#F2C94C',
+      lineWidth: 1,
+      pageHeight
+    });
+    drawPdfText(content, 'Avisos da leitura', marginX + 16, 400, {
+      pageHeight,
+      size: 11,
+      bold: true,
+      color: '#7A5C00'
+    });
+    const warningLines = [];
+    report.warnings.slice(0, 6).forEach((warning) => {
+      warningLines.push(...wrapPdfTextToWidth(stripPdfText(warning), pageWidth - marginX * 2 - 32, 9));
+    });
+    warningLines.slice(0, 8).forEach((line, index) => {
+      drawPdfText(content, `- ${line}`, marginX + 18, 420 + index * 15, {
+        pageHeight,
+        size: 8.8,
+        color: '#6B4E00'
+      });
+    });
+  } else {
+    drawPdfRect(content, marginX, 382, pageWidth - marginX * 2, 72, {
+      fill: '#FFFFFF',
+      stroke: '#D5DCE8',
+      lineWidth: 1,
+      pageHeight
+    });
+    drawPdfText(content, 'Nenhum aviso encontrado.', marginX + 16, 412, {
+      pageHeight,
+      size: 10,
+      color: '#64748B'
+    });
+  }
+
+  drawPdfFooter(content, pageWidth, pageHeight, pageNumber, totalPages);
+  return content.join('\n');
+}
+
+function buildComparePdfSectionPageContent({ section, rows, pageWidth, pageHeight, pageNumber, totalPages }) {
+  const marginX = 24;
+  const headerTop = 22;
+  const headerHeight = 56;
+  const tableTop = headerTop + headerHeight + 14;
+  const content = [];
+  const columns = [
+    { key: 'numero', label: 'Numero', width: 48, align: 'left' },
+    { key: 'data', label: 'Data', width: 72, align: 'left' },
+    { key: 'valor', label: 'Valor', width: 68, align: 'right' },
+    { key: 'fornecedor', label: 'Fornecedor / cliente', width: 150, align: 'left' },
+    { key: 'chave', label: 'Chave', width: 120, align: 'left' },
+    { key: 'obs', label: 'Observacao', width: 73, align: 'left' }
+  ];
+  const tableWidth = columns.reduce((acc, column) => acc + column.width, 0);
+  const countLabel = `${rows.length} itens`;
+  const totalLabel = section.total != null ? `Valor ${formatCurrency(section.total)}` : `${String(section.count || 0)} divergencias`;
+
+  drawPdfRect(content, 0, 0, pageWidth, pageHeight, { fill: '#F7F9FC', pageHeight });
+  drawPdfRect(content, marginX, headerTop, pageWidth - marginX * 2, headerHeight, {
+    fill: '#FFFFFF',
+    stroke: '#D5DCE8',
+    lineWidth: 1,
+    pageHeight
+  });
+  drawPdfRect(content, marginX, headerTop, 6, headerHeight, {
+    fill: sectionToneColor(section.tone),
+    pageHeight
+  });
+  drawPdfText(content, section.title, marginX + 16, headerTop + 16, {
+    pageHeight,
+    size: 14,
+    bold: true,
+    color: '#0F172A'
+  });
+  drawPdfText(content, section.description, marginX + 16, headerTop + 35, {
+    pageHeight,
+    size: 8.8,
+    color: '#64748B'
+  });
+  drawPdfRect(content, pageWidth - marginX - 92, headerTop + 14, 78, 24, {
+    fill: sectionToneSoftColor(section.tone),
+    stroke: sectionToneColor(section.tone),
+    lineWidth: 1,
+    pageHeight
+  });
+  drawPdfText(content, countLabel, pageWidth - marginX - 84, headerTop + 30, {
+    pageHeight,
+    size: 8.7,
+    bold: true,
+    color: sectionToneColor(section.tone)
+  });
+  drawPdfText(content, totalLabel, pageWidth - marginX - 182, headerTop + 30, {
+    pageHeight,
+    size: 8.5,
+    bold: true,
+    color: '#334155'
+  });
+
+  let x = marginX;
+  columns.forEach((column) => {
+    drawPdfRect(content, x, tableTop, column.width, 24, {
+      fill: '#173B6C',
+      stroke: '#173B6C',
+      lineWidth: 1,
+      pageHeight
+    });
+    drawPdfText(content, column.label, x + 6, tableTop + 16, {
+      pageHeight,
+      size: 8.2,
+      bold: true,
+      color: '#FFFFFF'
+    });
+    x += column.width;
+  });
+
+  let currentY = tableTop + 26;
+  if (!rows.length) {
+    drawPdfRect(content, marginX, currentY, tableWidth, 42, {
+      fill: '#FFFFFF',
+      stroke: '#D5DCE8',
+      lineWidth: 1,
+      pageHeight
+    });
+    drawPdfText(content, 'Nenhum documento encontrado nesta secao.', marginX + 16, currentY + 24, {
+      pageHeight,
+      size: 9.5,
+      color: '#64748B'
+    });
+  } else {
+    rows.forEach((row, rowIndex) => {
+      const fill = rowIndex % 2 === 0 ? '#FFFFFF' : '#F8FAFC';
+      drawPdfRect(content, marginX, currentY, tableWidth, row.height, {
+        fill,
+        stroke: '#D5DCE8',
+        lineWidth: 1,
+        pageHeight
+      });
+
+      let cellX = marginX;
+      columns.forEach((column) => {
+        const cellValue = row[column.key] || '-';
+        drawPdfTextBlock(content, cellValue, cellX + 6, currentY + 8, {
+          pageHeight,
+          width: column.width - 12,
+          size: column.key === 'valor' ? 8.2 : 7.9,
+          bold: column.key === 'valor',
+          color: '#0F172A',
+          align: column.align
+        });
+        drawPdfRect(content, cellX, currentY, column.width, row.height, {
+          stroke: '#D5DCE8',
+          lineWidth: 0.7,
+          pageHeight
+        });
+        cellX += column.width;
+      });
+
+      currentY += row.height;
+    });
+  }
+
+  drawPdfFooter(content, pageWidth, pageHeight, pageNumber, totalPages);
+  return content.join('\n');
+}
+
+function buildComparePdfSectionRow(section, row) {
+  const useDominio = section.source === 'dominio';
+  const useSped = section.source === 'sped';
+  const useCompare = section.source === 'compare';
+  const numero = useCompare ? `${row.numeroSped || '-'} / ${row.numeroDominio || '-'}` : useDominio ? row.numeroDominio || '-' : row.numeroSped || '-';
+  const data = useCompare ? `${row.dataSped || '-'} / ${row.dataDominio || '-'}` : useDominio ? row.dataDominio || '-' : row.dataSped || '-';
+  const valor = useCompare
+    ? `${formatOptionalCurrency(row.valorSped)} / ${formatOptionalCurrency(row.valorDominio)}`
+    : formatCurrency(pickCompareRowValue(useDominio ? row.valorDominio : row.valorSped, useDominio ? row.valorSped : row.valorDominio));
+  const fornecedor = useCompare
+    ? `${row.emitenteNomeSped || '-'} / ${row.emitenteNomeDominio || '-'}`
+    : useDominio
+      ? row.emitenteNomeDominio || '-'
+      : row.emitenteNomeSped || '-';
+  const chave = stripPdfText(row.chave || '-');
+  const observacao = useCompare ? stripPdfText(row.observacao || '-') : stripPdfText(row.observacao || (useSped ? 'Documento localizado apenas no SPED.' : 'Documento localizado apenas na Dominio.'));
+  const rowHeight = Math.max(
+    28,
+    computePdfTextLines(numero, 48, 7.9) * 10,
+    computePdfTextLines(data, 72, 7.9) * 10,
+    computePdfTextLines(valor, 68, 8.2) * 10,
+    computePdfTextLines(fornecedor, 150, 7.9) * 10,
+    computePdfTextLines(chave, 120, 7.9) * 10,
+    computePdfTextLines(observacao, 73, 7.7) * 10
+  ) + 12;
+
+  return {
+    numero,
+    data,
+    valor,
+    fornecedor,
+    chave,
+    obs: observacao,
+    height: rowHeight
+  };
+}
+
+function buildComparePdfBinary(pages, pageWidth, pageHeight) {
+  const normalizedPages = Array.isArray(pages) && pages.length ? pages : ['Sem dados para exibir.'];
   const objects = [
     `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`,
-    `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>\nendobj\n`,
+    `2 0 obj\n<< /Type /Pages /Kids [${normalizedPages.map((_, index) => `${6 + index * 2} 0 R`).join(' ')}] /Count ${normalizedPages.length} >>\nendobj\n`,
     `3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`,
-    ...contentObjects,
-    ...pageObjects
+    `4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>\nendobj\n`
   ];
+
+  normalizedPages.forEach((pageContent, index) => {
+    const contentObjectNumber = 5 + index * 2;
+    const pageObjectNumber = 6 + index * 2;
+    objects.push(
+      `${contentObjectNumber} 0 obj\n<< /Length ${pageContent.length} >>\nstream\n${pageContent}\nendstream\nendobj\n`,
+      `${pageObjectNumber} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentObjectNumber} 0 R >>\nendobj\n`
+    );
+  });
 
   let pdf = '%PDF-1.4\n';
   const offsets = ['0000000000 65535 f \n'];
@@ -14301,39 +14608,191 @@ function buildMinimalPdf(lines, title) {
   return new TextEncoder().encode(pdf);
 }
 
-function buildPdfPageContent({
-  title,
-  pageLines,
-  pageNumber,
-  totalPages,
-  pageWidth,
-  pageHeight,
-  margin,
-  titleFontSize,
-  bodyFontSize,
-  lineHeight
-}) {
-  const lines = [];
-  const safeTitle = escapePdfText(title);
-  const topY = pageHeight - margin - titleFontSize;
-  lines.push(`BT /F1 ${titleFontSize} Tf ${margin} ${topY} Td (${safeTitle}) Tj ET`);
-  lines.push(`BT /F1 9 Tf ${margin} ${topY - 22} Td (Pagina ${pageNumber} de ${totalPages}) Tj ET`);
-
-  let currentY = topY - 48;
-  pageLines.forEach((line) => {
-    const safeLine = escapePdfText(line);
-    lines.push(`BT /F1 ${bodyFontSize} Tf ${margin} ${currentY} Td (${safeLine}) Tj ET`);
-    currentY -= lineHeight;
+function drawPdfFooter(content, pageWidth, pageHeight, pageNumber, totalPages) {
+  drawPdfLine(content, 24, 34, pageWidth - 24, 34, '#D5DCE8', 0.7, pageHeight);
+  drawPdfText(content, `Pagina ${pageNumber} de ${totalPages}`, 24, 18, {
+    pageHeight,
+    size: 8.2,
+    color: '#64748B'
   });
-
-  return lines.join('\n');
+  drawPdfText(content, 'NotaSync - Comparacao SPED x Dominio', pageWidth - 24, 18, {
+    pageHeight,
+    size: 8.2,
+    align: 'right',
+    color: '#64748B'
+  });
 }
 
-function escapePdfText(value) {
-  return String(value || '')
-    .replace(/\\/g, '\\\\')
-    .replace(/\(/g, '\\(')
-    .replace(/\)/g, '\\)');
+function drawPdfTextBlock(content, text, x, yTop, options) {
+  const lines = wrapPdfTextToWidth(text, options.width, options.size || 8.5, options.bold);
+  const lineHeight = options.lineHeight || Math.max(9.5, (options.size || 8.5) * 1.25);
+  lines.forEach((line, index) => {
+    drawPdfText(content, line, x, yTop + index * lineHeight, options);
+  });
+}
+
+function drawPdfText(content, text, x, yTop, options = {}) {
+  const pageHeight = options.pageHeight || 842;
+  const size = options.size || 10;
+  const font = options.bold ? 'F2' : 'F1';
+  const color = options.color || '#111827';
+  const width = measurePdfTextWidth(text, size, Boolean(options.bold));
+  const xPos = options.align === 'right' ? x - width : options.align === 'center' ? x - width / 2 : x;
+  const yPos = pageHeight - yTop - size;
+  const [r, g, b] = hexToPdfRgb(color);
+  content.push(`BT /${font} ${size} Tf ${r} ${g} ${b} rg ${formatPdfNumber(xPos)} ${formatPdfNumber(yPos)} Td (${escapePdfText(stripPdfText(text))}) Tj ET`);
+}
+
+function measurePdfTextWidth(text, size, bold = false) {
+  const sanitized = stripPdfText(text || '');
+  const factor = bold ? 0.58 : 0.53;
+  return sanitized.length * size * factor;
+}
+
+function drawPdfRect(content, x, yTop, width, height, options = {}) {
+  const pageHeight = options.pageHeight || 842;
+  const fill = options.fill ? hexToPdfRgb(options.fill) : null;
+  const stroke = options.stroke ? hexToPdfRgb(options.stroke) : null;
+  const lineWidth = options.lineWidth || 1;
+  const y = pageHeight - yTop - height;
+  const operations = ['q'];
+  if (fill) {
+    operations.push(`${fill[0]} ${fill[1]} ${fill[2]} rg`);
+  }
+  if (stroke) {
+    operations.push(`${stroke[0]} ${stroke[1]} ${stroke[2]} RG ${formatPdfNumber(lineWidth)} w`);
+  }
+  operations.push(`${formatPdfNumber(x)} ${formatPdfNumber(y)} ${formatPdfNumber(width)} ${formatPdfNumber(height)} re`);
+  if (fill && stroke) {
+    operations.push('B');
+  } else if (fill) {
+    operations.push('f');
+  } else if (stroke) {
+    operations.push('S');
+  } else {
+    operations.push('n');
+  }
+  operations.push('Q');
+  content.push(operations.join(' '));
+}
+
+function drawPdfLine(content, x1, y1Top, x2, y2Top, color, lineWidth = 1, pageHeight = 842) {
+  const rgb = hexToPdfRgb(color);
+  const y1 = pageHeight - y1Top;
+  const y2 = pageHeight - y2Top;
+  content.push(`q ${rgb[0]} ${rgb[1]} ${rgb[2]} RG ${formatPdfNumber(lineWidth)} w ${formatPdfNumber(x1)} ${formatPdfNumber(y1)} m ${formatPdfNumber(x2)} ${formatPdfNumber(y2)} l S Q`);
+}
+
+function computePdfTextLines(text, width, size, bold = false) {
+  return wrapPdfTextToWidth(text, width, size, bold).length;
+}
+
+function wrapPdfTextToWidth(text, width, size, bold = false) {
+  const sanitized = stripPdfText(text || '').replace(/\s+/g, ' ').trim();
+  if (!sanitized) {
+    return [''];
+  }
+
+  const averageCharWidth = size * (bold ? 0.58 : 0.53);
+  const maxChars = Math.max(6, Math.floor(width / averageCharWidth));
+  const words = sanitized.split(/\s+/);
+  const lines = [];
+  let current = '';
+
+  words.forEach((word) => {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > maxChars && current) {
+      lines.push(current);
+      current = word;
+      return;
+    }
+
+    if (candidate.length > maxChars) {
+      const chunks = splitPdfWord(word, maxChars);
+      if (current) {
+        lines.push(current);
+        current = '';
+      }
+      chunks.forEach((chunk, index) => {
+        if (index === chunks.length - 1) {
+          current = chunk;
+        } else {
+          lines.push(chunk);
+        }
+      });
+      return;
+    }
+
+    current = candidate;
+  });
+
+  if (current) {
+    lines.push(current);
+  }
+
+  return lines.length ? lines : [sanitized];
+}
+
+function splitPdfWord(word, maxChars) {
+  const chunks = [];
+  let current = '';
+  String(word || '').split('').forEach((char) => {
+    const candidate = `${current}${char}`;
+    if (candidate.length > maxChars && current) {
+      chunks.push(current);
+      current = char;
+      return;
+    }
+    current = candidate;
+  });
+  if (current) {
+    chunks.push(current);
+  }
+  return chunks.length ? chunks : [String(word || '')];
+}
+
+function hexToPdfRgb(hexColor) {
+  const normalized = String(hexColor || '#000000').replace('#', '');
+  const value = normalized.length === 3
+    ? normalized
+        .split('')
+        .map((char) => `${char}${char}`)
+        .join('')
+    : normalized.padEnd(6, '0').slice(0, 6);
+  const r = Number.parseInt(value.slice(0, 2), 16) / 255;
+  const g = Number.parseInt(value.slice(2, 4), 16) / 255;
+  const b = Number.parseInt(value.slice(4, 6), 16) / 255;
+  return [formatPdfNumber(r), formatPdfNumber(g), formatPdfNumber(b)];
+}
+
+function formatPdfNumber(value) {
+  return Number.isFinite(Number(value)) ? Number(value).toFixed(3).replace(/\.?0+$/, '') : '0';
+}
+
+function sectionToneColor(tone) {
+  if (tone === 'danger') {
+    return '#C2410C';
+  }
+  if (tone === 'info') {
+    return '#1D4ED8';
+  }
+  if (tone === 'warning') {
+    return '#B45309';
+  }
+  return '#173B6C';
+}
+
+function sectionToneSoftColor(tone) {
+  if (tone === 'danger') {
+    return '#FDEEE7';
+  }
+  if (tone === 'info') {
+    return '#E8F0FF';
+  }
+  if (tone === 'warning') {
+    return '#FFF4D6';
+  }
+  return '#E7EDF7';
 }
 
 function openCompareSpedReportModal() {
