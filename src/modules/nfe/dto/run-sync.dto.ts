@@ -1,7 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { NfeAmbiente } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsEnum, IsNumber, IsOptional, IsUUID, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsNumber, IsOptional, IsUUID, Min } from 'class-validator';
 
 export class RunNfeSyncDto {
   @ApiProperty()
@@ -17,6 +17,13 @@ export class RunNfeSyncDto {
   @IsOptional()
   @IsUUID()
   estabelecimentoId?: string;
+
+  @ApiPropertyOptional({
+    description: 'Data inicial para varrer o catalogo Dominio no download manual por chave (YYYY-MM-DD). Padrao: 2026-01-02'
+  })
+  @IsOptional()
+  @IsDateString()
+  dataEmissaoInicio?: string;
 
   @ApiPropertyOptional({ default: 10 })
   @IsOptional()

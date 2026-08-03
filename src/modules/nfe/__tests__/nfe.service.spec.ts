@@ -1,5 +1,6 @@
 import { NfeAmbiente, NfeSyncStatus, NfeTipoRelacao, Prisma } from '@prisma/client';
 import { BadRequestException } from '@nestjs/common';
+import JSZip from 'jszip';
 import { DanfePdfGenerator } from '../../../integrations/danfe/danfe.types';
 import { DominioNfeXmlSource } from '../../../integrations/dominio-nfe/dominio-nfe.types';
 import { PrismaService } from '../../../prisma/prisma.service';
@@ -343,6 +344,70 @@ describe('NfeService', () => {
 
     await expect(service.getDanfe('doc-1', 'cliente-1')).rejects.toThrow(BadRequestException);
     expect(danfePdfGenerator.generateNfePdf).not.toHaveBeenCalled();
+  });
+
+  it('gera ZIP de lote com XML e DANFE', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-lote-1',
+        clienteId: 'cliente-1',
+        chaveAcesso: '35260612345678000199550010000001231000009999',
+        xmlCompletoPath: 'nfe/producao/123/2026/06/xml/a.xml',
+        xmlResumoPath: null,
+        xmlCompletoDisponivel: true,
+        resumoDisponivel: false
+      }
+    ]);
+    storage.getObject.mockResolvedValue(Buffer.from('<nfeProc>conteudo</nfeProc>', 'utf8'));
+    (danfePdfGenerator.generateNfePdf as jest.Mock).mockResolvedValue(Buffer.from('%PDF-1.4 nf-e', 'utf8'));
+
+    const result = await service.downloadLote({
+      ids: ['doc-lote-1'],
+      tipoArquivo: 'ambos',
+      clienteId: 'cliente-1'
+    });
+
+    expect(result.contentType).toBe('application/zip');
+    expect(result.totalSolicitados).toBe(1);
+    expect(result.totalDocumentosEncontrados).toBe(1);
+    expect(result.totalArquivosIncluidos).toBe(2);
+    expect(result.idsNaoEncontrados).toEqual([]);
+    expect(result.erros).toEqual([]);
+    expect(storage.getObject).toHaveBeenCalledTimes(1);
+    expect(danfePdfGenerator.generateNfePdf).toHaveBeenCalledWith({
+      xml: '<nfeProc>conteudo</nfeProc>',
+      chaveAcesso: '35260612345678000199550010000001231000009999'
+    });
+
+    const zip = await JSZip.loadAsync(Buffer.from(result.contentBase64, 'base64'));
+    expect(zip.file('xml/NFE-35260612345678000199550010000001231000009999.xml')).toBeTruthy();
+    expect(zip.file('danfe/DANFE-35260612345678000199550010000001231000009999.pdf')).toBeTruthy();
+    expect(zip.file('manifest.json')).toBeTruthy();
+  });
+
+  it('retorna IDs nao encontrados no lote de NF-e', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-lote-2',
+        clienteId: 'cliente-1',
+        chaveAcesso: '35260612345678000199550010000001231000008888',
+        xmlCompletoPath: 'nfe/producao/123/2026/06/xml/b.xml',
+        xmlResumoPath: null,
+        xmlCompletoDisponivel: true,
+        resumoDisponivel: false
+      }
+    ]);
+    storage.getObject.mockResolvedValue(Buffer.from('<nfeProc>conteudo-2</nfeProc>', 'utf8'));
+
+    const result = await service.downloadLote({
+      ids: ['doc-lote-2', 'doc-lote-inexistente'],
+      tipoArquivo: 'xml',
+      clienteId: 'cliente-1'
+    });
+
+    expect(result.idsNaoEncontrados).toEqual(['doc-lote-inexistente']);
+    const zip = await JSZip.loadAsync(Buffer.from(result.contentBase64, 'base64'));
+    expect(zip.file('xml/NFE-35260612345678000199550010000001231000008888.xml')).toBeTruthy();
   });
 
   it('importa XMLs da Dominio vinculando estabelecimento por CNPJ', async () => {
@@ -1350,6 +1415,52 @@ describe('NfeService', () => {
     });
   });
 
+  it('permite retroagir a previsualizacao do download por chave para 2026-01-01', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN = '2';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 999n,
+        ultimoNsuDistribuido: 999n,
+        maxNsu: 999n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 24,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '35260612345678000199550010000009991000009991',
+        dataEmissao: '2026-01-01'
+      }
+    ]);
+    prisma.nfeDocumento.findUnique.mockResolvedValueOnce(null);
+
+    const result = await service.previewDownloadByKey({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao,
+      dataEmissaoInicio: '2026-01-01'
+    });
+
+    expect(dominioXmlSource.listCatalog).toHaveBeenCalledWith({
+      cnpjs: ['12345678000199'],
+      limit: 2,
+      dataEmissaoInicio: '2026-01-01',
+      dataEmissaoFim: undefined,
+      chavesAcesso: undefined,
+      catalogoIds: [],
+      catalogoIdMinExclusive: undefined,
+      sortDirection: 'asc'
+    });
+    expect(result.pendingDownloads).toBe(1);
+  });
+
   it('ignora CT-e ja armazenado em resumo na previsualizacao do download por chave', async () => {
     process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
     prisma.nfeSyncControle.findMany.mockResolvedValue([
@@ -1501,6 +1612,77 @@ describe('NfeService', () => {
       ],
       failureDetails: []
     });
+  });
+
+  it('permite retroagir o download manual por chave para 2026-01-01', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN = '300';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 50n,
+        ultimoNsuDistribuido: 50n,
+        maxNsu: 50n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 10,
+        codigoEmpresa: 20,
+        cnpjEmpresa: '12345678000199',
+        chaveAcesso: '35260112345678000199550010000001091000001091',
+        dataEmissao: '2026-01-01'
+      }
+    ]);
+    (distribuicaoClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado',
+      ultNsu: 0n,
+      maxNsu: 0n,
+      documents: [
+        {
+          schema: 'procNFe_v4.00',
+          chaveAcesso: '35260112345678000199550010000001091000001091',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe35260112345678000199550010000001091000001091">
+      <ide><mod>55</mod><serie>1</serie><nNF>109</nNF><dhEmi>2026-01-01T10:00:00-03:00</dhEmi></ide>
+      <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
+      <dest><CNPJ>99888777000166</CNPJ><xNome>Cliente Teste</xNome></dest>
+      <total><ICMSTot><vNF>150.00</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat><dhRecbto>2026-01-01T10:00:01-03:00</dhRecbto></infProt></protNFe>
+</nfeProc>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.executeDownloadByKey({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao,
+      dataEmissaoInicio: '2026-01-01'
+    });
+
+    expect(dominioXmlSource.listCatalog).toHaveBeenCalledWith({
+      cnpjs: ['12345678000199'],
+      limit: 300,
+      dataEmissaoInicio: '2026-01-01',
+      dataEmissaoFim: undefined,
+      chavesAcesso: undefined,
+      catalogoIds: [],
+      catalogoIdMinExclusive: undefined,
+      sortDirection: 'asc'
+    });
+    expect(result.documentsSaved).toBe(1);
   });
 
   it('continua processando NF-e apos falha individual de CT-e no download manual por chave', async () => {

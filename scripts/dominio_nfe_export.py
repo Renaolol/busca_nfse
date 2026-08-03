@@ -1,7 +1,14 @@
 import base64
 import json
+import os
 import sys
 from datetime import datetime
+
+python_path = os.environ.get('PYTHONPATH', '')
+if python_path:
+    for extra_path in python_path.split(os.pathsep):
+        if extra_path and extra_path not in sys.path:
+            sys.path.insert(0, extra_path)
 
 import pyodbc
 

@@ -17,8 +17,9 @@ const navItems = [
   { key: 'certificados', label: 'Certificados', icon: 'shield', route: '/certificados' },
   { key: 'buscas', label: 'Buscas', icon: 'search', route: '/buscas' },
   { key: 'armazenados', label: 'Armazenados', icon: 'file', route: '/xmls' },
-  { key: 'alertas', label: 'Alertas', icon: 'alert', route: '/alertas' },
-  { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' }
+  { key: 'compara-sped', label: 'Compara SPED', icon: 'compare', route: '/compara-sped' },
+  { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' },
+  { key: 'alertas', label: 'Alertas', icon: 'alert', route: '/alertas' }
 ];
 
 const pageMeta = {
@@ -65,6 +66,10 @@ const pageMeta = {
   configuracoes: {
     title: 'Configuracoes',
     description: 'Ajuste parametros da rotina de busca e do armazenamento interno.'
+  },
+  'compara-sped': {
+    title: 'Compara SPED',
+    description: 'Compare arquivos SPED Fiscal com os documentos integrados da Dominio.'
   }
 };
 
@@ -79,6 +84,7 @@ const state = {
   selectedClientIds: new Set(),
   selectedAlertIds: new Set(),
   selectedXmlIds: new Set(),
+  selectedNfeIds: new Set(),
   clients: [],
   certificates: [],
   searchRuns: [],
@@ -154,6 +160,18 @@ const state = {
   alerts: [],
   serverResolvedAlerts: {},
   resolvedAlerts: loadResolvedAlertsStore(),
+  compareSped: {
+    status: 'idle',
+    sourceFileName: '',
+    sourceCompetence: '',
+    sourceCompanyId: '',
+    outputFormat: 'Excel',
+    generatedAt: null,
+    report: null,
+    artifact: null,
+    history: [],
+    lastError: ''
+  },
   establishmentsByClient: {},
   syncByClient: {},
   dashboardStats: null,
@@ -462,6 +480,27 @@ function onDocumentClick(event) {
       if (route) {
         navigate(route);
       }
+      return;
+    }
+    case 'compare-sped-download': {
+      void downloadCompareSpedArtifact();
+      return;
+    }
+    case 'compare-sped-redownload': {
+      const compareId = actionNode.getAttribute('data-compare-id');
+      if (!compareId) {
+        return;
+      }
+      void downloadCompareSpedHistoryItem(compareId);
+      return;
+    }
+    case 'compare-sped-reset': {
+      resetCompareSpedState();
+      render();
+      return;
+    }
+    case 'compare-sped-open-last': {
+      openCompareSpedReportModal();
       return;
     }
     case 'toggle-sidebar': {
@@ -936,6 +975,39 @@ function onDocumentClick(event) {
       void downloadNfeDanfeById(nfeId);
       return;
     }
+    case 'nfe-select': {
+      const nfeId = actionNode.getAttribute('data-nfe-id');
+      if (!nfeId) {
+        return;
+      }
+      if (actionNode.checked) {
+        state.selectedNfeIds.add(nfeId);
+      } else {
+        state.selectedNfeIds.delete(nfeId);
+      }
+      render();
+      return;
+    }
+    case 'nfe-toggle-all': {
+      const checked = actionNode.checked;
+      getFilteredNfeDocuments().forEach((doc) => {
+        if (!doc.apiNfeId) {
+          return;
+        }
+        if (checked) {
+          state.selectedNfeIds.add(doc.id);
+        } else {
+          state.selectedNfeIds.delete(doc.id);
+        }
+      });
+      render();
+      return;
+    }
+    case 'nfe-batch-download': {
+      const tipoArquivo = actionNode.getAttribute('data-tipo-arquivo') || 'ambos';
+      void downloadSelectedNfeBatch(tipoArquivo);
+      return;
+    }
     case 'nfe-sync-events': {
       const nfeId = actionNode.getAttribute('data-nfe-id');
       if (!nfeId) {
@@ -1327,6 +1399,11 @@ function onDocumentSubmit(event) {
       applyAlertsFilters(target);
       return;
     }
+    case 'compareSpedForm': {
+      event.preventDefault();
+      void submitCompareSpedForm(target, event.submitter);
+      return;
+    }
     case 'clientSearchConfigForm': {
       event.preventDefault();
       void submitClientSearchConfigForm(target);
@@ -1496,6 +1573,8 @@ function renderCurrentPage() {
       return renderNfeDocumentsPage();
     case 'xmls-cte':
       return renderCteDocumentsPage();
+    case 'compara-sped':
+      return renderComparaSpedPage();
     case 'alertas':
       return renderAlertsPage();
     case 'configuracoes':
@@ -2978,6 +3057,10 @@ function renderNfeSearchSummary() {
 }
 
 function renderNfeDocumentsTableCard(docs) {
+  const selectableDocs = docs.filter((doc) => Boolean(doc.apiNfeId));
+  const selectedVisibleCount = selectableDocs.filter((doc) => state.selectedNfeIds.has(doc.id)).length;
+  const allVisibleSelected = selectableDocs.length > 0 && selectedVisibleCount === selectableDocs.length;
+  const batchDisabled = selectedVisibleCount > 0 ? '' : 'disabled';
   const totalValue = sumListedDocumentValues(docs);
   const totalResults = Number(state.nfeSearch.total || docs.length || 0);
   const syncDisabled =
@@ -2991,16 +3074,22 @@ function renderNfeDocumentsTableCard(docs) {
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">NF-e encontradas</h3>
-          <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(totalResults))} documento(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(totalResults))} documento(s). ${selectedVisibleCount} selecionado(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
         </div>
         <div class="table-actions">
           <button class="btn secondary" type="button" data-action="nfe-sync-events-listed" ${syncDisabled}>${escapeHtml(syncLabel)}</button>
+          <button class="btn secondary" type="button" data-action="nfe-batch-download" data-tipo-arquivo="xml" ${batchDisabled}>Baixar XMLs</button>
+          <button class="btn secondary" type="button" data-action="nfe-batch-download" data-tipo-arquivo="danfe" ${batchDisabled}>Baixar DANFEs</button>
+          <button class="btn primary" type="button" data-action="nfe-batch-download" data-tipo-arquivo="ambos" ${batchDisabled}>Baixar XML + DANFE</button>
         </div>
       </div>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
+              <th>
+                <input type="checkbox" data-action="nfe-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableDocs.length ? '' : 'disabled'} aria-label="Selecionar todas as NF-e da listagem" />
+              </th>
               ${renderNfeSortHeader('numeroNfe', 'Numero')}
               ${renderNfeSortHeader('cliente', 'Cliente')}
               ${renderNfeSortHeader('tipo', 'Tipo')}
@@ -3016,11 +3105,12 @@ function renderNfeDocumentsTableCard(docs) {
           <tbody>
             ${renderTableRowsOrState({
               key: 'nfeDocs',
-              colSpan: 10,
+              colSpan: 11,
               rowsHtml: docs
                 .map((doc) => {
                   const syncDisabledRow = state.nfeEventsSyncRunning || !canSyncNfeEvents(doc) ? 'disabled' : '';
                   return `<tr>
+                    <td><input type="checkbox" data-action="nfe-select" data-nfe-id="${escapeHtml(doc.id)}" ${state.selectedNfeIds.has(doc.id) ? 'checked' : ''} ${doc.apiNfeId ? '' : 'disabled'} aria-label="Selecionar NF-e ${escapeHtml(doc.numeroNfe || '-')}" /></td>
                     <td>${escapeHtml(doc.numeroNfe || '-')}</td>
                     <td>${escapeHtml(doc.cliente)}</td>
                     <td>${statusBadge(doc.tipo, doc.tipo === 'Emitida' ? 'success' : doc.tipo === 'Recebida' ? 'info' : 'neutral')}</td>
@@ -3708,6 +3798,212 @@ function renderSettingsPage() {
   `;
 }
 
+function renderComparaSpedPage() {
+  const clientOptions = state.clients.map((client) => client.id);
+  const hasClients = clientOptions.length > 0;
+  const compareState = state.compareSped;
+  const report = compareState.report;
+  const recentComparisons = Array.isArray(compareState.history) ? compareState.history : [];
+  const artifactReady = Boolean(compareState.artifact?.blobUrl && report);
+  const downloadLabel = compareState.outputFormat === 'PDF' ? 'Baixar PDF' : 'Baixar Excel';
+  const generationStatus =
+    compareState.status === 'processing'
+      ? 'Processando arquivo...'
+      : artifactReady
+        ? 'Arquivo pronto para download'
+        : compareState.status === 'error'
+          ? 'Falha na comparacao'
+          : 'Aguardando arquivo';
+  const topStats = report
+    ? [
+        statCard('file', 'TXT', String(report.summary.spedDocs), 'documentos lidos no arquivo', 'neutral'),
+        statCard('search', 'Dominio x SPED', String(report.summary.dominioDocs), 'documentos no banco', 'info'),
+        statCard('alert', 'Pendentes', String(report.summary.issuesCount), 'divergencias a serem analisadas', 'warning')
+      ]
+    : [
+        statCard('file', 'TXT', 'TXT', 'arquivo SPED upload e leitura linha a linha', 'neutral'),
+        statCard('search', 'Dominio x SPED', 'Dominio x SPED', 'conferencia comparacao por documento', 'info'),
+        statCard('alert', 'Pendentes', 'Pendentes', 'divergencias a serem analisadas', 'warning')
+      ];
+
+  return `
+    <section class="page-section compare-page">
+      ${renderPageHeader({
+        title: 'Compara SPED',
+        description: 'Importe o SPED Fiscal, selecione a empresa e gere a comparacao com a base da Dominio.',
+        actions: []
+      })}
+
+      <article class="card compare-hero">
+        <div class="compare-hero-main">
+          <div class="compare-hero-icon" aria-hidden="true">${icon('compare')}</div>
+          <div>
+            <h3 class="card-title">Comparação em SPED</h3>
+            <p class="card-subtitle">
+              Escolha uma empresa cadastrada na Dominio, envie o arquivo SPED Fiscal e gere o arquivo de conferência para baixar no painel ao lado.
+            </p>
+          </div>
+        </div>
+        <p class="compare-hero-note">
+          O primeiro passo já pode ler o TXT do SPED, cruzar com os documentos da Domínio que estão carregados no sistema e entregar um Excel ou PDF para download.
+        </p>
+      </article>
+
+      <section class="stats-grid compare-stats">
+        ${topStats.join('')}
+      </section>
+
+      <section class="split-grid compare-layout">
+        <div class="compare-left-stack">
+        <article class="card compare-main-card">
+          <div class="compare-card-header">
+            <div>
+              <h3 class="card-title">Gerar arquivo</h3>
+              <p class="card-subtitle">
+                O upload fica aqui. A saída escolhida define se o resultado será Excel ou PDF, e o download acontece no bloco ao lado.
+              </p>
+            </div>
+            ${statusBadge(generationStatus, compareState.status === 'processing' ? 'info' : artifactReady ? 'success' : compareState.status === 'error' ? 'danger' : 'neutral')}
+          </div>
+
+          <form id="compareSpedForm" class="form-grid compare-form">
+            <label class="field compare-span-2">
+              Empresa
+              <select name="empresa" ${hasClients ? '' : 'disabled'} required>
+                ${renderOptions(clientOptions, compareState.sourceCompanyId || '', mapClientOptions(), 'Selecione a empresa')}
+              </select>
+            </label>
+            <label class="field">
+              Competência
+              <input name="competencia" type="month" value="${escapeHtml(compareState.sourceCompetence || '')}" />
+            </label>
+            <label class="field compare-span-2">
+              Arquivo SPED Fiscal
+              <input name="arquivoSped" type="file" accept=".txt,text/plain" required />
+            </label>
+            <label class="field">
+              Saída
+              <select name="saida">
+                ${renderOptions(['Excel', 'PDF'], compareState.outputFormat || 'Excel', {
+                  Excel: 'Excel',
+                  PDF: 'PDF'
+                })}
+              </select>
+            </label>
+            <label class="field">
+              Status
+              <input value="${escapeHtml(compareState.status === 'processing' ? 'Lendo arquivo...' : compareState.status === 'done' ? 'Comparacao concluida' : 'Pronto para gerar')}" disabled />
+            </label>
+            <div class="compare-upload-hint compare-span-3">
+              <span class="compare-upload-dot"></span>
+              <span>Use o TXT do SPED Fiscal. Nesta primeira etapa a comparação cruza o arquivo enviado com os documentos de NF-e já carregados do cliente selecionado.</span>
+            </div>
+            <div class="stack-actions compare-actions compare-span-3">
+              <button class="btn primary" type="submit" ${hasClients && compareState.status !== 'processing' ? '' : 'disabled'}>${compareState.status === 'processing' ? `Processando ${escapeHtml(compareState.outputFormat || 'arquivo')}...` : 'Gerar arquivo'}</button>
+              <button class="btn secondary" type="button" data-action="compare-sped-reset" ${compareState.status === 'processing' ? 'disabled' : ''}>Limpar</button>
+            </div>
+          </form>
+        </article>
+
+          <article class="card compare-history-card">
+            <div class="compare-card-header">
+              <div>
+                <h3 class="card-title">Ultimas comparações</h3>
+                <p class="card-subtitle">Reabra ou baixe novamente os arquivos gerados recentemente nesta sessao.</p>
+              </div>
+              ${statusBadge(`${recentComparisons.length} itens`, recentComparisons.length ? 'info' : 'neutral')}
+            </div>
+
+            ${
+              recentComparisons.length
+                ? `
+                  <div class="compare-history-list">
+                    ${recentComparisons
+                      .map((item) => {
+                        const outputLabel = item.outputFormat === 'PDF' ? 'PDF' : 'Excel';
+                        return `
+                          <div class="compare-history-item">
+                            <div class="compare-history-item-main">
+                              <div class="compare-history-item-title">${escapeHtml(item.clientName || 'Comparacao sem cliente')}</div>
+                              <div class="compare-history-meta">
+                                <span>${escapeHtml(item.competence ? `Competencia: ${item.competence}` : 'Competencia nao informada')}</span>
+                                <span>${escapeHtml(item.generatedAt ? `Gerada em: ${formatDateTime(item.generatedAt)}` : 'Data nao informada')}</span>
+                                <span>${escapeHtml(`Arquivo: ${item.sourceFileName || 'comparacao'}`)}</span>
+                                <span>${escapeHtml(`Saida: ${outputLabel}`)}</span>
+                              </div>
+                            </div>
+                            <div class="compare-history-actions">
+                              <button class="btn secondary small" type="button" data-action="compare-sped-redownload" data-compare-id="${escapeHtml(item.id)}">Baixar de novo</button>
+                            </div>
+                          </div>
+                        `;
+                      })
+                      .join('')}
+                  </div>
+                `
+                : `
+                  <div class="compare-history-empty">
+                    <div class="compare-history-empty-icon">${icon('clock')}</div>
+                    <div>
+                      <h4>Nenhuma comparacao recente</h4>
+                      <p>Quando voce gerar um arquivo, as ultimas comparacoes aparecem aqui com a opcao de baixar novamente.</p>
+                    </div>
+                  </div>
+                `
+            }
+          </article>
+        </div>
+
+        <div class="compare-side-stack">
+          <article class="card compare-result-card">
+            <div class="compare-card-header">
+              <div>
+                <h3 class="card-title">Relatório de saída</h3>
+                <p class="card-subtitle">O arquivo gerado aparece aqui para download imediato.</p>
+              </div>
+              ${statusBadge(generationStatus, compareState.status === 'processing' ? 'info' : artifactReady ? 'success' : compareState.status === 'error' ? 'danger' : 'neutral')}
+            </div>
+
+            <div class="compare-result-placeholder">
+              <div class="compare-result-icon">${icon('file')}</div>
+              <h4>${artifactReady ? compareState.artifact.fileName : 'Nenhum arquivo gerado ainda'}</h4>
+              <p>
+                ${
+                  artifactReady
+                    ? `Gerado em ${escapeHtml(formatDateTime(compareState.generatedAt || ''))}. Clique no botão abaixo para baixar novamente.`
+                    : 'Depois de gerar, este painel mostrará o nome do arquivo e o atalho para download.'
+                }
+              </p>
+            </div>
+
+            <div class="compare-result-actions">
+              <button class="btn secondary" type="button" data-action="compare-sped-download" ${artifactReady ? '' : 'disabled'}>${downloadLabel}</button>
+              <button class="btn primary" type="button" data-action="compare-sped-open-last" ${artifactReady ? '' : 'disabled'}>Abrir resumo</button>
+            </div>
+          </article>
+
+          <article class="card compare-steps-card">
+            <div class="compare-card-header">
+              <div>
+                <h3 class="card-title">Fluxo simples</h3>
+                <p class="card-subtitle">A ideia é manter a operação rápida e clara para o usuário.</p>
+              </div>
+              ${statusBadge('3 etapas', 'info')}
+            </div>
+
+            <div class="compare-step-list">
+              ${renderCompareStep(1, 'Selecione a empresa', 'Use o cadastro já sincronizado com a Domínio para definir a base da comparação.')}
+              ${renderCompareStep(2, 'Envie o SPED', 'Carregue o TXT da competência desejada e deixe o sistema processar as linhas do arquivo.')}
+              ${renderCompareStep(3, 'Baixe o resultado', 'Receba a planilha ou o PDF com faltantes e divergências prontas para auditoria.')}
+            </div>
+          </article>
+        </div>
+      </section>
+
+    </section>
+  `;
+}
+
 function renderSettingsTabPanel() {
   switch (state.settings.tab) {
     case 'geral':
@@ -3911,6 +4207,8 @@ function renderModal() {
       return renderCteDisagreementAlertsModal();
     case 'dominio-nfe-view':
       return renderDominioNfeViewerModal();
+    case 'compare-sped-report':
+      return renderCompareSpedReportModal();
     case 'xml-details':
       return renderXmlDetailsModal(state.modal.xmlId);
     case 'xml-view':
@@ -5106,6 +5404,18 @@ function statCard(iconKey, label, value, caption, tone) {
   `;
 }
 
+function renderCompareStep(number, title, description) {
+  return `
+    <article class="compare-step">
+      <div class="compare-step-number">${escapeHtml(String(number))}</div>
+      <div>
+        <h4>${escapeHtml(title)}</h4>
+        <p>${escapeHtml(description)}</p>
+      </div>
+    </article>
+  `;
+}
+
 function renderSchedulerStatusStrip() {
   const nightly = getNightlyScheduleInfo();
   const autoSync = getAutoSyncInfo();
@@ -5340,6 +5650,7 @@ function parseRoute(hash) {
     '/buscas-nfe': 'buscas-nfe',
     '/xmls-nfe': 'xmls-nfe',
     '/xmls-cte': 'xmls-cte',
+    '/compara-sped': 'compara-sped',
     '/alertas': 'alertas',
     '/configuracoes': 'configuracoes'
   };
@@ -7015,6 +7326,7 @@ async function applyNfeDocsFilters(form) {
     xmlCompleto: String(data.get('xmlCompleto') || 'Todos'),
     ambiente: String(data.get('ambiente') || 'Todos')
   };
+  state.selectedNfeIds = new Set();
 
   await executeNfeDocsSearch();
 }
@@ -7412,6 +7724,7 @@ async function executeNfeDocsSearch() {
   state.nfeSearch.results = [];
   state.nfeSearch.lastQuery = { ...state.filters.nfeDocs };
   state.nfeSearch.page = 1;
+  state.selectedNfeIds = new Set();
   state.tableState.nfeDocs = 'loading';
   render();
 
@@ -8131,6 +8444,7 @@ function resetNfeSyncFilters() {
 }
 
 function resetNfeDocsSearch() {
+  state.selectedNfeIds = new Set();
   state.filters.nfeDocs = {
     cliente: 'Todos',
     tipo: 'Todos',
@@ -10840,7 +11154,20 @@ function getEditableValue(value) {
 }
 
 function toNumber(value) {
-  const parsed = Number(value);
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  const raw = String(value ?? '').trim();
+  if (!raw) {
+    return 0;
+  }
+
+  const normalized = raw
+    .replace(/\s+/g, '')
+    .replace(/\.(?=\d{3}(?:\D|$))/g, '')
+    .replace(/,(?=\d{2}(?:\D|$)|\d+$)/g, '.');
+  const parsed = Number(normalized);
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
@@ -11651,6 +11978,45 @@ async function downloadSelectedXmlBatch(tipoArquivo = 'ambos') {
     );
   } catch (error) {
     pushToast(`Falha ao baixar lote: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function downloadSelectedNfeBatch(tipoArquivo = 'ambos') {
+  const allowedTypes = ['ambos', 'xml', 'danfe'];
+  const normalizedType = allowedTypes.includes(tipoArquivo) ? tipoArquivo : 'ambos';
+  const selectedDocs = getFilteredNfeDocuments().filter((doc) => state.selectedNfeIds.has(doc.id) && doc.apiNfeId);
+
+  if (!selectedDocs.length) {
+    pushToast('Selecione ao menos uma NF-e da listagem atual.', 'error');
+    return;
+  }
+
+  const ids = [...new Set(selectedDocs.map((doc) => doc.apiNfeId))];
+  const clientIds = [...new Set(selectedDocs.map((doc) => doc.clientId).filter(Boolean))];
+  const body = {
+    ids,
+    tipoArquivo: normalizedType
+  };
+
+  if (clientIds.length === 1) {
+    body.clienteId = clientIds[0];
+  }
+
+  try {
+    const payload = await apiRequest('/nfe/download-lote', {
+      method: 'POST',
+      body,
+      timeoutMs: 2 * 60 * 1000
+    });
+    downloadFromPayload(payload, `nfe-lote-${normalizedType}.zip`);
+    const errorsCount = Array.isArray(payload?.erros) ? payload.erros.length : 0;
+    const included = Number(payload?.totalArquivosIncluidos || 0);
+    pushToast(
+      `Download em lote iniciado: ${included} arquivo(s) no ZIP${errorsCount ? `, ${errorsCount} aviso(s)` : ''}.`,
+      errorsCount ? 'info' : 'success'
+    );
+  } catch (error) {
+    pushToast(`Falha ao baixar lote de NF-e: ${toErrorMessage(error)}`, 'error');
   }
 }
 
@@ -12718,6 +13084,1322 @@ function triggerBrowserDownload(fileName, blob) {
   URL.revokeObjectURL(url);
 }
 
+function resetCompareSpedState() {
+  state.compareSped.status = 'idle';
+  state.compareSped.sourceFileName = '';
+  state.compareSped.sourceCompetence = '';
+  state.compareSped.sourceCompanyId = '';
+  state.compareSped.outputFormat = 'Excel';
+  state.compareSped.generatedAt = null;
+  state.compareSped.report = null;
+  state.compareSped.artifact = null;
+  state.compareSped.lastError = '';
+}
+
+function addCompareSpedHistoryItem(item) {
+  const currentHistory = Array.isArray(state.compareSped.history) ? state.compareSped.history : [];
+  const history = [item, ...currentHistory];
+
+  while (history.length > 5) {
+    const removed = history.pop();
+    if (removed?.artifact?.blobUrl) {
+      URL.revokeObjectURL(removed.artifact.blobUrl);
+    }
+  }
+
+  state.compareSped.history = history;
+}
+
+function triggerBrowserDownloadFromUrl(fileName, blobUrl) {
+  const anchor = document.createElement('a');
+  anchor.href = blobUrl;
+  anchor.download = fileName;
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
+
+async function submitCompareSpedForm(form, submitter = null) {
+  const data = new FormData(form);
+  const companyId = String(data.get('empresa') || '').trim();
+  const competence = String(data.get('competencia') || '').trim();
+  const submitterFormat = String(submitter?.getAttribute?.('data-output-format') || '').trim();
+  const selectedOutput = submitterFormat || String(data.get('saida') || 'Excel').trim();
+  const outputFormat = selectedOutput === 'PDF' ? 'PDF' : 'Excel';
+  const file = data.get('arquivoSped');
+
+  if (!companyId) {
+    pushToast('Selecione uma empresa antes de gerar a comparacao.', 'error');
+    return;
+  }
+
+  if (!(file instanceof File) || !file.name) {
+    pushToast('Envie o arquivo TXT do SPED Fiscal.', 'error');
+    return;
+  }
+
+  if (!file.name.toLowerCase().endsWith('.txt')) {
+    pushToast('Nesta primeira etapa utilize um arquivo TXT do SPED Fiscal.', 'error');
+    return;
+  }
+
+  const client = findClientById(companyId);
+  if (!client) {
+    pushToast('Empresa selecionada nao encontrada.', 'error');
+    return;
+  }
+
+  state.compareSped.status = 'processing';
+  state.compareSped.sourceCompanyId = companyId;
+  state.compareSped.sourceCompetence = competence;
+  state.compareSped.sourceFileName = file.name;
+  state.compareSped.outputFormat = outputFormat;
+  state.compareSped.generatedAt = null;
+  state.compareSped.report = null;
+  state.compareSped.artifact = null;
+  state.compareSped.lastError = '';
+  render();
+
+  try {
+    const fileText = await file.text();
+    const parsed = parseCompareSpedFile(fileText);
+    const dateRange = resolveCompareSpedDateRange(parsed.documents, competence);
+    const dominioDocs = await fetchCompareSpedCompanyDocuments({
+      client,
+      dateRange
+    });
+    const effectiveCompetence = String(competence || '').trim() || getCompareSpedCompetence(parsed.documents) || formatCompareMonth(dateRange?.dataInicio || '');
+    const report = buildCompareSpedReport({
+      client,
+      competence: effectiveCompetence,
+      sourceFileName: file.name,
+      parsedDocuments: parsed.documents,
+      dominioDocuments: dominioDocs,
+      parsingWarnings: parsed.warnings,
+      outputFormat
+    });
+    const artifact = buildCompareSpedArtifact(report, outputFormat);
+    const generatedAt = new Date().toISOString();
+    const historyItem = {
+      id: `${generatedAt}-${Math.random().toString(36).slice(2, 8)}`,
+      generatedAt,
+      clientId: client.id,
+      clientName: client.razaoSocial || 'Cliente selecionado',
+      competence: effectiveCompetence,
+      sourceFileName: file.name,
+      outputFormat,
+      report,
+      artifact
+    };
+
+    state.compareSped.status = 'done';
+    state.compareSped.report = report;
+    state.compareSped.artifact = artifact;
+    state.compareSped.generatedAt = generatedAt;
+    addCompareSpedHistoryItem(historyItem);
+    state.compareSped.lastError = '';
+    render();
+    pushToast(`Comparacao gerada com sucesso em formato ${outputFormat === 'PDF' ? 'PDF' : 'Excel'}.`, 'success');
+  } catch (error) {
+    state.compareSped.status = 'error';
+    state.compareSped.lastError = toErrorMessage(error);
+    render();
+    pushToast(`Falha ao gerar comparacao: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function downloadCompareSpedArtifact() {
+  const artifact = state.compareSped.artifact;
+  if (!artifact?.blobUrl) {
+    pushToast('Gere a comparacao antes de baixar o arquivo.', 'error');
+    return;
+  }
+
+  triggerBrowserDownloadFromUrl(artifact.fileName, artifact.blobUrl);
+  pushToast(`Download de ${artifact.fileName} iniciado.`, 'success');
+}
+
+async function downloadCompareSpedHistoryItem(compareId) {
+  const history = Array.isArray(state.compareSped.history) ? state.compareSped.history : [];
+  const historyItem = history.find((item) => item.id === compareId);
+  if (!historyItem) {
+    pushToast('Nao foi possivel localizar a comparacao selecionada.', 'error');
+    return;
+  }
+
+  let artifact = historyItem.artifact;
+  if (!artifact?.blobUrl && historyItem.report) {
+    artifact = buildCompareSpedArtifact(historyItem.report, historyItem.outputFormat || 'Excel');
+    historyItem.artifact = artifact;
+  }
+
+  if (!artifact?.blobUrl) {
+    pushToast('Nao foi possivel recriar o arquivo para download novamente.', 'error');
+    return;
+  }
+
+  triggerBrowserDownloadFromUrl(artifact.fileName, artifact.blobUrl);
+  pushToast(`Download de ${artifact.fileName} iniciado novamente.`, 'success');
+}
+
+function parseCompareSpedFile(text) {
+  const documents = [];
+  const warnings = [];
+  const seenKeys = new Set();
+  const participants = new Map();
+  const pendingDocuments = [];
+  const rawLines = String(text || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+
+  rawLines.forEach((line, index) => {
+    const trimmed = String(line || '').trim();
+    if (!trimmed || !trimmed.startsWith('|')) {
+      return;
+    }
+
+    const fields = trimmed.split('|').slice(1, -1);
+    const recordType = fields[0];
+    if (recordType === '0150') {
+      const participantCode = String(fields[1] || '').trim();
+      if (participantCode) {
+        participants.set(participantCode, {
+          codigo: participantCode,
+          nome: String(fields[2] || '').trim() || '-',
+          cnpj: normalizeDigits(fields[4] || fields[5] || ''),
+          cpf: normalizeDigits(fields[5] || ''),
+          rawFields: fields
+        });
+      }
+      return;
+    }
+
+    if (recordType !== 'C100') {
+      return;
+    }
+
+    pendingDocuments.push({
+      sourceLine: index + 1,
+      recordType,
+      modelo: String(fields[4] || '').trim(),
+      codPart: String(fields[3] || '').trim(),
+      serie: String(fields[6] || '').trim(),
+      numero: String(fields[7] || '').trim(),
+      chaveAcesso: normalizeDigits(fields[8] || ''),
+      dataEmissao: parseCompareSpedDate(fields[9]),
+      valor: toNumber(fields[11]),
+      rawFields: fields
+    });
+  });
+
+  pendingDocuments.forEach((spedDocument) => {
+    const participant = participants.get(spedDocument.codPart) || null;
+    const enrichedDocument = {
+      ...spedDocument,
+      tipoDocumento: describeCompareSpedModel(spedDocument.modelo),
+      emitenteNome: participant?.nome || '-',
+      emitenteCnpj: participant?.cnpj || participant?.cpf || ''
+    };
+    const fingerprint = buildCompareCandidateKeys(enrichedDocument)[0] || '';
+    if (seenKeys.has(fingerprint)) {
+      warnings.push(`Documento repetido no SPED: linha ${enrichedDocument.sourceLine}, chave ${enrichedDocument.chaveAcesso || enrichedDocument.numero || '-'} .`);
+      return;
+    }
+
+    seenKeys.add(fingerprint);
+    documents.push(enrichedDocument);
+  });
+
+  return { documents, warnings };
+}
+
+async function fetchCompareSpedCompanyDocuments({ client, dateRange }) {
+  const [storedDocs, dominioDocs] = await Promise.all([
+    fetchCompareSpedStoredDocuments({ client, dateRange }),
+    fetchCompareSpedDominioPreviewDocuments({ client, dateRange })
+  ]);
+
+  return mergeCompareSpedCompanyDocuments(storedDocs, dominioDocs);
+}
+
+async function fetchCompareSpedStoredDocuments({ client, dateRange }) {
+  const query = buildNfeSearchQuery(
+    {
+      cliente: client.id,
+      tipo: 'Recebida',
+      ambiente: 'Todos',
+      emissaoInicio: dateRange?.dataInicio || '',
+      emissaoFim: dateRange?.dataFim || '',
+      status: 'Todos',
+      eventos: 'Todos',
+      schemaDoc: 'Todos',
+      xmlCompleto: 'Todos',
+      cnpj: '',
+      numero: '',
+      chave: '',
+      valorMin: '',
+      valorMax: ''
+    },
+    1,
+    SEARCH_PAGE_SIZE,
+    true
+  );
+
+  const payload = normalizePaginatedResponse(await apiRequest(`/nfe?${query.toString()}`));
+  return buildNfeDocumentsFromApi(payload.items, state.clients).map((doc) => ({
+    ...doc,
+    tipoDocumento: describeCompareSpedModel(doc.modelo || '55')
+  }));
+}
+
+async function fetchCompareSpedDominioPreviewDocuments({ client, dateRange }) {
+  const response = normalizePaginatedResponse(
+    await apiRequest('/nfe/dominio/documentos/preview', {
+      method: 'POST',
+      body: {
+        clienteId: client.id,
+        limit: 5000,
+        ...(dateRange?.dataInicio ? { dataEmissaoInicio: dateRange.dataInicio } : {}),
+        ...(dateRange?.dataFim ? { dataEmissaoFim: dateRange.dataFim } : {})
+      }
+    })
+  );
+
+  return response.items.map((item, index) => ({
+    id: `dominio-preview-${item.catalogoId || index}`,
+    apiNfeId: null,
+    clientId: client.id,
+    cliente: client.razaoSocial || 'Cliente nao identificado',
+    estabelecimentoId: null,
+    chaveAcesso: item.chaveAcesso || '-',
+    numeroNfe: item.numeroNfe || '-',
+    serie: item.serie || '-',
+    modelo: item.modelo || '55',
+    ambiente: 'producao',
+    dataEmissao: item.dataEmissao || null,
+    dataAutorizacao: item.dataEmissao || null,
+    valor: toNumber(item.valor),
+    tipoDocumento: describeCompareSpedModel(item.modelo || '55'),
+    tipo: 'Recebida',
+    statusFiscal: 'Disponivel na Dominio',
+    cancelada: false,
+    schemaDoc: 'dominio_xml',
+    xmlCompletoDisponivel: true,
+    resumoDisponivel: true,
+    caminhoServidor: '-',
+    emitenteNome: item.emitenteNome || '-',
+    emitenteCnpj: normalizeDigits(item.emitenteCnpj || ''),
+    destinatarioNome: item.destinatarioNome || '-',
+    destinatarioCnpj: normalizeDigits(item.destinatarioCnpj || ''),
+    contraparteNome: item.emitenteNome || '-',
+    contraparteCnpj: normalizeDigits(item.emitenteCnpj || ''),
+    eventos: [],
+    temEventos: false,
+    eventosResumo: [],
+    conteudoXml: null
+  }));
+}
+
+function mergeCompareSpedCompanyDocuments(storedDocs, dominioDocs) {
+  const merged = [];
+  const seenKeys = new Set();
+  const appendDocument = (doc) => {
+    if (!doc) {
+      return;
+    }
+
+    const candidateKeys = buildCompareCandidateKeys(doc).filter(Boolean);
+    const dedupeKey = candidateKeys[0] || `${normalizeDigits(doc.chaveAcesso || '')}-${normalizeDigits(doc.numeroNfe || doc.numero || '')}-${normalizeDigits(doc.serie || '')}-${formatCompareMonth(doc.dataEmissao || '')}`;
+    if (!dedupeKey || seenKeys.has(dedupeKey)) {
+      return;
+    }
+
+    seenKeys.add(dedupeKey);
+    merged.push(doc);
+  };
+
+  (Array.isArray(storedDocs) ? storedDocs : []).forEach(appendDocument);
+  (Array.isArray(dominioDocs) ? dominioDocs : []).forEach(appendDocument);
+
+  return merged.sort((left, right) => Date.parse(right?.dataEmissao || 0) - Date.parse(left?.dataEmissao || 0));
+}
+
+function buildCompareSpedReport({ client, competence, sourceFileName, parsedDocuments, dominioDocuments, parsingWarnings, outputFormat }) {
+  const normalizedCompetence = String(competence || '').trim();
+  const inferredCompetence = getCompareSpedCompetence(parsedDocuments);
+  const activeCompetence = normalizedCompetence || inferredCompetence || '';
+  const companyDocs = Array.isArray(dominioDocuments) ? dominioDocuments : [];
+  const spedDocs = filterCompareSpedByCompetence(parsedDocuments, activeCompetence);
+  const dominioDocs = filterCompareDominioByCompetence(companyDocs, activeCompetence);
+  const matchResult = matchCompareSpedDocuments(spedDocs, dominioDocs);
+  const rows = matchResult.rows;
+  const matchedCount = matchResult.matchedCount;
+  const onlySpedCount = matchResult.onlySpedCount;
+  const onlyDominioCount = matchResult.onlyDominioCount;
+  const divergentCount = matchResult.divergentCount;
+
+  const issuesCount = rows.filter((row) => row.status !== 'OK').length;
+  const warnings = [...(Array.isArray(parsingWarnings) ? parsingWarnings : [])];
+  const summary = {
+    spedDocs: spedDocs.length,
+    dominioDocs: dominioDocs.length,
+    matchedDocs: matchedCount,
+    onlySpedDocs: onlySpedCount,
+    onlyDominioDocs: onlyDominioCount,
+    divergentDocs: divergentCount,
+    issuesCount,
+    warningsCount: warnings.length
+  };
+
+  return {
+    clientId: client.id,
+    companyName: client.razaoSocial || 'Empresa selecionada',
+    clientCnpj: normalizeDigits(client.cnpj || ''),
+    competence: activeCompetence,
+    sourceFileName,
+    generatedAt: new Date().toISOString(),
+    outputFormat,
+    summary,
+    rows,
+    warnings,
+    source: {
+      parsedDocs: parsedDocuments.length,
+      companyDocs: companyDocs.length
+    }
+  };
+}
+
+function filterCompareSpedByCompetence(documents, competence) {
+  if (!competence) {
+    return [...documents];
+  }
+
+  return documents.filter((doc) => formatCompareMonth(doc.dataEmissao) === competence);
+}
+
+function filterCompareDominioByCompetence(documents, competence) {
+  if (!competence) {
+    return [...documents];
+  }
+
+  return documents.filter((doc) => formatCompareMonth(doc.dataEmissao) === competence);
+}
+
+function matchCompareSpedDocuments(spedDocs, dominioDocs) {
+  const rows = [];
+  const usedSped = new Set();
+  const usedDominio = new Set();
+  const spedIndexed = (Array.isArray(spedDocs) ? spedDocs : []).map((doc, idx) => ({ ...doc, __compareIndex: idx }));
+  const dominioIndexed = (Array.isArray(dominioDocs) ? dominioDocs : []).map((doc, idx) => ({ ...doc, __compareIndex: idx }));
+  const spedIndex = buildCompareIndex(spedIndexed);
+  const dominioIndex = buildCompareIndex(dominioIndexed);
+  let matchedCount = 0;
+  let onlySpedCount = 0;
+  let onlyDominioCount = 0;
+  let divergentCount = 0;
+
+  const consumeMatch = (spedDoc, dominioDoc) => {
+    const diffs = compareSpedAndDominioDocs(spedDoc, dominioDoc);
+    const status = diffs.length ? 'Divergente' : 'OK';
+    if (status === 'OK') {
+      matchedCount += 1;
+    } else {
+      divergentCount += 1;
+    }
+
+    rows.push({
+      status,
+      chave: spedDoc.chaveAcesso || dominioDoc.chaveAcesso || '-',
+      tipoSped: spedDoc.tipoDocumento || describeCompareSpedModel(spedDoc.modelo) || '-',
+      tipoDominio: dominioDoc.tipoDocumento || describeCompareSpedModel(dominioDoc.modelo) || '-',
+      numeroSped: spedDoc.numero || spedDoc.numeroNfe || '-',
+      numeroDominio: dominioDoc.numeroNfe || dominioDoc.numero || '-',
+      serieSped: spedDoc.serie || '-',
+      serieDominio: dominioDoc.serie || '-',
+      dataSped: spedDoc.dataEmissao || '-',
+      dataDominio: formatDate(dominioDoc.dataEmissao || ''),
+      valorSped: spedDoc.valor,
+      valorDominio: dominioDoc.valor,
+      diferencaValor: toNumber(dominioDoc.valor) - toNumber(spedDoc.valor),
+      emitenteNomeSped: spedDoc.emitenteNome || '-',
+      emitenteCnpjSped: spedDoc.emitenteCnpj || '',
+      emitenteNomeDominio: dominioDoc.emitenteNome || '-',
+      emitenteCnpjDominio: dominioDoc.emitenteCnpj || '',
+      observacao: diffs.join('; ') || 'Documento encontrado nas duas bases.'
+    });
+  };
+
+  const tryMatchByKey = (keys) => {
+    for (const key of keys) {
+      const spedBucket = spedIndex.get(key) || [];
+      const dominioBucket = dominioIndex.get(key) || [];
+      const spedDoc = spedBucket.find((doc) => !usedSped.has(doc.__compareIndex));
+      const dominioDoc = dominioBucket.find((doc) => !usedDominio.has(doc.__compareIndex));
+
+      if (spedDoc && dominioDoc) {
+        usedSped.add(spedDoc.__compareIndex);
+        usedDominio.add(dominioDoc.__compareIndex);
+        consumeMatch(spedDoc, dominioDoc);
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  spedIndexed.forEach((spedDoc) => {
+    const keys = buildCompareCandidateKeys(spedDoc);
+    const matched = tryMatchByKey(keys);
+    if (!matched) {
+      onlySpedCount += 1;
+      rows.push({
+        status: 'Somente no SPED',
+        chave: spedDoc.chaveAcesso || '-',
+        tipoSped: spedDoc.tipoDocumento || describeCompareSpedModel(spedDoc.modelo) || '-',
+        tipoDominio: '-',
+        numeroSped: spedDoc.numero || '-',
+        numeroDominio: '-',
+        serieSped: spedDoc.serie || '-',
+        serieDominio: '-',
+        dataSped: spedDoc.dataEmissao || '-',
+        dataDominio: '-',
+        valorSped: spedDoc.valor,
+        valorDominio: null,
+        diferencaValor: null,
+        emitenteNomeSped: spedDoc.emitenteNome || '-',
+        emitenteCnpjSped: spedDoc.emitenteCnpj || '',
+        emitenteNomeDominio: '-',
+        emitenteCnpjDominio: '',
+        observacao: 'Documento localizado apenas no SPED.'
+      });
+    }
+  });
+
+  dominioIndexed.forEach((dominioDoc) => {
+    if (!usedDominio.has(dominioDoc.__compareIndex)) {
+      onlyDominioCount += 1;
+      rows.push({
+        status: 'Somente no Dominio',
+        chave: dominioDoc?.chaveAcesso || '-',
+        tipoSped: '-',
+        tipoDominio: dominioDoc?.tipoDocumento || describeCompareSpedModel(dominioDoc?.modelo) || '-',
+        numeroSped: '-',
+        numeroDominio: dominioDoc?.numeroNfe || '-',
+        serieSped: '-',
+        serieDominio: dominioDoc?.serie || '-',
+        dataSped: '-',
+        dataDominio: formatDate(dominioDoc?.dataEmissao || ''),
+        valorSped: null,
+        valorDominio: dominioDoc?.valor ?? null,
+        diferencaValor: null,
+        emitenteNomeSped: '-',
+        emitenteCnpjSped: '',
+        emitenteNomeDominio: dominioDoc?.emitenteNome || '-',
+        emitenteCnpjDominio: dominioDoc?.emitenteCnpj || '',
+        observacao: 'Documento localizado apenas na Dominio.'
+      });
+    }
+  });
+
+  return {
+    rows,
+    matchedCount,
+    onlySpedCount,
+    onlyDominioCount,
+    divergentCount
+  };
+}
+
+function compareSpedAndDominioDocs(spedDoc, dominioDoc) {
+  const diffs = [];
+
+  if (String(spedDoc.numero || '').trim() !== String(dominioDoc.numeroNfe || '').trim()) {
+    diffs.push(`Numero ${spedDoc.numero || '-'} x ${dominioDoc.numeroNfe || '-'}`);
+  }
+
+  if (String(spedDoc.serie || '').trim() !== String(dominioDoc.serie || '').trim()) {
+    diffs.push(`Serie ${spedDoc.serie || '-'} x ${dominioDoc.serie || '-'}`);
+  }
+
+  const valorSped = toNumber(spedDoc.valor);
+  const valorDominio = toNumber(dominioDoc.valor);
+  if (Math.abs(valorSped - valorDominio) > 0.01) {
+    diffs.push(`Valor ${formatCurrency(valorSped)} x ${formatCurrency(valorDominio)}`);
+  }
+
+  const dataSped = String(spedDoc.dataEmissao || '').trim();
+  const dataDominio = formatDate(dominioDoc.dataEmissao || '');
+  if (dataSped && dataDominio && dataSped !== dataDominio) {
+    diffs.push(`Data ${dataSped} x ${dataDominio}`);
+  }
+
+  return diffs;
+}
+
+function buildCompareIndex(documents) {
+  const index = new Map();
+  (Array.isArray(documents) ? documents : []).forEach((doc, idx) => {
+    const enriched = doc.__compareIndex == null ? { ...doc, __compareIndex: idx } : doc;
+    buildCompareCandidateKeys(enriched).forEach((key) => {
+      if (!index.has(key)) {
+        index.set(key, []);
+      }
+      index.get(key).push(enriched);
+    });
+  });
+  return index;
+}
+
+function buildCompareCandidateKeys(doc) {
+  const keys = [];
+  const chave = normalizeDigits(doc?.chaveAcesso || '');
+  if (chave.length >= 40) {
+    keys.push(`CHAVE:${chave}`);
+  }
+
+  const serie = String(doc?.serie || '').trim() || '-';
+  const numero = String(doc?.numero || doc?.numeroNfe || '').trim() || '-';
+  const date = normalizeCompareDateKey(doc?.dataEmissao || '') || formatCompareMonth(doc?.dataEmissao || '') || '-';
+  const value = Number.isFinite(Number(doc?.valor)) ? Number(toNumber(doc.valor)).toFixed(2) : '0.00';
+  keys.push(`FALLBACK:${serie}|${numero}|${date}|${value}`);
+  return [...new Set(keys)];
+}
+
+function buildCompareFingerprint(doc) {
+  return buildCompareCandidateKeys(doc)[0] || '';
+}
+
+function parseCompareSpedDate(value) {
+  const raw = String(value || '').trim();
+  if (!/^\d{8}$/.test(raw)) {
+    return '';
+  }
+
+  const day = raw.slice(0, 2);
+  const month = raw.slice(2, 4);
+  const year = raw.slice(4, 8);
+  return `${year}-${month}-${day}`;
+}
+
+function normalizeCompareDateKey(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  const date = new Date(text);
+  if (!Number.isNaN(date.getTime())) {
+    return date.toISOString().slice(0, 10);
+  }
+
+  if (/^\d{8}$/.test(text)) {
+    return parseCompareSpedDate(text);
+  }
+
+  return '';
+}
+
+function resolveCompareSpedDateRange(documents, competence) {
+  const normalizedCompetence = String(competence || '').trim();
+  if (/^\d{4}-\d{2}$/.test(normalizedCompetence)) {
+    const [year, month] = normalizedCompetence.split('-');
+    const start = `${year}-${month}-01`;
+    const endDate = new Date(Number(year), Number(month), 0);
+    const end = endDate.toISOString().slice(0, 10);
+    return { dataInicio: start, dataFim: end };
+  }
+
+  const dates = (Array.isArray(documents) ? documents : [])
+    .map((doc) => normalizeCompareDateKey(doc.dataEmissao))
+    .filter(Boolean)
+    .sort((left, right) => left.localeCompare(right));
+
+  if (!dates.length) {
+    return null;
+  }
+
+  return {
+    dataInicio: dates[0],
+    dataFim: dates[dates.length - 1]
+  };
+}
+
+function getCompareSpedCompetence(documents) {
+  const months = new Set(
+    (Array.isArray(documents) ? documents : [])
+      .map((doc) => formatCompareMonth(doc.dataEmissao))
+      .filter(Boolean)
+  );
+
+  return months.size === 1 ? [...months][0] : '';
+}
+
+function formatCompareMonth(value) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) {
+    const match = text.match(/^(\d{4})-(\d{2})/);
+    return match ? `${match[1]}-${match[2]}` : '';
+  }
+
+  return `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function buildCompareSpedArtifact(report, outputFormat) {
+  const fileName = `comparacao-sped-${toSafeFileName(report.companyName)}-${report.competence || 'geral'}-${compactDate(report.generatedAt)}.${outputFormat === 'PDF' ? 'pdf' : 'xls'}`;
+  if (outputFormat === 'PDF') {
+    const blob = buildComparePdfBlob(report);
+    const blobUrl = URL.createObjectURL(blob);
+    return {
+      fileName,
+      contentType: 'application/pdf',
+      blob,
+      blobUrl
+    };
+  }
+
+  const blob = buildCompareExcelBlob(report);
+  const blobUrl = URL.createObjectURL(blob);
+  return {
+    fileName,
+    contentType: 'application/vnd.ms-excel',
+    blob,
+    blobUrl
+  };
+}
+
+function buildCompareExcelBlob(report) {
+  const xml = buildCompareSpreadsheetXml(report);
+  return new Blob([`\ufeff${xml}`], { type: 'application/vnd.ms-excel;charset=utf-8' });
+}
+
+function buildCompareSpreadsheetXml(report) {
+  const sheetNames = ['Resumo', 'Faltantes no SPED', 'Faltantes na Dominio'];
+  const worksheets = [
+    buildCompareSummaryWorksheet(report),
+    buildCompareDocumentWorksheet(report, 'Faltantes no SPED', 'dominio'),
+    buildCompareDocumentWorksheet(report, 'Faltantes na Dominio', 'sped')
+  ];
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+  <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
+    <Author>NotaSync</Author>
+    <LastAuthor>NotaSync</LastAuthor>
+    <Created>${escapeHtml(new Date().toISOString())}</Created>
+    <Company>NotaSync</Company>
+  </DocumentProperties>
+  <ExcelWorkbook xmlns="urn:schemas-microsoft-com:office:excel">
+    <ProtectStructure>False</ProtectStructure>
+    <ProtectWindows>False</ProtectWindows>
+  </ExcelWorkbook>
+  <Styles>
+    <Style ss:ID="Default" ss:Name="Normal">
+      <Alignment ss:Vertical="Center" />
+      <Font ss:FontName="Calibri" ss:Size="10" />
+    </Style>
+    <Style ss:ID="SheetTitle">
+      <Font ss:Bold="1" ss:Size="14" ss:Color="#0E3E70" />
+      <Interior ss:Color="#B8CBE8" ss:Pattern="Solid" />
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#8EA9CF" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#8EA9CF" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#8EA9CF" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#8EA9CF" />
+      </Borders>
+    </Style>
+    <Style ss:ID="MetaLabel">
+      <Font ss:Bold="1" ss:Color="#1F9D55" />
+    </Style>
+    <Style ss:ID="MetaValue">
+      <Font ss:Color="#111827" />
+    </Style>
+    <Style ss:ID="MetaLabelAlt" ss:Parent="MetaLabel">
+      <Interior ss:Color="#E7EFF9" ss:Pattern="Solid" />
+    </Style>
+    <Style ss:ID="MetaValueAlt" ss:Parent="MetaValue">
+      <Interior ss:Color="#E7EFF9" ss:Pattern="Solid" />
+    </Style>
+    <Style ss:ID="Header">
+      <Font ss:Bold="1" ss:Color="#FFFFFF" />
+      <Interior ss:Color="#1F4E78" ss:Pattern="Solid" />
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
+      </Borders>
+    </Style>
+    <Style ss:ID="Cell">
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
+      </Borders>
+    </Style>
+    <Style ss:ID="CellAlt" ss:Parent="Cell">
+      <Interior ss:Color="#E7EFF9" ss:Pattern="Solid" />
+    </Style>
+    <Style ss:ID="CellDate" ss:Parent="Cell">
+      <NumberFormat ss:Format="dd/mm/yyyy" />
+    </Style>
+    <Style ss:ID="CellDateAlt" ss:Parent="CellAlt">
+      <NumberFormat ss:Format="dd/mm/yyyy" />
+    </Style>
+    <Style ss:ID="CellMoney" ss:Parent="Cell">
+      <NumberFormat ss:Format="R$ #,##0.00" />
+    </Style>
+    <Style ss:ID="CellMoneyAlt" ss:Parent="CellAlt">
+      <NumberFormat ss:Format="R$ #,##0.00" />
+    </Style>
+  </Styles>
+  ${sheetNames
+    .map((sheetName, index) => `<Worksheet ss:Name="${escapeHtml(sheetName)}">${worksheets[index]}</Worksheet>`)
+    .join('')}
+</Workbook>`;
+}
+
+function buildCompareSummaryWorksheet(report) {
+  const totals = getCompareReportTotals(report);
+  const summaryRows = [
+    ['Empresa', report.companyName],
+    ['CNPJ', formatCnpj(report.clientCnpj || '')],
+    ['Arquivo SPED', report.sourceFileName],
+    ['Competencia', report.competence || 'Nao informada'],
+    ['SPED documentos', report.summary.spedDocs],
+    ['SPED valor total', formatCurrency(totals.totalSpedValue)],
+    ['Dominio documentos', report.summary.dominioDocs],
+    ['Dominio valor total', formatCurrency(totals.totalDominioValue)],
+    ['Encontrados nas duas bases', report.summary.matchedDocs],
+    ['Somente no SPED', report.summary.onlySpedDocs],
+    ['Somente no SPED valor', formatCurrency(totals.onlySpedValue)],
+    ['Somente na Dominio', report.summary.onlyDominioDocs],
+    ['Somente na Dominio valor', formatCurrency(totals.onlyDominioValue)],
+    ['Divergentes', report.summary.divergentDocs],
+    ['Avisos', report.summary.warningsCount]
+  ];
+
+  const warningRows = report.warnings.length
+    ? report.warnings.map((warning) => [warning])
+    : [['Nenhum aviso encontrado.']];
+  const summaryBodyRows = summaryRows
+    .map((row, index) => {
+      const labelStyle = index % 2 === 0 ? 'MetaLabel' : 'MetaLabelAlt';
+      const valueStyle = index % 2 === 0 ? 'MetaValue' : 'MetaValueAlt';
+      const value = row[1];
+      const isNumeric = typeof value === 'number' && Number.isFinite(value);
+
+      return `
+      <Row>
+        <Cell ss:StyleID="${labelStyle}"><Data ss:Type="String">${escapeHtml(String(row[0] || ''))}</Data></Cell>
+        <Cell ss:StyleID="${valueStyle}"><Data ss:Type="${isNumeric ? 'Number' : 'String'}">${escapeHtml(String(value ?? ''))}</Data></Cell>
+      </Row>`;
+    })
+    .join('');
+
+  return `
+    <Table>
+      <Column ss:Width="220" />
+      <Column ss:Width="420" />
+      <Row ss:Height="22">
+        <Cell ss:MergeAcross="1" ss:StyleID="SheetTitle"><Data ss:Type="String">Comparacao SPED x Dominio</Data></Cell>
+      </Row>
+      ${summaryBodyRows}
+      <Row />
+      <Row ss:Height="22">
+        <Cell ss:MergeAcross="0" ss:StyleID="SheetTitle"><Data ss:Type="String">Avisos</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="Header"><Data ss:Type="String">Mensagem</Data></Cell>
+      </Row>
+      ${warningRows.map((row, index) => `<Row><Cell ss:StyleID="${index % 2 === 0 ? 'Cell' : 'CellAlt'}"><Data ss:Type="String">${escapeHtml(String(row[0] || ''))}</Data></Cell></Row>`).join('')}
+    </Table>
+  `;
+}
+
+function buildCompareDocumentWorksheet(report, title, source) {
+  const rows = source === 'dominio'
+    ? report.rows.filter((row) => row.status === 'Somente no Dominio')
+    : report.rows.filter((row) => row.status === 'Somente no SPED');
+  const headers = ['Tipo', 'Serie', 'Numero', 'Data', 'Cnpj_Cpf_Emit', 'Rz_Social_Emit', 'Valor', 'Chave'];
+  const sheetRows = rows.map((row) => {
+    const isDominio = source === 'dominio';
+    const tipo = isDominio ? row.tipoDominio || '-' : row.tipoSped || '-';
+    const serie = isDominio ? row.serieDominio || '-' : row.serieSped || '-';
+    const numero = isDominio ? row.numeroDominio || '-' : row.numeroSped || '-';
+    const data = isDominio ? row.dataDominio || '-' : row.dataSped || '-';
+    const cnpj = isDominio ? row.emitenteCnpjDominio || '' : row.emitenteCnpjSped || '';
+    const nome = isDominio ? row.emitenteNomeDominio || '-' : row.emitenteNomeSped || '-';
+    const valor = isDominio ? pickCompareRowValue(row.valorDominio, row.valorSped) : pickCompareRowValue(row.valorSped, row.valorDominio);
+
+    return [tipo, serie, numero, data, cnpj, nome, valor, row.chave || '-'];
+  });
+  const totalValue = sheetRows.reduce((sum, row) => sum + (Number.isFinite(Number(row[6])) ? Number(row[6]) : 0), 0);
+
+  return `
+    <Table>
+      <Column ss:Width="90" />
+      <Column ss:Width="70" />
+      <Column ss:Width="90" />
+      <Column ss:Width="95" />
+      <Column ss:Width="150" />
+      <Column ss:Width="280" />
+      <Column ss:Width="95" />
+      <Column ss:Width="250" />
+      <Row ss:Height="22">
+        <Cell ss:MergeAcross="7" ss:StyleID="SheetTitle"><Data ss:Type="String">${escapeHtml(title)}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Qtd. notas</Data></Cell>
+        <Cell ss:StyleID="MetaValue"><Data ss:Type="Number">${rows.length}</Data></Cell>
+        <Cell ss:StyleID="MetaLabel"><Data ss:Type="String">Valor total</Data></Cell>
+        <Cell ss:StyleID="CellMoney"><Data ss:Type="Number">${totalValue}</Data></Cell>
+      </Row>
+      <Row>
+        ${headers.map((header) => `<Cell ss:StyleID="Header"><Data ss:Type="String">${escapeHtml(header)}</Data></Cell>`).join('')}
+      </Row>
+      ${
+        sheetRows.length
+          ? sheetRows
+              .map(
+                (row, index) => {
+                  const baseStyle = index % 2 === 0 ? 'Cell' : 'CellAlt';
+                  const dateStyle = index % 2 === 0 ? 'CellDate' : 'CellDateAlt';
+                  const moneyStyle = index % 2 === 0 ? 'CellMoney' : 'CellMoneyAlt';
+                  return `
+                  <Row>
+                    <Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(String(row[0] || '-'))}</Data></Cell>
+                    <Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(String(row[1] || '-'))}</Data></Cell>
+                    <Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(String(row[2] || '-'))}</Data></Cell>
+                    ${
+                      toSpreadsheetDateTime(row[3])
+                        ? `<Cell ss:StyleID="${dateStyle}"><Data ss:Type="DateTime">${escapeHtml(toSpreadsheetDateTime(row[3]))}</Data></Cell>`
+                        : `<Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(String(row[3] || '-'))}</Data></Cell>`
+                    }
+                    <Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(formatCnpj(row[4] || ''))}</Data></Cell>
+                    <Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(String(row[5] || '-'))}</Data></Cell>
+                    <Cell ss:StyleID="${moneyStyle}"><Data ss:Type="Number">${Number.isFinite(Number(row[6])) ? Number(row[6]) : 0}</Data></Cell>
+                    <Cell ss:StyleID="${baseStyle}"><Data ss:Type="String">${escapeHtml(String(row[7] || '-'))}</Data></Cell>
+                  </Row>
+                `;
+                }
+              )
+              .join('')
+          : `<Row><Cell ss:StyleID="Cell" ss:MergeAcross="7"><Data ss:Type="String">Nenhum documento localizado.</Data></Cell></Row>`
+      }
+    </Table>
+  `;
+}
+
+function describeCompareSpedModel(modelo) {
+  const code = String(modelo || '').trim();
+  if (!code) {
+    return '-';
+  }
+  if (code === '55') {
+    return 'NF-e';
+  }
+  if (code === '57') {
+    return 'CT-e';
+  }
+  if (code === '65') {
+    return 'NFC-e';
+  }
+  return `Modelo ${code}`;
+}
+
+function getCompareReportTotals(report) {
+  const rows = Array.isArray(report?.rows) ? report.rows : [];
+  return rows.reduce(
+    (acc, row) => {
+      acc.totalSpedValue += Number.isFinite(Number(row?.valorSped)) ? Number(row.valorSped) : 0;
+      acc.totalDominioValue += Number.isFinite(Number(row?.valorDominio)) ? Number(row.valorDominio) : 0;
+
+      if (row?.status === 'Somente no SPED') {
+        acc.onlySpedValue += Number.isFinite(Number(row?.valorSped)) ? Number(row.valorSped) : 0;
+      }
+
+      if (row?.status === 'Somente no Dominio') {
+        acc.onlyDominioValue += Number.isFinite(Number(row?.valorDominio)) ? Number(row.valorDominio) : 0;
+      }
+
+      return acc;
+    },
+    {
+      totalSpedValue: 0,
+      totalDominioValue: 0,
+      onlySpedValue: 0,
+      onlyDominioValue: 0
+    }
+  );
+}
+
+function toSpreadsheetDateTime(value) {
+  const text = String(value || '').trim();
+  if (!text || text === '-') {
+    return '';
+  }
+
+  const slashMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (slashMatch) {
+    const [, day, month, year] = slashMatch;
+    return `${year}-${month}-${day}T00:00:00.000`;
+  }
+
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    return `${year}-${month}-${day}T00:00:00.000`;
+  }
+
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) {
+    const year = String(parsed.getFullYear());
+    const month = String(parsed.getMonth() + 1).padStart(2, '0');
+    const day = String(parsed.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}T00:00:00.000`;
+  }
+
+  return '';
+}
+
+function toCompareApiDateRangeBoundary(value, endOfDay) {
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return `${text}${endOfDay ? 'T23:59:59.999Z' : 'T00:00:00.000Z'}`;
+  }
+
+  return text;
+}
+
+function pickCompareRowValue(primaryValue, fallbackValue) {
+  if (primaryValue != null && primaryValue !== '' && Number.isFinite(Number(primaryValue))) {
+    return Number(primaryValue);
+  }
+
+  if (fallbackValue != null && fallbackValue !== '' && Number.isFinite(Number(fallbackValue))) {
+    return Number(fallbackValue);
+  }
+
+  return 0;
+}
+
+function buildComparePdfBlob(report) {
+  const lines = buildComparePdfLines(report);
+  const pdfBytes = buildMinimalPdf(lines, `Comparacao SPED - ${report.companyName}`);
+  return new Blob([pdfBytes], { type: 'application/pdf' });
+}
+
+function buildComparePdfLines(report) {
+  const totals = getCompareReportTotals(report);
+  const onlySpedRows = report.rows.filter((row) => row.status === 'Somente no SPED');
+  const onlyDominioRows = report.rows.filter((row) => row.status === 'Somente no Dominio');
+  const divergentRows = report.rows.filter((row) => row.status === 'Divergente');
+  const lines = [
+    'Comparacao SPED x Dominio',
+    '=====================================================================',
+    `Empresa.....: ${stripPdfText(report.companyName)}`,
+    `CNPJ........: ${stripPdfText(formatCnpj(report.clientCnpj || ''))}`,
+    `Arquivo.....: ${stripPdfText(report.sourceFileName)}`,
+    `Competencia.: ${stripPdfText(report.competence || 'Nao informada')}`,
+    `Gerado em...: ${stripPdfText(formatDateTime(report.generatedAt || ''))}`,
+    ''
+  ];
+
+  lines.push('RESUMO');
+  lines.push('---------------------------------------------------------------------');
+  lines.push(`SPED documentos...........: ${report.summary.spedDocs}`);
+  lines.push(`SPED valor total..........: ${stripPdfText(formatCurrency(totals.totalSpedValue))}`);
+  lines.push(`Dominio documentos........: ${report.summary.dominioDocs}`);
+  lines.push(`Dominio valor total.......: ${stripPdfText(formatCurrency(totals.totalDominioValue))}`);
+  lines.push(`Encontrados nas duas bases: ${report.summary.matchedDocs}`);
+  lines.push(`Somente no SPED...........: ${report.summary.onlySpedDocs}`);
+  lines.push(`Valor faltante no SPED....: ${stripPdfText(formatCurrency(totals.onlyDominioValue))}`);
+  lines.push(`Somente na Dominio........: ${report.summary.onlyDominioDocs}`);
+  lines.push(`Valor faltante na Dominio.: ${stripPdfText(formatCurrency(totals.onlySpedValue))}`);
+  lines.push(`Divergencias..............: ${report.summary.divergentDocs}`);
+  lines.push('');
+
+  if (report.warnings.length) {
+    lines.push('AVISOS');
+    lines.push('---------------------------------------------------------------------');
+    report.warnings.slice(0, 12).forEach((warning) => {
+      lines.push(`- ${stripPdfText(warning)}`);
+    });
+    lines.push('');
+  }
+
+  appendComparePdfSection(lines, 'FALTANTES NO SPED', onlyDominioRows, 'dominio');
+  appendComparePdfSection(lines, 'FALTANTES NA DOMINIO', onlySpedRows, 'sped');
+  appendComparePdfSection(lines, 'DIVERGENCIAS', divergentRows, 'compare');
+
+  return lines;
+}
+
+function appendComparePdfSection(lines, title, rows, mode) {
+  lines.push(title);
+  lines.push('---------------------------------------------------------------------');
+
+  if (!rows.length) {
+    lines.push('Nenhum item encontrado.');
+    lines.push('');
+    return;
+  }
+
+  rows.slice(0, 120).forEach((row, index) => {
+    buildComparePdfRowBlock(row, mode, index + 1).forEach((line) => lines.push(line));
+    lines.push('');
+  });
+}
+
+function buildComparePdfRowBlock(row, mode, index) {
+  const useDominio = mode === 'dominio';
+  const useCompare = mode === 'compare';
+  const tipo = useCompare ? `${row.tipoSped || '-'} / ${row.tipoDominio || '-'}` : useDominio ? row.tipoDominio || '-' : row.tipoSped || '-';
+  const numero = useCompare ? `${row.numeroSped || '-'} / ${row.numeroDominio || '-'}` : useDominio ? row.numeroDominio || '-' : row.numeroSped || '-';
+  const serie = useCompare ? `${row.serieSped || '-'} / ${row.serieDominio || '-'}` : useDominio ? row.serieDominio || '-' : row.serieSped || '-';
+  const data = useCompare ? `${row.dataSped || '-'} / ${row.dataDominio || '-'}` : useDominio ? row.dataDominio || '-' : row.dataSped || '-';
+  const cnpj = useCompare
+    ? `${formatCnpj(row.emitenteCnpjSped || '')} / ${formatCnpj(row.emitenteCnpjDominio || '')}`
+    : formatCnpj(useDominio ? row.emitenteCnpjDominio || '' : row.emitenteCnpjSped || '');
+  const nome = useCompare
+    ? `${row.emitenteNomeSped || '-'} / ${row.emitenteNomeDominio || '-'}`
+    : useDominio ? row.emitenteNomeDominio || '-' : row.emitenteNomeSped || '-';
+  const valor = useCompare
+    ? `${formatOptionalCurrency(row.valorSped)} / ${formatOptionalCurrency(row.valorDominio)}`
+    : formatCurrency(pickCompareRowValue(useDominio ? row.valorDominio : row.valorSped, useDominio ? row.valorSped : row.valorDominio));
+  const lines = [
+    `${String(index).padStart(3, '0')} | ${stripPdfText(row.status || '-')}`,
+    `Tipo..: ${stripPdfText(tipo)}`,
+    `Serie.: ${stripPdfText(String(serie || '-'))}  Numero: ${stripPdfText(String(numero || '-'))}`,
+    `Data..: ${stripPdfText(String(data || '-'))}  Valor.: ${stripPdfText(String(valor || '-'))}`,
+    `CNPJ..: ${stripPdfText(String(cnpj || '-'))}`,
+    `Nome..: ${stripPdfText(String(nome || '-'))}`,
+    `Chave.: ${stripPdfText(row.chave || '-')}`
+  ];
+
+  if (row.observacao) {
+    wrapPdfText(`Obs...: ${stripPdfText(row.observacao)}`, 95).forEach((line) => lines.push(line));
+  }
+
+  return lines;
+}
+
+function wrapPdfText(text, maxLength) {
+  const normalized = stripPdfText(text || '');
+  if (normalized.length <= maxLength) {
+    return [normalized];
+  }
+
+  const words = normalized.split(/\s+/);
+  const lines = [];
+  let current = '';
+
+  words.forEach((word) => {
+    if (!word) {
+      return;
+    }
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > maxLength) {
+      if (current) {
+        lines.push(current);
+      }
+      current = word;
+    } else {
+      current = candidate;
+    }
+  });
+
+  if (current) {
+    lines.push(current);
+  }
+
+  return lines.length ? lines : [normalized];
+}
+
+function stripPdfText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7E]/g, '?');
+}
+
+function buildMinimalPdf(lines, title) {
+  const sanitizedTitle = stripPdfText(title || 'Relatorio');
+  const normalizedLines = (Array.isArray(lines) ? lines : []).map((line) => stripPdfText(line));
+  const pageWidth = 595;
+  const pageHeight = 842;
+  const margin = 40;
+  const titleFontSize = 16;
+  const bodyFontSize = 10;
+  const lineHeight = 14;
+  const linesPerPage = Math.max(1, Math.floor((pageHeight - margin * 2 - 60) / lineHeight));
+  const pages = [];
+
+  for (let index = 0; index < normalizedLines.length; index += linesPerPage) {
+    pages.push(normalizedLines.slice(index, index + linesPerPage));
+  }
+
+  if (!pages.length) {
+    pages.push(['Sem dados para exibir.']);
+  }
+
+  const pageObjects = [];
+  const contentObjects = [];
+  pages.forEach((pageLines, index) => {
+    const contentObjectNumber = 4 + index * 2;
+    const pageObjectNumber = 5 + index * 2;
+    const content = buildPdfPageContent({
+      title: sanitizedTitle,
+      pageLines,
+      pageNumber: index + 1,
+      totalPages: pages.length,
+      pageWidth,
+      pageHeight,
+      margin,
+      titleFontSize,
+      bodyFontSize,
+      lineHeight
+    });
+    contentObjects.push(`${contentObjectNumber} 0 obj\n<< /Length ${content.length} >>\nstream\n${content}\nendstream\nendobj\n`);
+    pageObjects.push(
+      `${pageObjectNumber} 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObjectNumber} 0 R >>\nendobj\n`
+    );
+  });
+
+  const kids = pages.map((_, index) => `${5 + index * 2} 0 R`).join(' ');
+  const objects = [
+    `1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n`,
+    `2 0 obj\n<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>\nendobj\n`,
+    `3 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n`,
+    ...contentObjects,
+    ...pageObjects
+  ];
+
+  let pdf = '%PDF-1.4\n';
+  const offsets = ['0000000000 65535 f \n'];
+  objects.forEach((objectString) => {
+    offsets.push(`${String(pdf.length).padStart(10, '0')} 00000 n \n`);
+    pdf += objectString;
+  });
+
+  const xrefStart = pdf.length;
+  pdf += `xref\n0 ${objects.length + 1}\n${offsets.join('')}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`;
+  return new TextEncoder().encode(pdf);
+}
+
+function buildPdfPageContent({
+  title,
+  pageLines,
+  pageNumber,
+  totalPages,
+  pageWidth,
+  pageHeight,
+  margin,
+  titleFontSize,
+  bodyFontSize,
+  lineHeight
+}) {
+  const lines = [];
+  const safeTitle = escapePdfText(title);
+  const topY = pageHeight - margin - titleFontSize;
+  lines.push(`BT /F1 ${titleFontSize} Tf ${margin} ${topY} Td (${safeTitle}) Tj ET`);
+  lines.push(`BT /F1 9 Tf ${margin} ${topY - 22} Td (Pagina ${pageNumber} de ${totalPages}) Tj ET`);
+
+  let currentY = topY - 48;
+  pageLines.forEach((line) => {
+    const safeLine = escapePdfText(line);
+    lines.push(`BT /F1 ${bodyFontSize} Tf ${margin} ${currentY} Td (${safeLine}) Tj ET`);
+    currentY -= lineHeight;
+  });
+
+  return lines.join('\n');
+}
+
+function escapePdfText(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\(/g, '\\(')
+    .replace(/\)/g, '\\)');
+}
+
+function openCompareSpedReportModal() {
+  if (!state.compareSped.report) {
+    pushToast('Gere a comparacao antes de abrir o resumo.', 'info');
+    return;
+  }
+
+  openModal({ kind: 'compare-sped-report' });
+}
+
+function renderCompareSpedReportModal() {
+  const report = state.compareSped.report;
+  if (!report) {
+    return '';
+  }
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal compare-report-modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Resumo da comparacao</h3>
+          <p class="modal-subtitle">${escapeHtml(report.companyName)} - ${escapeHtml(report.competence || 'competencia nao informada')}</p>
+        </div>
+        <div class="modal-body">
+          <div class="compare-report-grid">
+            ${statCard('file', 'SPED', String(report.summary.spedDocs), 'documentos lidos', 'neutral')}
+            ${statCard('file', 'Dominio', String(report.summary.dominioDocs), 'documentos comparados', 'info')}
+            ${statCard('alert', 'Divergencias', String(report.summary.issuesCount), 'itens fora do esperado', 'warning')}
+          </div>
+          <div class="table-wrap compare-report-table">
+            <table>
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Chave</th>
+                  <th>Numero SPED</th>
+                  <th>Numero Dominio</th>
+                  <th>Observacao</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${
+                  report.rows.slice(0, 20).map((row) => `
+                    <tr>
+                      <td>${escapeHtml(row.status)}</td>
+                      <td>${escapeHtml(row.chave)}</td>
+                      <td>${escapeHtml(String(row.numeroSped || '-'))}</td>
+                      <td>${escapeHtml(String(row.numeroDominio || '-'))}</td>
+                      <td>${escapeHtml(row.observacao || '-')}</td>
+                    </tr>
+                  `).join('')
+                }
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" type="button" data-action="close-modal">Fechar</button>
+          <button class="btn primary" type="button" data-action="compare-sped-download">Baixar ${escapeHtml(state.compareSped.outputFormat === 'PDF' ? 'PDF' : 'Excel')}</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 async function copyTextToClipboard(value) {
   if (navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -12787,6 +14469,8 @@ function icon(name) {
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M10.3 3.9L1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"></path><path d="M12 9v4"></path><circle cx="12" cy="17" r="1"></circle></svg>',
     settings:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1a2 2 0 0 1 0 2.8 2 2 0 0 1-2.8 0l-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 0 1-4 0v-.2a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H3a2 2 0 0 1 0-4h.2a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.9.3h.1a1.7 1.7 0 0 0 1-1.5V3a2 2 0 0 1 4 0v.2a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1a2 2 0 0 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.9v.1a1.7 1.7 0 0 0 1.5 1H21a2 2 0 0 1 0 4h-.2a1.7 1.7 0 0 0-1.5 1z"></path></svg>',
+    compare:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 4v16"></path><path d="M4 8l4-4 4 4"></path><path d="M16 20V4"></path><path d="M12 16l4 4 4-4"></path></svg>',
     menu:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18"></path><path d="M3 12h18"></path><path d="M3 18h18"></path></svg>',
     'arrow-left':

@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { DominioNfeCatalogRecord, DominioNfeXmlRecord, DominioNfeXmlSource } from './dominio-nfe.types';
+import { resolveDominioPythonBin } from './python-bin';
 
 type PythonRecord = {
   catalogo_id: number;
@@ -14,7 +15,7 @@ type PythonRecord = {
 
 @Injectable()
 export class RealDominioNfeClient implements DominioNfeXmlSource {
-  private readonly pythonBin = process.env.DOMINIO_PYTHON_BIN || 'python';
+  private readonly pythonBin = resolveDominioPythonBin();
   private readonly connectionString = process.env.DOMINIO_ODBC_CONNECTION_STRING || '';
   private readonly scriptPath = join(process.cwd(), 'scripts', 'dominio_nfe_export.py');
 

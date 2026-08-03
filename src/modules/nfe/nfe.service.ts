@@ -9,6 +9,7 @@ import {
 } from '@prisma/client';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import JSZip from 'jszip';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
 import { DANFE_PDF_GENERATOR, DanfePdfGenerator } from '../../integrations/danfe/danfe.types';
 import {
@@ -31,8 +32,10 @@ import { GetDominioNfeXmlDto } from './dto/dominio-xml.dto';
 import { ImportNfeFromDominioDto } from './dto/import-dominio.dto';
 import { EnableAllNfeSyncDto } from './dto/enable-all-sync.dto';
 import { EnableNfeSyncDto } from './dto/enable-sync.dto';
+import { DownloadLoteDto } from './dto/download-lote.dto';
 import { ImportNfeXmlDto } from './dto/import-xml.dto';
 import { PauseNfeSyncDto } from './dto/pause-sync.dto';
+import { PreviewDominioDocumentsDto } from './dto/preview-dominio-documents.dto';
 import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
 import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
@@ -647,6 +650,117 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  async downloadLote(dto: DownloadLoteDto) {
+    const uniqueIds = [...new Set(dto.ids)];
+    const tipoArquivo = dto.tipoArquivo ?? 'ambos';
+    const docs = await this.prisma.nfeDocumento.findMany({
+      where: {
+        id: {
+          in: uniqueIds
+        },
+        ...(dto.clienteId ? { clienteId: dto.clienteId } : {})
+      },
+      select: {
+        id: true,
+        clienteId: true,
+        chaveAcesso: true,
+        xmlCompletoPath: true,
+        xmlResumoPath: true,
+        xmlCompletoDisponivel: true,
+        resumoDisponivel: true
+      }
+    });
+
+    if (docs.length === 0) {
+      throw new NotFoundException('Nenhuma NF-e encontrada para os IDs informados');
+    }
+
+    const docsById = new Map(docs.map((doc) => [doc.id, doc] as const));
+    const orderedDocs = uniqueIds.map((id) => docsById.get(id)).filter((doc): doc is (typeof docs)[number] => Boolean(doc));
+    const idsNaoEncontrados = uniqueIds.filter((id) => !docsById.has(id));
+    const erros: Array<{ id: string; erro: string }> = [];
+    const zip = new JSZip();
+    let totalArquivosIncluidos = 0;
+
+    for (const doc of orderedDocs) {
+      let xmlBuffer: Buffer | null = null;
+
+      if (tipoArquivo === 'ambos' || tipoArquivo === 'xml') {
+        const xmlPath = doc.xmlCompletoPath ?? doc.xmlResumoPath;
+        if (!xmlPath) {
+          erros.push({ id: doc.id, erro: 'XML nao disponivel para esta NF-e' });
+        } else {
+          try {
+            xmlBuffer = await this.storage.getObject(xmlPath);
+            zip.file(`xml/NFE-${this.toSafeFileName(doc.chaveAcesso)}.xml`, xmlBuffer);
+            totalArquivosIncluidos += 1;
+          } catch (error) {
+            erros.push({ id: doc.id, erro: `Falha ao ler XML: ${this.toErrorMessage(error)}` });
+          }
+        }
+      }
+
+      if (tipoArquivo === 'ambos' || tipoArquivo === 'danfe') {
+        if (!doc.xmlCompletoPath) {
+          erros.push({ id: doc.id, erro: 'DANFE indisponivel porque a NF-e nao possui XML completo armazenado.' });
+        } else {
+          try {
+            const danfeXmlBuffer = xmlBuffer ?? (await this.storage.getObject(doc.xmlCompletoPath));
+            const xml = danfeXmlBuffer.toString('utf8');
+            const pdfBuffer = await this.danfePdfGenerator.generateNfePdf({
+              xml,
+              chaveAcesso: doc.chaveAcesso
+            });
+            zip.file(`danfe/DANFE-${this.toSafeFileName(doc.chaveAcesso)}.pdf`, pdfBuffer);
+            totalArquivosIncluidos += 1;
+          } catch (error) {
+            erros.push({ id: doc.id, erro: `Falha ao gerar DANFE: ${this.toErrorMessage(error)}` });
+          }
+        }
+      }
+    }
+
+    if (totalArquivosIncluidos === 0) {
+      throw new NotFoundException('Nenhum arquivo disponivel para os filtros informados');
+    }
+
+    zip.file(
+      'manifest.json',
+      JSON.stringify(
+        {
+          geradoEm: new Date().toISOString(),
+          tipoArquivo,
+          totalSolicitados: uniqueIds.length,
+          totalDocumentosEncontrados: docs.length,
+          totalArquivosIncluidos,
+          idsNaoEncontrados,
+          erros
+        },
+        null,
+        2
+      )
+    );
+
+    const zipBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 }
+    });
+
+    const fileName = `nfe-lote-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
+
+    return {
+      fileName,
+      contentType: 'application/zip',
+      contentBase64: zipBuffer.toString('base64'),
+      totalSolicitados: uniqueIds.length,
+      totalDocumentosEncontrados: docs.length,
+      totalArquivosIncluidos,
+      idsNaoEncontrados,
+      erros
+    };
+  }
+
   async sincronizarEventosDocumentos(params: {
     clienteId: string;
     documentoIds?: string[];
@@ -860,6 +974,86 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  async previewDominioDocuments(dto: PreviewDominioDocumentsDto) {
+    const batchSize = Math.min(Math.max(1, dto.limit ?? 500), 500);
+    const maxDocuments = Math.min(Math.max(1, dto.limit ?? 5000), 5000);
+    const collected: Array<{
+      catalogoId: number;
+      chaveAcesso: string;
+      numeroNfe: string;
+      serie: string;
+      modelo: string;
+      dataEmissao: string | Date | null;
+      valor: number;
+      emitenteNome: string;
+      emitenteCnpj: string;
+      destinatarioNome: string;
+      destinatarioCnpj: string;
+    }> = [];
+    let cursor: number | undefined;
+
+    while (collected.length < maxDocuments) {
+      const documents = await this.loadDominioDocumentsForClient({
+        clienteId: dto.clienteId,
+        estabelecimentoId: dto.estabelecimentoId,
+        limit: Math.min(batchSize, maxDocuments - collected.length),
+        dataEmissaoInicio: dto.dataEmissaoInicio,
+        dataEmissaoFim: dto.dataEmissaoFim,
+        catalogoIdMinExclusive: cursor,
+        sortDirection: 'asc'
+      });
+
+      if (!documents.length) {
+        break;
+      }
+
+      for (const document of documents) {
+        cursor = Math.max(cursor ?? 0, document.catalogoId);
+
+        const xml = this.decodeXml(document.xmlBase64);
+        if (this.isIgnorableDominioXml(xml)) {
+          continue;
+        }
+
+        const classifiedXml = this.parser.classify(xml);
+        if (classifiedXml.documentType !== 'nfe' || classifiedXml.contentType === 'evento') {
+          continue;
+        }
+
+        const parsed = this.parser.parse(xml);
+        collected.push({
+          catalogoId: document.catalogoId,
+          chaveAcesso: this.normalizeChaveAcesso(document.chaveAcesso) ?? parsed.chaveAcesso,
+          numeroNfe: parsed.numeroNfe ?? '',
+          serie: parsed.serie ?? '',
+          modelo: parsed.modelo ?? '55',
+          dataEmissao: parsed.dataEmissao ?? document.dataEmissao ?? null,
+          valor: Number(this.toDecimal(parsed.valorTotal)),
+          emitenteNome: parsed.razaoSocialEmitente ?? '-',
+          emitenteCnpj: parsed.cnpjEmitente ?? '',
+          destinatarioNome: parsed.razaoSocialDestinatario ?? '-',
+          destinatarioCnpj: parsed.cnpjDestinatario ?? ''
+        });
+
+        if (collected.length >= maxDocuments) {
+          break;
+        }
+      }
+
+      if (documents.length < batchSize) {
+        break;
+      }
+    }
+
+    return {
+      items: collected,
+      total: collected.length,
+      page: 1,
+      pageSize: collected.length,
+      totalPages: collected.length ? 1 : 0
+    };
+  }
+
   async getDominioXml(dto: GetDominioNfeXmlDto) {
     await this.ensureClient(dto.clienteId);
 
@@ -1016,6 +1210,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       ambiente: dto.ambiente,
       estabelecimentoId: dto.estabelecimentoId,
       limitControles: dto.limitControles,
+      dataEmissaoInicio: dto.dataEmissaoInicio,
       scanFullHistory: true
     });
   }
@@ -1036,6 +1231,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       ambiente: dto.ambiente,
       estabelecimentoId: dto.estabelecimentoId,
       limitControles: dto.limitControles,
+      dataEmissaoInicio: dto.dataEmissaoInicio,
       scanFullHistory: true
     });
   }
@@ -1777,6 +1973,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     ambiente?: NfeAmbiente;
     estabelecimentoId?: string;
     limitControles?: number;
+    dataEmissaoInicio?: string;
     scanFullHistory?: boolean;
   }): Promise<NfeSyncRunResult> {
     const controls = await this.prisma.nfeSyncControle.findMany({
@@ -1819,7 +2016,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           clienteId: control.clienteId,
           estabelecimentoId: control.estabelecimentoId,
           limit: limitPorControle,
-          dataEmissaoInicio: NfeService.DOMINIO_CHAVE_DATA_EMISSAO_INICIO,
+          dataEmissaoInicio: params.dataEmissaoInicio ?? NfeService.DOMINIO_CHAVE_DATA_EMISSAO_INICIO,
           catalogoIdMinExclusive: savedCursor,
           scanFullHistory: params.scanFullHistory,
           sortDirection: 'asc'
@@ -2190,6 +2387,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     ambiente?: NfeAmbiente;
     estabelecimentoId?: string;
     limitControles?: number;
+    dataEmissaoInicio?: string;
     scanFullHistory?: boolean;
   }): Promise<NfeDownloadByKeyPreviewResult> {
     const controls = await this.prisma.nfeSyncControle.findMany({
@@ -2222,7 +2420,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           clienteId: control.clienteId,
           estabelecimentoId: establishment.id,
           limit: limitPorControle,
-          dataEmissaoInicio: NfeService.DOMINIO_CHAVE_DATA_EMISSAO_INICIO,
+          dataEmissaoInicio: params.dataEmissaoInicio ?? NfeService.DOMINIO_CHAVE_DATA_EMISSAO_INICIO,
           catalogoIdMinExclusive: this.toSafeCatalogoCursor(control.ultimoNsuConsultado),
           scanFullHistory: params.scanFullHistory,
           sortDirection: 'asc'

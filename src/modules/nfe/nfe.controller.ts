@@ -13,8 +13,11 @@ import { EnableAllNfeSyncDto } from './dto/enable-all-sync.dto';
 import { EnableNfeSyncDto } from './dto/enable-sync.dto';
 import { DownloadNfeDocumentDto } from './dto/download-document.dto';
 import { DownloadNfePdfDto } from './dto/download-pdf.dto';
+import { DownloadLoteDto } from './dto/download-lote.dto';
+import { DownloadLoteResponseDto } from './dto/download-lote-response.dto';
 import { ImportNfeXmlDto } from './dto/import-xml.dto';
 import { PauseNfeSyncDto } from './dto/pause-sync.dto';
+import { PreviewDominioDocumentsDto } from './dto/preview-dominio-documents.dto';
 import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
 import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
@@ -77,6 +80,13 @@ export class NfeController {
     return this.nfeService.getDanfe(id, query.clienteId);
   }
 
+  @Post('download-lote')
+  @ApiOkResponse({ type: DownloadLoteResponseDto })
+  @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
+  downloadLote(@Body() dto: DownloadLoteDto) {
+    return this.nfeService.downloadLote(dto);
+  }
+
   @Post('importar-xml')
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   importXml(@Body() dto: ImportNfeXmlDto) {
@@ -94,6 +104,12 @@ export class NfeController {
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   importFromDominio(@Body() dto: ImportNfeFromDominioDto) {
     return this.nfeService.importFromDominio(dto);
+  }
+
+  @Post('dominio/documentos/preview')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  previewDominioDocuments(@Body() dto: PreviewDominioDocumentsDto) {
+    return this.nfeService.previewDominioDocuments(dto);
   }
 
   @Post('dominio/xml')

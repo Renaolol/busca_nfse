@@ -268,10 +268,14 @@ Eventos sao vinculados pela chave da NFS-e referenciada (`chNFSe`) e salvos em `
 - `POST /nfse/download-lote`: gera um arquivo ZIP em Base64 para baixar XML/DANFSE em lote. Quando houver eventos de NFS-e vinculados e o lote incluir XMLs, os XMLs de evento tambem entram no ZIP.
 - `POST /nfse/reprocessar-xmls`: reprocessa XMLs ja salvos para preencher campos faltantes e (opcionalmente) regenerar DANFSE.
 - `POST /nfse/reprocessar-danfses`: reprocessa DANFSEs salvas para atualizar PDFs legados ou ausentes para o modelo atual.
+- `GET /nfe/:id/xml`: retorna XML da NF-e com `fileName`, `contentType` e `contentBase64`.
+- `GET /nfe/:id/danfe`: retorna DANFE em PDF com `fileName`, `contentType` e `contentBase64`.
+- `POST /nfe/download-lote`: gera um arquivo ZIP em Base64 para baixar XML/DANFE em lote, com `tipoArquivo=ambos|xml|danfe`.
 - `POST /nfse/eventos/sincronizar`: consulta manualmente os eventos das NFS-e ja armazenadas, usando a chave de acesso da nota e o certificado do estabelecimento, sem alterar NSU. O import aceita tanto XMLs de evento retornados pelo ADN quanto eventos estruturados em JSON.
 - `GET /nfse`, `GET /nfse/separadas` e `GET /nfse/:id` retornam tambem `eventos` vinculados a cada nota.
 - Os endpoints `GET /nfse/:id`, `GET /nfse/:id/xml` e `GET /nfse/:id/danfse` exigem `?clienteId=...` para garantir escopo de acesso por cliente.
-  - `clienteId` deve ser UUID valido.
+- Os endpoints `GET /nfe/:id`, `GET /nfe/:id/xml` e `GET /nfe/:id/danfe` exigem `?clienteId=...` para garantir escopo de acesso por cliente.
+- `clienteId` deve ser UUID valido.
 
 Exemplo de body para sincronizacao manual de eventos:
 
@@ -410,7 +414,7 @@ O layout agora inclui menus dedicados para armazenamento por documento fiscal:
 - `Clientes`: cadastro/edicao, certificados e contexto ativo.
 - `XMLs NFS-e`: filtros, listagem e download em lote (ZIP XML/DANFSE) das linhas selecionadas.
 - `Buscas NF-e`: execucao e acompanhamento da importacao de NF-e.
-- `XMLs NF-e`: armazenamento e consulta de documentos de compra e venda.
+- `XMLs NF-e`: armazenamento, consulta e download em lote (ZIP XML/DANFE) dos documentos selecionados.
 - `XMLs CT-e`: armazenamento e consulta de documentos de transporte.
 - `Auditoria`: consulta de trilha operacional por `cliente_id` e `acao`.
 Use a lista suspensa de clientes para selecionar o contexto ativo; ao selecionar, as notas do cliente sao carregadas automaticamente.
