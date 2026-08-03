@@ -51,6 +51,31 @@ export class NfseService {
       }
     }
 
+    if (query.all) {
+      const rawItems = await this.prisma.nfseDocumento.findMany({
+        where,
+        orderBy: { dataEmissao: 'desc' },
+        skip,
+        take: pageSize,
+        include: this.nfseDocumentoInclude()
+      });
+      const { items: uniqueItems, duplicatesRemoved } = this.deduplicateDocumentosForList(rawItems);
+      if (duplicatesRemoved > 0) {
+        this.logger.warn(`Listagem de NFS-e ocultou ${duplicatesRemoved} duplicata(s) legada(s) por ambiente + chave_acesso.`);
+      }
+
+      const total = uniqueItems.length;
+      const items = await Promise.all(uniqueItems.map((item) => this.enrichDocumentoSummary(item)));
+
+      return {
+        items,
+        total,
+        page,
+        pageSize,
+        totalPages: 1
+      };
+    }
+
     const [total, rawItems] = await Promise.all([
       this.prisma.nfseDocumento.count({ where }),
       this.prisma.nfseDocumento.findMany({

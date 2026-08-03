@@ -84,7 +84,6 @@ describe('NfseService', () => {
   });
 
   it('ignora page/pageSize e usa o limite de seguranca quando all=true', async () => {
-    prisma.nfseDocumento.count.mockResolvedValueOnce(245);
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([]);
 
     const result = await service.findAll({
@@ -100,9 +99,10 @@ describe('NfseService', () => {
         take: 10000
       })
     );
+    expect(prisma.nfseDocumento.count).not.toHaveBeenCalled();
     expect(result).toEqual({
       items: [],
-      total: 245,
+      total: 0,
       page: 1,
       pageSize: 10000,
       totalPages: 1
@@ -157,7 +157,7 @@ describe('NfseService', () => {
       all: true
     });
 
-    expect(result.total).toBe(2);
+    expect(result.total).toBe(1);
     expect(result.items).toHaveLength(1);
     expect(result.items[0].id).toBe('doc-recente');
   });
