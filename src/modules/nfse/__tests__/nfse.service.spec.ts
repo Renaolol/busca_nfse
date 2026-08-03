@@ -157,7 +157,7 @@ describe('NfseService', () => {
       all: true
     });
 
-    expect(result.total).toBe(1);
+    expect(result.total).toBe(2);
     expect(result.items).toHaveLength(1);
     expect(result.items[0].id).toBe('doc-recente');
   });

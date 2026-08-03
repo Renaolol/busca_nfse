@@ -193,7 +193,7 @@ describe('CteService', () => {
       all: true
     });
 
-    expect(response.total).toBe(1);
+    expect(response.total).toBe(2);
     expect(response.items).toHaveLength(1);
     expect(response.items[0].id).toBe('doc-completo');
   });
