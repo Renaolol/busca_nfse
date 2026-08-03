@@ -53,15 +53,20 @@ export class CteService {
         take: pageSize
       })
     ]);
+    const { items: uniqueDocuments, duplicatesRemoved } = this.deduplicateDocumentosForList(documents);
+    if (duplicatesRemoved > 0) {
+      this.logger.warn(`Listagem de CT-e ocultou ${duplicatesRemoved} duplicata(s) legada(s) por ambiente + chave_acesso.`);
+    }
 
-    const items = await Promise.all(documents.map((document) => this.enrichDocument(document)));
+    const items = await Promise.all(uniqueDocuments.map((document) => this.enrichDocument(document)));
+    const effectiveTotal = query.all ? items.length : total;
 
     return {
       items,
-      total,
+      total: effectiveTotal,
       page,
       pageSize,
-      totalPages: Math.max(1, Math.ceil(total / pageSize))
+      totalPages: Math.max(1, Math.ceil(effectiveTotal / pageSize))
     };
   }
 
@@ -803,6 +808,123 @@ export class CteService {
     }
   }
 
+  private deduplicateDocumentosForList<
+    T extends {
+      ambiente: NfeAmbiente;
+      chaveAcesso: string;
+      xmlCompletoDisponivel?: boolean | null;
+      xmlCompletoPath?: string | null;
+      resumoDisponivel?: boolean | null;
+      xmlResumoPath?: string | null;
+      numeroNfe?: string | null;
+      serie?: string | null;
+      dataEmissao?: Date | null;
+      dataAutorizacao?: Date | null;
+      cnpjEmitente?: string | null;
+      razaoSocialEmitente?: string | null;
+      cnpjDestinatario?: string | null;
+      razaoSocialDestinatario?: string | null;
+      valorTotal?: Prisma.Decimal | null;
+      updatedAt?: Date | null;
+      createdAt?: Date | null;
+    }
+  >(documents: T[]): { items: T[]; duplicatesRemoved: number } {
+    const byBusinessKey = new Map<string, T>();
+
+    for (const document of documents) {
+      const businessKey = `${document.ambiente}:${document.chaveAcesso}`;
+      const current = byBusinessKey.get(businessKey);
+      if (!current || this.isPreferredListDocumento(document, current)) {
+        byBusinessKey.set(businessKey, document);
+      }
+    }
+
+    const items = Array.from(byBusinessKey.values()).sort((left, right) => {
+      const emissaoDiff = this.toTimestamp(right.dataEmissao) - this.toTimestamp(left.dataEmissao);
+      if (emissaoDiff !== 0) {
+        return emissaoDiff;
+      }
+
+      const createdDiff = this.toTimestamp(right.createdAt) - this.toTimestamp(left.createdAt);
+      if (createdDiff !== 0) {
+        return createdDiff;
+      }
+
+      return this.toTimestamp(right.updatedAt) - this.toTimestamp(left.updatedAt);
+    });
+
+    return {
+      items,
+      duplicatesRemoved: documents.length - items.length
+    };
+  }
+
+  private isPreferredListDocumento<
+    T extends {
+      xmlCompletoDisponivel?: boolean | null;
+      xmlCompletoPath?: string | null;
+      resumoDisponivel?: boolean | null;
+      xmlResumoPath?: string | null;
+      numeroNfe?: string | null;
+      serie?: string | null;
+      dataEmissao?: Date | null;
+      dataAutorizacao?: Date | null;
+      cnpjEmitente?: string | null;
+      razaoSocialEmitente?: string | null;
+      cnpjDestinatario?: string | null;
+      razaoSocialDestinatario?: string | null;
+      valorTotal?: Prisma.Decimal | null;
+      updatedAt?: Date | null;
+      createdAt?: Date | null;
+    }
+  >(candidate: T, current: T): boolean {
+    const scoreDiff = this.scoreListDocumento(candidate) - this.scoreListDocumento(current);
+    if (scoreDiff !== 0) {
+      return scoreDiff > 0;
+    }
+
+    const updatedDiff = this.toTimestamp(candidate.updatedAt) - this.toTimestamp(current.updatedAt);
+    if (updatedDiff !== 0) {
+      return updatedDiff > 0;
+    }
+
+    return this.toTimestamp(candidate.createdAt) > this.toTimestamp(current.createdAt);
+  }
+
+  private scoreListDocumento<
+    T extends {
+      xmlCompletoDisponivel?: boolean | null;
+      xmlCompletoPath?: string | null;
+      resumoDisponivel?: boolean | null;
+      xmlResumoPath?: string | null;
+      numeroNfe?: string | null;
+      serie?: string | null;
+      dataEmissao?: Date | null;
+      dataAutorizacao?: Date | null;
+      cnpjEmitente?: string | null;
+      razaoSocialEmitente?: string | null;
+      cnpjDestinatario?: string | null;
+      razaoSocialDestinatario?: string | null;
+      valorTotal?: Prisma.Decimal | null;
+    }
+  >(document: T): number {
+    return [
+      Boolean(document.xmlCompletoDisponivel),
+      Boolean(document.xmlCompletoPath),
+      Boolean(document.resumoDisponivel),
+      Boolean(document.xmlResumoPath),
+      Boolean(document.numeroNfe),
+      Boolean(document.serie),
+      Boolean(document.dataEmissao),
+      Boolean(document.dataAutorizacao),
+      Boolean(document.cnpjEmitente),
+      Boolean(document.razaoSocialEmitente),
+      Boolean(document.cnpjDestinatario),
+      Boolean(document.razaoSocialDestinatario),
+      document.valorTotal != null
+    ].filter(Boolean).length;
+  }
+
   private async enrichDocument<T extends {
     chaveAcesso: string;
     numeroNfe?: string | null;
@@ -873,6 +995,10 @@ export class CteService {
 
     const digits = value.replace(/\D/g, '');
     return digits.length === 44 ? digits : undefined;
+  }
+
+  private toTimestamp(value?: Date | null): number {
+    return value instanceof Date ? value.getTime() : 0;
   }
 
   private extractModeloFromChave(chaveAcesso?: string): string | undefined {

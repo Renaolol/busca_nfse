@@ -189,6 +189,67 @@ describe('NfeService', () => {
     });
   });
 
+  it('colapsa duplicatas legadas por ambiente e chave_acesso na listagem ampla', async () => {
+    prisma.nfeDocumento.count.mockResolvedValueOnce(2);
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-resumo',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        numeroNfe: '123',
+        serie: '1',
+        dataEmissao: new Date('2026-06-01T00:00:00.000Z'),
+        dataAutorizacao: null,
+        cnpjEmitente: '12345678000199',
+        razaoSocialEmitente: 'EMITENTE LTDA',
+        cnpjDestinatario: '99887766000155',
+        razaoSocialDestinatario: 'DESTINATARIO LTDA',
+        valorTotal: new Prisma.Decimal('890.00'),
+        resumoDisponivel: true,
+        xmlCompletoDisponivel: false,
+        xmlResumoPath: 'nfe/producao/12345678000199/2026/06/resumos/a.xml',
+        xmlCompletoPath: null,
+        updatedAt: new Date('2026-07-31T16:23:00.000Z'),
+        createdAt: new Date('2026-07-31T16:23:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-completo',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        numeroNfe: '123',
+        serie: '1',
+        dataEmissao: new Date('2026-06-01T00:00:00.000Z'),
+        dataAutorizacao: new Date('2026-06-01T01:00:00.000Z'),
+        cnpjEmitente: '12345678000199',
+        razaoSocialEmitente: 'EMITENTE LTDA',
+        cnpjDestinatario: '99887766000155',
+        razaoSocialDestinatario: 'DESTINATARIO LTDA',
+        valorTotal: new Prisma.Decimal('890.00'),
+        resumoDisponivel: true,
+        xmlCompletoDisponivel: true,
+        xmlResumoPath: 'nfe/producao/12345678000199/2026/06/resumos/b.xml',
+        xmlCompletoPath: 'nfe/producao/12345678000199/2026/06/xml/b.xml',
+        updatedAt: new Date('2026-08-03T09:31:00.000Z'),
+        createdAt: new Date('2026-08-03T09:31:00.000Z'),
+        eventos: []
+      }
+    ]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      all: true
+    });
+
+    expect(result.total).toBe(1);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].id).toBe('doc-completo');
+  });
+
   it('retorna estatisticas agregadas do dashboard por cliente', async () => {
     prisma.nfeDocumento.count.mockResolvedValueOnce(12).mockResolvedValueOnce(9);
     prisma.nfeDocumento.groupBy

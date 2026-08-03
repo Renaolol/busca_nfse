@@ -61,14 +61,20 @@ export class NfseService {
         include: this.nfseDocumentoInclude()
       })
     ]);
-    const items = await Promise.all(rawItems.map((item) => this.enrichDocumentoSummary(item)));
+    const { items: uniqueItems, duplicatesRemoved } = this.deduplicateDocumentosForList(rawItems);
+    if (duplicatesRemoved > 0) {
+      this.logger.warn(`Listagem de NFS-e ocultou ${duplicatesRemoved} duplicata(s) legada(s) por ambiente + chave_acesso.`);
+    }
+
+    const items = await Promise.all(uniqueItems.map((item) => this.enrichDocumentoSummary(item)));
+    const effectiveTotal = query.all ? items.length : total;
 
     return {
       items,
-      total,
+      total: effectiveTotal,
       page,
       pageSize,
-      totalPages: Math.max(1, Math.ceil(total / pageSize))
+      totalPages: Math.max(1, Math.ceil(effectiveTotal / pageSize))
     };
   }
 
@@ -195,6 +201,103 @@ export class NfseService {
         orderBy: [{ dataEvento: 'desc' }, { createdAt: 'desc' }]
       }
     };
+  }
+
+  private deduplicateDocumentosForList<
+    T extends NfseDocumento & {
+      eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
+    }
+  >(documents: T[]): { items: T[]; duplicatesRemoved: number } {
+    const byBusinessKey = new Map<string, T>();
+
+    for (const document of documents) {
+      const businessKey = `${document.ambiente}:${document.chaveAcesso}`;
+      const current = byBusinessKey.get(businessKey);
+      if (!current || this.isPreferredListDocumento(document, current)) {
+        byBusinessKey.set(businessKey, document);
+      }
+    }
+
+    const items = Array.from(byBusinessKey.values()).sort((left, right) => {
+      const emissaoDiff = this.toTimestamp(right.dataEmissao) - this.toTimestamp(left.dataEmissao);
+      if (emissaoDiff !== 0) {
+        return emissaoDiff;
+      }
+
+      const updatedDiff = this.toTimestamp(right.updatedAt) - this.toTimestamp(left.updatedAt);
+      if (updatedDiff !== 0) {
+        return updatedDiff;
+      }
+
+      return this.toTimestamp(right.createdAt) - this.toTimestamp(left.createdAt);
+    });
+
+    return {
+      items,
+      duplicatesRemoved: documents.length - items.length
+    };
+  }
+
+  private isPreferredListDocumento(
+    candidate: Pick<
+      NfseDocumento,
+      | 'xmlPath'
+      | 'danfsePath'
+      | 'numeroNfse'
+      | 'serie'
+      | 'dataEmissao'
+      | 'cnpjPrestador'
+      | 'razaoSocialPrestador'
+      | 'cnpjTomador'
+      | 'razaoSocialTomador'
+      | 'updatedAt'
+      | 'createdAt'
+    >,
+    current: Pick<
+      NfseDocumento,
+      | 'xmlPath'
+      | 'danfsePath'
+      | 'numeroNfse'
+      | 'serie'
+      | 'dataEmissao'
+      | 'cnpjPrestador'
+      | 'razaoSocialPrestador'
+      | 'cnpjTomador'
+      | 'razaoSocialTomador'
+      | 'updatedAt'
+      | 'createdAt'
+    >
+  ): boolean {
+    const scoreDiff = this.scoreListDocumento(candidate) - this.scoreListDocumento(current);
+    if (scoreDiff !== 0) {
+      return scoreDiff > 0;
+    }
+
+    const updatedDiff = this.toTimestamp(candidate.updatedAt) - this.toTimestamp(current.updatedAt);
+    if (updatedDiff !== 0) {
+      return updatedDiff > 0;
+    }
+
+    return this.toTimestamp(candidate.createdAt) > this.toTimestamp(current.createdAt);
+  }
+
+  private scoreListDocumento(
+    document: Pick<
+      NfseDocumento,
+      'xmlPath' | 'danfsePath' | 'numeroNfse' | 'serie' | 'dataEmissao' | 'cnpjPrestador' | 'razaoSocialPrestador' | 'cnpjTomador' | 'razaoSocialTomador'
+    >
+  ): number {
+    return [
+      Boolean(document.xmlPath),
+      Boolean(document.danfsePath),
+      Boolean(document.numeroNfse),
+      Boolean(document.serie),
+      Boolean(document.dataEmissao),
+      Boolean(document.cnpjPrestador),
+      Boolean(document.razaoSocialPrestador),
+      Boolean(document.cnpjTomador),
+      Boolean(document.razaoSocialTomador)
+    ].filter(Boolean).length;
   }
 
   private buildEventoSyncWhere(dto: SincronizarNfseEventosDto): Prisma.NfseDocumentoWhereInput {
@@ -365,27 +468,49 @@ export class NfseService {
       .toLowerCase();
   }
 
+  private toTimestamp(value?: Date | null): number {
+    return value instanceof Date ? value.getTime() : 0;
+  }
+
   private async enrichDocumentoSummary(
     doc: NfseDocumento & {
       eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
     }
   ) {
-    if (!doc.xmlPath || (doc.razaoSocialPrestador && doc.razaoSocialTomador)) {
-      return doc;
+    const municipioPrestacaoNome = await this.resolveMunicipioPrestacaoNome({
+      municipioPrestacaoCodigo: doc.municipioPrestacaoCodigo,
+      municipioPrestacaoNome: doc.municipioPrestacaoNome,
+      cnpjPrestador: doc.cnpjPrestador
+    });
+
+    if (!doc.xmlPath || (doc.razaoSocialPrestador && doc.razaoSocialTomador && municipioPrestacaoNome === doc.municipioPrestacaoNome)) {
+      return {
+        ...doc,
+        municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome
+      };
     }
 
     try {
       const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
       const parsed = this.parser.parse(xml);
+      const municipioPrestacaoNomeEnriquecido = await this.resolveMunicipioPrestacaoNome({
+        municipioPrestacaoCodigo: doc.municipioPrestacaoCodigo ?? parsed.municipioPrestacaoCodigo,
+        municipioPrestacaoNome: doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome,
+        cnpjPrestador: doc.cnpjPrestador ?? parsed.cnpjPrestador
+      });
 
       return {
         ...doc,
         razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
-        razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null
+        razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
+        municipioPrestacaoNome: municipioPrestacaoNomeEnriquecido ?? doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome ?? null
       };
     } catch (error) {
       this.logger.warn(`Falha ao enriquecer listagem da NFS-e ${doc.id}: ${this.toErrorMessage(error)}`);
-      return doc;
+      return {
+        ...doc,
+        municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome
+      };
     }
   }
 
@@ -400,22 +525,44 @@ export class NfseService {
     }
   > {
     if (!doc.xmlPath) {
-      return doc;
+      const municipioPrestacaoNome = await this.resolveMunicipioPrestacaoNome({
+        municipioPrestacaoCodigo: doc.municipioPrestacaoCodigo,
+        municipioPrestacaoNome: doc.municipioPrestacaoNome,
+        cnpjPrestador: doc.cnpjPrestador
+      });
+      return {
+        ...doc,
+        municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome
+      };
     }
 
     try {
       const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
       const parsed = this.parser.parse(xml);
+      const municipioPrestacaoNome = await this.resolveMunicipioPrestacaoNome({
+        municipioPrestacaoCodigo: doc.municipioPrestacaoCodigo ?? parsed.municipioPrestacaoCodigo,
+        municipioPrestacaoNome: doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome,
+        cnpjPrestador: doc.cnpjPrestador ?? parsed.cnpjPrestador
+      });
 
       return {
         ...doc,
         razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
         razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
+        municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome ?? null,
         retencaoIss: parsed.retencaoIss ?? null
       };
     } catch (error) {
       this.logger.warn(`Falha ao enriquecer detalhes da NFS-e ${doc.id}: ${this.toErrorMessage(error)}`);
-      return doc;
+      const municipioPrestacaoNome = await this.resolveMunicipioPrestacaoNome({
+        municipioPrestacaoCodigo: doc.municipioPrestacaoCodigo,
+        municipioPrestacaoNome: doc.municipioPrestacaoNome,
+        cnpjPrestador: doc.cnpjPrestador
+      });
+      return {
+        ...doc,
+        municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome
+      };
     }
   }
 
@@ -624,11 +771,16 @@ export class NfseService {
     const xmlKey = `nfse/${ambiente}/${cnpj}/${year}/${month}/xml/${parsed.chaveAcesso}.xml`;
     await this.storage.putObject(xmlKey, dto.xml);
     const danfseKey = `nfse/${ambiente}/${cnpj}/${year}/${month}/danfse/${parsed.chaveAcesso}.pdf`;
+    const municipioPrestacaoNome = await this.resolveMunicipioPrestacaoNome({
+      municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo,
+      municipioPrestacaoNome: parsed.municipioPrestacaoNome,
+      cnpjPrestador: parsed.cnpjPrestador
+    });
     const municipioFallback = await this.buildDanfseMunicipioFallback({
       cnpjPrestador: parsed.cnpjPrestador,
       cnpjTomador: parsed.cnpjTomador,
       municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo,
-      municipioPrestacaoNome: parsed.municipioPrestacaoNome
+      municipioPrestacaoNome
     });
     const danfsePdf = this.danfse.generateFromXml(dto.xml, {
       chaveAcesso: parsed.chaveAcesso,
@@ -668,7 +820,7 @@ export class NfseService {
         cnpjTomador: parsed.cnpjTomador,
         razaoSocialTomador: parsed.razaoSocialTomador,
         municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo,
-        municipioPrestacaoNome: parsed.municipioPrestacaoNome,
+        municipioPrestacaoNome,
         valorServico: this.toDecimal(parsed.valorServico),
         valorDeducoes: this.toDecimal(parsed.valorDeducoes),
         valorIss: this.toDecimal(parsed.valorIss),
@@ -698,7 +850,7 @@ export class NfseService {
         cnpjTomador: parsed.cnpjTomador,
         razaoSocialTomador: parsed.razaoSocialTomador,
         municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo,
-        municipioPrestacaoNome: parsed.municipioPrestacaoNome,
+        municipioPrestacaoNome,
         valorServico: this.toDecimal(parsed.valorServico),
         valorDeducoes: this.toDecimal(parsed.valorDeducoes),
         valorIss: this.toDecimal(parsed.valorIss),
@@ -1036,11 +1188,16 @@ export class NfseService {
         const danfseKey = `nfse/${doc.ambiente}/${cnpj}/${year}/${month}/danfse/${doc.chaveAcesso}.pdf`;
 
         if (regenerarDanfse) {
+          const municipioPrestacaoNome = await this.resolveMunicipioPrestacaoNome({
+            municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo ?? doc.municipioPrestacaoCodigo,
+            municipioPrestacaoNome: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome,
+            cnpjPrestador: parsed.cnpjPrestador ?? doc.cnpjPrestador
+          });
           const municipioFallback = await this.buildDanfseMunicipioFallback({
             cnpjPrestador: parsed.cnpjPrestador ?? doc.cnpjPrestador,
             cnpjTomador: parsed.cnpjTomador ?? doc.cnpjTomador,
             municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo ?? doc.municipioPrestacaoCodigo,
-            municipioPrestacaoNome: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome
+            municipioPrestacaoNome
           });
           const pdf = this.danfse.generateFromXml(xml, {
             chaveAcesso: doc.chaveAcesso,
@@ -1058,6 +1215,11 @@ export class NfseService {
           await this.storage.putObject(danfseKey, pdf);
         }
 
+        const municipioPrestacaoNome = await this.resolveMunicipioPrestacaoNome({
+          municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo ?? doc.municipioPrestacaoCodigo,
+          municipioPrestacaoNome: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome,
+          cnpjPrestador: parsed.cnpjPrestador ?? doc.cnpjPrestador
+        });
         await this.prisma.nfseDocumento.update({
           where: { id: doc.id },
           data: {
@@ -1072,7 +1234,7 @@ export class NfseService {
             cnpjTomador: parsed.cnpjTomador ?? doc.cnpjTomador,
             razaoSocialTomador: parsed.razaoSocialTomador ?? doc.razaoSocialTomador,
             municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo ?? doc.municipioPrestacaoCodigo,
-            municipioPrestacaoNome: parsed.municipioPrestacaoNome ?? doc.municipioPrestacaoNome,
+            municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome,
             valorServico: this.toDecimal(parsed.valorServico) ?? doc.valorServico,
             valorDeducoes: this.toDecimal(parsed.valorDeducoes) ?? doc.valorDeducoes,
             valorIss: this.toDecimal(parsed.valorIss) ?? doc.valorIss,
@@ -1417,7 +1579,11 @@ export class NfseService {
       cnpjPrestador: doc.cnpjPrestador,
       cnpjTomador: doc.cnpjTomador,
       municipioPrestacaoCodigo: doc.municipioPrestacaoCodigo,
-      municipioPrestacaoNome: doc.municipioPrestacaoNome
+      municipioPrestacaoNome: await this.resolveMunicipioPrestacaoNome({
+        municipioPrestacaoCodigo: doc.municipioPrestacaoCodigo,
+        municipioPrestacaoNome: doc.municipioPrestacaoNome,
+        cnpjPrestador: doc.cnpjPrestador
+      })
     });
     const pdf = this.danfse.generateFromXml(xml, {
       chaveAcesso: doc.chaveAcesso,
@@ -1473,7 +1639,12 @@ export class NfseService {
       this.resolveMunicipioNomeByCnpj(params.cnpjPrestador),
       this.resolveMunicipioNomeByCnpj(params.cnpjTomador)
     ]);
-    const municipioPrestacaoNome = params.municipioPrestacaoNome ?? undefined;
+    const municipioPrestacaoNome =
+      (await this.resolveMunicipioPrestacaoNome({
+        municipioPrestacaoCodigo: params.municipioPrestacaoCodigo,
+        municipioPrestacaoNome: params.municipioPrestacaoNome,
+        cnpjPrestador: params.cnpjPrestador
+      })) ?? undefined;
 
     return {
       municipioPrestador: municipioPrestador ?? municipioPrestacaoNome,
@@ -1483,6 +1654,31 @@ export class NfseService {
       localPrestacao: municipioPrestacaoNome,
       municipioIncidenciaIssqn: municipioPrestacaoNome
     };
+  }
+
+  private async resolveMunicipioPrestacaoNome(params: {
+    municipioPrestacaoCodigo?: string | null;
+    municipioPrestacaoNome?: string | null;
+    cnpjPrestador?: string | null;
+  }): Promise<string | undefined> {
+    const municipioPrestacaoCodigo = this.normalizeMunicipioCodigoIbge(params.municipioPrestacaoCodigo);
+    const municipioPrestacaoNome = params.municipioPrestacaoNome?.trim() || undefined;
+
+    if (municipioPrestacaoNome && !this.looksLikeMunicipioCode(municipioPrestacaoNome, municipioPrestacaoCodigo)) {
+      return municipioPrestacaoNome;
+    }
+
+    const resolvedByCode = await this.resolveMunicipioNomeByCodigoIbge(municipioPrestacaoCodigo);
+    if (resolvedByCode) {
+      return resolvedByCode;
+    }
+
+    const resolvedByCnpj = await this.resolveMunicipioNomeByCnpj(params.cnpjPrestador);
+    if (resolvedByCnpj) {
+      return resolvedByCnpj;
+    }
+
+    return municipioPrestacaoNome;
   }
 
   private async resolveMunicipioNomeByCnpj(cnpj?: string | null): Promise<string | undefined> {
@@ -1505,6 +1701,48 @@ export class NfseService {
 
     const municipio = estabelecimento?.municipioNome?.trim();
     return municipio || undefined;
+  }
+
+  private async resolveMunicipioNomeByCodigoIbge(codigoIbge?: string | null): Promise<string | undefined> {
+    const normalizedCodigoIbge = this.normalizeMunicipioCodigoIbge(codigoIbge);
+    if (!normalizedCodigoIbge) {
+      return undefined;
+    }
+
+    const estabelecimento = await this.prisma.clienteEstabelecimento.findFirst({
+      where: {
+        municipioCodigoIbge: normalizedCodigoIbge,
+        municipioNome: {
+          not: null
+        }
+      },
+      select: {
+        municipioNome: true
+      }
+    });
+
+    const municipio = estabelecimento?.municipioNome?.trim();
+    return municipio || undefined;
+  }
+
+  private normalizeMunicipioCodigoIbge(value?: string | null): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const digits = value.replace(/\D/g, '');
+    return digits.length >= 6 ? digits : undefined;
+  }
+
+  private looksLikeMunicipioCode(value?: string | null, codigoIbge?: string | null): boolean {
+    const trimmed = value?.trim();
+    if (!trimmed) {
+      return false;
+    }
+
+    const digits = trimmed.replace(/\D/g, '');
+    const normalizedCodigoIbge = this.normalizeMunicipioCodigoIbge(codigoIbge);
+    return /^\d{6,7}$/.test(digits) && (!normalizedCodigoIbge || digits === normalizedCodigoIbge);
   }
 
   private toDecimal(value?: string): Prisma.Decimal | undefined {
