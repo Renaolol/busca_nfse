@@ -3260,12 +3260,24 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       keys.add(`chave:${ambiente}:${chaveAcesso}`);
     }
 
+    if (chaveAcesso) {
+      keys.add(`chave-global:${chaveAcesso}`);
+    }
+
     if (ambiente && hashResumo) {
       keys.add(`hash:${ambiente}:${hashResumo}`);
     }
 
+    if (hashResumo) {
+      keys.add(`hash-global:${hashResumo}`);
+    }
+
     if (ambiente && hashXmlCompleto) {
       keys.add(`hash:${ambiente}:${hashXmlCompleto}`);
+    }
+
+    if (hashXmlCompleto) {
+      keys.add(`hash-global:${hashXmlCompleto}`);
     }
 
     const snapshot = [
@@ -3281,6 +3293,20 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
     if (snapshot.replace(/:/g, '').trim()) {
       keys.add(`snapshot:${snapshot}`);
+    }
+
+    const globalSnapshot = [
+      String(document.modelo || '').trim(),
+      String(document.numeroNfe || '').trim(),
+      String(document.serie || '').trim(),
+      emissao,
+      String(document.cnpjEmitente || '').trim(),
+      String(document.cnpjDestinatario || '').trim(),
+      valor
+    ].join(':');
+
+    if (globalSnapshot.replace(/:/g, '').trim()) {
+      keys.add(`snapshot-global:${globalSnapshot}`);
     }
 
     return Array.from(keys);

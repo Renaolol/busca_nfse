@@ -276,8 +276,16 @@ export class NfseService {
       keys.add(`chave:${ambiente}:${chaveAcesso}`);
     }
 
+    if (chaveAcesso) {
+      keys.add(`chave-global:${chaveAcesso}`);
+    }
+
     if (ambiente && hashXml) {
       keys.add(`hash:${ambiente}:${hashXml}`);
+    }
+
+    if (hashXml) {
+      keys.add(`hash-global:${hashXml}`);
     }
 
     const snapshot = [
@@ -292,6 +300,19 @@ export class NfseService {
 
     if (snapshot.replace(/:/g, '').trim()) {
       keys.add(`snapshot:${snapshot}`);
+    }
+
+    const globalSnapshot = [
+      String(document.numeroNfse || '').trim(),
+      String(document.serie || '').trim(),
+      emissao,
+      String(document.cnpjPrestador || '').trim(),
+      String(document.cnpjTomador || '').trim(),
+      valor
+    ].join(':');
+
+    if (globalSnapshot.replace(/:/g, '').trim()) {
+      keys.add(`snapshot-global:${globalSnapshot}`);
     }
 
     return Array.from(keys);
