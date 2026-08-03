@@ -67,14 +67,13 @@ export class NfseService {
     }
 
     const items = await Promise.all(uniqueItems.map((item) => this.enrichDocumentoSummary(item)));
-    const effectiveTotal = query.all ? items.length : total;
 
     return {
       items,
-      total: effectiveTotal,
+      total,
       page,
       pageSize,
-      totalPages: Math.max(1, Math.ceil(effectiveTotal / pageSize))
+      totalPages: Math.max(1, Math.ceil(total / pageSize))
     };
   }
 
@@ -208,17 +207,31 @@ export class NfseService {
       eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
     }
   >(documents: T[]): { items: T[]; duplicatesRemoved: number } {
-    const byBusinessKey = new Map<string, T>();
+    const selected: T[] = [];
+    const keyToIndex = new Map<string, number>();
 
     for (const document of documents) {
-      const businessKey = `${document.ambiente}:${document.chaveAcesso}`;
-      const current = byBusinessKey.get(businessKey);
-      if (!current || this.isPreferredListDocumento(document, current)) {
-        byBusinessKey.set(businessKey, document);
+      const candidateKeys = this.buildNfseDuplicateKeys(document);
+      const existingIndex = candidateKeys
+        .map((key) => keyToIndex.get(key))
+        .find((index): index is number => index !== undefined);
+
+      if (existingIndex === undefined) {
+        const nextIndex = selected.push(document) - 1;
+        candidateKeys.forEach((key) => keyToIndex.set(key, nextIndex));
+        continue;
       }
+
+      const current = selected[existingIndex];
+      if (this.isPreferredListDocumento(document, current)) {
+        selected[existingIndex] = document;
+      }
+
+      candidateKeys.forEach((key) => keyToIndex.set(key, existingIndex));
+      this.buildNfseDuplicateKeys(selected[existingIndex]).forEach((key) => keyToIndex.set(key, existingIndex));
     }
 
-    const items = Array.from(byBusinessKey.values()).sort((left, right) => {
+    const items = selected.sort((left, right) => {
       const emissaoDiff = this.toTimestamp(right.dataEmissao) - this.toTimestamp(left.dataEmissao);
       if (emissaoDiff !== 0) {
         return emissaoDiff;
@@ -236,6 +249,52 @@ export class NfseService {
       items,
       duplicatesRemoved: documents.length - items.length
     };
+  }
+
+  private buildNfseDuplicateKeys(
+    document: Pick<
+      NfseDocumento,
+      | 'ambiente'
+      | 'chaveAcesso'
+      | 'hashXml'
+      | 'numeroNfse'
+      | 'serie'
+      | 'dataEmissao'
+      | 'cnpjPrestador'
+      | 'cnpjTomador'
+      | 'valorServico'
+    >
+  ): string[] {
+    const keys = new Set<string>();
+    const ambiente = String(document.ambiente || '');
+    const chaveAcesso = String(document.chaveAcesso || '').trim();
+    const hashXml = String(document.hashXml || '').trim();
+    const emissao = this.toDateKey(document.dataEmissao);
+    const valor = document.valorServico?.toString?.() ?? '';
+
+    if (ambiente && chaveAcesso) {
+      keys.add(`chave:${ambiente}:${chaveAcesso}`);
+    }
+
+    if (ambiente && hashXml) {
+      keys.add(`hash:${ambiente}:${hashXml}`);
+    }
+
+    const snapshot = [
+      ambiente,
+      String(document.numeroNfse || '').trim(),
+      String(document.serie || '').trim(),
+      emissao,
+      String(document.cnpjPrestador || '').trim(),
+      String(document.cnpjTomador || '').trim(),
+      valor
+    ].join(':');
+
+    if (snapshot.replace(/:/g, '').trim()) {
+      keys.add(`snapshot:${snapshot}`);
+    }
+
+    return Array.from(keys);
   }
 
   private isPreferredListDocumento(
@@ -470,6 +529,10 @@ export class NfseService {
 
   private toTimestamp(value?: Date | null): number {
     return value instanceof Date ? value.getTime() : 0;
+  }
+
+  private toDateKey(value?: Date | null): string {
+    return value instanceof Date ? value.toISOString() : '';
   }
 
   private async enrichDocumentoSummary(
