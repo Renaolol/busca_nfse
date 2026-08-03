@@ -114,7 +114,7 @@ export class NfseXmlParserService {
       retencaoIss:
         this.extract(xml, ['tpRetISSQN', 'IssRetido']) ??
         this.extractNestedAny(xml, ['tribMun', 'Servico'], ['tpRetISSQN', 'IssRetido']),
-      aliquotaIss: this.extract(xml, ['aliquotaIss', 'aliquotaISS', 'pAliq', 'pAliquota']),
+      aliquotaIss: this.extract(xml, ['aliquotaIss', 'aliquotaISS', 'pAliqAplic', 'pAliq', 'pAliquota']),
       codigoServicoNacional: this.extract(xml, ['codigoServicoNacional', 'cTribNac']),
       itemListaServico: this.extract(xml, ['itemListaServico', 'ItemListaServico', 'cItemListaServ']),
       descricaoServico: this.extract(xml, ['descricaoServico', 'Discriminacao', 'xDescServ'])

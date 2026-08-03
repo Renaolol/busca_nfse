@@ -1318,6 +1318,8 @@ export class NfseDanfseService {
       valorLiquidoComIbscbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'vTotNF']]),
       valorIss: this.extract(xml, ['valorIss', 'valorISS', 'ValorIss', 'vISSQN', 'vISS']),
       baseCalculoIss: this.extractFromPaths(xml, [
+        ['infNFSe', 'valores', 'vBC'],
+        ['valores', 'vBC'],
         ['infDPS', 'valores', 'trib', 'tribMun', 'vBCISSQN'],
         ['InfNfse', 'ValoresNfse', 'BaseCalculo']
       ]),
@@ -1326,8 +1328,10 @@ export class NfseDanfseService {
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'IssRetido']
       ]),
       aliquotaIss: this.extractFromPaths(xml, [
+        ['infNFSe', 'valores', 'pAliqAplic'],
+        ['valores', 'pAliqAplic'],
         ['InfNfse', 'ValoresNfse', 'Aliquota']
-      ]) ?? this.extract(xml, ['aliquotaIss', 'aliquotaISS', 'pAliq', 'pAliquota']),
+      ]) ?? this.extract(xml, ['aliquotaIss', 'aliquotaISS', 'pAliqAplic', 'pAliq', 'pAliquota']),
       tipoTributacaoIssqn: this.extractFromPaths(xml, [
         ['infDPS', 'valores', 'trib', 'tribMun', 'tribISSQN'],
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'ExigibilidadeISS']

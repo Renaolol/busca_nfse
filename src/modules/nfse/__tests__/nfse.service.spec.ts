@@ -109,6 +109,95 @@ describe('NfseService', () => {
     });
   });
 
+  it('colapsa duplicatas legadas por ambiente e chave_acesso na listagem ampla', async () => {
+    prisma.nfseDocumento.count.mockResolvedValueOnce(2);
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-antigo',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000000126019687178145',
+        numeroNfse: '104',
+        serie: '1',
+        dataEmissao: new Date('2026-06-01T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'ALBRECHT & BORNHOLDT SAUDE LTDA',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'LABRAND SCHOOL LTDA',
+        xmlPath: 'nfse/producao/06960810000176/2026/06/xml/old.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-07-31T16:23:00.000Z'),
+        updatedAt: new Date('2026-07-31T16:23:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-recente',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000000126019687178145',
+        numeroNfse: '104',
+        serie: '1',
+        dataEmissao: new Date('2026-06-01T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'ALBRECHT & BORNHOLDT SAUDE LTDA',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'LABRAND SCHOOL LTDA',
+        xmlPath: 'nfse/producao/06960810000176/2026/06/xml/new.xml',
+        danfsePath: 'nfse/producao/06960810000176/2026/06/danfse/new.pdf',
+        createdAt: new Date('2026-08-03T09:31:00.000Z'),
+        updatedAt: new Date('2026-08-03T09:31:00.000Z'),
+        eventos: []
+      }
+    ]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      all: true
+    });
+
+    expect(result.total).toBe(2);
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].id).toBe('doc-recente');
+  });
+
+  it('troca codigo IBGE pelo nome do municipio na listagem quando houver cadastro interno', async () => {
+    prisma.nfseDocumento.count.mockResolvedValueOnce(1);
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-codigo-municipio',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000000126019687178145',
+        numeroNfse: '104',
+        serie: '1',
+        dataEmissao: new Date('2026-06-01T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'ALBRECHT & BORNHOLDT SAUDE LTDA',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'LABRAND SCHOOL LTDA',
+        municipioPrestacaoCodigo: '2304400',
+        municipioPrestacaoNome: '2304400',
+        xmlPath: null,
+        danfsePath: null,
+        createdAt: new Date('2026-08-03T09:31:00.000Z'),
+        updatedAt: new Date('2026-08-03T09:31:00.000Z'),
+        eventos: []
+      }
+    ]);
+    prisma.clienteEstabelecimento.findFirst.mockResolvedValueOnce({ municipioNome: 'Fortaleza' });
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      all: true
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0].municipioPrestacaoNome).toBe('Fortaleza');
+  });
+
   it('enriquece a listagem com razao social do prestador a partir do XML quando o banco estiver sem esse campo', async () => {
     prisma.nfseDocumento.count.mockResolvedValueOnce(1);
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([

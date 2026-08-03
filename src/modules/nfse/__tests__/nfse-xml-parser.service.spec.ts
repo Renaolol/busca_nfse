@@ -114,6 +114,26 @@ describe('NfseXmlParserService', () => {
     expect(parsed.competencia?.toISOString()).toBe('2024-08-01T00:00:00.000Z');
   });
 
+  it('parseia aliquota ISS do layout nacional em pAliqAplic', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS23044001241109394000106000000000010926070838769673">
+    <nNFSe>109</nNFSe>
+    <valores>
+      <vBC>890.00</vBC>
+      <pAliqAplic>2.40</pAliqAplic>
+      <vISSQN>21.36</vISSQN>
+    </valores>
+  </infNFSe>
+</NFSe>`;
+
+    const parsed = parser.parse(xml);
+
+    expect(parsed.chaveAcesso).toBe('23044001241109394000106000000000010926070838769673');
+    expect(parsed.valorIss).toBe('21.36');
+    expect(parsed.aliquotaIss).toBe('2.40');
+  });
+
   it('parseia XML ABRASF classico com prestador e tomador em tags capitalizadas', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">

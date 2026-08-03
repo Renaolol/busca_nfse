@@ -4,7 +4,7 @@ import { PrismaService } from '../../../prisma/prisma.service';
 import { LocalStorageService } from '../../storage/storage.service';
 import { NfeService } from '../../nfe/nfe.service';
 import { CteConsultaClient } from '../../../integrations/cte-consulta/cte-consulta.types';
-import { NfeAmbiente } from '@prisma/client';
+import { NfeAmbiente, Prisma } from '@prisma/client';
 
 describe('CteService', () => {
   const prisma = {
@@ -131,6 +131,71 @@ describe('CteService', () => {
       pageSize: 100,
       totalPages: 3
     });
+  });
+
+  it('colapsa duplicatas legadas por ambiente e chave_acesso na listagem ampla', async () => {
+    prisma.nfeDocumento.count.mockResolvedValueOnce(2);
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-resumo',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        numeroNfe: '31969',
+        serie: '1',
+        modelo: '57',
+        dataEmissao: new Date('2026-06-07T00:00:00.000Z'),
+        dataAutorizacao: null,
+        cnpjEmitente: '95849600000135',
+        razaoSocialEmitente: 'TRANSPORTADORA LTDA',
+        cnpjDestinatario: '12345678000199',
+        razaoSocialDestinatario: 'DESTINATARIO LTDA',
+        valorTotal: null,
+        schemaDoc: 'resCTe_v1.00',
+        resumoDisponivel: true,
+        xmlCompletoDisponivel: false,
+        xmlResumoPath: 'nfe/producao/95849600000135/2026/06/resumos/cte-a.xml',
+        xmlCompletoPath: null,
+        updatedAt: new Date('2026-07-31T16:23:00.000Z'),
+        createdAt: new Date('2026-07-31T16:23:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-completo',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        numeroNfe: '31969',
+        serie: '1',
+        modelo: '57',
+        dataEmissao: new Date('2026-06-07T00:00:00.000Z'),
+        dataAutorizacao: new Date('2026-06-07T01:00:00.000Z'),
+        cnpjEmitente: '95849600000135',
+        razaoSocialEmitente: 'TRANSPORTADORA LTDA',
+        cnpjDestinatario: '12345678000199',
+        razaoSocialDestinatario: 'DESTINATARIO LTDA',
+        valorTotal: new Prisma.Decimal('11075.73'),
+        schemaDoc: 'cteProc_v4.00',
+        resumoDisponivel: true,
+        xmlCompletoDisponivel: true,
+        xmlResumoPath: 'nfe/producao/95849600000135/2026/06/resumos/cte-b.xml',
+        xmlCompletoPath: 'nfe/producao/95849600000135/2026/06/xml/cte-b.xml',
+        updatedAt: new Date('2026-08-03T09:31:00.000Z'),
+        createdAt: new Date('2026-08-03T09:31:00.000Z'),
+        eventos: []
+      }
+    ]);
+
+    const response = await service.findAll({
+      clienteId: 'cliente-1',
+      all: true
+    });
+
+    expect(response.total).toBe(2);
+    expect(response.items).toHaveLength(1);
+    expect(response.items[0].id).toBe('doc-completo');
   });
 
   it('aplica filtros de numero, chave e ambiente na listagem de CT-e', async () => {

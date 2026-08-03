@@ -495,7 +495,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       }
     }
 
-    const [total, items] = await Promise.all([
+    const [total, rawItems] = await Promise.all([
       this.prisma.nfeDocumento.count({ where }),
       this.findManyDocumentosWithEventos({
         where,
@@ -504,6 +504,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         take: pageSize
       })
     ]);
+    const { items, duplicatesRemoved } = this.deduplicateDocumentosForList(rawItems);
+    if (duplicatesRemoved > 0) {
+      this.logger.warn(`Listagem de NF-e ocultou ${duplicatesRemoved} duplicata(s) legada(s) por ambiente + chave_acesso.`);
+    }
 
     return {
       items,
@@ -3162,6 +3166,218 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
+  private deduplicateDocumentosForList<
+    T extends {
+      ambiente: NfeAmbiente;
+      chaveAcesso: string;
+      hashResumo?: string | null;
+      hashXmlCompleto?: string | null;
+      xmlCompletoDisponivel?: boolean | null;
+      xmlCompletoPath?: string | null;
+      resumoDisponivel?: boolean | null;
+      xmlResumoPath?: string | null;
+      numeroNfe?: string | null;
+      serie?: string | null;
+      dataEmissao?: Date | null;
+      dataAutorizacao?: Date | null;
+      cnpjEmitente?: string | null;
+      razaoSocialEmitente?: string | null;
+      cnpjDestinatario?: string | null;
+      razaoSocialDestinatario?: string | null;
+      valorTotal?: Prisma.Decimal | null;
+      updatedAt?: Date | null;
+      createdAt?: Date | null;
+    }
+  >(documents: T[]): { items: T[]; duplicatesRemoved: number } {
+    const selected: T[] = [];
+    const keyToIndex = new Map<string, number>();
+
+    for (const document of documents) {
+      const candidateKeys = this.buildNfeDuplicateKeys(document);
+      const existingIndex = candidateKeys
+        .map((key) => keyToIndex.get(key))
+        .find((index): index is number => index !== undefined);
+
+      if (existingIndex === undefined) {
+        const nextIndex = selected.push(document) - 1;
+        candidateKeys.forEach((key) => keyToIndex.set(key, nextIndex));
+        continue;
+      }
+
+      const current = selected[existingIndex];
+      if (this.isPreferredListDocumento(document, current)) {
+        selected[existingIndex] = document;
+      }
+
+      candidateKeys.forEach((key) => keyToIndex.set(key, existingIndex));
+      this.buildNfeDuplicateKeys(selected[existingIndex]).forEach((key) => keyToIndex.set(key, existingIndex));
+    }
+
+    const items = selected.sort((left, right) => {
+      const emissaoDiff = this.toTimestamp(right.dataEmissao) - this.toTimestamp(left.dataEmissao);
+      if (emissaoDiff !== 0) {
+        return emissaoDiff;
+      }
+
+      const createdDiff = this.toTimestamp(right.createdAt) - this.toTimestamp(left.createdAt);
+      if (createdDiff !== 0) {
+        return createdDiff;
+      }
+
+      return this.toTimestamp(right.updatedAt) - this.toTimestamp(left.updatedAt);
+    });
+
+    return {
+      items,
+      duplicatesRemoved: documents.length - items.length
+    };
+  }
+
+  private buildNfeDuplicateKeys(
+    document: {
+      ambiente: NfeAmbiente;
+      chaveAcesso: string;
+      hashResumo?: string | null;
+      hashXmlCompleto?: string | null;
+      numeroNfe?: string | null;
+      serie?: string | null;
+      modelo?: string | null;
+      dataEmissao?: Date | null;
+      cnpjEmitente?: string | null;
+      cnpjDestinatario?: string | null;
+      valorTotal?: Prisma.Decimal | null;
+    }
+  ): string[] {
+    const keys = new Set<string>();
+    const ambiente = String(document.ambiente || '');
+    const chaveAcesso = String(document.chaveAcesso || '').trim();
+    const hashResumo = String(document.hashResumo || '').trim();
+    const hashXmlCompleto = String(document.hashXmlCompleto || '').trim();
+    const emissao = this.toDateKey(document.dataEmissao);
+    const valor = document.valorTotal?.toString?.() ?? '';
+
+    if (ambiente && chaveAcesso) {
+      keys.add(`chave:${ambiente}:${chaveAcesso}`);
+    }
+
+    if (chaveAcesso) {
+      keys.add(`chave-global:${chaveAcesso}`);
+    }
+
+    if (ambiente && hashResumo) {
+      keys.add(`hash:${ambiente}:${hashResumo}`);
+    }
+
+    if (hashResumo) {
+      keys.add(`hash-global:${hashResumo}`);
+    }
+
+    if (ambiente && hashXmlCompleto) {
+      keys.add(`hash:${ambiente}:${hashXmlCompleto}`);
+    }
+
+    if (hashXmlCompleto) {
+      keys.add(`hash-global:${hashXmlCompleto}`);
+    }
+
+    const snapshot = [
+      ambiente,
+      String(document.modelo || '').trim(),
+      String(document.numeroNfe || '').trim(),
+      String(document.serie || '').trim(),
+      emissao,
+      String(document.cnpjEmitente || '').trim(),
+      String(document.cnpjDestinatario || '').trim(),
+      valor
+    ].join(':');
+
+    if (snapshot.replace(/:/g, '').trim()) {
+      keys.add(`snapshot:${snapshot}`);
+    }
+
+    const globalSnapshot = [
+      String(document.modelo || '').trim(),
+      String(document.numeroNfe || '').trim(),
+      String(document.serie || '').trim(),
+      emissao,
+      String(document.cnpjEmitente || '').trim(),
+      String(document.cnpjDestinatario || '').trim(),
+      valor
+    ].join(':');
+
+    if (globalSnapshot.replace(/:/g, '').trim()) {
+      keys.add(`snapshot-global:${globalSnapshot}`);
+    }
+
+    return Array.from(keys);
+  }
+
+  private isPreferredListDocumento<
+    T extends {
+      xmlCompletoDisponivel?: boolean | null;
+      xmlCompletoPath?: string | null;
+      resumoDisponivel?: boolean | null;
+      xmlResumoPath?: string | null;
+      numeroNfe?: string | null;
+      serie?: string | null;
+      dataEmissao?: Date | null;
+      dataAutorizacao?: Date | null;
+      cnpjEmitente?: string | null;
+      razaoSocialEmitente?: string | null;
+      cnpjDestinatario?: string | null;
+      razaoSocialDestinatario?: string | null;
+      valorTotal?: Prisma.Decimal | null;
+      updatedAt?: Date | null;
+      createdAt?: Date | null;
+    }
+  >(candidate: T, current: T): boolean {
+    const scoreDiff = this.scoreListDocumento(candidate) - this.scoreListDocumento(current);
+    if (scoreDiff !== 0) {
+      return scoreDiff > 0;
+    }
+
+    const updatedDiff = this.toTimestamp(candidate.updatedAt) - this.toTimestamp(current.updatedAt);
+    if (updatedDiff !== 0) {
+      return updatedDiff > 0;
+    }
+
+    return this.toTimestamp(candidate.createdAt) > this.toTimestamp(current.createdAt);
+  }
+
+  private scoreListDocumento<
+    T extends {
+      xmlCompletoDisponivel?: boolean | null;
+      xmlCompletoPath?: string | null;
+      resumoDisponivel?: boolean | null;
+      xmlResumoPath?: string | null;
+      numeroNfe?: string | null;
+      serie?: string | null;
+      dataEmissao?: Date | null;
+      dataAutorizacao?: Date | null;
+      cnpjEmitente?: string | null;
+      razaoSocialEmitente?: string | null;
+      cnpjDestinatario?: string | null;
+      razaoSocialDestinatario?: string | null;
+      valorTotal?: Prisma.Decimal | null;
+    }
+  >(document: T): number {
+    return [
+      Boolean(document.xmlCompletoDisponivel),
+      Boolean(document.xmlCompletoPath),
+      Boolean(document.resumoDisponivel),
+      Boolean(document.xmlResumoPath),
+      Boolean(document.numeroNfe),
+      Boolean(document.serie),
+      Boolean(document.dataEmissao),
+      Boolean(document.dataAutorizacao),
+      Boolean(document.cnpjEmitente),
+      Boolean(document.razaoSocialEmitente),
+      Boolean(document.cnpjDestinatario),
+      Boolean(document.razaoSocialDestinatario),
+      document.valorTotal != null
+    ].filter(Boolean).length;
+  }
+
   private async findExistingDocumentoForPersist(
     ambiente: NfeAmbiente,
     chaveAcesso: string
@@ -3912,6 +4128,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase();
+  }
+
+  private toTimestamp(value?: Date | null): number {
+    return value instanceof Date ? value.getTime() : 0;
+  }
+
+  private toDateKey(value?: Date | null): string {
+    return value instanceof Date ? value.toISOString() : '';
   }
 
   private toSafeFileName(value?: string | null): string {
