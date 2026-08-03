@@ -1500,11 +1500,8 @@ function renderSidebar() {
     <aside class="sidebar ${state.mobileSidebarOpen ? 'mobile-open' : ''}">
       <div>
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true"></span>
-          <div>
-            <h1 class="brand-title">NotaSync</h1>
-            <p class="brand-subtitle">GCONT Gestao Contabil</p>
-          </div>
+          <img class="brand-logo" src="/app/assets/notasync-logo-horizontal.png" alt="NotaSync" />
+          <p class="brand-subtitle">GCONT Gestao Contabil</p>
         </div>
       </div>
       <nav class="sidebar-nav" aria-label="Menu principal">
