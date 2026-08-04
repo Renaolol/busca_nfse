@@ -1500,7 +1500,15 @@ function renderSidebar() {
     <aside class="sidebar ${state.mobileSidebarOpen ? 'mobile-open' : ''}">
       <div>
         <div class="brand">
-          <img class="brand-logo" src="/app/assets/notasync-logo-horizontal.png" alt="NotaSync" />
+          <div class="brand-card" aria-label="NotaSync">
+            <img class="brand-symbol" src="/app/assets/notasync-symbol.svg" alt="" aria-hidden="true" />
+            <div class="brand-copy">
+              <div class="brand-wordmark">
+                <span class="brand-wordmark-primary">Nota</span><span class="brand-wordmark-accent">Sync</span>
+              </div>
+              <div class="brand-tagline">Busca • Monitora • Armazena</div>
+            </div>
+          </div>
           <p class="brand-subtitle">GCONT Gestao Contabil</p>
         </div>
       </div>

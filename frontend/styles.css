@@ -74,10 +74,51 @@ a {
   gap: 8px;
 }
 
-.brand-logo {
-  display: block;
-  width: min(100%, 196px);
+.brand-card {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #f7f7f8 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.16);
+}
+
+.brand-symbol {
+  width: 68px;
   height: auto;
+  flex: 0 0 auto;
+}
+
+.brand-copy {
+  min-width: 0;
+}
+
+.brand-wordmark {
+  font-family: 'Sora', 'Manrope', sans-serif;
+  font-size: 1.75rem;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  font-weight: 700;
+}
+
+.brand-wordmark-primary {
+  color: var(--text-primary);
+}
+
+.brand-wordmark-accent {
+  color: var(--accent-dark);
+}
+
+.brand-tagline {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: 0.62rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .brand-subtitle {
