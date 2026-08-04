@@ -172,6 +172,78 @@ describe('NfseDanfseService', () => {
     expect(content).toContain('Servico de publicidade institucional');
   });
 
+  it('evidencia retencoes federais em XML ABRASF classico', () => {
+    const xml = `
+      <CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+        <Nfse versao="1.00">
+          <InfNfse>
+            <Numero>425</Numero>
+            <CodigoVerificacao>42082032211496705000168000000000042526078195939549</CodigoVerificacao>
+            <DataEmissao>2026-07-24T10:35:20-03:00</DataEmissao>
+            <ValoresNfse>
+              <BaseCalculo>350.00</BaseCalculo>
+              <Aliquota>3.00</Aliquota>
+              <ValorIss>10.50</ValorIss>
+              <ValorLiquidoNfse>328.47</ValorLiquidoNfse>
+            </ValoresNfse>
+            <PrestadorServico>
+              <IdentificacaoPrestador>
+                <CpfCnpj>
+                  <Cnpj>11496705000168</Cnpj>
+                </CpfCnpj>
+              </IdentificacaoPrestador>
+              <RazaoSocial>MULTISAT NOX GERENCIAMENTO E MONITORAMENTO DE RISCO LTDA</RazaoSocial>
+            </PrestadorServico>
+            <DeclaracaoPrestacaoServico>
+              <InfDeclaracaoPrestacaoServico>
+                <Competencia>2026-07-24T00:00:00</Competencia>
+                <Servico>
+                  <Valores>
+                    <ValorServicos>350.00</ValorServicos>
+                    <ValorPis>2.28</ValorPis>
+                    <ValorCofins>10.50</ValorCofins>
+                    <ValorIr>5.25</ValorIr>
+                    <ValorCsll>16.28</ValorCsll>
+                    <OutrasRetencoes>21.53</OutrasRetencoes>
+                    <ValorIss>10.50</ValorIss>
+                  </Valores>
+                  <IssRetido>2</IssRetido>
+                  <ItemListaServico>1701</ItemListaServico>
+                  <Discriminacao>Minimo Mensal de Monitoramento Nox</Discriminacao>
+                </Servico>
+                <Tomador>
+                  <IdentificacaoTomador>
+                    <CpfCnpj>
+                      <Cnpj>32973310000189</Cnpj>
+                    </CpfCnpj>
+                  </IdentificacaoTomador>
+                  <RazaoSocial>H.M. Rother Transportes Ltda</RazaoSocial>
+                </Tomador>
+              </InfDeclaracaoPrestacaoServico>
+            </DeclaracaoPrestacaoServico>
+          </InfNfse>
+        </Nfse>
+      </CompNfse>
+    `;
+
+    const pdf = service.generateFromXml(xml, {
+      chaveAcesso: '42082032211496705000168000000000042526078195939549'
+    });
+
+    const content = pdf.toString('latin1');
+
+    expect(content).toContain('IRRF');
+    expect(content).toContain('R$ 5,25');
+    expect(content).toContain('Contribuicoes Sociais - Retidas');
+    expect(content).toContain('R$ 16,28');
+    expect(content).toContain('PIS - Debito Apuracao Propria');
+    expect(content).toContain('R$ 2,28');
+    expect(content).toContain('COFINS - Debito Apuracao Propria');
+    expect(content).toContain('R$ 10,50');
+    expect(content).toContain('Total das Retencoes Federais');
+    expect(content).toContain('R$ 21,53');
+  });
+
   it('substitui codigo do municipio pelo nome quando o nome estiver disponivel no fallback', () => {
     const pdf = service.generatePdf({
       chaveAcesso: '42110092206960810000176000000000000126019687178145',

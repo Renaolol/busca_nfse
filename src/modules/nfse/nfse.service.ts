@@ -774,6 +774,20 @@ export class NfseService {
           certificateId: certificate.id
         });
         const statusCode = this.extractStatusCode(response);
+        if (this.isNotFoundEventoSyncStatus(statusCode) && this.isAdnSemEventosResponse(response)) {
+          detalhes.push({
+            documentoId: effectiveDocument.id,
+            chaveAcesso: effectiveDocument.chaveAcesso,
+            estabelecimentoId: effectiveDocument.estabelecimentoId,
+            ambiente: this.toDtoAmbiente(effectiveDocument.ambiente),
+            status: 'sem_eventos',
+            eventosEncontrados: 0,
+            eventosImportados: 0,
+            mensagem: 'Nenhum evento encontrado no ADN'
+          });
+          continue;
+        }
+
         if (this.isNotFoundEventoSyncStatus(statusCode)) {
           const diagnostico = this.buildEventoEndpointDiagnosticWithDocument(response, effectiveDocument);
           this.logger.warn(
@@ -2150,6 +2164,40 @@ export class NfseService {
     }
 
     return 'Endpoint de eventos do ADN retornou HTTP 404 para a chave consultada.';
+  }
+
+  private isAdnSemEventosResponse(payload: unknown): boolean {
+    const data = this.asRecord(this.extractResponseData(payload));
+    if (!data) {
+      return false;
+    }
+
+    const statusProcessamento = this.scalarToString(
+      this.readRecordValue(data, ['StatusProcessamento', 'statusProcessamento'])
+    );
+    if (this.normalizeSearchText(statusProcessamento).includes('nenhumdocumentolocalizado')) {
+      return true;
+    }
+
+    const errors = this.readRecordValue(data, ['Erros', 'erros']);
+    if (!Array.isArray(errors)) {
+      return false;
+    }
+
+    return errors.some((item) => {
+      const record = this.asRecord(item);
+      if (!record) {
+        return false;
+      }
+
+      const codigo = this.scalarToString(this.readRecordValue(record, ['Codigo', 'codigo']));
+      if (codigo?.trim().toUpperCase() === 'E2240') {
+        return true;
+      }
+
+      const descricao = this.scalarToString(this.readRecordValue(record, ['Descricao', 'descricao']));
+      return this.normalizeSearchText(descricao).includes('nenhumdocumentolocalizado');
+    });
   }
 
   private buildEventoEndpointDiagnostic(payload: unknown): Record<string, unknown> {

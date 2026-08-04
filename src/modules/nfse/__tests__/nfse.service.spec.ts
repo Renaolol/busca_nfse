@@ -1095,7 +1095,7 @@ describe('NfseService', () => {
     });
   });
 
-  it('trata HTTP 404 na consulta de eventos como status especifico do endpoint para NFS-e cancelada', async () => {
+  it('trata retorno E2240 sem documentos no ADN como sem eventos', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
       {
         id: 'doc-evt-404',
@@ -1155,23 +1155,10 @@ describe('NfseService', () => {
           chaveAcesso: '42110092206960810000176000000000077726062205552016',
           estabelecimentoId: 'estab-1',
           ambiente: 'producao',
-          status: 'nao_localizado_endpoint_eventos',
+          status: 'sem_eventos',
           eventosEncontrados: 0,
           eventosImportados: 0,
-          mensagem: 'E2240 - Nenhum documento localizado -não existem documentos fiscais para a chave de acesso informada.',
-          diagnostico: {
-            documentoId: 'doc-evt-404',
-            chaveAcesso: '42110092206960810000176000000000077726062205552016',
-            ambienteDocumento: 'producao',
-            statusCode: 404,
-            message: 'E2240 - Nenhum documento localizado -não existem documentos fiscais para a chave de acesso informada.',
-            contentType: 'application/json; charset=utf-8',
-            requestId: 'req-404',
-            rawBodyPreview:
-              '{"StatusProcessamento":"NENHUM_DOCUMENTO_LOCALIZADO","LoteDFe":[],"Alertas":[],"Erros":[{"Mensagem":{},"Codigo":"E2240","Descricao":"Nenhum documento localizado -não existem documentos fiscais para a chave de acesso informada."}],"TipoAmbiente":"HOMOLOGACAO","VersaoAplicativo":"1.0.0.0","DataHoraProcessamento":"2026-08-04T11:45:41.1146376-03:00"}',
-            parsedDataPreview:
-              '{"StatusProcessamento":"NENHUM_DOCUMENTO_LOCALIZADO","LoteDFe":[],"Alertas":[],"Erros":[{"Mensagem":{},"Codigo":"E2240","Descricao":"Nenhum documento localizado -não existem documentos fiscais para a chave de acesso informada."}],"TipoAmbiente":"HOMOLOGACAO","VersaoAplicativo":"1.0.0.0","DataHoraProcessamento":"2026-08-04T11:45:41.1146376-03:00"}'
-          }
+          mensagem: 'Nenhum evento encontrado no ADN'
         }
       ]
     });
