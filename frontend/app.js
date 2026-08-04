@@ -159,6 +159,13 @@ const state = {
     total: 0,
     totalPages: 0
   },
+  xmlReader30: {
+    hasSearched: false,
+    results: [],
+    lastQuery: null,
+    lastSearchedAt: null,
+    total: 0
+  },
   alerts: [],
   serverResolvedAlerts: {},
   resolvedAlerts: loadResolvedAlertsStore(),
@@ -293,6 +300,7 @@ const state = {
     xmls: 'loading',
     nfeDocs: 'loading',
     cteDocs: 'loading',
+    xmlReader30: 'loading',
     alerts: 'loading'
   },
   sort: {
@@ -509,6 +517,11 @@ function onDocumentClick(event) {
     }
     case 'compare-sped-open-last': {
       openCompareSpedReportModal();
+      return;
+    }
+    case 'xmlReader30-clear': {
+      resetXmlReader30Search();
+      render();
       return;
     }
     case 'toggle-sidebar': {
@@ -1410,6 +1423,11 @@ function onDocumentSubmit(event) {
     case 'compareSpedForm': {
       event.preventDefault();
       void submitCompareSpedForm(target, event.submitter);
+      return;
+    }
+    case 'xmlReader30Form': {
+      event.preventDefault();
+      void submitXmlReader30Form(target);
       return;
     }
     case 'clientSearchConfigForm': {
@@ -4008,8 +4026,471 @@ function renderComparaSpedPage() {
         </div>
       </section>
 
+      ${renderXmlReader30Section()}
+
     </section>
   `;
+}
+
+function renderXmlReader30Section() {
+  const reader = state.xmlReader30;
+  const hasClients = state.clients.length > 0;
+  const currentCount = Number(reader.total || reader.results.length || 0);
+  const currentType = reader.lastQuery?.documento || 'todos';
+  const currentTypeLabel = mapXmlReader30TypeLabel(currentType);
+  const results = Array.isArray(reader.results) ? reader.results : [];
+  const summary = reader.hasSearched && reader.lastQuery ? renderXmlReader30Summary() : '';
+
+  return `
+    <article class="card compare-reader-card">
+      <div class="compare-card-header">
+        <div>
+          <h3 class="card-title">Leitor XML 3.0</h3>
+          <p class="card-subtitle">Leia os XMLs ja armazenados no Nota Sync sem sair da pagina de comparacao.</p>
+        </div>
+        ${statusBadge(`${currentCount} item(s)`, currentCount ? 'success' : 'neutral')}
+      </div>
+
+      <form id="xmlReader30Form" class="form-grid compare-form">
+        <label class="field">
+          Empresa
+          <select name="cliente" required ${hasClients ? '' : 'disabled'}>
+            ${renderOptions(state.clients.map((client) => client.id), reader.lastQuery?.cliente || '', mapClientOptions(), 'Selecione a empresa')}
+          </select>
+        </label>
+        <label class="field">
+          Documento
+          <select name="documento">${renderOptions(['todos', 'nfse', 'nfe', 'cte'], currentType, {
+            todos: 'Todos',
+            nfse: 'NFS-e',
+            nfe: 'NF-e',
+            cte: 'CT-e'
+          })}</select>
+        </label>
+        <label class="field">
+          Emissao inicio
+          <input name="emissaoInicio" type="date" value="${escapeHtml(reader.lastQuery?.emissaoInicio || '')}" />
+        </label>
+        <label class="field">
+          Emissao fim
+          <input name="emissaoFim" type="date" value="${escapeHtml(reader.lastQuery?.emissaoFim || '')}" />
+        </label>
+        <label class="field compare-span-2">
+          Busca livre
+          <input name="texto" placeholder="Chave, número, CNPJ, cliente, status..." value="${escapeHtml(reader.lastQuery?.texto || '')}" />
+        </label>
+        <label class="field">
+          Status
+          <input value="${escapeHtml(reader.hasSearched ? `Pronto para consultar ${currentTypeLabel}` : 'Aguardando busca')}" disabled />
+        </label>
+        <div class="compare-upload-hint compare-span-3">
+          <span class="compare-upload-dot"></span>
+          <span>O leitor consulta o acervo interno ja carregado pelo Nota Sync e abre o XML bruto no visualizador padrao.</span>
+        </div>
+        <div class="stack-actions compare-actions compare-span-3">
+          <button class="btn primary" type="submit" ${hasClients ? '' : 'disabled'}>Buscar XML</button>
+          <button class="btn secondary" type="button" data-action="xmlReader30-clear" ${reader.hasSearched || reader.lastQuery ? '' : 'disabled'}>Limpar</button>
+        </div>
+      </form>
+
+      ${
+        summary
+          ? summary
+          : renderXmlReader30EmptyState()
+      }
+
+      ${reader.hasSearched ? renderXmlReader30ResultsTable(results) : ''}
+    </article>
+  `;
+}
+
+function renderXmlReader30Summary() {
+  const query = state.xmlReader30.lastQuery;
+  if (!query) {
+    return '';
+  }
+
+  const client = findClientById(query.cliente);
+  const periodText =
+    query.emissaoInicio || query.emissaoFim
+      ? `${formatDate(query.emissaoInicio || '')} ate ${formatDate(query.emissaoFim || '')}`
+      : 'Sem período';
+
+  return `
+    <article class="card" style="box-shadow:none; border-style:dashed; margin-top: 2px;">
+      <div class="progress-meta">
+        <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
+        <span>Documento: <strong>${escapeHtml(mapXmlReader30TypeLabel(query.documento || 'todos'))}</strong></span>
+        <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
+        <span>Resultado: <strong>${escapeHtml(String(state.xmlReader30.total || state.xmlReader30.results.length || 0))} XML(s)</strong></span>
+        <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.xmlReader30.lastSearchedAt || new Date().toISOString()))}</strong></span>
+      </div>
+    </article>
+  `;
+}
+
+function renderXmlReader30EmptyState() {
+  return `
+    <div class="compare-history-empty">
+      <div class="compare-history-empty-icon">${icon('search')}</div>
+      <div>
+        <h4>Pronto para pesquisar</h4>
+        <p>Selecione a empresa, defina o tipo e abra os XMLs que ja estao armazenados no sistema.</p>
+      </div>
+    </div>
+  `;
+}
+
+function renderXmlReader30ResultsTable(results) {
+  return `
+    <article class="card" style="margin-top: 2px;">
+      <div class="xml-batch-bar">
+        <div>
+          <h3 class="card-title">XMLs encontrados</h3>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(results.length))} XML(s) do acervo interno.</p>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Tipo</th>
+              <th>Documento</th>
+              <th>Empresa</th>
+              <th>Emissao</th>
+              <th>Situação</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderTableRowsOrState({
+              key: 'xmlReader30',
+              colSpan: 6,
+              rowsHtml: results.length
+                ? results
+                    .map((row) => {
+                      const actions = renderXmlReader30Actions(row);
+                      return `
+                        <tr>
+                          <td>${statusBadge(row.documentLabel, row.documentTone)}</td>
+                          <td>
+                            <span class="row-title">${escapeHtml(row.numeroLabel)}</span>
+                            <span class="row-sub">${escapeHtml(row.chaveLabel)}</span>
+                          </td>
+                          <td>
+                            <span class="row-title">${escapeHtml(row.cliente)}</span>
+                            <span class="row-sub">${escapeHtml(row.cnpjLabel)}</span>
+                          </td>
+                          <td>${escapeHtml(formatDateTime(row.dataEmissao))}</td>
+                          <td>
+                            <div class="status-stack">
+                              ${statusBadge(row.statusLabel, row.statusTone)}
+                              ${statusBadge(row.storageLabel, row.storageTone)}
+                            </div>
+                          </td>
+                          <td>
+                            <div class="table-actions">${actions}</div>
+                          </td>
+                        </tr>
+                      `;
+                    })
+                    .join('')
+                : '',
+              emptyMessage: 'Nenhum XML encontrado para os filtros informados.'
+            })}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function renderXmlReader30Actions(row) {
+  if (row.documentType === 'nfse') {
+    return `
+      <button class="icon-btn" data-action="xml-details" data-xml-id="${escapeHtml(row.rowId)}">Detalhes</button>
+      <button class="icon-btn" data-action="xml-view" data-xml-id="${escapeHtml(row.rowId)}">Ver XML</button>
+      <button class="icon-btn" data-action="xml-download" data-xml-id="${escapeHtml(row.rowId)}">Baixar XML</button>
+    `;
+  }
+
+  if (row.documentType === 'nfe') {
+    return `
+      <button class="icon-btn" data-action="nfe-details" data-nfe-id="${escapeHtml(row.rowId)}">Detalhes</button>
+      <button class="icon-btn" data-action="nfe-view" data-nfe-id="${escapeHtml(row.rowId)}">Ver XML</button>
+      <button class="icon-btn" data-action="nfe-download" data-nfe-id="${escapeHtml(row.rowId)}">Baixar XML</button>
+    `;
+  }
+
+  return `
+    <button class="icon-btn" data-action="cte-details" data-cte-id="${escapeHtml(row.rowId)}">Detalhes</button>
+    <button class="icon-btn" data-action="cte-view" data-cte-id="${escapeHtml(row.rowId)}">Ver XML</button>
+    <button class="icon-btn" data-action="cte-download" data-cte-id="${escapeHtml(row.rowId)}">Baixar XML</button>
+  `;
+}
+
+function mapXmlReader30TypeLabel(documentType) {
+  if (documentType === 'nfse') {
+    return 'NFS-e';
+  }
+  if (documentType === 'nfe') {
+    return 'NF-e';
+  }
+  if (documentType === 'cte') {
+    return 'CT-e';
+  }
+  return 'Todos';
+}
+
+function resetXmlReader30Search() {
+  state.xmlReader30 = {
+    hasSearched: false,
+    results: [],
+    lastQuery: null,
+    lastSearchedAt: null,
+    total: 0
+  };
+  state.tableState.xmlReader30 = 'data';
+}
+
+async function submitXmlReader30Form(form) {
+  await executeXmlReader30Search(form);
+}
+
+async function executeXmlReader30Search(form) {
+  const data = new FormData(form);
+  const cliente = String(data.get('cliente') || '').trim();
+  const documento = String(data.get('documento') || 'todos').trim();
+  const emissaoInicio = String(data.get('emissaoInicio') || '').trim();
+  const emissaoFim = String(data.get('emissaoFim') || '').trim();
+  const texto = String(data.get('texto') || '').trim();
+
+  if (!cliente) {
+    resetXmlReader30Search();
+    pushToast('Selecione uma empresa para ler os XMLs.', 'error');
+    render();
+    return;
+  }
+
+  if (emissaoInicio && emissaoFim && Date.parse(emissaoInicio) > Date.parse(emissaoFim)) {
+    resetXmlReader30Search();
+    pushToast('A data inicial nao pode ser maior que a data final.', 'error');
+    render();
+    return;
+  }
+
+  state.xmlReader30.hasSearched = true;
+  state.xmlReader30.results = [];
+  state.xmlReader30.lastQuery = {
+    cliente,
+    documento,
+    emissaoInicio,
+    emissaoFim,
+    texto
+  };
+  state.tableState.xmlReader30 = 'loading';
+  render();
+
+  try {
+    const source = buildXmlReader30SourceDocuments({
+      cliente,
+      documento,
+      emissaoInicio,
+      emissaoFim
+    });
+    const filtered = filterXmlReader30Results(source, texto);
+    state.xmlReader30.results = filtered;
+    state.xmlReader30.total = filtered.length;
+    state.xmlReader30.lastSearchedAt = new Date().toISOString();
+    state.tableState.xmlReader30 = 'data';
+  } catch (error) {
+    state.xmlReader30.results = [];
+    state.xmlReader30.total = 0;
+    state.tableState.xmlReader30 = 'error';
+    pushToast(`Falha ao ler XMLs: ${toErrorMessage(error)}`, 'error');
+  }
+
+  render();
+}
+
+function buildXmlReader30SourceDocuments(filters) {
+  const clientId = filters.cliente;
+  const selectedType = filters.documento && filters.documento !== 'todos' ? filters.documento : 'todos';
+
+  const nfseDocs = selectedType !== 'todos' && selectedType !== 'nfse' ? [] : buildXmlReader30NfseSource(clientId, filters.emissaoInicio, filters.emissaoFim);
+  const nfeDocs = selectedType !== 'todos' && selectedType !== 'nfe' ? [] : buildXmlReader30NfeSource(clientId, filters.emissaoInicio, filters.emissaoFim);
+  const cteDocs = selectedType !== 'todos' && selectedType !== 'cte' ? [] : buildXmlReader30CteSource(clientId, filters.emissaoInicio, filters.emissaoFim);
+
+  return [...nfseDocs, ...nfeDocs, ...cteDocs].sort((left, right) => Date.parse(right.dataEmissao || 0) - Date.parse(left.dataEmissao || 0));
+}
+
+function buildXmlReader30NfseSource(clienteId, emissaoInicio, emissaoFim) {
+  return (Array.isArray(state.xmlFiles) ? state.xmlFiles : [])
+    .filter((xml) => xml.clientId === clienteId)
+    .filter((xml) => matchesDateRange(xml.dataEmissao, emissaoInicio, emissaoFim))
+    .map((xml) => mapXmlReader30Item('nfse', xml));
+}
+
+function buildXmlReader30NfeSource(clienteId, emissaoInicio, emissaoFim) {
+  return (Array.isArray(state.nfeDocuments) ? state.nfeDocuments : [])
+    .filter((doc) => doc.clientId === clienteId)
+    .filter((doc) => matchesDateRange(doc.dataEmissao, emissaoInicio, emissaoFim))
+    .map((doc) => mapXmlReader30Item('nfe', doc));
+}
+
+function buildXmlReader30CteSource(clienteId, emissaoInicio, emissaoFim) {
+  return (Array.isArray(state.cteDocuments) ? state.cteDocuments : [])
+    .filter((doc) => doc.clientId === clienteId)
+    .filter((doc) => matchesDateRange(doc.dataEmissao, emissaoInicio, emissaoFim))
+    .map((doc) => mapXmlReader30Item('cte', doc));
+}
+
+function mapXmlReader30Item(documentType, doc) {
+  if (documentType === 'nfse') {
+    const xml = doc;
+    return {
+      documentType,
+      documentLabel: 'NFS-e',
+      documentTone: 'success',
+      rowId: xml.id,
+      apiId: xml.apiNfseId || null,
+      clientId: xml.clientId || '',
+      cliente: xml.cliente || 'Cliente nao identificado',
+      cnpjLabel: formatCnpj(xml.cnpj || ''),
+      numeroLabel: xml.numeroNfse || '-',
+      chaveLabel: xml.chaveAcesso ? `Chave ${xml.chaveAcesso}` : 'Chave nao informada',
+      dataEmissao: xml.dataEmissao || xml.dataDownload || null,
+      statusLabel: xml.statusFiscal || '-',
+      statusTone: xml.cancelada ? 'danger' : xml.statusFiscal === 'Autorizada' ? 'success' : 'info',
+      storageLabel: xml.statusArmazenamento || 'Desconhecido',
+      storageTone: xml.statusArmazenamento === 'Armazenado' ? 'success' : 'danger',
+      valorLabel: formatOptionalCurrency(xml.valor),
+      searchText: buildXmlReader30SearchText([
+        xml.cliente,
+        xml.cnpj,
+        xml.numeroNfse,
+        xml.chaveAcesso,
+        xml.statusFiscal,
+        xml.statusArmazenamento,
+        xml.tipo,
+        xml.municipio,
+        xml.prestador,
+        xml.tomador,
+        xml.eventosResumo
+      ]),
+      raw: xml
+    };
+  }
+
+  if (documentType === 'nfe') {
+    const nfe = doc;
+    return {
+      documentType,
+      documentLabel: 'NF-e',
+      documentTone: 'info',
+      rowId: nfe.id,
+      apiId: nfe.apiNfeId || null,
+      clientId: nfe.clientId || '',
+      cliente: nfe.cliente || 'Cliente nao identificado',
+      cnpjLabel: formatCnpj(nfe.emitenteCnpj || nfe.destinatarioCnpj || ''),
+      numeroLabel: nfe.numeroNfe || '-',
+      chaveLabel: nfe.chaveAcesso ? `Chave ${nfe.chaveAcesso}` : 'Chave nao informada',
+      dataEmissao: nfe.dataEmissao || nfe.dataAutorizacao || null,
+      statusLabel: nfe.statusFiscal || '-',
+      statusTone: nfe.cancelada ? 'danger' : nfe.statusFiscal === 'Autorizada' ? 'success' : 'info',
+      storageLabel: nfe.xmlCompletoDisponivel ? 'XML completo' : 'Resumo XML',
+      storageTone: nfe.xmlCompletoDisponivel ? 'success' : 'warning',
+      valorLabel: formatOptionalCurrency(nfe.valor),
+      searchText: buildXmlReader30SearchText([
+        nfe.cliente,
+        nfe.emitenteNome,
+        nfe.destinatarioNome,
+        nfe.contraparteNome,
+        nfe.emitenteCnpj,
+        nfe.destinatarioCnpj,
+        nfe.numeroNfe,
+        nfe.chaveAcesso,
+        nfe.statusFiscal,
+        nfe.schemaDoc,
+        nfe.eventosResumo,
+        nfe.tipo
+      ]),
+      raw: nfe
+    };
+  }
+
+  const cte = doc;
+  return {
+    documentType,
+    documentLabel: 'CT-e',
+    documentTone: 'warning',
+    rowId: cte.id,
+    apiId: cte.apiCteId || null,
+    clientId: cte.clientId || '',
+    cliente: cte.cliente || 'Cliente nao identificado',
+    cnpjLabel: formatCnpj(cte.emitenteCnpj || cte.destinatarioCnpj || ''),
+    numeroLabel: cte.numeroCte || '-',
+    chaveLabel: cte.chaveAcesso ? `Chave ${cte.chaveAcesso}` : 'Chave nao informada',
+    dataEmissao: cte.dataEmissao || cte.dataAutorizacao || null,
+    statusLabel: cte.statusFiscal || '-',
+    statusTone: cte.cancelada ? 'danger' : cte.statusFiscal === 'Autorizada' ? 'success' : 'info',
+    storageLabel: cte.xmlCompletoDisponivel ? 'XML completo' : 'Resumo XML',
+    storageTone: cte.xmlCompletoDisponivel ? 'success' : 'warning',
+    valorLabel: formatOptionalCurrency(cte.valor),
+    searchText: buildXmlReader30SearchText([
+      cte.cliente,
+      cte.emitenteNome,
+      cte.destinatarioNome,
+      cte.contraparteNome,
+      cte.emitenteCnpj,
+      cte.destinatarioCnpj,
+      cte.numeroCte,
+      cte.chaveAcesso,
+      cte.statusFiscal,
+      cte.schemaDoc,
+      cte.eventosResumo,
+      cte.tipo
+    ]),
+    raw: cte
+  };
+}
+
+function filterXmlReader30Results(results, texto) {
+  const normalizedText = normalizeSearchText(texto);
+  return (Array.isArray(results) ? results : [])
+    .filter((row) => {
+      if (!normalizedText) {
+        return true;
+      }
+
+      return normalizeSearchText(row.searchText || '').includes(normalizedText);
+    })
+    .sort((left, right) => Date.parse(right.dataEmissao || 0) - Date.parse(left.dataEmissao || 0));
+}
+
+function buildXmlReader30SearchText(values) {
+  return (Array.isArray(values) ? values : [])
+    .filter(Boolean)
+    .map((value) => String(value || '').trim())
+    .filter(Boolean)
+    .join(' ');
+}
+
+function matchesDateRange(value, start, end) {
+  const timestamp = Date.parse(value || '');
+  if (Number.isNaN(timestamp)) {
+    return true;
+  }
+
+  if (start && timestamp < Date.parse(`${start}T00:00:00`)) {
+    return false;
+  }
+
+  if (end && timestamp > Date.parse(`${end}T23:59:59`)) {
+    return false;
+  }
+
+  return true;
 }
 
 function renderSettingsTabPanel() {
@@ -11796,7 +12277,25 @@ function formatOptionalCurrency(value) {
 }
 
 function sumListedDocumentValues(items) {
-  return (Array.isArray(items) ? items : []).reduce((sum, item) => sum + toNumber(item?.valor), 0);
+  return (Array.isArray(items) ? items : []).reduce((sum, item) => {
+    if (!shouldIncludeDocumentValueInSum(item)) {
+      return sum;
+    }
+
+    return sum + toNumber(item?.valor);
+  }, 0);
+}
+
+function shouldIncludeDocumentValueInSum(item) {
+  if (!item || item.cancelada) {
+    return false;
+  }
+
+  const normalizedStatus = normalizeSearchText(
+    item.statusFiscal || item.statusLabel || item.status || ''
+  );
+
+  return normalizedStatus.includes('autoriz');
 }
 
 function formatInteger(value) {
