@@ -12906,7 +12906,7 @@ function resolveSyncAuditDocumentLabel(documentType, detail, document, index) {
 
 function resolveSyncAuditSecondaryLabel(documentType, detail, document) {
   if (documentType === 'nfse') {
-    const ambienteBruto = detail?.ambiente || detail?.diagnostico?.ambienteDocumento || document?.ambiente || '';
+    const ambienteBruto = document?.ambiente || detail?.ambiente || detail?.diagnostico?.ambienteDocumento || '';
     const ambiente = ambienteBruto ? mapNfseAmbienteLabel(ambienteBruto) : '';
     const estabelecimento = document?.prestador || document?.cliente || '';
     return [ambiente, estabelecimento].filter(Boolean).join(' • ');
