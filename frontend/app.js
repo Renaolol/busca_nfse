@@ -4338,7 +4338,7 @@ function renderXmlReader30ResultsTable(results) {
   `;
 }
 
-function renderXmlReader30ResultsTableLegacyUnused(results) {
+function renderXmlReader30ResultsTableLegacyUnusedOld2(results) {
   return `
     <article class="card" style="margin-top: 2px;">
       <div class="xml-batch-bar">
