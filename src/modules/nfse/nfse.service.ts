@@ -832,7 +832,7 @@ export class NfseService {
           status: xmls.length > 0 ? 'sincronizado' : 'sem_eventos',
           eventosEncontrados: xmls.length,
           eventosImportados: eventosImportados - importedBefore,
-          mensagem: xmls.length > 0 ? undefined : this.extractSyncMessage(response) ?? 'Nenhum evento encontrado no ADN'
+          mensagem: xmls.length > 0 ? undefined : 'Nenhum evento encontrado no ADN'
         });
       } catch (error) {
         falhas += 1;

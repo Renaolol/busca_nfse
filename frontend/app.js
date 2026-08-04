@@ -12586,7 +12586,9 @@ async function runManualEventsSyncOverlay(params) {
       const summary = await params.requestSync(target);
       const detail = normalizeSingleEventsSyncDetail(summary, target);
       const updatedDocument =
-        detail.status === 'sincronizado' && typeof params.fetchUpdatedDocument === 'function'
+        detail.status !== 'falha_certificado' &&
+        detail.status !== 'falha_api' &&
+        typeof params.fetchUpdatedDocument === 'function'
           ? await params.fetchUpdatedDocument(target).catch(() => null)
           : null;
 
@@ -12881,7 +12883,7 @@ function resolveSyncAuditDocumentLabel(documentType, detail, document, index) {
 
 function resolveSyncAuditSecondaryLabel(documentType, detail, document) {
   if (documentType === 'nfse') {
-    const ambiente = document?.ambiente ? mapNfseAmbienteLabel(document.ambiente) : detail?.ambiente ? mapNfseAmbienteLabel(detail.ambiente) : '';
+    const ambiente = detail?.ambiente ? mapNfseAmbienteLabel(detail.ambiente) : document?.ambiente ? mapNfseAmbienteLabel(document.ambiente) : '';
     const estabelecimento = document?.prestador || document?.cliente || '';
     return [ambiente, estabelecimento].filter(Boolean).join(' • ');
   }
