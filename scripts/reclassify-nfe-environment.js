@@ -2,6 +2,9 @@ const { existsSync, readFileSync } = require('node:fs');
 const { mkdir, readFile, writeFile } = require('node:fs/promises');
 const { resolve } = require('node:path');
 
+const UUID_REGEX =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
 function loadEnvFile() {
   const envPath = resolve(process.cwd(), '.env');
   if (!existsSync(envPath)) {
@@ -38,6 +41,10 @@ function parseArgs() {
   };
 }
 
+function isUuid(value) {
+  return UUID_REGEX.test(String(value || '').trim());
+}
+
 function normalizeText(value) {
   return String(value || '').replace(/^\uFEFF/, '').replace(/\u0000/g, '').trim();
 }
@@ -54,6 +61,10 @@ function resolveExpectedAmbiente(xml) {
 async function main() {
   const { apply, clienteId, batchSize } = parseArgs();
   loadEnvFile();
+
+  if (clienteId && !isUuid(clienteId)) {
+    throw new Error(`clienteId invalido: "${clienteId}". Informe um UUID real no formato 00000000-0000-0000-0000-000000000000.`);
+  }
 
   const { PrismaClient } = require('@prisma/client');
   const prisma = new PrismaClient();
@@ -74,6 +85,7 @@ async function main() {
       reclassified: 0,
       conflicts: 0,
       missingXml: 0,
+      missingFiles: 0,
       readErrors: 0,
       updated: 0
     },
@@ -81,6 +93,7 @@ async function main() {
     reclassified: [],
     conflicts: [],
     missingXml: [],
+    missingFiles: [],
     readErrors: []
   };
 
@@ -117,14 +130,16 @@ async function main() {
 
       for (const document of documents) {
         report.summary.processed += 1;
-        const storageKey = document.xmlCompletoPath ?? document.xmlResumoPath;
+        const candidateKeys = [document.xmlCompletoPath, document.xmlResumoPath].filter(Boolean);
+        const storageKey = candidateKeys[0] ?? null;
         const item = {
           id: document.id,
           clienteId: document.clienteId,
           estabelecimentoId: document.estabelecimentoId,
           ambienteAtual: document.ambiente,
           chaveAcesso: document.chaveAcesso,
-          storageKey
+          storageKey,
+          candidateKeys
         };
 
         if (!storageKey) {
@@ -137,14 +152,37 @@ async function main() {
         }
 
         let xml;
-        try {
-          xml = normalizeText((await readFile(resolve(storageRootPath, storageKey))).toString('utf8'));
-        } catch (error) {
-          report.summary.readErrors += 1;
-          report.readErrors.push({
-            ...item,
-            motivo: error instanceof Error ? error.message : String(error)
-          });
+        let resolvedKey = null;
+        let lastError = null;
+        for (const key of candidateKeys) {
+          try {
+            xml = normalizeText((await readFile(resolve(storageRootPath, key))).toString('utf8'));
+            resolvedKey = key;
+            break;
+          } catch (error) {
+            lastError = error;
+          }
+        }
+
+        if (!xml) {
+          const errorMessage = lastError instanceof Error ? lastError.message : String(lastError || '');
+          const isMissingFile =
+            /ENOENT|no such file or directory/i.test(errorMessage) ||
+            (lastError && typeof lastError === 'object' && lastError.code === 'ENOENT');
+
+          if (isMissingFile) {
+            report.summary.missingFiles += 1;
+            report.missingFiles.push({
+              ...item,
+              motivo: errorMessage || 'Nenhum dos arquivos XML referenciados foi encontrado no storage local'
+            });
+          } else {
+            report.summary.readErrors += 1;
+            report.readErrors.push({
+              ...item,
+              motivo: errorMessage || 'Falha desconhecida ao ler XML do storage local'
+            });
+          }
           continue;
         }
 
@@ -155,6 +193,7 @@ async function main() {
           report.summary.unchanged += 1;
           report.unchanged.push({
             ...item,
+            storageKey: resolvedKey,
             tpAmb: tpAmb || null,
             ambienteEsperado
           });
@@ -178,6 +217,7 @@ async function main() {
           report.summary.conflicts += 1;
           report.conflicts.push({
             ...item,
+            storageKey: resolvedKey,
             tpAmb: tpAmb || null,
             ambienteEsperado,
             conflictingDocumentId: conflicting.id,
@@ -189,6 +229,7 @@ async function main() {
         report.summary.reclassified += 1;
         report.reclassified.push({
           ...item,
+          storageKey: resolvedKey,
           tpAmb: tpAmb || null,
           ambienteEsperado
         });
@@ -216,6 +257,7 @@ async function main() {
         `Elegiveis para reclassificacao: ${report.summary.reclassified}.`,
         `Conflitos: ${report.summary.conflicts}.`,
         `Sem XML: ${report.summary.missingXml}.`,
+        `Arquivos ausentes: ${report.summary.missingFiles}.`,
         `Falhas de leitura: ${report.summary.readErrors}.`,
         apply ? `Atualizados: ${report.summary.updated}.` : 'Nenhuma alteracao aplicada (dry-run).',
         `Relatorio: ${reportPath}.`
