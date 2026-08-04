@@ -1501,12 +1501,8 @@ function renderSidebar() {
       <div>
         <div class="brand">
           <div class="brand-card" aria-label="NotaSync">
-            <img class="brand-symbol" src="/app/assets/notasync-symbol.svg" alt="" aria-hidden="true" />
-            <div class="brand-copy">
-              <div class="brand-wordmark">
-                <span class="brand-wordmark-primary">Nota</span><span class="brand-wordmark-accent">Sync</span>
-              </div>
-              <div class="brand-tagline">Busca • Monitora • Armazena</div>
+            <div class="brand-logo-frame">
+              <img class="brand-logo" src="/app/assets/notasync-logo-horizontal.png" alt="NotaSync" />
             </div>
           </div>
           <p class="brand-subtitle">GCONT Gestao Contabil</p>
