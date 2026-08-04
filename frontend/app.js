@@ -92,6 +92,7 @@ const state = {
   selectedAlertIds: new Set(),
   selectedXmlIds: new Set(),
   selectedNfeIds: new Set(),
+  selectedXmlReaderIds: new Set(),
   clients: [],
   certificates: [],
   searchRuns: [],
@@ -169,7 +170,12 @@ const state = {
     results: [],
     lastQuery: null,
     lastSearchedAt: null,
-    total: 0
+    total: 0,
+    sourceTotals: {
+      nfse: 0,
+      nfe: 0,
+      cte: 0
+    }
   },
   alerts: [],
   serverResolvedAlerts: {},
@@ -974,7 +980,7 @@ function onDocumentClick(event) {
       if (!nfeId) {
         return;
       }
-      openModal({ kind: 'nfe-details', nfeId });
+      void openNfeDetails(nfeId);
       return;
     }
     case 'nfe-view': {
@@ -1064,7 +1070,7 @@ function onDocumentClick(event) {
       if (!cteId) {
         return;
       }
-      openModal({ kind: 'cte-details', cteId });
+      void openCteDetails(cteId);
       return;
     }
     case 'cte-view': {
@@ -1102,15 +1108,15 @@ function onDocumentClick(event) {
         return;
       }
       if (documentType === 'nfe') {
-        openModal({ kind: 'nfe-details', nfeId: documentId });
+        void openNfeDetails(documentId);
         return;
       }
       if (documentType === 'cte') {
-        openModal({ kind: 'cte-details', cteId: documentId });
+        void openCteDetails(documentId);
         return;
       }
       if (documentType === 'nfse') {
-        openModal({ kind: 'xml-details', xmlId: documentId });
+        void openXmlDetails(documentId);
       }
       return;
     }
@@ -1153,7 +1159,40 @@ function onDocumentClick(event) {
       if (!xmlId) {
         return;
       }
-      openModal({ kind: 'xml-details', xmlId });
+      void openXmlDetails(xmlId);
+      return;
+    }
+    case 'xml-reader30-select': {
+      const selectionKey = actionNode.getAttribute('data-selection-key');
+      if (!selectionKey) {
+        return;
+      }
+      if (actionNode.checked) {
+        state.selectedXmlReaderIds.add(selectionKey);
+      } else {
+        state.selectedXmlReaderIds.delete(selectionKey);
+      }
+      render();
+      return;
+    }
+    case 'xml-reader30-toggle-all': {
+      const checked = actionNode.checked;
+      state.xmlReader30.results.forEach((row) => {
+        const selectionKey = getXmlReader30SelectionKey(row);
+        if (!selectionKey || !canDownloadXmlReader30Row(row)) {
+          return;
+        }
+        if (checked) {
+          state.selectedXmlReaderIds.add(selectionKey);
+        } else {
+          state.selectedXmlReaderIds.delete(selectionKey);
+        }
+      });
+      render();
+      return;
+    }
+    case 'xml-reader30-batch-download': {
+      void downloadSelectedXmlReader30Batch();
       return;
     }
     case 'xml-view': {
@@ -4142,6 +4181,7 @@ function renderXmlReader30Summary() {
         <span>Documento: <strong>${escapeHtml(mapXmlReader30TypeLabel(query.documento || 'todos'))}</strong></span>
         <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
         <span>Resultado: <strong>${escapeHtml(String(state.xmlReader30.total || state.xmlReader30.results.length || 0))} XML(s)</strong></span>
+        <span>Acervo lido: <strong>${escapeHtml(formatXmlReader30SourceTotals(state.xmlReader30.sourceTotals))}</strong></span>
         <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.xmlReader30.lastSearchedAt || new Date().toISOString()))}</strong></span>
       </div>
     </article>
@@ -4267,7 +4307,12 @@ function resetXmlReader30Search() {
     results: [],
     lastQuery: null,
     lastSearchedAt: null,
-    total: 0
+    total: 0,
+    sourceTotals: {
+      nfse: 0,
+      nfe: 0,
+      cte: 0
+    }
   };
   state.tableState.xmlReader30 = 'data';
 }
@@ -4311,20 +4356,33 @@ async function executeXmlReader30Search(form) {
   render();
 
   try {
-    const source = buildXmlReader30SourceDocuments({
+    const sourceResponse = await fetchXmlReader30SourceDocuments({
       cliente,
       documento,
       emissaoInicio,
       emissaoFim
     });
-    const filtered = filterXmlReader30Results(source, texto);
+    const filtered = filterXmlReader30Results(sourceResponse.items, texto);
     state.xmlReader30.results = filtered;
     state.xmlReader30.total = filtered.length;
+    state.xmlReader30.sourceTotals = sourceResponse.sourceTotals;
     state.xmlReader30.lastSearchedAt = new Date().toISOString();
     state.tableState.xmlReader30 = 'data';
+
+    if (sourceResponse.cappedSources.length) {
+      const cappedLabels = sourceResponse.cappedSources
+        .map((entry) => `${entry.label}: ${entry.loaded} de ${entry.total}`)
+        .join(' / ');
+      pushToast(`O leitor trouxe o limite seguro do acervo completo. Refine os filtros para ver o restante (${cappedLabels}).`, 'info');
+    }
   } catch (error) {
     state.xmlReader30.results = [];
     state.xmlReader30.total = 0;
+    state.xmlReader30.sourceTotals = {
+      nfse: 0,
+      nfe: 0,
+      cte: 0
+    };
     state.tableState.xmlReader30 = 'error';
     pushToast(`Falha ao ler XMLs: ${toErrorMessage(error)}`, 'error');
   }
@@ -4332,36 +4390,200 @@ async function executeXmlReader30Search(form) {
   render();
 }
 
-function buildXmlReader30SourceDocuments(filters) {
+async function fetchXmlReader30SourceDocuments(filters) {
+  if (state.dataSource !== 'api') {
+    const items = buildXmlReader30SourceDocumentsFromState(filters);
+    return {
+      items,
+      sourceTotals: countXmlReader30SourceTotals(items),
+      cappedSources: []
+    };
+  }
+
+  const selectedType = filters.documento && filters.documento !== 'todos' ? filters.documento : 'todos';
+  const tasks = [
+    selectedType !== 'todos' && selectedType !== 'nfse' ? Promise.resolve(createXmlReader30FetchResult('NFS-e', [])) : fetchXmlReader30NfseSource(filters),
+    selectedType !== 'todos' && selectedType !== 'nfe' ? Promise.resolve(createXmlReader30FetchResult('NF-e', [])) : fetchXmlReader30NfeSource(filters),
+    selectedType !== 'todos' && selectedType !== 'cte' ? Promise.resolve(createXmlReader30FetchResult('CT-e', [])) : fetchXmlReader30CteSource(filters)
+  ];
+  const [nfseResponse, nfeResponse, cteResponse] = await Promise.all(tasks);
+  const items = [...nfseResponse.items, ...nfeResponse.items, ...cteResponse.items].sort(
+    (left, right) => Date.parse(right.dataEmissao || 0) - Date.parse(left.dataEmissao || 0)
+  );
+
+  return {
+    items,
+    sourceTotals: {
+      nfse: nfseResponse.items.length,
+      nfe: nfeResponse.items.length,
+      cte: cteResponse.items.length
+    },
+    cappedSources: [nfseResponse, nfeResponse, cteResponse]
+      .filter((entry) => entry.capped)
+      .map((entry) => ({ label: entry.label, total: entry.total, loaded: entry.loaded }))
+  };
+}
+
+function buildXmlReader30SourceDocumentsFromState(filters) {
   const clientId = filters.cliente;
   const selectedType = filters.documento && filters.documento !== 'todos' ? filters.documento : 'todos';
 
-  const nfseDocs = selectedType !== 'todos' && selectedType !== 'nfse' ? [] : buildXmlReader30NfseSource(clientId, filters.emissaoInicio, filters.emissaoFim);
-  const nfeDocs = selectedType !== 'todos' && selectedType !== 'nfe' ? [] : buildXmlReader30NfeSource(clientId, filters.emissaoInicio, filters.emissaoFim);
-  const cteDocs = selectedType !== 'todos' && selectedType !== 'cte' ? [] : buildXmlReader30CteSource(clientId, filters.emissaoInicio, filters.emissaoFim);
+  const nfseDocs =
+    selectedType !== 'todos' && selectedType !== 'nfse'
+      ? []
+      : buildXmlReader30NfseSourceFromState(clientId, filters.emissaoInicio, filters.emissaoFim);
+  const nfeDocs =
+    selectedType !== 'todos' && selectedType !== 'nfe'
+      ? []
+      : buildXmlReader30NfeSourceFromState(clientId, filters.emissaoInicio, filters.emissaoFim);
+  const cteDocs =
+    selectedType !== 'todos' && selectedType !== 'cte'
+      ? []
+      : buildXmlReader30CteSourceFromState(clientId, filters.emissaoInicio, filters.emissaoFim);
 
   return [...nfseDocs, ...nfeDocs, ...cteDocs].sort((left, right) => Date.parse(right.dataEmissao || 0) - Date.parse(left.dataEmissao || 0));
 }
 
-function buildXmlReader30NfseSource(clienteId, emissaoInicio, emissaoFim) {
+async function fetchXmlReader30NfseSource(filters) {
+  const query = buildXmlSearchQuery(
+    {
+      cliente: filters.cliente,
+      cnpj: '',
+      numero: '',
+      emissaoInicio: filters.emissaoInicio,
+      emissaoFim: filters.emissaoFim,
+      downloadInicio: '',
+      downloadFim: '',
+      municipio: 'Todos',
+      tipo: 'Todos',
+      status: 'Armazenado'
+    },
+    1,
+    SEARCH_PAGE_SIZE,
+    true
+  );
+  const payload = normalizePaginatedResponse(await apiRequest(`/nfse?${query.toString()}`));
+  const xmls = buildXmlFilesFromApi(payload.items, state.clients).filter((xml) => xml.statusArmazenamento === 'Armazenado');
+  state.xmlFiles = mergeXmlFilesById(state.xmlFiles, xmls);
+  return createXmlReader30FetchResult('NFS-e', xmls.map((xml) => mapXmlReader30Item('nfse', xml)), payload);
+}
+
+function buildXmlReader30NfseSourceFromState(clienteId, emissaoInicio, emissaoFim) {
   return (Array.isArray(state.xmlFiles) ? state.xmlFiles : [])
     .filter((xml) => xml.clientId === clienteId)
+    .filter((xml) => xml.statusArmazenamento === 'Armazenado')
     .filter((xml) => matchesDateRange(xml.dataEmissao, emissaoInicio, emissaoFim))
     .map((xml) => mapXmlReader30Item('nfse', xml));
 }
 
-function buildXmlReader30NfeSource(clienteId, emissaoInicio, emissaoFim) {
+async function fetchXmlReader30NfeSource(filters) {
+  const query = buildNfeSearchQuery(
+    {
+      cliente: filters.cliente,
+      tipo: 'Todos',
+      cnpj: '',
+      numero: '',
+      chave: '',
+      emissaoInicio: filters.emissaoInicio,
+      emissaoFim: filters.emissaoFim,
+      status: 'Todos',
+      eventos: 'Todos',
+      schemaDoc: 'Todos',
+      valorMin: '',
+      valorMax: '',
+      xmlCompleto: 'Somente completos',
+      ambiente: 'Todos'
+    },
+    1,
+    SEARCH_PAGE_SIZE,
+    true
+  );
+  const payload = normalizePaginatedResponse(await apiRequest(`/nfe?${query.toString()}`));
+  const docs = buildNfeDocumentsFromApi(payload.items, state.clients).filter((doc) => doc.xmlCompletoDisponivel);
+  state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, docs);
+  return createXmlReader30FetchResult('NF-e', docs.map((doc) => mapXmlReader30Item('nfe', doc)), payload);
+}
+
+function buildXmlReader30NfeSourceFromState(clienteId, emissaoInicio, emissaoFim) {
   return (Array.isArray(state.nfeDocuments) ? state.nfeDocuments : [])
     .filter((doc) => doc.clientId === clienteId)
+    .filter((doc) => doc.xmlCompletoDisponivel)
     .filter((doc) => matchesDateRange(doc.dataEmissao, emissaoInicio, emissaoFim))
     .map((doc) => mapXmlReader30Item('nfe', doc));
 }
 
-function buildXmlReader30CteSource(clienteId, emissaoInicio, emissaoFim) {
+async function fetchXmlReader30CteSource(filters) {
+  const query = buildCteSearchQuery(
+    {
+      cliente: filters.cliente,
+      tipo: 'Todos',
+      cnpj: '',
+      numero: '',
+      chave: '',
+      emissaoInicio: filters.emissaoInicio,
+      emissaoFim: filters.emissaoFim,
+      status: 'Todos',
+      eventos: 'Todos',
+      tipoEvento: '',
+      schemaDoc: 'Todos',
+      valorMin: '',
+      valorMax: '',
+      xmlCompleto: 'Somente completos',
+      ambiente: 'Todos'
+    },
+    1,
+    SEARCH_PAGE_SIZE,
+    true
+  );
+  const payload = normalizePaginatedResponse(await apiRequest(`/cte?${query.toString()}`));
+  const docs = buildCteDocumentsFromApi(payload.items, state.clients).filter((doc) => doc.xmlCompletoDisponivel);
+  state.cteDocuments = mergeCteDocumentsById(state.cteDocuments, docs);
+  return createXmlReader30FetchResult('CT-e', docs.map((doc) => mapXmlReader30Item('cte', doc)), payload);
+}
+
+function buildXmlReader30CteSourceFromState(clienteId, emissaoInicio, emissaoFim) {
   return (Array.isArray(state.cteDocuments) ? state.cteDocuments : [])
     .filter((doc) => doc.clientId === clienteId)
+    .filter((doc) => doc.xmlCompletoDisponivel)
     .filter((doc) => matchesDateRange(doc.dataEmissao, emissaoInicio, emissaoFim))
     .map((doc) => mapXmlReader30Item('cte', doc));
+}
+
+function createXmlReader30FetchResult(label, items, payload = null) {
+  const normalizedItems = Array.isArray(items) ? items : [];
+  const total = Number(payload?.total ?? normalizedItems.length);
+  return {
+    label,
+    items: normalizedItems,
+    total,
+    loaded: normalizedItems.length,
+    capped: total > normalizedItems.length
+  };
+}
+
+function countXmlReader30SourceTotals(items) {
+  return (Array.isArray(items) ? items : []).reduce(
+    (totals, item) => {
+      if (item?.documentType === 'nfse') {
+        totals.nfse += 1;
+      } else if (item?.documentType === 'nfe') {
+        totals.nfe += 1;
+      } else if (item?.documentType === 'cte') {
+        totals.cte += 1;
+      }
+      return totals;
+    },
+    {
+      nfse: 0,
+      nfe: 0,
+      cte: 0
+    }
+  );
+}
+
+function formatXmlReader30SourceTotals(sourceTotals) {
+  const totals = sourceTotals || { nfse: 0, nfe: 0, cte: 0 };
+  return `NFS-e ${totals.nfse || 0} / NF-e ${totals.nfe || 0} / CT-e ${totals.cte || 0}`;
 }
 
 function mapXmlReader30Item(documentType, doc) {
@@ -4510,6 +4732,401 @@ function matchesDateRange(value, start, end) {
   }
 
   return true;
+}
+
+function getXmlReader30SelectionKey(row) {
+  if (!row?.documentType || !row?.rowId) {
+    return '';
+  }
+
+  return `${row.documentType}:${row.rowId}`;
+}
+
+function canDownloadXmlReader30Row(row) {
+  if (!row?.raw) {
+    return false;
+  }
+
+  if (row.documentType === 'nfse') {
+    return Boolean(row.raw.apiNfseId && row.raw.clientId);
+  }
+
+  if (row.documentType === 'nfe') {
+    return Boolean(row.raw.apiNfeId && row.raw.clientId && row.raw.xmlCompletoDisponivel);
+  }
+
+  if (row.documentType === 'cte') {
+    return Boolean(row.raw.apiCteId && row.raw.clientId && row.raw.xmlCompletoDisponivel);
+  }
+
+  return false;
+}
+
+function getSelectedXmlReader30Rows() {
+  return (Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : []).filter((row) => {
+    const selectionKey = getXmlReader30SelectionKey(row);
+    return selectionKey && state.selectedXmlReaderIds.has(selectionKey) && canDownloadXmlReader30Row(row);
+  });
+}
+
+async function downloadSelectedXmlReader30Batch() {
+  const selectedRows = getSelectedXmlReader30Rows();
+  if (!selectedRows.length) {
+    pushToast('Selecione ao menos um XML no leitor.', 'error');
+    return;
+  }
+
+  const nfseRows = selectedRows.filter((row) => row.documentType === 'nfse');
+  const nfeRows = selectedRows.filter((row) => row.documentType === 'nfe');
+  const cteRows = selectedRows.filter((row) => row.documentType === 'cte');
+  const summary = [];
+
+  try {
+    if (nfseRows.length) {
+      const ids = [...new Set(nfseRows.map((row) => row.raw.apiNfseId).filter(Boolean))];
+      const clientIds = [...new Set(nfseRows.map((row) => row.raw.clientId).filter(Boolean))];
+      const body = { ids, tipoArquivo: 'xml' };
+      if (clientIds.length === 1) {
+        body.clienteId = clientIds[0];
+      }
+
+      const payload = await apiRequest('/nfse/download-lote', {
+        method: 'POST',
+        body,
+        timeoutMs: 2 * 60 * 1000
+      });
+      downloadFromPayload(payload, 'leitor-xml-nfse.zip');
+      summary.push(`NFS-e ${Number(payload?.totalArquivosIncluidos || ids.length)}`);
+    }
+
+    if (nfeRows.length) {
+      const ids = [...new Set(nfeRows.map((row) => row.raw.apiNfeId).filter(Boolean))];
+      const clientIds = [...new Set(nfeRows.map((row) => row.raw.clientId).filter(Boolean))];
+      const body = { ids, tipoArquivo: 'xml' };
+      if (clientIds.length === 1) {
+        body.clienteId = clientIds[0];
+      }
+
+      const payload = await apiRequest('/nfe/download-lote', {
+        method: 'POST',
+        body,
+        timeoutMs: 2 * 60 * 1000
+      });
+      downloadFromPayload(payload, 'leitor-xml-nfe.zip');
+      summary.push(`NF-e ${Number(payload?.totalArquivosIncluidos || ids.length)}`);
+    }
+
+    if (cteRows.length) {
+      for (const row of cteRows) {
+        const doc = row.raw;
+        await ensureCteContentLoaded(doc);
+        const blob = new Blob([doc.conteudoXml], { type: 'application/xml' });
+        triggerBrowserDownload(`cte-${doc.chaveAcesso || doc.numeroCte || 'xml'}.xml`, blob);
+        await wait(120);
+      }
+      summary.push(`CT-e ${cteRows.length}`);
+    }
+
+    pushToast(`Downloads iniciados no leitor: ${summary.join(' / ')}.`, 'success');
+  } catch (error) {
+    pushToast(`Falha ao baixar selecao do leitor: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+function renderXmlReader30ResultsTable(results) {
+  const selectableRows = results.filter((row) => canDownloadXmlReader30Row(row));
+  const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
+  const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
+  const batchDisabled = selectableRows.length === 0 || selectedVisibleCount === 0 ? 'disabled' : '';
+
+  return `
+    <article class="card" style="margin-top: 2px;">
+      <div class="xml-batch-bar">
+        <div>
+          <h3 class="card-title">XMLs encontrados</h3>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(results.length))} XML(s) do acervo interno.</p>
+        </div>
+        <div class="table-actions">
+          <span class="row-sub">${escapeHtml(String(selectedVisibleCount))} selecionado(s)</span>
+          <button class="btn primary" type="button" data-action="xml-reader30-batch-download" ${batchDisabled}>Baixar XMLs selecionados</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th><input type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" /></th>
+              <th>Tipo</th>
+              <th>Documento</th>
+              <th>Status</th>
+              <th>Cancelada?</th>
+              <th>Empresa</th>
+              <th>Participante</th>
+              <th>Emissao</th>
+              <th>Resumo</th>
+              <th>Valor</th>
+              <th>Arquivo</th>
+              <th>Acoes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderTableRowsOrState({
+              key: 'xmlReader30',
+              colSpan: 12,
+              rowsHtml: results.length
+                ? results
+                    .map((row) => {
+                      const actions = renderXmlReader30Actions(row);
+                      const selectionKey = getXmlReader30SelectionKey(row);
+                      const canDownload = canDownloadXmlReader30Row(row);
+                      return `
+                        <tr>
+                          <td><input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${canDownload ? '' : 'disabled'} aria-label="Selecionar ${escapeHtml(row.documentLabel)} ${escapeHtml(row.numeroLabel)}" /></td>
+                          <td>${statusBadge(row.documentLabel, row.documentTone)}</td>
+                          <td>
+                            <span class="row-title">${escapeHtml(row.numeroLabel)}</span>
+                            <span class="row-sub">${escapeHtml(row.chaveLabel)}</span>
+                          </td>
+                          <td>${statusBadge(row.statusLabel, row.statusTone)}</td>
+                          <td>${statusBadge(row.cancelLabel, row.cancelTone)}</td>
+                          <td>
+                            <span class="row-title">${escapeHtml(row.cliente)}</span>
+                            <span class="row-sub">${escapeHtml(row.cnpjLabel)}</span>
+                          </td>
+                          <td>
+                            <span class="row-title">${escapeHtml(row.partyLabel)}</span>
+                            <span class="row-sub">${escapeHtml(row.partySecondaryLabel)}</span>
+                          </td>
+                          <td>${escapeHtml(formatDateTime(row.dataEmissao))}</td>
+                          <td><span class="row-sub">${escapeHtml(row.previewLabel)}</span></td>
+                          <td>${escapeHtml(row.valorLabel)}</td>
+                          <td>${statusBadge(row.storageLabel, row.storageTone)}</td>
+                          <td>
+                            <div class="table-actions">${actions}</div>
+                          </td>
+                        </tr>
+                      `;
+                    })
+                    .join('')
+                : '',
+              emptyMessage: 'Nenhum XML encontrado para os filtros informados.'
+            })}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function resetXmlReader30Search() {
+  state.selectedXmlReaderIds = new Set();
+  state.xmlReader30 = {
+    hasSearched: false,
+    results: [],
+    lastQuery: null,
+    lastSearchedAt: null,
+    total: 0,
+    sourceTotals: {
+      nfse: 0,
+      nfe: 0,
+      cte: 0
+    }
+  };
+  state.tableState.xmlReader30 = 'data';
+}
+
+async function executeXmlReader30Search(form) {
+  const data = new FormData(form);
+  const cliente = String(data.get('cliente') || '').trim();
+  const documento = String(data.get('documento') || 'todos').trim();
+  const emissaoInicio = String(data.get('emissaoInicio') || '').trim();
+  const emissaoFim = String(data.get('emissaoFim') || '').trim();
+  const texto = String(data.get('texto') || '').trim();
+
+  if (!cliente) {
+    resetXmlReader30Search();
+    pushToast('Selecione uma empresa para ler os XMLs.', 'error');
+    render();
+    return;
+  }
+
+  if (emissaoInicio && emissaoFim && Date.parse(emissaoInicio) > Date.parse(emissaoFim)) {
+    resetXmlReader30Search();
+    pushToast('A data inicial nao pode ser maior que a data final.', 'error');
+    render();
+    return;
+  }
+
+  state.xmlReader30.hasSearched = true;
+  state.selectedXmlReaderIds = new Set();
+  state.xmlReader30.results = [];
+  state.xmlReader30.lastQuery = {
+    cliente,
+    documento,
+    emissaoInicio,
+    emissaoFim,
+    texto
+  };
+  state.tableState.xmlReader30 = 'loading';
+  render();
+
+  try {
+    const sourceResponse = await fetchXmlReader30SourceDocuments({
+      cliente,
+      documento,
+      emissaoInicio,
+      emissaoFim
+    });
+    const filtered = filterXmlReader30Results(sourceResponse.items, texto);
+    state.xmlReader30.results = filtered;
+    state.xmlReader30.total = filtered.length;
+    state.xmlReader30.sourceTotals = sourceResponse.sourceTotals;
+    state.xmlReader30.lastSearchedAt = new Date().toISOString();
+    state.tableState.xmlReader30 = 'data';
+
+    if (sourceResponse.cappedSources.length) {
+      const cappedLabels = sourceResponse.cappedSources.map((entry) => `${entry.label}: ${entry.loaded} de ${entry.total}`).join(' / ');
+      pushToast(`O leitor trouxe o limite seguro do acervo completo. Refine os filtros para ver o restante (${cappedLabels}).`, 'info');
+    }
+  } catch (error) {
+    state.xmlReader30.results = [];
+    state.xmlReader30.total = 0;
+    state.xmlReader30.sourceTotals = {
+      nfse: 0,
+      nfe: 0,
+      cte: 0
+    };
+    state.tableState.xmlReader30 = 'error';
+    pushToast(`Falha ao ler XMLs: ${toErrorMessage(error)}`, 'error');
+  }
+
+  render();
+}
+
+function mapXmlReader30Item(documentType, doc) {
+  if (documentType === 'nfse') {
+    const xml = doc;
+    return {
+      documentType,
+      documentLabel: 'NFS-e',
+      documentTone: 'success',
+      rowId: xml.id,
+      apiId: xml.apiNfseId || null,
+      clientId: xml.clientId || '',
+      cliente: xml.cliente || 'Cliente nao identificado',
+      cnpjLabel: formatCnpj(xml.cnpj || ''),
+      numeroLabel: xml.numeroNfse || '-',
+      chaveLabel: xml.chaveAcesso ? `Chave ${xml.chaveAcesso}` : 'Chave nao informada',
+      dataEmissao: xml.dataEmissao || xml.dataDownload || null,
+      statusLabel: xml.statusFiscal || '-',
+      statusTone: xml.cancelada ? 'danger' : xml.statusFiscal === 'Autorizada' ? 'success' : 'info',
+      cancelLabel: xml.cancelada ? 'Sim' : 'Nao',
+      cancelTone: xml.cancelada ? 'danger' : 'success',
+      storageLabel: xml.statusArmazenamento || 'Desconhecido',
+      storageTone: xml.statusArmazenamento === 'Armazenado' ? 'success' : 'danger',
+      valorLabel: formatOptionalCurrency(xml.valor),
+      partyLabel: xml.contraparteNome || xml.tomador || xml.prestador || '-',
+      partySecondaryLabel: xml.tipo || '-',
+      previewLabel: truncateText(xml.descricaoServico || xml.codigoServicoPrestado || xml.eventosResumo || '-', 90),
+      searchText: buildXmlReader30SearchText([
+        xml.cliente,
+        xml.cnpj,
+        xml.numeroNfse,
+        xml.chaveAcesso,
+        xml.statusFiscal,
+        xml.statusArmazenamento,
+        xml.tipo,
+        xml.municipio,
+        xml.prestador,
+        xml.tomador,
+        xml.eventosResumo,
+        xml.descricaoServico
+      ]),
+      raw: xml
+    };
+  }
+
+  if (documentType === 'nfe') {
+    const nfe = doc;
+    return {
+      documentType,
+      documentLabel: 'NF-e',
+      documentTone: 'info',
+      rowId: nfe.id,
+      apiId: nfe.apiNfeId || null,
+      clientId: nfe.clientId || '',
+      cliente: nfe.cliente || 'Cliente nao identificado',
+      cnpjLabel: formatCnpj(nfe.emitenteCnpj || nfe.destinatarioCnpj || ''),
+      numeroLabel: nfe.numeroNfe || '-',
+      chaveLabel: nfe.chaveAcesso ? `Chave ${nfe.chaveAcesso}` : 'Chave nao informada',
+      dataEmissao: nfe.dataEmissao || nfe.dataAutorizacao || null,
+      statusLabel: nfe.statusFiscal || '-',
+      statusTone: nfe.cancelada ? 'danger' : nfe.statusFiscal === 'Autorizada' ? 'success' : 'info',
+      cancelLabel: nfe.cancelada ? 'Sim' : 'Nao',
+      cancelTone: nfe.cancelada ? 'danger' : 'success',
+      storageLabel: nfe.xmlCompletoDisponivel ? 'XML completo' : 'Resumo XML',
+      storageTone: nfe.xmlCompletoDisponivel ? 'success' : 'warning',
+      valorLabel: formatOptionalCurrency(nfe.valor),
+      partyLabel: nfe.contraparteNome || '-',
+      partySecondaryLabel: formatCnpj(nfe.contraparteCnpj || nfe.emitenteCnpj || nfe.destinatarioCnpj || ''),
+      previewLabel: truncateText(`${nfe.tipo || '-'} / ${nfe.schemaDoc || '-'}${nfe.eventosResumo ? ` / ${nfe.eventosResumo}` : ''}`, 90),
+      searchText: buildXmlReader30SearchText([
+        nfe.cliente,
+        nfe.emitenteNome,
+        nfe.destinatarioNome,
+        nfe.contraparteNome,
+        nfe.emitenteCnpj,
+        nfe.destinatarioCnpj,
+        nfe.numeroNfe,
+        nfe.chaveAcesso,
+        nfe.statusFiscal,
+        nfe.schemaDoc,
+        nfe.eventosResumo,
+        nfe.tipo
+      ]),
+      raw: nfe
+    };
+  }
+
+  const cte = doc;
+  return {
+    documentType,
+    documentLabel: 'CT-e',
+    documentTone: 'warning',
+    rowId: cte.id,
+    apiId: cte.apiCteId || null,
+    clientId: cte.clientId || '',
+    cliente: cte.cliente || 'Cliente nao identificado',
+    cnpjLabel: formatCnpj(cte.emitenteCnpj || cte.destinatarioCnpj || ''),
+    numeroLabel: cte.numeroCte || '-',
+    chaveLabel: cte.chaveAcesso ? `Chave ${cte.chaveAcesso}` : 'Chave nao informada',
+    dataEmissao: cte.dataEmissao || cte.dataAutorizacao || null,
+    statusLabel: cte.statusFiscal || '-',
+    statusTone: cte.cancelada ? 'danger' : cte.statusFiscal === 'Autorizada' ? 'success' : 'info',
+    cancelLabel: cte.cancelada ? 'Sim' : 'Nao',
+    cancelTone: cte.cancelada ? 'danger' : 'success',
+    storageLabel: cte.xmlCompletoDisponivel ? 'XML completo' : 'Resumo XML',
+    storageTone: cte.xmlCompletoDisponivel ? 'success' : 'warning',
+    valorLabel: formatOptionalCurrency(cte.valor),
+    partyLabel: cte.contraparteNome || '-',
+    partySecondaryLabel: formatCnpj(cte.contraparteCnpj || cte.emitenteCnpj || cte.destinatarioCnpj || ''),
+    previewLabel: truncateText(`${cte.tipo || '-'} / ${cte.schemaDoc || '-'}${cte.eventosResumo ? ` / ${cte.eventosResumo}` : ''}`, 90),
+    searchText: buildXmlReader30SearchText([
+      cte.cliente,
+      cte.emitenteNome,
+      cte.destinatarioNome,
+      cte.contraparteNome,
+      cte.emitenteCnpj,
+      cte.destinatarioCnpj,
+      cte.numeroCte,
+      cte.chaveAcesso,
+      cte.statusFiscal,
+      cte.schemaDoc,
+      cte.eventosResumo,
+      cte.tipo
+    ]),
+    raw: cte
+  };
 }
 
 function renderSettingsTabPanel() {
@@ -5641,6 +6258,334 @@ function renderXmlDetailsModal(xmlId) {
       </div>
     </div>
   `;
+}
+
+function renderNfeDetailsModal(nfeId) {
+  const doc = findNfeById(nfeId);
+  if (!doc) {
+    return '';
+  }
+  const syncEventsDisabled = state.nfeEventsSyncRunning || !canSyncNfeEvents(doc) ? 'disabled' : '';
+  const danfeButton = doc.xmlCompletoDisponivel
+    ? `<button class="btn secondary" data-action="nfe-download-danfe" data-nfe-id="${doc.id}">Baixar DANFE</button>`
+    : '';
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1280px);">
+        <div class="modal-header">
+          <h3 class="modal-title">Detalhes da NF-e ${escapeHtml(doc.numeroNfe || doc.chaveAcesso)}</h3>
+          <p class="modal-subtitle">Resumo do documento armazenado para consulta interna.</p>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid two">
+            ${detailItem('Cliente', doc.cliente)}
+            ${detailItem('Tipo', doc.tipo)}
+            ${detailItem('Chave de acesso', doc.chaveAcesso)}
+            ${detailItem('Numero NF-e', doc.numeroNfe || '-')}
+            ${detailItem('Serie / modelo', `${doc.serie || '-'} / ${doc.modelo || '-'}`)}
+            ${detailItem('Ambiente', mapNfeAmbienteLabel(doc.ambiente))}
+            ${detailItem('Emitente', `${doc.emitenteNome || '-'}${doc.emitenteCnpj ? ` (${formatCnpj(doc.emitenteCnpj)})` : ''}`)}
+            ${detailItem('Destinatario', `${doc.destinatarioNome || '-'}${doc.destinatarioCnpj ? ` (${formatCnpj(doc.destinatarioCnpj)})` : ''}`)}
+            ${detailItem('Data de emissao', formatDateTime(doc.dataEmissao))}
+            ${detailItem('Data de autorizacao', formatDateTime(doc.dataAutorizacao))}
+            ${detailItem('Valor total', formatOptionalCurrency(doc.valor))}
+            ${detailItem('Schema', doc.schemaDoc || '-')}
+            ${detailItem('Arquivo completo', doc.xmlCompletoDisponivel ? 'Sim' : 'Nao')}
+            ${detailItem('Resumo disponivel', doc.resumoDisponivel ? 'Sim' : 'Nao')}
+            ${detailItem('Status fiscal', doc.statusFiscal || '-')}
+            ${detailItem('Resumo de eventos', doc.eventosResumo || '-')}
+            ${detailItem('Caminho XML', doc.caminhoServidor || '-')}
+          </div>
+          ${renderDocumentInsightsSection('nfe', doc)}
+          <div style="margin-top:18px;">
+            <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
+            ${renderXmlEventsList(doc.eventos)}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="nfe-sync-events" data-nfe-id="${doc.id}" ${syncEventsDisabled}>Buscar eventos</button>
+          <button class="btn secondary" data-action="nfe-view" data-nfe-id="${doc.id}">Ver conteudo XML</button>
+          ${danfeButton}
+          <button class="btn primary" data-action="nfe-download" data-nfe-id="${doc.id}">Baixar XML</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderCteDetailsModal(cteId) {
+  const doc = findCteById(cteId);
+  if (!doc) {
+    return '';
+  }
+  const syncEventsDisabled = state.cteEventsSyncRunning || !canSyncCteEvents(doc) ? 'disabled' : '';
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1240px);">
+        <div class="modal-header">
+          <h3 class="modal-title">Detalhes do CT-e ${escapeHtml(doc.numeroCte || doc.chaveAcesso)}</h3>
+          <p class="modal-subtitle">Resumo do documento armazenado para consulta interna.</p>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid two">
+            ${detailItem('Cliente', doc.cliente)}
+            ${detailItem('Tipo', doc.tipo)}
+            ${detailItem('Chave de acesso', doc.chaveAcesso)}
+            ${detailItem('Numero CT-e', doc.numeroCte || '-')}
+            ${detailItem('Serie / modelo', `${doc.serie || '-'} / ${doc.modelo || '-'}`)}
+            ${detailItem('Ambiente', mapNfeAmbienteLabel(doc.ambiente))}
+            ${detailItem('Emitente', `${doc.emitenteNome || '-'}${doc.emitenteCnpj ? ` (${formatCnpj(doc.emitenteCnpj)})` : ''}`)}
+            ${detailItem('Destinatario', `${doc.destinatarioNome || '-'}${doc.destinatarioCnpj ? ` (${formatCnpj(doc.destinatarioCnpj)})` : ''}`)}
+            ${detailItem('Data de emissao', formatDateTime(doc.dataEmissao))}
+            ${detailItem('Data de autorizacao', formatDateTime(doc.dataAutorizacao))}
+            ${detailItem('Valor total', formatOptionalCurrency(doc.valor))}
+            ${detailItem('Schema', doc.schemaDoc || '-')}
+            ${detailItem('Arquivo completo', doc.xmlCompletoDisponivel ? 'Sim' : 'Nao')}
+            ${detailItem('Resumo disponivel', doc.resumoDisponivel ? 'Sim' : 'Nao')}
+            ${detailItem('Status fiscal', doc.statusFiscal || '-')}
+            ${detailItem('Resumo de eventos', doc.eventosResumo || '-')}
+            ${detailItem('Caminho XML', doc.caminhoServidor || '-')}
+          </div>
+          ${renderDocumentInsightsSection('cte', doc)}
+          <div style="margin-top:18px;">
+            <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
+            ${renderXmlEventsList(doc.eventos)}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="cte-sync-events" data-cte-id="${doc.id}" ${syncEventsDisabled}>Buscar eventos</button>
+          <button class="btn secondary" data-action="cte-view" data-cte-id="${doc.id}">Ver conteudo XML</button>
+          <button class="btn primary" data-action="cte-download" data-cte-id="${doc.id}">Baixar XML</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderXmlDetailsModal(xmlId) {
+  const xml = findXmlById(xmlId);
+  if (!xml) {
+    return '';
+  }
+  const syncEventsDisabled = state.xmlEventsSyncRunning || !canSyncXmlEvents(xml) ? 'disabled' : '';
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1200px);">
+        <div class="modal-header">
+          <h3 class="modal-title">Detalhes da NFS-e ${escapeHtml(xml.numeroNfse)}</h3>
+          <p class="modal-subtitle">Informacoes de armazenamento do XML no servidor interno.</p>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid two">
+            ${detailItem('Numero NFS-e', xml.numeroNfse)}
+            ${detailItem('Codigo verificacao', xml.codigoVerificacao)}
+            ${detailItem('Data de emissao', formatDateTime(xml.dataEmissao))}
+            ${detailItem('Prestador', xml.prestador)}
+            ${detailItem('Tomador', xml.tomador)}
+            ${detailItem('Valor dos servicos', formatCurrency(xml.valor))}
+            ${detailItem('ISS', formatCurrency(xml.iss))}
+            ${detailItem('Municipio', xml.municipio)}
+            ${detailItem('Codigo do servico prestado', xml.codigoServicoPrestado || '-')}
+            ${detailItem('Descricao do servico', xml.descricaoServico || '-')}
+            ${detailItem('Status de armazenamento', xml.statusArmazenamento)}
+            ${detailItem('Situacao fiscal', xml.statusFiscal || '-')}
+            ${detailItem('Data de cancelamento', xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '-')}
+            ${detailItem('Resumo de eventos', xml.eventosResumo || '-')}
+          </div>
+          ${renderDocumentInsightsSection('nfse', xml)}
+          <div style="margin-top:18px;">
+            <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
+            ${renderXmlEventsList(xml.eventos)}
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="xml-sync-events" data-xml-id="${xml.id}" ${syncEventsDisabled}>Buscar eventos</button>
+          <button class="btn secondary" data-action="xml-view" data-xml-id="${xml.id}">Ver conteudo XML</button>
+          <button class="btn secondary" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
+          <button class="btn primary" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderDocumentInsightsSection(documentType, doc) {
+  if (documentType === 'nfe') {
+    const items = extractNfeLineItems(doc.conteudoXml || '');
+    return renderDocumentInsightsBlock('Itens da NF-e', items.length ? renderDocumentInsightsTable(items, [
+      { key: 'index', label: '#' },
+      { key: 'code', label: 'Codigo' },
+      { key: 'description', label: 'Produto' },
+      { key: 'quantity', label: 'Quantidade' },
+      { key: 'unit', label: 'Un' },
+      { key: 'unitValue', label: 'Valor unitario' },
+      { key: 'totalValue', label: 'Valor total' },
+      { key: 'cfop', label: 'CFOP' }
+    ]) : renderDocumentInsightsEmpty('Nao encontrei itens detalhados no XML carregado desta NF-e.'));
+  }
+
+  if (documentType === 'cte') {
+    const summary = extractCteServiceSummary(doc.conteudoXml || '');
+    const metaCards = [
+      detailItem('Produto predominante', summary.productLabel || '-'),
+      detailItem('Valor total prestacao', summary.totalValue ? formatCurrency(summary.totalValue) : '-'),
+      detailItem('Total de componentes', String(summary.components.length))
+    ].join('');
+    const table = summary.components.length
+      ? renderDocumentInsightsTable(summary.components, [
+          { key: 'name', label: 'Componente' },
+          { key: 'valueLabel', label: 'Valor' }
+        ])
+      : renderDocumentInsightsEmpty('Nao encontrei componentes detalhados no XML carregado deste CT-e.');
+
+    return renderDocumentInsightsBlock('Prestacao do CT-e', `<div class="form-grid three" style="margin-bottom:14px;">${metaCards}</div>${table}`);
+  }
+
+  const serviceSummary = extractNfseServiceSummary(doc);
+  const cards = [
+    detailItem('Servico', serviceSummary.description || '-'),
+    detailItem('Codigo do servico', serviceSummary.serviceCode || '-'),
+    detailItem('Valor do servico', serviceSummary.serviceValue ? formatCurrency(serviceSummary.serviceValue) : '-'),
+    detailItem('ISS', serviceSummary.issValue ? formatCurrency(serviceSummary.issValue) : '-')
+  ].join('');
+
+  return renderDocumentInsightsBlock('Servico destacado', `<div class="form-grid two">${cards}</div>`);
+}
+
+function renderDocumentInsightsBlock(title, content) {
+  return `
+    <div style="margin-top:18px;">
+      <small style="color:#606062; display:block; margin-bottom:8px;">${escapeHtml(title)}</small>
+      ${content}
+    </div>
+  `;
+}
+
+function renderDocumentInsightsEmpty(message) {
+  return `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">${escapeHtml(message)}</div>`;
+}
+
+function renderDocumentInsightsTable(rows, columns) {
+  return `
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('')}</tr>
+        </thead>
+        <tbody>
+          ${rows
+            .map(
+              (row) => `
+                <tr>
+                  ${columns.map((column) => `<td>${escapeHtml(row[column.key] ?? '-')}</td>`).join('')}
+                </tr>
+              `
+            )
+            .join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+function parseXmlDocumentSafe(xmlString) {
+  if (!xmlString) {
+    return null;
+  }
+
+  try {
+    const parser = new DOMParser();
+    const document = parser.parseFromString(xmlString, 'application/xml');
+    if (document.getElementsByTagName('parsererror').length) {
+      return null;
+    }
+    return document;
+  } catch (error) {
+    return null;
+  }
+}
+
+function findXmlElementsByLocalName(parent, localName) {
+  if (!parent || !localName) {
+    return [];
+  }
+
+  const withNamespace = typeof parent.getElementsByTagNameNS === 'function' ? Array.from(parent.getElementsByTagNameNS('*', localName) || []) : [];
+  if (withNamespace.length) {
+    return withNamespace;
+  }
+
+  return Array.from(parent.getElementsByTagName(localName) || []);
+}
+
+function getXmlText(parent, localName) {
+  const node = findXmlElementsByLocalName(parent, localName)[0] || null;
+  return String(node?.textContent || '').trim();
+}
+
+function extractNfeLineItems(xmlString) {
+  const xml = parseXmlDocumentSafe(xmlString);
+  if (!xml) {
+    return [];
+  }
+
+  return findXmlElementsByLocalName(xml, 'det')
+    .map((detNode, index) => {
+      const prodNode = findXmlElementsByLocalName(detNode, 'prod')[0] || detNode;
+      const quantity = getXmlText(prodNode, 'qCom');
+      const unitValue = getXmlText(prodNode, 'vUnCom');
+      const totalValue = getXmlText(prodNode, 'vProd');
+      return {
+        index: String(index + 1),
+        code: getXmlText(prodNode, 'cProd') || '-',
+        description: getXmlText(prodNode, 'xProd') || '-',
+        quantity: quantity || '-',
+        unit: getXmlText(prodNode, 'uCom') || '-',
+        unitValue: unitValue ? formatCurrency(unitValue) : '-',
+        totalValue: totalValue ? formatCurrency(totalValue) : '-',
+        cfop: getXmlText(prodNode, 'CFOP') || '-'
+      };
+    })
+    .filter((item) => item.description !== '-' || item.code !== '-');
+}
+
+function extractCteServiceSummary(xmlString) {
+  const xml = parseXmlDocumentSafe(xmlString);
+  if (!xml) {
+    return {
+      productLabel: '',
+      totalValue: null,
+      components: []
+    };
+  }
+
+  const components = findXmlElementsByLocalName(xml, 'Comp')
+    .map((componentNode) => {
+      const value = getXmlText(componentNode, 'vComp');
+      return {
+        name: getXmlText(componentNode, 'xNome') || '-',
+        valueLabel: value ? formatCurrency(value) : '-'
+      };
+    })
+    .filter((item) => item.name !== '-');
+
+  return {
+    productLabel: getXmlText(xml, 'xProd') || '',
+    totalValue: toNumber(getXmlText(xml, 'vTPrest') || ''),
+    components
+  };
+}
+
+function extractNfseServiceSummary(doc) {
+  return {
+    description: String(doc?.descricaoServico || '').trim(),
+    serviceCode: String(doc?.codigoServicoPrestado || '').trim(),
+    serviceValue: toNumber(doc?.valor),
+    issValue: toNumber(doc?.iss)
+  };
 }
 
 function renderCteDisagreementAlertsModal() {
@@ -9211,7 +10156,7 @@ async function openAlertDocument(alertId) {
 
   state.drawer = null;
   state.modal = null;
-  openModal({ kind: 'cte-details', cteId: doc.id });
+  await openCteDetails(doc.id);
 }
 
 async function executeConfirmAction(payload) {
@@ -12422,6 +13367,24 @@ async function openNfeViewer(nfeId) {
   }
 }
 
+async function openNfeDetails(nfeId) {
+  const doc = findNfeById(nfeId);
+  if (!doc) {
+    pushToast('NF-e nao encontrada.', 'error');
+    return;
+  }
+
+  if (doc.xmlCompletoDisponivel) {
+    try {
+      await ensureNfeContentLoaded(doc);
+    } catch (error) {
+      pushToast(`Nao foi possivel enriquecer os detalhes da NF-e agora: ${toErrorMessage(error)}`, 'info');
+    }
+  }
+
+  openModal({ kind: 'nfe-details', nfeId });
+}
+
 async function downloadNfeXmlById(nfeId) {
   const doc = findNfeById(nfeId);
   if (!doc) {
@@ -12489,6 +13452,24 @@ async function openCteViewer(cteId) {
   }
 }
 
+async function openCteDetails(cteId) {
+  const doc = findCteById(cteId);
+  if (!doc) {
+    pushToast('CT-e nao encontrado.', 'error');
+    return;
+  }
+
+  if (doc.xmlCompletoDisponivel) {
+    try {
+      await ensureCteContentLoaded(doc);
+    } catch (error) {
+      pushToast(`Nao foi possivel enriquecer os detalhes do CT-e agora: ${toErrorMessage(error)}`, 'info');
+    }
+  }
+
+  openModal({ kind: 'cte-details', cteId });
+}
+
 async function downloadCteXmlById(cteId) {
   const doc = findCteById(cteId);
   if (!doc) {
@@ -12528,6 +13509,24 @@ async function openXmlViewer(xmlId) {
   } catch (error) {
     pushToast(`Falha ao carregar XML: ${toErrorMessage(error)}`, 'error');
   }
+}
+
+async function openXmlDetails(xmlId) {
+  const xml = findXmlById(xmlId);
+  if (!xml) {
+    pushToast('XML nao encontrado.', 'error');
+    return;
+  }
+
+  if (xml.apiNfseId && xml.clientId) {
+    try {
+      await ensureXmlContentLoaded(xml);
+    } catch (error) {
+      pushToast(`Nao foi possivel enriquecer os detalhes da NFS-e agora: ${toErrorMessage(error)}`, 'info');
+    }
+  }
+
+  openModal({ kind: 'xml-details', xmlId });
 }
 
 async function downloadXmlById(xmlId) {
