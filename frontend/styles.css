@@ -1095,6 +1095,53 @@ tbody tr:hover {
   flex-wrap: wrap;
 }
 
+.xml-reader30-table {
+  min-width: 980px;
+}
+
+.xml-reader30-table thead th,
+.xml-reader30-table tbody td {
+  padding: 8px 10px;
+}
+
+.xml-reader30-check {
+  width: 38px;
+  text-align: center;
+}
+
+.xml-reader30-check input {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
+.xml-reader30-doc {
+  min-width: 170px;
+}
+
+.xml-reader30-company {
+  min-width: 220px;
+}
+
+.xml-reader30-money {
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.xml-reader30-product {
+  min-width: 220px;
+  max-width: 300px;
+}
+
+.xml-reader30-table .table-actions {
+  gap: 4px;
+}
+
+.xml-reader30-table .icon-btn {
+  height: 28px;
+  padding: 0 8px;
+}
+
 .icon-btn {
   border: 1px solid var(--line-strong);
   background: #fff;

@@ -1180,7 +1180,7 @@ function onDocumentClick(event) {
       const checked = actionNode.checked;
       state.xmlReader30.results.forEach((row) => {
         const selectionKey = getXmlReader30SelectionKey(row);
-        if (!selectionKey || !canDownloadXmlReader30Row(row)) {
+        if (!selectionKey) {
           return;
         }
         if (checked) {
@@ -4253,6 +4253,92 @@ function renderXmlReader30EmptyState() {
 }
 
 function renderXmlReader30ResultsTable(results) {
+  const selectableRows = (Array.isArray(results) ? results : []).filter((row) => getXmlReader30SelectionKey(row));
+  const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
+  const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
+
+  return `
+    <article class="card" style="margin-top: 2px;">
+      <div class="xml-batch-bar">
+        <div>
+          <h3 class="card-title">XMLs encontrados</h3>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(results.length))} XML(s) do acervo interno.</p>
+        </div>
+        <div class="stack-mini" style="align-items:flex-end;">
+          ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
+          <span class="row-sub">Use as caixas para acompanhar o que ja conferiu.</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="xml-reader30-table">
+          <thead>
+            <tr>
+              <th class="xml-reader30-check">
+                <input type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />
+              </th>
+              <th>Tipo</th>
+              <th>Documento</th>
+              <th>Empresa</th>
+              <th>Emissao</th>
+              <th>Valor</th>
+              <th>Produtos</th>
+              <th>Situacao</th>
+              <th>Acoes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderTableRowsOrState({
+              key: 'xmlReader30',
+              colSpan: 9,
+              rowsHtml: results.length
+                ? results
+                    .map((row) => {
+                      const actions = renderXmlReader30Actions(row);
+                      const selectionKey = getXmlReader30SelectionKey(row);
+                      return `
+                        <tr>
+                          <td class="xml-reader30-check">
+                            <input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Selecionar ${escapeHtml(row.documentLabel)} ${escapeHtml(row.numeroLabel)}" />
+                          </td>
+                          <td>${statusBadge(row.documentLabel, row.documentTone)}</td>
+                          <td class="xml-reader30-doc">
+                            <span class="row-title">${escapeHtml(row.numeroLabel)}</span>
+                            <span class="row-sub">${escapeHtml(row.chaveLabel)}</span>
+                          </td>
+                          <td class="xml-reader30-company">
+                            <span class="row-title">${escapeHtml(row.cliente)}</span>
+                            <span class="row-sub">${escapeHtml(row.cnpjLabel)}</span>
+                          </td>
+                          <td>${escapeHtml(formatDateTime(row.dataEmissao))}</td>
+                          <td class="xml-reader30-money">${escapeHtml(row.valorLabel || '-')}</td>
+                          <td class="xml-reader30-product">
+                            <span class="row-title">${escapeHtml(row.productLabel || '-')}</span>
+                            <span class="row-sub">${escapeHtml(row.productSecondaryLabel || row.productHint || '-')}</span>
+                          </td>
+                          <td>
+                            <div class="status-stack">
+                              ${statusBadge(row.statusLabel, row.statusTone)}
+                              ${statusBadge(row.storageLabel, row.storageTone)}
+                            </div>
+                          </td>
+                          <td>
+                            <div class="table-actions">${actions}</div>
+                          </td>
+                        </tr>
+                      `;
+                    })
+                    .join('')
+                : '',
+              emptyMessage: 'Nenhum XML encontrado para os filtros informados.'
+            })}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function renderXmlReader30ResultsTableLegacyUnused(results) {
   return `
     <article class="card" style="margin-top: 2px;">
       <div class="xml-batch-bar">
@@ -4321,6 +4407,27 @@ function renderXmlReader30Actions(row) {
     return `
       <button class="icon-btn" data-action="xml-details" data-xml-id="${escapeHtml(row.rowId)}">Detalhes</button>
       <button class="icon-btn" data-action="xml-view" data-xml-id="${escapeHtml(row.rowId)}">Ver XML</button>
+    `;
+  }
+
+  if (row.documentType === 'nfe') {
+    return `
+      <button class="icon-btn" data-action="nfe-details" data-nfe-id="${escapeHtml(row.rowId)}">Detalhes</button>
+      <button class="icon-btn" data-action="nfe-view" data-nfe-id="${escapeHtml(row.rowId)}">Ver XML</button>
+    `;
+  }
+
+  return `
+    <button class="icon-btn" data-action="cte-details" data-cte-id="${escapeHtml(row.rowId)}">Detalhes</button>
+    <button class="icon-btn" data-action="cte-view" data-cte-id="${escapeHtml(row.rowId)}">Ver XML</button>
+  `;
+}
+
+function renderXmlReader30ActionsLegacyUnused(row) {
+  if (row.documentType === 'nfse') {
+    return `
+      <button class="icon-btn" data-action="xml-details" data-xml-id="${escapeHtml(row.rowId)}">Detalhes</button>
+      <button class="icon-btn" data-action="xml-view" data-xml-id="${escapeHtml(row.rowId)}">Ver XML</button>
       <button class="icon-btn" data-action="xml-download" data-xml-id="${escapeHtml(row.rowId)}">Baixar XML</button>
     `;
   }
@@ -4366,6 +4473,7 @@ function resetXmlReader30Search() {
       cte: 0
     }
   };
+  state.selectedXmlReaderIds = new Set();
   state.tableState.xmlReader30 = 'data';
 }
 
@@ -4397,6 +4505,7 @@ async function executeXmlReader30Search(form) {
 
   state.xmlReader30.hasSearched = true;
   state.xmlReader30.results = [];
+  state.selectedXmlReaderIds = new Set();
   state.xmlReader30.lastQuery = {
     cliente,
     documento,
@@ -4552,6 +4661,7 @@ async function fetchXmlReader30NfeSource(filters) {
   );
   const payload = normalizePaginatedResponse(await apiRequest(`/nfe?${query.toString()}`));
   const docs = buildNfeDocumentsFromApi(payload.items, state.clients).filter((doc) => doc.xmlCompletoDisponivel);
+  await enrichXmlReader30DocumentsWithContent('nfe', docs);
   state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, docs);
   return createXmlReader30FetchResult('NF-e', docs.map((doc) => mapXmlReader30Item('nfe', doc)), payload);
 }
@@ -4589,6 +4699,7 @@ async function fetchXmlReader30CteSource(filters) {
   );
   const payload = normalizePaginatedResponse(await apiRequest(`/cte?${query.toString()}`));
   const docs = buildCteDocumentsFromApi(payload.items, state.clients).filter((doc) => doc.xmlCompletoDisponivel);
+  await enrichXmlReader30DocumentsWithContent('cte', docs);
   state.cteDocuments = mergeCteDocumentsById(state.cteDocuments, docs);
   return createXmlReader30FetchResult('CT-e', docs.map((doc) => mapXmlReader30Item('cte', doc)), payload);
 }
@@ -4638,9 +4749,85 @@ function formatXmlReader30SourceTotals(sourceTotals) {
   return `NFS-e ${totals.nfse || 0} / NF-e ${totals.nfe || 0} / CT-e ${totals.cte || 0}`;
 }
 
+async function enrichXmlReader30DocumentsWithContent(documentType, documents) {
+  const docs = Array.isArray(documents) ? documents.filter(Boolean) : [];
+  if (!docs.length) {
+    return;
+  }
+
+  const loader =
+    documentType === 'cte'
+      ? ensureCteContentLoaded
+      : documentType === 'nfe'
+        ? ensureNfeContentLoaded
+        : null;
+
+  if (!loader) {
+    return;
+  }
+
+  const batchSize = 4;
+  for (let index = 0; index < docs.length; index += batchSize) {
+    const batch = docs.slice(index, index + batchSize);
+    const results = await Promise.allSettled(batch.map((doc) => loader(doc)));
+    results.forEach((result, resultIndex) => {
+      if (result.status === 'rejected') {
+        const failedDoc = batch[resultIndex];
+        console.warn(`Falha ao enriquecer ${documentType.toUpperCase()} ${failedDoc?.id || failedDoc?.chaveAcesso || '-'} no leitor XML 3.0.`, result.reason);
+      }
+    });
+  }
+}
+
+function summarizeXmlReader30Products(documentType, doc) {
+  if (documentType === 'nfse') {
+    const description = truncateText(String(doc?.descricaoServico || doc?.codigoServicoPrestado || '').trim(), 88);
+    return {
+      label: description || 'Servico sem descricao',
+      secondary: String(doc?.codigoServicoPrestado || doc?.tipo || '').trim() || 'Servico',
+      hint: 'Servico destacado no XML'
+    };
+  }
+
+  if (documentType === 'nfe') {
+    const items = extractNfeLineItems(doc?.conteudoXml || '');
+    if (items.length) {
+      const label = truncateText(items.slice(0, 2).map((item) => item.description).filter(Boolean).join(' / '), 88);
+      return {
+        label: label || 'Itens lidos do XML',
+        secondary: `${items.length} item(ns) encontrado(s)`,
+        hint: 'Produtos da NF-e'
+      };
+    }
+
+    return {
+      label: 'Produtos nao lidos',
+      secondary: 'Abra o XML para detalhar os itens',
+      hint: 'Itens da NF-e'
+    };
+  }
+
+  const summary = extractCteServiceSummary(doc?.conteudoXml || '');
+  if (summary.productLabel || summary.components.length) {
+    const label = truncateText(summary.productLabel || summary.components.slice(0, 2).map((item) => item.name).join(' / '), 88);
+    return {
+      label: label || 'Prestacao identificada',
+      secondary: summary.components.length ? `${summary.components.length} componente(s)` : 'Prestacao do CT-e',
+      hint: 'Resumo da carga ou prestacao'
+    };
+  }
+
+  return {
+    label: 'Prestacao nao detalhada',
+    secondary: 'Abra o XML para ver os componentes',
+    hint: 'Resumo do CT-e'
+  };
+}
+
 function mapXmlReader30Item(documentType, doc) {
   if (documentType === 'nfse') {
     const xml = doc;
+    const productSummary = summarizeXmlReader30Products(documentType, xml);
     return {
       documentType,
       documentLabel: 'NFS-e',
@@ -4658,6 +4845,9 @@ function mapXmlReader30Item(documentType, doc) {
       storageLabel: xml.statusArmazenamento || 'Desconhecido',
       storageTone: xml.statusArmazenamento === 'Armazenado' ? 'success' : 'danger',
       valorLabel: formatOptionalCurrency(xml.valor),
+      productLabel: productSummary.label,
+      productSecondaryLabel: productSummary.secondary,
+      productHint: productSummary.hint,
       searchText: buildXmlReader30SearchText([
         xml.cliente,
         xml.cnpj,
@@ -4669,7 +4859,9 @@ function mapXmlReader30Item(documentType, doc) {
         xml.municipio,
         xml.prestador,
         xml.tomador,
-        xml.eventosResumo
+        xml.eventosResumo,
+        productSummary.label,
+        productSummary.secondary
       ]),
       raw: xml
     };
@@ -4677,6 +4869,7 @@ function mapXmlReader30Item(documentType, doc) {
 
   if (documentType === 'nfe') {
     const nfe = doc;
+    const productSummary = summarizeXmlReader30Products(documentType, nfe);
     return {
       documentType,
       documentLabel: 'NF-e',
@@ -4694,6 +4887,9 @@ function mapXmlReader30Item(documentType, doc) {
       storageLabel: nfe.xmlCompletoDisponivel ? 'XML completo' : 'Resumo XML',
       storageTone: nfe.xmlCompletoDisponivel ? 'success' : 'warning',
       valorLabel: formatOptionalCurrency(nfe.valor),
+      productLabel: productSummary.label,
+      productSecondaryLabel: productSummary.secondary,
+      productHint: productSummary.hint,
       searchText: buildXmlReader30SearchText([
         nfe.cliente,
         nfe.emitenteNome,
@@ -4706,13 +4902,16 @@ function mapXmlReader30Item(documentType, doc) {
         nfe.statusFiscal,
         nfe.schemaDoc,
         nfe.eventosResumo,
-        nfe.tipo
+        nfe.tipo,
+        productSummary.label,
+        productSummary.secondary
       ]),
       raw: nfe
     };
   }
 
   const cte = doc;
+  const productSummary = summarizeXmlReader30Products(documentType, cte);
   return {
     documentType,
     documentLabel: 'CT-e',
@@ -4730,6 +4929,9 @@ function mapXmlReader30Item(documentType, doc) {
     storageLabel: cte.xmlCompletoDisponivel ? 'XML completo' : 'Resumo XML',
     storageTone: cte.xmlCompletoDisponivel ? 'success' : 'warning',
     valorLabel: formatOptionalCurrency(cte.valor),
+    productLabel: productSummary.label,
+    productSecondaryLabel: productSummary.secondary,
+    productHint: productSummary.hint,
     searchText: buildXmlReader30SearchText([
       cte.cliente,
       cte.emitenteNome,
@@ -4742,7 +4944,9 @@ function mapXmlReader30Item(documentType, doc) {
       cte.statusFiscal,
       cte.schemaDoc,
       cte.eventosResumo,
-      cte.tipo
+      cte.tipo,
+      productSummary.label,
+      productSummary.secondary
     ]),
     raw: cte
   };
