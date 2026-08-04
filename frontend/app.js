@@ -12847,12 +12847,43 @@ function compactDate(value) {
   return `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`;
 }
 
-function formatIsoDate(value) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return new Date().toISOString().slice(0, 10);
+function extractCalendarDateKey(value) {
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) {
+      return '';
+    }
+    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
   }
-  return date.toISOString().slice(0, 10);
+
+  const text = String(value || '').trim();
+  if (!text) {
+    return '';
+  }
+
+  if (/^\d{8}$/.test(text)) {
+    return `${text.slice(4, 8)}-${text.slice(2, 4)}-${text.slice(0, 2)}`;
+  }
+
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:$|[T\s])/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+
+  const brMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (brMatch) {
+    return `${brMatch[3]}-${brMatch[2]}-${brMatch[1]}`;
+  }
+
+  const date = new Date(text);
+  if (Number.isNaN(date.getTime())) {
+    return '';
+  }
+
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+}
+
+function formatIsoDate(value) {
+  return extractCalendarDateKey(value) || extractCalendarDateKey(new Date()) || new Date().toISOString().slice(0, 10);
 }
 
 function toErrorMessage(error) {
@@ -13213,20 +13244,13 @@ function toneFromAlertStatus(status) {
 }
 
 function formatDate(value) {
-  if (!value) {
+  const dateKey = extractCalendarDateKey(value);
+  if (!dateKey) {
     return '-';
   }
 
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return '-';
-  }
-
-  return new Intl.DateTimeFormat('pt-BR', {
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric'
-  }).format(date);
+  const [year, month, day] = dateKey.split('-');
+  return `${day}/${month}/${year}`;
 }
 
 function formatDateTime(value) {
@@ -15530,21 +15554,7 @@ function parseCompareSpedDate(value) {
 }
 
 function normalizeCompareDateKey(value) {
-  const text = String(value || '').trim();
-  if (!text) {
-    return '';
-  }
-
-  const date = new Date(text);
-  if (!Number.isNaN(date.getTime())) {
-    return date.toISOString().slice(0, 10);
-  }
-
-  if (/^\d{8}$/.test(text)) {
-    return parseCompareSpedDate(text);
-  }
-
-  return '';
+  return extractCalendarDateKey(value);
 }
 
 function resolveCompareSpedDateRange(documents, competence) {
@@ -15583,18 +15593,8 @@ function getCompareSpedCompetence(documents) {
 }
 
 function formatCompareMonth(value) {
-  const text = String(value || '').trim();
-  if (!text) {
-    return '';
-  }
-
-  const date = new Date(text);
-  if (Number.isNaN(date.getTime())) {
-    const match = text.match(/^(\d{4})-(\d{2})/);
-    return match ? `${match[1]}-${match[2]}` : '';
-  }
-
-  return `${String(date.getFullYear())}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+  const dateKey = extractCalendarDateKey(value);
+  return dateKey ? dateKey.slice(0, 7) : '';
 }
 
 function buildCompareSpedArtifact(report, outputFormat) {
