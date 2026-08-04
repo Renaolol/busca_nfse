@@ -257,7 +257,7 @@ const state = {
       valorMin: '',
       valorMax: '',
       xmlCompleto: 'Todos',
-      ambiente: 'Todos'
+      ambiente: 'producao'
     },
     cteDocs: {
       cliente: 'Todos',
@@ -7333,7 +7333,7 @@ async function applyNfeDocsFilters(form) {
     valorMin: String(data.get('valorMin') || '').trim(),
     valorMax: String(data.get('valorMax') || '').trim(),
     xmlCompleto: String(data.get('xmlCompleto') || 'Todos'),
-    ambiente: String(data.get('ambiente') || 'Todos')
+    ambiente: String(data.get('ambiente') || 'producao')
   };
   state.selectedNfeIds = new Set();
 
@@ -8468,7 +8468,7 @@ function resetNfeDocsSearch() {
     valorMin: '',
     valorMax: '',
     xmlCompleto: 'Todos',
-    ambiente: 'Todos'
+    ambiente: 'producao'
   };
   state.nfeSearch.hasSearched = false;
   state.nfeSearch.results = [];
@@ -13472,7 +13472,7 @@ async function fetchCompareSpedStoredDocuments({ client, dateRange }) {
     {
       cliente: client.id,
       tipo: 'Recebida',
-      ambiente: 'Todos',
+      ambiente: 'producao',
       emissaoInicio: dateRange?.dataInicio || '',
       emissaoFim: dateRange?.dataFim || '',
       status: 'Todos',
