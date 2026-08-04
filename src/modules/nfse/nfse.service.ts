@@ -769,6 +769,20 @@ export class NfseService {
           certificateId: certificate.id
         });
         const statusCode = this.extractStatusCode(response);
+        if (this.isNotFoundEventoSyncStatus(statusCode)) {
+          detalhes.push({
+            documentoId: document.id,
+            chaveAcesso: document.chaveAcesso,
+            estabelecimentoId: document.estabelecimentoId,
+            ambiente: this.toDtoAmbiente(document.ambiente),
+            status: 'sem_eventos',
+            eventosEncontrados: 0,
+            eventosImportados: 0,
+            mensagem: this.extractSyncMessage(response) ?? 'Nenhum evento encontrado no ADN'
+          });
+          continue;
+        }
+
         if (statusCode !== undefined && statusCode !== 200) {
           falhas += 1;
           detalhes.push({
@@ -1999,6 +2013,10 @@ export class NfseService {
 
     const candidate = (payload as { statusCode?: unknown; status?: unknown }).statusCode ?? (payload as { status?: unknown }).status;
     return typeof candidate === 'number' ? candidate : undefined;
+  }
+
+  private isNotFoundEventoSyncStatus(statusCode: number | undefined): boolean {
+    return statusCode === 404;
   }
 
   private extractSyncMessage(payload: unknown): string | undefined {

@@ -1094,6 +1094,57 @@ describe('NfseService', () => {
     });
   });
 
+  it('trata HTTP 404 na consulta de eventos como sem_eventos para NFS-e cancelada', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-evt-404',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000077726062205552016',
+        status: 'cancelada',
+        dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
+        dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+        createdAt: new Date('2026-06-03T12:00:00.000Z')
+      }
+    ]);
+    prisma.certificado.findFirst.mockResolvedValue({
+      id: 'cert-1',
+      validadeFim: new Date('2099-01-01T00:00:00.000Z')
+    });
+    adnClient.getEventosByChave.mockResolvedValue({
+      statusCode: 404,
+      data: {
+        message: 'Not Found'
+      }
+    });
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      limit: 1
+    });
+
+    expect(result).toEqual({
+      documentosAnalisados: 1,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 0,
+      detalhes: [
+        {
+          documentoId: 'doc-evt-404',
+          chaveAcesso: '42110092206960810000176000000000077726062205552016',
+          estabelecimentoId: 'estab-1',
+          ambiente: 'producao',
+          status: 'sem_eventos',
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          mensagem: 'Nenhum evento encontrado no ADN'
+        }
+      ]
+    });
+  });
+
   it('continua sincronizacao manual de eventos quando a tabela nfse_eventos nao existe', async () => {
     prisma.nfseDocumento.findMany
       .mockRejectedValueOnce(new Error('The table `public.nfse_eventos` does not exist in the current database.'))
