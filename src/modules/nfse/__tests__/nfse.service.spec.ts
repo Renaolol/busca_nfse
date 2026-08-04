@@ -1114,8 +1114,14 @@ describe('NfseService', () => {
     });
     adnClient.getEventosByChave.mockResolvedValue({
       statusCode: 404,
+      rawBody: '{"message":"Not Found","path":"/contribuintes/NFSe/42110092206960810000176000000000077726062205552016/Eventos"}',
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'x-request-id': 'req-404'
+      },
       data: {
-        message: 'Not Found'
+        message: 'Not Found',
+        path: '/contribuintes/NFSe/42110092206960810000176000000000077726062205552016/Eventos'
       }
     });
 
@@ -1139,7 +1145,17 @@ describe('NfseService', () => {
           status: 'nao_localizado_endpoint_eventos',
           eventosEncontrados: 0,
           eventosImportados: 0,
-          mensagem: 'Endpoint de eventos do ADN retornou HTTP 404 para a chave consultada.'
+          mensagem: 'Endpoint de eventos do ADN retornou HTTP 404 para a chave consultada.',
+          diagnostico: {
+            statusCode: 404,
+            message: null,
+            contentType: 'application/json; charset=utf-8',
+            requestId: 'req-404',
+            rawBodyPreview:
+              '{"message":"Not Found","path":"/contribuintes/NFSe/42110092206960810000176000000000077726062205552016/Eventos"}',
+            parsedDataPreview:
+              '{"message":"Not Found","path":"/contribuintes/NFSe/42110092206960810000176000000000077726062205552016/Eventos"}'
+          }
         }
       ]
     });

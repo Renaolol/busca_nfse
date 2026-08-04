@@ -749,6 +749,7 @@ export class NfseService {
       eventosEncontrados: number;
       eventosImportados: number;
       mensagem?: string;
+      diagnostico?: Record<string, unknown>;
     }> = [];
     let documentosComEventos = 0;
     let eventosEncontrados = 0;
@@ -770,6 +771,10 @@ export class NfseService {
         });
         const statusCode = this.extractStatusCode(response);
         if (this.isNotFoundEventoSyncStatus(statusCode)) {
+          const diagnostico = this.buildEventoEndpointDiagnostic(response);
+          this.logger.warn(
+            `Consulta de eventos ADN retornou 404 para a chave ${document.chaveAcesso}: ${JSON.stringify(diagnostico)}`
+          );
           detalhes.push({
             documentoId: document.id,
             chaveAcesso: document.chaveAcesso,
@@ -778,7 +783,8 @@ export class NfseService {
             status: 'nao_localizado_endpoint_eventos',
             eventosEncontrados: 0,
             eventosImportados: 0,
-            mensagem: this.buildEventoEndpointNotFoundMessage(response)
+            mensagem: this.buildEventoEndpointNotFoundMessage(response),
+            diagnostico
           });
           continue;
         }
@@ -2028,6 +2034,23 @@ export class NfseService {
     return 'Endpoint de eventos do ADN retornou HTTP 404 para a chave consultada.';
   }
 
+  private buildEventoEndpointDiagnostic(payload: unknown): Record<string, unknown> {
+    const headers = this.extractResponseHeaders(payload);
+
+    return {
+      statusCode: this.extractStatusCode(payload) ?? null,
+      message: this.extractSyncMessage(payload) ?? null,
+      contentType: this.extractHeaderValue(headers, 'content-type') ?? null,
+      requestId:
+        this.extractHeaderValue(headers, 'x-request-id') ??
+        this.extractHeaderValue(headers, 'x-correlation-id') ??
+        this.extractHeaderValue(headers, 'traceparent') ??
+        null,
+      rawBodyPreview: this.buildPayloadPreview(this.extractRawBody(payload), 1200),
+      parsedDataPreview: this.buildPayloadPreview(this.extractResponseData(payload), 1200)
+    };
+  }
+
   private extractSyncMessage(payload: unknown): string | undefined {
     const values = this.collectRecursiveValues(payload, 100);
 
@@ -2054,6 +2077,68 @@ export class NfseService {
     }
 
     return undefined;
+  }
+
+  private extractResponseData(payload: unknown): unknown {
+    if (!payload || typeof payload !== 'object') {
+      return undefined;
+    }
+
+    return (payload as { data?: unknown }).data;
+  }
+
+  private extractRawBody(payload: unknown): string | undefined {
+    if (!payload || typeof payload !== 'object') {
+      return undefined;
+    }
+
+    const rawBody = (payload as { rawBody?: unknown }).rawBody;
+    return typeof rawBody === 'string' ? rawBody : undefined;
+  }
+
+  private extractResponseHeaders(payload: unknown): Record<string, unknown> | undefined {
+    if (!payload || typeof payload !== 'object') {
+      return undefined;
+    }
+
+    const headers = (payload as { headers?: unknown }).headers;
+    return headers && typeof headers === 'object' ? (headers as Record<string, unknown>) : undefined;
+  }
+
+  private extractHeaderValue(headers: Record<string, unknown> | undefined, name: string): string | undefined {
+    if (!headers) {
+      return undefined;
+    }
+
+    const value = headers[name] ?? headers[name.toLowerCase()] ?? headers[name.toUpperCase()];
+    if (typeof value === 'string') {
+      return value;
+    }
+
+    return Array.isArray(value) ? value.find((item) => typeof item === 'string') : undefined;
+  }
+
+  private buildPayloadPreview(payload: unknown, maxLength: number): string | null {
+    if (payload === undefined || payload === null) {
+      return null;
+    }
+
+    const serialized =
+      typeof payload === 'string'
+        ? payload
+        : (() => {
+            try {
+              return JSON.stringify(payload);
+            } catch {
+              return String(payload);
+            }
+          })();
+    const normalized = serialized.replace(/\s+/g, ' ').trim();
+    if (!normalized) {
+      return null;
+    }
+
+    return normalized.length > maxLength ? `${normalized.slice(0, maxLength)}...` : normalized;
   }
 
   private extractEventoXmls(payload: unknown): string[] {

@@ -79,6 +79,11 @@ export class SincronizarNfseEventosDetalheDto {
 
   @ApiPropertyOptional()
   mensagem?: string;
+
+  @ApiPropertyOptional({
+    description: 'Diagnostico tecnico opcional retornado pela integracao quando o endpoint externo responde fora do esperado'
+  })
+  diagnostico?: Record<string, unknown>;
 }
 
 export class SincronizarNfseEventosResponseDto {
