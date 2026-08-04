@@ -1235,7 +1235,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     return ambiente === Ambiente.producao ? NfseAmbiente.PRODUCAO : NfseAmbiente.PRODUCAO_RESTRITA;
   }
 
-  private resolveNfseAmbienteFromParsed(parsed: Pick<ParsedNfse, 'tpAmb'> | undefined, fallback: Ambiente): Ambiente {
+  private resolveNfseAmbienteFromParsed(parsed: Pick<ParsedNfse, 'tpAmb'> | null | undefined, fallback: Ambiente): Ambiente {
     if (parsed?.tpAmb === '1') {
       return Ambiente.producao;
     }
