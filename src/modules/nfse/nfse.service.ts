@@ -610,6 +610,7 @@ export class NfseService {
 
       return {
         ...doc,
+        ambiente: this.resolveNfseAmbienteFromParsed(parsed, doc.ambiente),
         razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
         razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
         municipioPrestacaoNome: municipioPrestacaoNomeEnriquecido ?? doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome ?? null
@@ -656,6 +657,7 @@ export class NfseService {
 
       return {
         ...doc,
+        ambiente: this.resolveNfseAmbienteFromParsed(parsed, doc.ambiente),
         razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
         razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
         municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome ?? null,
