@@ -12690,7 +12690,8 @@ function buildResolvedEventsSyncRow(documentType, target, detail, updatedDocumen
     eventCountLabel: `${Number(detail?.eventosEncontrados || 0)} encontrado(s) / ${Number(detail?.eventosImportados || 0)} importado(s)`,
     statusLabel: mapSyncAuditStatusLabel(detail?.status),
     statusTone: resolveSyncAuditStatusTone(detail?.status),
-    message: String(detail?.mensagem || '').trim() || (detail?.status === 'sincronizado' ? 'Consulta concluida com sucesso.' : '-'),
+    message:
+      normalizeSyncAuditMessage(detail) || (detail?.status === 'sincronizado' ? 'Consulta concluida com sucesso.' : '-'),
     openActionId: document?.id || target?.id || null
   };
 }
@@ -12835,10 +12836,32 @@ function buildEventsSyncAuditRows(documentType, summary) {
       eventCountLabel: `${Number(detail?.eventosEncontrados || 0)} encontrado(s) / ${Number(detail?.eventosImportados || 0)} importado(s)`,
       statusLabel: mapSyncAuditStatusLabel(detail?.status),
       statusTone,
-      message: String(detail?.mensagem || '').trim(),
+      message: normalizeSyncAuditMessage(detail),
       openActionId: document?.id || null
     };
   });
+}
+
+function normalizeSyncAuditMessage(detail) {
+  const raw = String(detail?.mensagem || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  const normalized = normalizeSearchText(raw);
+  if (raw.startsWith('{') || raw.startsWith('[') || normalized.includes('"lotedfe"') || normalized.includes('"statusprocessamento"')) {
+    if (detail?.status === 'sem_eventos') {
+      return 'Nenhum evento encontrado no ADN';
+    }
+
+    if (detail?.status === 'nao_localizado_endpoint_eventos') {
+      return 'Nao localizado no endpoint de eventos';
+    }
+
+    return 'Resposta retornada pelo servico externo fora do formato esperado.';
+  }
+
+  return raw;
 }
 
 function findDocumentBySyncAudit(documentType, documentoId) {
@@ -12883,7 +12906,8 @@ function resolveSyncAuditDocumentLabel(documentType, detail, document, index) {
 
 function resolveSyncAuditSecondaryLabel(documentType, detail, document) {
   if (documentType === 'nfse') {
-    const ambiente = detail?.ambiente ? mapNfseAmbienteLabel(detail.ambiente) : document?.ambiente ? mapNfseAmbienteLabel(document.ambiente) : '';
+    const ambienteBruto = detail?.ambiente || detail?.diagnostico?.ambienteDocumento || document?.ambiente || '';
+    const ambiente = ambienteBruto ? mapNfseAmbienteLabel(ambienteBruto) : '';
     const estabelecimento = document?.prestador || document?.cliente || '';
     return [ambiente, estabelecimento].filter(Boolean).join(' • ');
   }

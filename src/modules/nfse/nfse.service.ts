@@ -592,7 +592,7 @@ export class NfseService {
       cnpjPrestador: doc.cnpjPrestador
     });
 
-    if (!doc.xmlPath || (doc.razaoSocialPrestador && doc.razaoSocialTomador && municipioPrestacaoNome === doc.municipioPrestacaoNome)) {
+    if (!doc.xmlPath) {
       return {
         ...doc,
         municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome
