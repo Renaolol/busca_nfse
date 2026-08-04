@@ -159,6 +159,7 @@ const state = {
     hasSearched: false,
     results: [],
     lastQuery: null,
+    numberingValidation: null,
     lastSearchedAt: null,
     page: 1,
     pageSize: SEARCH_PAGE_SIZE,
@@ -3619,6 +3620,7 @@ function renderXmlSearchSummary() {
     query.emissaoInicio || query.emissaoFim
       ? `${formatDate(query.emissaoInicio || '')} ate ${formatDate(query.emissaoFim || '')}`
       : 'Todos os XMLs armazenados';
+  const numberingValidationSummary = renderXmlNumberingValidationSummary(query, state.xmlSearch.numberingValidation);
   return `
     <article class="card" style="box-shadow:none; border-style:dashed;">
       <div class="progress-meta">
@@ -3629,8 +3631,58 @@ function renderXmlSearchSummary() {
         <span>Valor somado: <strong>${escapeHtml(formatCurrency(totalValue))}</strong></span>
         <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.xmlSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
       </div>
+      ${numberingValidationSummary}
     </article>
   `;
+}
+
+function renderXmlNumberingValidationSummary(query, validation) {
+  if (query?.tipo !== 'Emitida') {
+    return '';
+  }
+
+  if (!validation || validation.aplicada === false) {
+    const reason =
+      validation?.motivo === 'filtros_incompativeis'
+        ? 'Validacao de numeracao indisponivel com os filtros adicionais atuais.'
+        : 'Validacao de numeracao disponivel apenas para a consulta de NFS-e emitidas da empresa selecionada.';
+
+    return `<p class="card-subtitle" style="margin-top:12px;">${escapeHtml(reason)}</p>`;
+  }
+
+  if (!validation.possuiNumeracaoPulada) {
+    return `<p class="card-subtitle" style="margin-top:12px;">Numeracao validada sem lacunas para ${escapeHtml(String(validation.totalNumerosValidos || 0))} documento(s) emitido(s) com numero fiscal.</p>`;
+  }
+
+  const preview = Array.isArray(validation.lacunas)
+    ? validation.lacunas
+        .slice(0, 5)
+        .map((lacuna) => formatXmlNumberingGap(lacuna))
+        .filter(Boolean)
+        .join('; ')
+    : '';
+  const hiddenCount = Math.max(0, Number(validation.totalFaixasLacuna || 0) - 5);
+  const suffix = hiddenCount > 0 ? ` (+${hiddenCount} faixa(s))` : '';
+
+  return `
+    <p class="card-subtitle" style="margin-top:12px; color:#8a5a00;">
+      Atencao: foram encontradas ${escapeHtml(String(validation.totalNumerosPulados || 0))} numeracao(oes) pulada(s) em ${escapeHtml(String(validation.totalFaixasLacuna || 0))} faixa(s). ${escapeHtml(preview)}${escapeHtml(suffix)}
+    </p>
+  `;
+}
+
+function formatXmlNumberingGap(gap) {
+  if (!gap) {
+    return '';
+  }
+
+  const ambiente = mapNfseAmbienteLabel(gap.ambiente || '');
+  const serie = String(gap.serie || '').trim();
+  const prefix = serie ? `Serie ${serie}` : 'Serie padrao';
+  const start = Number(gap.numeroInicial || 0);
+  const end = Number(gap.numeroFinal || 0);
+  const range = start === end ? String(start) : `${start} a ${end}`;
+  return `${prefix} (${ambiente}): ${range}`;
 }
 
 function renderXmlsTableCard(xmls) {
@@ -9275,6 +9327,7 @@ async function applyXmlFilters(form) {
     state.xmlSearch.hasSearched = false;
     state.xmlSearch.results = [];
     state.xmlSearch.lastQuery = null;
+    state.xmlSearch.numberingValidation = null;
     state.xmlSearch.total = 0;
     state.xmlSearch.totalPages = 0;
     state.xmlSearch.page = 1;
@@ -9292,6 +9345,7 @@ async function applyXmlFilters(form) {
     state.xmlSearch.hasSearched = false;
     state.xmlSearch.results = [];
     state.xmlSearch.lastQuery = null;
+    state.xmlSearch.numberingValidation = null;
     state.xmlSearch.total = 0;
     state.xmlSearch.totalPages = 0;
     state.xmlSearch.page = 1;
@@ -9311,6 +9365,7 @@ async function applyXmlFilters(form) {
 
   if (state.dataSource !== 'api') {
     state.xmlSearch.results = getFilteredXmlsFromSource(state.xmlFiles);
+    state.xmlSearch.numberingValidation = null;
     state.xmlSearch.lastSearchedAt = new Date().toISOString();
     state.xmlSearch.total = state.xmlSearch.results.length;
     state.xmlSearch.totalPages = state.xmlSearch.results.length ? 1 : 0;
@@ -9880,6 +9935,7 @@ function resetXmlSearch() {
   state.xmlSearch.hasSearched = false;
   state.xmlSearch.results = [];
   state.xmlSearch.lastQuery = null;
+  state.xmlSearch.numberingValidation = null;
   state.xmlSearch.lastSearchedAt = null;
   state.xmlSearch.page = 1;
   state.xmlSearch.pageSize = SEARCH_PAGE_SIZE;
@@ -9980,6 +10036,7 @@ async function executeXmlSearch() {
     const xmls = buildXmlFilesFromApi(payload.items, state.clients);
     state.xmlFiles = mergeXmlFilesById(state.xmlFiles, xmls);
     state.xmlSearch.results = getFilteredXmlsFromSource(xmls);
+    state.xmlSearch.numberingValidation = payload.validacaoNumeracao;
     state.xmlSearch.lastSearchedAt = new Date().toISOString();
     state.xmlSearch.page = 1;
     state.xmlSearch.pageSize = payload.pageSize;
@@ -9989,6 +10046,7 @@ async function executeXmlSearch() {
     reportIfListingCapped('nota(s)', payload);
   } catch (error) {
     state.xmlSearch.results = [];
+    state.xmlSearch.numberingValidation = null;
     state.xmlSearch.total = 0;
     state.xmlSearch.totalPages = 0;
     state.tableState.xmls = 'error';
@@ -10005,7 +10063,8 @@ function normalizePaginatedResponse(payload) {
       total: payload.length,
       page: 1,
       pageSize: payload.length || SEARCH_PAGE_SIZE,
-      totalPages: payload.length ? 1 : 0
+      totalPages: payload.length ? 1 : 0,
+      validacaoNumeracao: null
     };
   }
 
@@ -10014,13 +10073,43 @@ function normalizePaginatedResponse(payload) {
   const page = Number(payload?.page ?? 1);
   const pageSize = Number(payload?.pageSize ?? SEARCH_PAGE_SIZE);
   const totalPages = Number(payload?.totalPages ?? (pageSize > 0 ? Math.ceil(total / pageSize) : 0));
+  const validacaoNumeracao = normalizeXmlNumberingValidation(payload?.validacaoNumeracao);
 
   return {
     items,
     total,
     page,
     pageSize,
-    totalPages
+    totalPages,
+    validacaoNumeracao
+  };
+}
+
+function normalizeXmlNumberingValidation(payload) {
+  if (!payload || typeof payload !== 'object') {
+    return null;
+  }
+
+  const lacunas = Array.isArray(payload.lacunas)
+    ? payload.lacunas.map((gap) => ({
+        ambiente: String(gap?.ambiente || ''),
+        serie: gap?.serie == null ? null : String(gap.serie),
+        numeroInicial: Number(gap?.numeroInicial || 0),
+        numeroFinal: Number(gap?.numeroFinal || 0),
+        quantidade: Number(gap?.quantidade || 0)
+      }))
+    : [];
+
+  return {
+    aplicada: Boolean(payload.aplicada),
+    motivo: payload?.motivo ? String(payload.motivo) : '',
+    cnpjPrestador: payload?.cnpjPrestador ? String(payload.cnpjPrestador) : null,
+    totalDocumentosAnalisados: Number(payload?.totalDocumentosAnalisados || 0),
+    totalNumerosValidos: Number(payload?.totalNumerosValidos || 0),
+    totalFaixasLacuna: Number(payload?.totalFaixasLacuna || 0),
+    totalNumerosPulados: Number(payload?.totalNumerosPulados || 0),
+    possuiNumeracaoPulada: Boolean(payload?.possuiNumeracaoPulada),
+    lacunas
   };
 }
 

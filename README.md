@@ -404,6 +404,7 @@ Observacoes:
 
 - Lista geral com filtro: `GET /nfse?cnpjConsulta=12345678000100&tipoRelacao=emitidas`
 - Retorno separado por grupos: `GET /nfse/separadas?cnpjConsulta=12345678000100`
+- Quando `GET /nfse` recebe `tipoRelacao=emitidas` com `cnpjConsulta` e sem filtros adicionais que truncam a sequencia, a resposta inclui `validacaoNumeracao`, indicando se houve numeracao pulada e quais faixas ficaram ausentes.
 
 ## Frontend de testes
 

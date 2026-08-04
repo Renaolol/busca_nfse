@@ -16,6 +16,28 @@ import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
 import { SincronizarNfseEventosDto } from './dto/sincronizar-eventos.dto';
 import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from './nfse-xml-parser.service';
 
+type NfseNumeracaoGap = {
+  ambiente: Ambiente;
+  serie: string | null;
+  numeroInicial: number;
+  numeroFinal: number;
+  quantidade: number;
+};
+
+type NfseNumeracaoValidation = {
+  aplicada: boolean;
+  motivo?: 'requer_consulta_emitidas' | 'filtros_incompativeis';
+  cnpjPrestador: string | null;
+  totalDocumentosAnalisados: number;
+  totalNumerosValidos: number;
+  totalFaixasLacuna: number;
+  totalNumerosPulados: number;
+  possuiNumeracaoPulada: boolean;
+  lacunas: NfseNumeracaoGap[];
+};
+
+type NfseDocumentoNumeracaoProjection = Pick<NfseDocumento, 'ambiente' | 'serie' | 'numeroNfse'>;
+
 @Injectable()
 export class NfseService {
   private readonly logger = new Logger(NfseService.name);
@@ -38,6 +60,7 @@ export class NfseService {
     const where = this.buildBaseWhere(query);
     const cnpjConsulta = this.normalizeCnpj(query.cnpjConsulta);
     const { page, pageSize, skip } = this.resolvePagination(query);
+    const shouldValidateNumbering = this.shouldValidateEmitidasNumbering(query, cnpjConsulta);
 
     if (cnpjConsulta) {
       const tipoRelacao = query.tipoRelacao ?? 'ambas';
@@ -66,17 +89,21 @@ export class NfseService {
 
       const total = uniqueItems.length;
       const items = await Promise.all(uniqueItems.map((item) => this.enrichDocumentoSummary(item)));
+      const validacaoNumeracao = shouldValidateNumbering
+        ? this.buildNfseNumberingValidation(uniqueItems, cnpjConsulta)
+        : this.buildSkippedNumberingValidationNotApplied(query, cnpjConsulta);
 
       return {
         items,
         total,
         page,
         pageSize,
-        totalPages: 1
+        totalPages: 1,
+        validacaoNumeracao
       };
     }
 
-    const [total, rawItems] = await Promise.all([
+    const [total, rawItems, documentosNumeracao] = await Promise.all([
       this.prisma.nfseDocumento.count({ where }),
       this.prisma.nfseDocumento.findMany({
         where,
@@ -84,7 +111,17 @@ export class NfseService {
         skip,
         take: pageSize,
         include: this.nfseDocumentoInclude()
-      })
+      }),
+      shouldValidateNumbering
+        ? this.prisma.nfseDocumento.findMany({
+            where,
+            select: {
+              ambiente: true,
+              serie: true,
+              numeroNfse: true
+            }
+          })
+        : Promise.resolve([])
     ]);
     const { items: uniqueItems, duplicatesRemoved } = this.deduplicateDocumentosForList(rawItems);
     if (duplicatesRemoved > 0) {
@@ -92,13 +129,17 @@ export class NfseService {
     }
 
     const items = await Promise.all(uniqueItems.map((item) => this.enrichDocumentoSummary(item)));
+    const validacaoNumeracao = shouldValidateNumbering
+      ? this.buildNfseNumberingValidation(documentosNumeracao, cnpjConsulta)
+      : this.buildSkippedNumberingValidationNotApplied(query, cnpjConsulta);
 
     return {
       items,
       total,
       page,
       pageSize,
-      totalPages: Math.max(1, Math.ceil(total / pageSize))
+      totalPages: Math.max(1, Math.ceil(total / pageSize)),
+      validacaoNumeracao
     };
   }
 
@@ -181,13 +222,14 @@ export class NfseService {
     if (!cnpjConsulta) {
       throw new BadRequestException('Informe cnpjConsulta com 14 digitos para separar emitidas e tomadas.');
     }
+    const shouldValidateNumbering = this.shouldValidateEmitidasNumbering(query, cnpjConsulta);
 
     const baseWhere = this.buildBaseWhere(query);
     delete baseWhere.cnpjPrestador;
     delete baseWhere.cnpjTomador;
     delete baseWhere.OR;
 
-    const [emitidas, tomadas] = await Promise.all([
+    const [emitidas, tomadas, documentosNumeracaoEmitidas] = await Promise.all([
       this.prisma.nfseDocumento.findMany({
         where: {
           ...baseWhere,
@@ -205,8 +247,25 @@ export class NfseService {
         orderBy: { dataEmissao: 'desc' },
         take: 500,
         include: this.nfseDocumentoInclude()
-      })
+      }),
+      shouldValidateNumbering
+        ? this.prisma.nfseDocumento.findMany({
+            where: {
+              ...baseWhere,
+              cnpjPrestador: cnpjConsulta
+            },
+            select: {
+              ambiente: true,
+              serie: true,
+              numeroNfse: true
+            }
+          })
+        : Promise.resolve([])
     ]);
+
+    const validacaoNumeracaoEmitidas = shouldValidateNumbering
+      ? this.buildNfseNumberingValidation(documentosNumeracaoEmitidas, cnpjConsulta)
+      : this.buildSkippedNumberingValidationNotApplied(query, cnpjConsulta);
 
     return {
       cnpjConsulta,
@@ -214,6 +273,7 @@ export class NfseService {
         emitidas: emitidas.length,
         tomadas: tomadas.length
       },
+      validacaoNumeracaoEmitidas,
       emitidas,
       tomadas
     };
@@ -579,6 +639,146 @@ export class NfseService {
 
   private toDateKey(value?: Date | null): string {
     return value instanceof Date ? value.toISOString() : '';
+  }
+
+  private shouldValidateEmitidasNumbering(query: QueryNfseDto, cnpjConsulta?: string): boolean {
+    return Boolean(cnpjConsulta) && (query.tipoRelacao ?? 'ambas') === 'emitidas' && this.hasCompatibleSkippedNumberingFilters(query);
+  }
+
+  private buildSkippedNumberingValidationNotApplied(
+    query: QueryNfseDto,
+    cnpjConsulta?: string
+  ): NfseNumeracaoValidation {
+    const motivo =
+      cnpjConsulta && (query.tipoRelacao ?? 'ambas') === 'emitidas' && !this.hasCompatibleSkippedNumberingFilters(query)
+        ? 'filtros_incompativeis'
+        : 'requer_consulta_emitidas';
+
+    return {
+      aplicada: false,
+      motivo,
+      cnpjPrestador: cnpjConsulta ?? null,
+      totalDocumentosAnalisados: 0,
+      totalNumerosValidos: 0,
+      totalFaixasLacuna: 0,
+      totalNumerosPulados: 0,
+      possuiNumeracaoPulada: false,
+      lacunas: []
+    };
+  }
+
+  private hasCompatibleSkippedNumberingFilters(query: QueryNfseDto): boolean {
+    return !(
+      query.cnpjPrestador ||
+      query.cnpjTomador ||
+      query.status ||
+      query.valorMin !== undefined ||
+      query.valorMax !== undefined ||
+      query.cnpj ||
+      query.numeroNfse ||
+      query.municipio ||
+      query.downloadInicio ||
+      query.downloadFim ||
+      query.statusArmazenamento
+    );
+  }
+
+  private buildNfseNumberingValidation(
+    documents: NfseDocumentoNumeracaoProjection[],
+    cnpjConsulta?: string
+  ): NfseNumeracaoValidation {
+    const groupedNumbers = new Map<string, { ambiente: Ambiente; serie: string | null; numbers: Set<number> }>();
+    let totalNumerosValidos = 0;
+
+    for (const document of documents) {
+      const numero = this.parseNumeroNfse(document.numeroNfse);
+      if (numero === null) {
+        continue;
+      }
+
+      totalNumerosValidos += 1;
+      const serie = this.normalizeSerie(document.serie);
+      const groupKey = `${document.ambiente}:${serie ?? ''}`;
+      const current =
+        groupedNumbers.get(groupKey) ??
+        {
+          ambiente: document.ambiente,
+          serie,
+          numbers: new Set<number>()
+        };
+
+      current.numbers.add(numero);
+      groupedNumbers.set(groupKey, current);
+    }
+
+    const lacunas: NfseNumeracaoGap[] = [];
+
+    groupedNumbers.forEach((group) => {
+      const orderedNumbers = Array.from(group.numbers).sort((left, right) => left - right);
+
+      for (let index = 1; index < orderedNumbers.length; index += 1) {
+        const anterior = orderedNumbers[index - 1];
+        const atual = orderedNumbers[index];
+        const quantidade = atual - anterior - 1;
+
+        if (quantidade <= 0) {
+          continue;
+        }
+
+        lacunas.push({
+          ambiente: group.ambiente,
+          serie: group.serie,
+          numeroInicial: anterior + 1,
+          numeroFinal: atual - 1,
+          quantidade
+        });
+      }
+    });
+
+    lacunas.sort((left, right) => {
+      const ambienteDiff = String(left.ambiente).localeCompare(String(right.ambiente));
+      if (ambienteDiff !== 0) {
+        return ambienteDiff;
+      }
+
+      const serieDiff = String(left.serie ?? '').localeCompare(String(right.serie ?? ''), 'pt-BR', {
+        numeric: true,
+        sensitivity: 'base'
+      });
+      if (serieDiff !== 0) {
+        return serieDiff;
+      }
+
+      return left.numeroInicial - right.numeroInicial;
+    });
+
+    const totalNumerosPulados = lacunas.reduce((total, lacuna) => total + lacuna.quantidade, 0);
+
+    return {
+      aplicada: true,
+      cnpjPrestador: cnpjConsulta ?? null,
+      totalDocumentosAnalisados: documents.length,
+      totalNumerosValidos,
+      totalFaixasLacuna: lacunas.length,
+      totalNumerosPulados,
+      possuiNumeracaoPulada: lacunas.length > 0,
+      lacunas
+    };
+  }
+
+  private parseNumeroNfse(value?: string | null): number | null {
+    const normalized = String(value ?? '').trim();
+    if (!/^\d+$/.test(normalized)) {
+      return null;
+    }
+
+    const parsed = Number(normalized);
+    return Number.isSafeInteger(parsed) ? parsed : null;
+  }
+
+  private normalizeSerie(value?: string | null): string | null {
+    const normalized = String(value ?? '').trim();
+    return normalized || null;
   }
 
   private async enrichDocumentoSummary(

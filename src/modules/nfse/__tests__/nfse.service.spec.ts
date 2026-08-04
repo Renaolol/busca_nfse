@@ -51,7 +51,7 @@ describe('NfseService', () => {
   );
 
   beforeEach(() => {
-    jest.clearAllMocks();
+    jest.resetAllMocks();
     prisma.clienteEstabelecimento.findFirst.mockResolvedValue(undefined);
   });
 
@@ -81,7 +81,18 @@ describe('NfseService', () => {
       total: 245,
       page: 3,
       pageSize: 100,
-      totalPages: 3
+      totalPages: 3,
+      validacaoNumeracao: {
+        aplicada: false,
+        motivo: 'requer_consulta_emitidas',
+        cnpjPrestador: null,
+        totalDocumentosAnalisados: 0,
+        totalNumerosValidos: 0,
+        totalFaixasLacuna: 0,
+        totalNumerosPulados: 0,
+        possuiNumeracaoPulada: false,
+        lacunas: []
+      }
     });
   });
 
@@ -107,7 +118,87 @@ describe('NfseService', () => {
       total: 0,
       page: 1,
       pageSize: 10000,
-      totalPages: 1
+      totalPages: 1,
+      validacaoNumeracao: {
+        aplicada: false,
+        motivo: 'requer_consulta_emitidas',
+        cnpjPrestador: null,
+        totalDocumentosAnalisados: 0,
+        totalNumerosValidos: 0,
+        totalFaixasLacuna: 0,
+        totalNumerosPulados: 0,
+        possuiNumeracaoPulada: false,
+        lacunas: []
+      }
+    });
+  });
+
+  it('valida numeracao pulada na listagem de NFS-e emitidas', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-emitida-101',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000010126019687178145',
+        numeroNfse: '101',
+        serie: 'A1',
+        dataEmissao: new Date('2026-06-01T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador 1',
+        xmlPath: null,
+        danfsePath: null,
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-emitida-103',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000010326019687178145',
+        numeroNfse: '103',
+        serie: 'A1',
+        dataEmissao: new Date('2026-06-03T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '22222222000122',
+        razaoSocialTomador: 'Tomador 2',
+        xmlPath: null,
+        danfsePath: null,
+        createdAt: new Date('2026-06-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T00:00:00.000Z'),
+        eventos: []
+      }
+    ]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '06960810000176',
+      tipoRelacao: 'emitidas',
+      all: true
+    });
+
+    expect(result.validacaoNumeracao).toEqual({
+      aplicada: true,
+      cnpjPrestador: '06960810000176',
+      totalDocumentosAnalisados: 2,
+      totalNumerosValidos: 2,
+      totalFaixasLacuna: 1,
+      totalNumerosPulados: 1,
+      possuiNumeracaoPulada: true,
+      lacunas: [
+        {
+          ambiente: Ambiente.producao,
+          serie: 'A1',
+          numeroInicial: 102,
+          numeroFinal: 102,
+          quantidade: 1
+        }
+      ]
     });
   });
 
@@ -375,7 +466,7 @@ describe('NfseService', () => {
       createdAt: new Date('2026-01-05T00:00:00.000Z')
     });
 
-    storage.getObject.mockResolvedValueOnce(Buffer.from('<NFSe><nNFSe>2</nNFSe></NFSe>', 'utf8'));
+    storage.getObject.mockResolvedValue(Buffer.from('<NFSe><nNFSe>2</nNFSe></NFSe>', 'utf8'));
     storage.putObject.mockResolvedValue('/tmp/danfse.pdf');
     prisma.nfseDocumento.update.mockResolvedValue({});
 
@@ -417,7 +508,7 @@ describe('NfseService', () => {
       .mockResolvedValueOnce({ municipioNome: 'Embu Das Artes' })
       .mockResolvedValueOnce({ municipioNome: 'Mondai' });
 
-    storage.getObject.mockResolvedValueOnce(
+    storage.getObject.mockResolvedValue(
       Buffer.from(
         '<NFSe><nNFSe>591</nNFSe><Tomador><Endereco><CodigoMunicipio>4211009</CodigoMunicipio></Endereco></Tomador></NFSe>',
         'utf8'
@@ -523,6 +614,7 @@ describe('NfseService', () => {
     });
 
     storage.getObject
+      .mockResolvedValueOnce(Buffer.from('<NFSe><nNFSe>4</nNFSe></NFSe>', 'utf8'))
       .mockResolvedValueOnce(Buffer.from('%PDF-1.4\n(arquivo legado sem marcador novo)', 'utf8'))
       .mockResolvedValueOnce(Buffer.from('<NFSe><nNFSe>4</nNFSe></NFSe>', 'utf8'));
     storage.putObject.mockResolvedValue('/tmp/danfse-regenerado.pdf');
@@ -568,7 +660,7 @@ describe('NfseService', () => {
       createdAt: new Date('2026-06-03T12:00:00.000Z')
     });
 
-    storage.getObject.mockResolvedValueOnce(Buffer.from('<NFSe><nNFSe>333</nNFSe></NFSe>', 'utf8'));
+    storage.getObject.mockResolvedValue(Buffer.from('<NFSe><nNFSe>333</nNFSe></NFSe>', 'utf8'));
     storage.putObject.mockResolvedValue('/tmp/danfse-cancelada.pdf');
 
     const result = await service.getDanfse('doc-4-cancelada', 'cliente-1');

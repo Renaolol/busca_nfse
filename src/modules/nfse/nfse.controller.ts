@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiExtraModels, ApiOkResponse, ApiQuery, ApiTags, getSchemaPath } from '@nestjs/swagger';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { DownloadLoteDto } from './dto/download-lote.dto';
@@ -7,6 +7,7 @@ import { DownloadLoteResponseDto } from './dto/download-lote-response.dto';
 import { DownloadDocumentDto } from './dto/download-document.dto';
 import { DashboardStatsQueryDto, DashboardStatsResponseDto } from './dto/dashboard-stats.dto';
 import { ImportXmlDto } from './dto/import-xml.dto';
+import { NfseNumeracaoValidationDto } from './dto/list-nfse-response.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
 import { ReprocessarDanfsesDto, ReprocessarDanfsesResponseDto } from './dto/reprocessar-danfses.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
@@ -14,6 +15,7 @@ import { SincronizarNfseEventosDto, SincronizarNfseEventosResponseDto } from './
 import { NfseService } from './nfse.service';
 
 @ApiTags('nfse')
+@ApiExtraModels(NfseNumeracaoValidationDto)
 @Controller('nfse')
 export class NfseController {
   constructor(private readonly nfseService: NfseService) {}
@@ -26,12 +28,65 @@ export class NfseController {
   }
 
   @Get()
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: {
+        items: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: true
+          }
+        },
+        total: { type: 'number' },
+        page: { type: 'number' },
+        pageSize: { type: 'number' },
+        totalPages: { type: 'number' },
+        validacaoNumeracao: {
+          allOf: [{ $ref: getSchemaPath(NfseNumeracaoValidationDto) }]
+        }
+      }
+    }
+  })
   @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })
   findAll(@Query() query: QueryNfseDto) {
     return this.nfseService.findAll(query);
   }
 
   @Get('separadas')
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: {
+        cnpjConsulta: { type: 'string' },
+        totais: {
+          type: 'object',
+          properties: {
+            emitidas: { type: 'number' },
+            tomadas: { type: 'number' }
+          }
+        },
+        validacaoNumeracaoEmitidas: {
+          allOf: [{ $ref: getSchemaPath(NfseNumeracaoValidationDto) }]
+        },
+        emitidas: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: true
+          }
+        },
+        tomadas: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: true
+          }
+        }
+      }
+    }
+  })
   @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })
   findSeparated(@Query() query: QueryNfseDto) {
     return this.nfseService.findSeparated(query);
