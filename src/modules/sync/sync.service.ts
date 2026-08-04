@@ -1413,14 +1413,17 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
   private resolveAutomaticEventNextAttemptAt(
     doc: { eventos?: Array<unknown> },
-    detail: { status: 'sincronizado' | 'sem_eventos' | 'falha_api' | 'falha_certificado'; mensagem?: string },
+    detail: {
+      status: 'sincronizado' | 'sem_eventos' | 'nao_localizado_endpoint_eventos' | 'falha_api' | 'falha_certificado';
+      mensagem?: string;
+    },
     now: Date
   ): Date {
     if (detail.status === 'falha_certificado') {
       return new Date(now.getTime() + this.autoEventSyncCertificateCooldownMs);
     }
 
-    if (detail.status === 'falha_api') {
+    if (detail.status === 'falha_api' || detail.status === 'nao_localizado_endpoint_eventos') {
       return new Date(now.getTime() + this.autoEventSyncFailureCooldownMs);
     }
 

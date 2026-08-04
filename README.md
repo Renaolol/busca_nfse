@@ -271,7 +271,7 @@ Eventos sao vinculados pela chave da NFS-e referenciada (`chNFSe`) e salvos em `
 - `GET /nfe/:id/xml`: retorna XML da NF-e com `fileName`, `contentType` e `contentBase64`.
 - `GET /nfe/:id/danfe`: retorna DANFE em PDF com `fileName`, `contentType` e `contentBase64`.
 - `POST /nfe/download-lote`: gera um arquivo ZIP em Base64 para baixar XML/DANFE em lote, com `tipoArquivo=ambos|xml|danfe`.
-- `POST /nfse/eventos/sincronizar`: consulta manualmente os eventos das NFS-e ja armazenadas, usando a chave de acesso da nota e o certificado do estabelecimento, sem alterar NSU. O import aceita tanto XMLs de evento retornados pelo ADN quanto eventos estruturados em JSON.
+- `POST /nfse/eventos/sincronizar`: consulta manualmente os eventos das NFS-e ja armazenadas, usando a chave de acesso da nota e o certificado do estabelecimento, sem alterar NSU. O import aceita tanto XMLs de evento retornados pelo ADN quanto eventos estruturados em JSON. Quando o endpoint de eventos do ADN responder `HTTP 404`, a auditoria retorna o status `nao_localizado_endpoint_eventos`, distinto de `sem_eventos`.
 - `GET /nfse`, `GET /nfse/separadas` e `GET /nfse/:id` retornam tambem `eventos` vinculados a cada nota.
 - Os endpoints `GET /nfse/:id`, `GET /nfse/:id/xml` e `GET /nfse/:id/danfse` exigem `?clienteId=...` para garantir escopo de acesso por cliente.
 - Os endpoints `GET /nfe/:id`, `GET /nfe/:id/xml` e `GET /nfe/:id/danfe` exigem `?clienteId=...` para garantir escopo de acesso por cliente.

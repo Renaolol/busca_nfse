@@ -745,7 +745,7 @@ export class NfseService {
       chaveAcesso: string;
       estabelecimentoId: string;
       ambiente: 'producao' | 'producao_restrita';
-      status: 'sincronizado' | 'sem_eventos' | 'falha_api' | 'falha_certificado';
+      status: 'sincronizado' | 'sem_eventos' | 'nao_localizado_endpoint_eventos' | 'falha_api' | 'falha_certificado';
       eventosEncontrados: number;
       eventosImportados: number;
       mensagem?: string;
@@ -775,10 +775,10 @@ export class NfseService {
             chaveAcesso: document.chaveAcesso,
             estabelecimentoId: document.estabelecimentoId,
             ambiente: this.toDtoAmbiente(document.ambiente),
-            status: 'sem_eventos',
+            status: 'nao_localizado_endpoint_eventos',
             eventosEncontrados: 0,
             eventosImportados: 0,
-            mensagem: this.extractSyncMessage(response) ?? 'Nenhum evento encontrado no ADN'
+            mensagem: this.buildEventoEndpointNotFoundMessage(response)
           });
           continue;
         }
@@ -2017,6 +2017,15 @@ export class NfseService {
 
   private isNotFoundEventoSyncStatus(statusCode: number | undefined): boolean {
     return statusCode === 404;
+  }
+
+  private buildEventoEndpointNotFoundMessage(payload: unknown): string {
+    const message = this.extractSyncMessage(payload);
+    if (message && !/^not found$/i.test(message.trim())) {
+      return message;
+    }
+
+    return 'Endpoint de eventos do ADN retornou HTTP 404 para a chave consultada.';
   }
 
   private extractSyncMessage(payload: unknown): string | undefined {

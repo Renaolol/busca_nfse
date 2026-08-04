@@ -1094,7 +1094,7 @@ describe('NfseService', () => {
     });
   });
 
-  it('trata HTTP 404 na consulta de eventos como sem_eventos para NFS-e cancelada', async () => {
+  it('trata HTTP 404 na consulta de eventos como status especifico do endpoint para NFS-e cancelada', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
       {
         id: 'doc-evt-404',
@@ -1136,10 +1136,10 @@ describe('NfseService', () => {
           chaveAcesso: '42110092206960810000176000000000077726062205552016',
           estabelecimentoId: 'estab-1',
           ambiente: 'producao',
-          status: 'sem_eventos',
+          status: 'nao_localizado_endpoint_eventos',
           eventosEncontrados: 0,
           eventosImportados: 0,
-          mensagem: 'Nenhum evento encontrado no ADN'
+          mensagem: 'Endpoint de eventos do ADN retornou HTTP 404 para a chave consultada.'
         }
       ]
     });

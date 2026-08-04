@@ -66,8 +66,10 @@ export class SincronizarNfseEventosDetalheDto {
   @ApiProperty({ enum: ['producao', 'producao_restrita'] })
   ambiente!: 'producao' | 'producao_restrita';
 
-  @ApiProperty({ enum: ['sincronizado', 'sem_eventos', 'falha_api', 'falha_certificado'] })
-  status!: 'sincronizado' | 'sem_eventos' | 'falha_api' | 'falha_certificado';
+  @ApiProperty({
+    enum: ['sincronizado', 'sem_eventos', 'nao_localizado_endpoint_eventos', 'falha_api', 'falha_certificado']
+  })
+  status!: 'sincronizado' | 'sem_eventos' | 'nao_localizado_endpoint_eventos' | 'falha_api' | 'falha_certificado';
 
   @ApiProperty()
   eventosEncontrados!: number;

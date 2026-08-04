@@ -12896,6 +12896,10 @@ function resolveSyncAuditEventLabel(detail, document) {
     return 'Falha na consulta';
   }
 
+  if (detail?.status === 'nao_localizado_endpoint_eventos') {
+    return 'Nao localizado no endpoint';
+  }
+
   if (detail?.status === 'sem_eventos') {
     return 'Sem evento';
   }
@@ -12913,6 +12917,8 @@ function mapSyncAuditStatusLabel(status) {
   switch (status) {
     case 'sincronizado':
       return 'Sincronizado';
+    case 'nao_localizado_endpoint_eventos':
+      return 'Nao localizado no endpoint';
     case 'sem_eventos':
       return 'Sem evento';
     case 'falha_certificado':
@@ -12928,6 +12934,8 @@ function resolveSyncAuditStatusTone(status) {
   switch (status) {
     case 'sincronizado':
       return 'success';
+    case 'nao_localizado_endpoint_eventos':
+      return 'warning';
     case 'sem_eventos':
       return 'neutral';
     case 'falha_certificado':
