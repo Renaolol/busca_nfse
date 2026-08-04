@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 
 export interface ParsedNfse {
   chaveAcesso: string;
+  tpAmb?: string;
   numeroNfse?: string;
   serie?: string;
   dataEmissao?: Date;
@@ -71,6 +72,7 @@ export class NfseXmlParserService {
 
     return {
       chaveAcesso,
+      tpAmb: this.extract(xml, ['tpAmb']),
       numeroNfse: this.extract(xml, ['numeroNFSe', 'numeroNfse', 'Numero', 'nNFSe']),
       serie: this.extract(xml, ['serie']),
       dataEmissao: this.parseDate(this.extract(xml, ['dataEmissao', 'DataEmissao', 'dhEmi', 'dhProc'])),

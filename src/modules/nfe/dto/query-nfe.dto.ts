@@ -98,4 +98,12 @@ export class QueryNfeDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(NfeAmbiente)
   ambiente?: NfeAmbiente;
+
+  @ApiPropertyOptional({
+    description: 'Quando true, ignora page/pageSize e retorna todos os registros de NF-e que casam com o filtro, sem aplicar limite de seguranca.'
+  })
+  @IsOptional()
+  @Type(() => Boolean)
+  @IsBoolean()
+  all?: boolean;
 }

@@ -18,6 +18,14 @@ export interface AdnDFeResult {
   message?: string;
 }
 
+export interface AdnEventosResult {
+  statusCode: number;
+  data?: unknown;
+  rawBody?: string;
+  headers?: Record<string, string | string[] | undefined>;
+  error?: string;
+}
+
 export interface NfseAdnClient {
   getDFeByNsu(params: {
     cnpjConsulta: string;
@@ -30,7 +38,7 @@ export interface NfseAdnClient {
     chaveAcesso: string;
     ambiente: NfseAmbiente;
     certificateId: string;
-  }): Promise<unknown>;
+  }): Promise<AdnEventosResult>;
 }
 
 export const NFSE_ADN_CLIENT = Symbol('NFSE_ADN_CLIENT');

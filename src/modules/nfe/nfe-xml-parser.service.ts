@@ -6,6 +6,7 @@ export interface ParsedNfe {
   numeroNfe?: string;
   serie?: string;
   modelo?: string;
+  tpAmb?: string;
   dataEmissao?: Date;
   dataAutorizacao?: Date;
   status?: string;
@@ -35,6 +36,7 @@ export interface ParsedDfeEvento {
   documentType: 'nfe' | 'cte';
   chaveAcesso: string;
   tipoEvento: string;
+  tpAmb?: string;
   dataEvento?: Date;
   descricao?: string;
   cnpjAutor?: string;
@@ -146,6 +148,7 @@ export class NfeXmlParserService {
       numeroNfe: inspected.numeroNfe,
       serie: inspected.serie,
       modelo: inspected.modelo,
+      tpAmb: this.extract(xml, ['tpAmb']),
       dataEmissao: this.parseDate(this.extract(xml, ['dhEmi', 'dEmi'])),
       dataAutorizacao: this.parseDate(this.extract(xml, ['dhRecbto', 'dhAut'])),
       status: this.extract(xml, ['cStat', 'cSitNFe', 'xMotivo']),
@@ -189,6 +192,7 @@ export class NfeXmlParserService {
       documentType: classification.documentType,
       chaveAcesso,
       tipoEvento,
+      tpAmb: this.extract(xml, ['tpAmb']),
       dataEvento: this.parseDate(this.extract(xml, ['dhEvento', 'dhRegEvento', 'dhProc'])),
       descricao,
       cnpjAutor: this.normalizeCnpj(this.extract(xml, ['CNPJ', 'CPF'])),

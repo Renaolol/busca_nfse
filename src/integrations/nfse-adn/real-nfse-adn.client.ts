@@ -11,7 +11,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
 import { LocalStorageService } from '../../modules/storage/storage.service';
 import { CryptoService } from '../../modules/shared/crypto.service';
-import { AdnDFeDocument, AdnDFeResult, NfseAdnClient } from './nfse-adn.types';
+import { AdnDFeDocument, AdnDFeResult, AdnEventosResult, NfseAdnClient } from './nfse-adn.types';
 
 type DfeItem = {
   NSU?: string | number;
@@ -124,7 +124,7 @@ export class RealNfseAdnClient implements NfseAdnClient {
     chaveAcesso: string;
     ambiente: NfseAmbiente;
     certificateId: string;
-  }): Promise<unknown> {
+  }): Promise<AdnEventosResult> {
     try {
       const certificate = await this.loadCertificate(params.certificateId);
       const url = this.buildEventosUrl(params.ambiente, params.chaveAcesso);
@@ -132,7 +132,9 @@ export class RealNfseAdnClient implements NfseAdnClient {
 
       return {
         statusCode: response.statusCode,
-        data: this.tryParseJson(response.body) ?? response.body
+        data: this.tryParseJson(response.body) ?? response.body,
+        rawBody: response.body,
+        headers: this.normalizeHeaders(response.headers)
       };
     } catch (error) {
       return {
@@ -294,6 +296,10 @@ export class RealNfseAdnClient implements NfseAdnClient {
     } catch {
       return null;
     }
+  }
+
+  private normalizeHeaders(headers: IncomingHttpHeaders): Record<string, string | string[] | undefined> {
+    return Object.fromEntries(Object.entries(headers));
   }
 
   private extractDfeDocuments(payload: Record<string, unknown> | null): AdnDFeDocument[] {

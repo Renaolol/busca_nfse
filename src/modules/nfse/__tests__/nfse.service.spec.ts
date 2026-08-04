@@ -13,7 +13,9 @@ describe('NfseService', () => {
     },
     nfseDocumento: {
       count: jest.fn(),
+      findFirst: jest.fn(),
       findUnique: jest.fn(),
+      create: jest.fn(),
       update: jest.fn(),
       upsert: jest.fn(),
       findMany: jest.fn(),
@@ -84,7 +86,6 @@ describe('NfseService', () => {
   });
 
   it('ignora page/pageSize e usa o limite de seguranca quando all=true', async () => {
-    prisma.nfseDocumento.count.mockResolvedValueOnce(245);
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([]);
 
     const result = await service.findAll({
@@ -100,9 +101,10 @@ describe('NfseService', () => {
         take: 10000
       })
     );
+    expect(prisma.nfseDocumento.count).not.toHaveBeenCalled();
     expect(result).toEqual({
       items: [],
-      total: 245,
+      total: 0,
       page: 1,
       pageSize: 10000,
       totalPages: 1
@@ -157,7 +159,7 @@ describe('NfseService', () => {
       all: true
     });
 
-    expect(result.total).toBe(2);
+    expect(result.total).toBe(1);
     expect(result.items).toHaveLength(1);
     expect(result.items[0].id).toBe('doc-recente');
   });
@@ -687,7 +689,8 @@ describe('NfseService', () => {
 </CompNfse>`;
 
     prisma.nfseDocumento.findUnique.mockResolvedValue(null);
-    prisma.nfseDocumento.upsert.mockResolvedValue({
+    prisma.nfseDocumento.findFirst.mockResolvedValue(null);
+    prisma.nfseDocumento.create.mockResolvedValue({
       id: 'doc-267',
       clienteId: 'cliente-1',
       estabelecimentoId: 'estab-1',
@@ -708,12 +711,10 @@ describe('NfseService', () => {
       ambiente: 'producao'
     });
 
-    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledWith(
+    expect(prisma.nfseDocumento.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        update: expect.objectContaining({
-          nsu: null
-        }),
-        create: expect.objectContaining({
+        data: expect.objectContaining({
+          ambiente: Ambiente.producao,
           nsu: null,
           chaveAcesso: '42110092206960810000176000000000026726041826944060',
           numeroNfse: '267'
@@ -1091,6 +1092,137 @@ describe('NfseService', () => {
           mensagem: 'Nenhum certificado ativo para o estabelecimento'
         }
       ]
+    });
+  });
+
+  it('trata retorno E2240 sem documentos no ADN como sem eventos', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-evt-404',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000077726062205552016',
+        status: 'cancelada',
+        dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
+        dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+        createdAt: new Date('2026-06-03T12:00:00.000Z')
+      }
+    ]);
+    prisma.certificado.findFirst.mockResolvedValue({
+      id: 'cert-1',
+      validadeFim: new Date('2099-01-01T00:00:00.000Z')
+    });
+    adnClient.getEventosByChave.mockResolvedValue({
+      statusCode: 404,
+      rawBody:
+        '{"StatusProcessamento":"NENHUM_DOCUMENTO_LOCALIZADO","LoteDFe":[],"Alertas":[],"Erros":[{"Mensagem":{},"Codigo":"E2240","Descricao":"Nenhum documento localizado -não existem documentos fiscais para a chave de acesso informada."}],"TipoAmbiente":"HOMOLOGACAO","VersaoAplicativo":"1.0.0.0","DataHoraProcessamento":"2026-08-04T11:45:41.1146376-03:00"}',
+      headers: {
+        'content-type': 'application/json; charset=utf-8',
+        'x-request-id': 'req-404'
+      },
+      data: {
+        StatusProcessamento: 'NENHUM_DOCUMENTO_LOCALIZADO',
+        LoteDFe: [],
+        Alertas: [],
+        Erros: [
+          {
+            Mensagem: {},
+            Codigo: 'E2240',
+            Descricao: 'Nenhum documento localizado -não existem documentos fiscais para a chave de acesso informada.'
+          }
+        ],
+        TipoAmbiente: 'HOMOLOGACAO',
+        VersaoAplicativo: '1.0.0.0',
+        DataHoraProcessamento: '2026-08-04T11:45:41.1146376-03:00'
+      }
+    });
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      limit: 1
+    });
+
+    expect(result).toEqual({
+      documentosAnalisados: 1,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 0,
+      detalhes: [
+        {
+          documentoId: 'doc-evt-404',
+          chaveAcesso: '42110092206960810000176000000000077726062205552016',
+          estabelecimentoId: 'estab-1',
+          ambiente: 'producao',
+          status: 'sem_eventos',
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          mensagem: 'Nenhum evento encontrado no ADN'
+        }
+      ]
+    });
+  });
+
+  it('corrige o ambiente do documento antes da consulta de eventos com base no tpAmb do XML salvo', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-evt-amb-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao_restrita,
+        chaveAcesso: '42110092227260384000138000000000005726070184044075',
+        xmlPath: 'nfse/producao_restrita/27260384000138/2026/07/xml/42110092227260384000138000000000005726070184044075.xml',
+        dataEmissao: new Date('2026-07-20T20:21:44.000Z'),
+        createdAt: new Date('2026-07-20T20:21:44.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42110092227260384000138000000000005726070184044075">
+    <nNFSe>57</nNFSe>
+    <DPS><infDPS><tpAmb>1</tpAmb></infDPS></DPS>
+  </infNFSe>
+</NFSe>`,
+        'utf8'
+      )
+    );
+    prisma.nfseDocumento.update.mockResolvedValue({
+      id: 'doc-evt-amb-1',
+      ambiente: Ambiente.producao
+    });
+    prisma.certificado.findFirst.mockResolvedValue({
+      id: 'cert-1',
+      validadeFim: new Date('2099-01-01T00:00:00.000Z')
+    });
+    adnClient.getEventosByChave.mockResolvedValue({
+      statusCode: 200,
+      data: {
+        eventos: []
+      }
+    });
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      limit: 1
+    });
+
+    expect(prisma.nfseDocumento.update).toHaveBeenCalledWith({
+      where: { id: 'doc-evt-amb-1' },
+      data: {
+        ambiente: Ambiente.producao
+      }
+    });
+    expect(adnClient.getEventosByChave).toHaveBeenCalledWith({
+      chaveAcesso: '42110092227260384000138000000000005726070184044075',
+      ambiente: 'producao',
+      certificateId: 'cert-1'
+    });
+    expect(result.detalhes[0]).toMatchObject({
+      ambiente: 'producao',
+      status: 'sem_eventos'
     });
   });
 

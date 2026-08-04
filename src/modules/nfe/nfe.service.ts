@@ -10,7 +10,6 @@ import {
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import JSZip from 'jszip';
-import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
 import { DANFE_PDF_GENERATOR, DanfePdfGenerator } from '../../integrations/danfe/danfe.types';
 import {
   DOMINIO_NFE_XML_SOURCE,
@@ -500,8 +499,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       this.findManyDocumentosWithEventos({
         where,
         orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
-        skip,
-        take: pageSize
+        ...(query.all ? {} : { skip, take: pageSize })
       })
     ]);
     const { items, duplicatesRemoved } = this.deduplicateDocumentosForList(rawItems);
@@ -509,12 +507,16 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Listagem de NF-e ocultou ${duplicatesRemoved} duplicata(s) legada(s) por ambiente + chave_acesso.`);
     }
 
+    const effectiveTotal = query.all ? items.length : total;
+    const effectivePageSize = query.all ? items.length : pageSize;
+    const effectiveTotalPages = query.all ? (items.length ? 1 : 0) : Math.max(1, Math.ceil(total / pageSize));
+
     return {
       items,
-      total,
+      total: effectiveTotal,
       page,
-      pageSize,
-      totalPages: Math.max(1, Math.ceil(total / pageSize))
+      pageSize: effectivePageSize,
+      totalPages: effectiveTotalPages
     };
   }
 
@@ -2658,7 +2660,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
 
     const parsed = this.parser.parse(params.document.xml);
-    const existing = await this.findExistingDocumentoForPersist(params.ambiente, parsed.chaveAcesso);
+    const effectiveAmbiente = this.resolveDocumentoAmbiente(parsed.tpAmb);
+    const existing = await this.findExistingDocumentoForPersist(effectiveAmbiente, parsed.chaveAcesso);
 
     const cnpjConsulta = this.normalizeCnpj(params.cnpjConsulta);
     const tipoRelacao =
@@ -2671,7 +2674,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const year = dataReferencia.getUTCFullYear();
     const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
     const cnpjPasta = parsed.cnpjEmitente ?? parsed.cnpjDestinatario ?? cnpjConsulta ?? 'sem-cnpj';
-    const storagePrefix = `nfe/${params.ambiente}/${cnpjPasta}/${year}/${month}`;
+    const storagePrefix = `nfe/${effectiveAmbiente}/${cnpjPasta}/${year}/${month}`;
     const fileName = `${parsed.chaveAcesso}.xml`;
     const isFull = parsed.contentType === 'completo';
     const storageKey = `${storagePrefix}/${isFull ? 'xml' : 'resumos'}/${fileName}`;
@@ -2716,7 +2719,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const createData: Prisma.NfeDocumentoUncheckedCreateInput = {
       clienteId: params.clienteId,
       estabelecimentoId: params.estabelecimentoId,
-      ambiente: params.ambiente,
+      ambiente: effectiveAmbiente,
       nsu: params.document.nsu,
       chaveAcesso: parsed.chaveAcesso,
       numeroNfe: parsed.numeroNfe,
@@ -2745,7 +2748,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return this.prisma.nfeDocumento.upsert({
       where: {
         ambiente_chaveAcesso: {
-          ambiente: params.ambiente,
+          ambiente: effectiveAmbiente,
           chaveAcesso: parsed.chaveAcesso
         }
       },
@@ -2764,6 +2767,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     tipoRelacaoForcada?: NfeTipoRelacao;
   }) {
     const parsedEvent = this.parser.parseEvento(params.document.xml);
+    const effectiveAmbiente = this.resolveDocumentoAmbiente(parsedEvent.tpAmb);
     const hash = this.parser.getHash(params.document.xml);
     const dataReferencia = parsedEvent.dataEvento ?? new Date();
     const year = dataReferencia.getUTCFullYear();
@@ -2771,13 +2775,13 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const cnpjPasta = parsedEvent.cnpjAutor ?? this.normalizeCnpj(params.cnpjConsulta) ?? 'sem-cnpj';
     const tipoEvento = this.toSafeFileName(parsedEvent.tipoEvento || 'evento');
     const suffix = parsedEvent.numeroSequencial ? `_${this.toSafeFileName(parsedEvent.numeroSequencial)}` : `_${hash.slice(0, 12)}`;
-    const storageKey = `nfe/${params.ambiente}/${cnpjPasta}/${year}/${month}/eventos/${parsedEvent.chaveAcesso}_${tipoEvento}${suffix}.xml`;
+    const storageKey = `nfe/${effectiveAmbiente}/${cnpjPasta}/${year}/${month}/eventos/${parsedEvent.chaveAcesso}_${tipoEvento}${suffix}.xml`;
     await this.storage.putObject(storageKey, params.document.xml);
 
     const documento = await this.upsertDocumentoForEvento({
       clienteId: params.clienteId,
       estabelecimentoId: params.estabelecimentoId,
-      ambiente: params.ambiente,
+      ambiente: effectiveAmbiente,
       cnpjConsulta: params.cnpjConsulta,
       parsedEvent
     });
@@ -3260,24 +3264,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       keys.add(`chave:${ambiente}:${chaveAcesso}`);
     }
 
-    if (chaveAcesso) {
-      keys.add(`chave-global:${chaveAcesso}`);
-    }
-
     if (ambiente && hashResumo) {
       keys.add(`hash:${ambiente}:${hashResumo}`);
     }
 
-    if (hashResumo) {
-      keys.add(`hash-global:${hashResumo}`);
-    }
-
     if (ambiente && hashXmlCompleto) {
       keys.add(`hash:${ambiente}:${hashXmlCompleto}`);
-    }
-
-    if (hashXmlCompleto) {
-      keys.add(`hash-global:${hashXmlCompleto}`);
     }
 
     const snapshot = [
@@ -3293,20 +3285,6 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
     if (snapshot.replace(/:/g, '').trim()) {
       keys.add(`snapshot:${snapshot}`);
-    }
-
-    const globalSnapshot = [
-      String(document.modelo || '').trim(),
-      String(document.numeroNfe || '').trim(),
-      String(document.serie || '').trim(),
-      emissao,
-      String(document.cnpjEmitente || '').trim(),
-      String(document.cnpjDestinatario || '').trim(),
-      valor
-    ].join(':');
-
-    if (globalSnapshot.replace(/:/g, '').trim()) {
-      keys.add(`snapshot-global:${globalSnapshot}`);
     }
 
     return Array.from(keys);
@@ -3518,7 +3496,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   private resolvePagination(query: QueryNfeDto): { page: number; pageSize: number; skip: number } {
     if (query.all) {
-      return { page: 1, pageSize: MAX_UNPAGINATED_RESULTS, skip: 0 };
+      return { page: 1, pageSize: 0, skip: 0 };
     }
 
     const page = Math.max(1, query.page ?? 1);
@@ -3528,6 +3506,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       pageSize,
       skip: (page - 1) * pageSize
     };
+  }
+
+  private resolveDocumentoAmbiente(tpAmb: string | undefined): NfeAmbiente {
+    return tpAmb === '2' ? NfeAmbiente.homologacao : NfeAmbiente.producao;
   }
 
   private getCteSchemaDocFilters(): Prisma.NfeDocumentoWhereInput[] {

@@ -12,6 +12,7 @@ describe('NfeXmlParserService', () => {
         <mod>55</mod>
         <serie>1</serie>
         <nNF>123</nNF>
+        <tpAmb>2</tpAmb>
         <dhEmi>2026-06-29T10:00:00-03:00</dhEmi>
       </ide>
       <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
@@ -27,6 +28,7 @@ describe('NfeXmlParserService', () => {
       numeroNfe: '123',
       serie: '1',
       modelo: '55',
+      tpAmb: '2',
       cnpjEmitente: '12345678000199',
       razaoSocialEmitente: 'Emitente Teste',
       cnpjDestinatario: '99888777000166',
@@ -133,6 +135,7 @@ describe('NfeXmlParserService', () => {
       documentType: 'nfe',
       chaveAcesso: '35260612345678000199550010000001231000001231',
       tipoEvento: '110111',
+      tpAmb: '1',
       descricao: 'Cancelamento',
       numeroSequencial: '1',
       schemaDoc: 'procEventoNFe_v1.00',
@@ -169,6 +172,7 @@ describe('NfeXmlParserService', () => {
       documentType: 'cte',
       chaveAcesso: '42260795849600000135570010000319691243772228',
       tipoEvento: '110111',
+      tpAmb: '1',
       descricao: 'Cancelamento',
       numeroSequencial: '1',
       schemaDoc: 'procEventoCTe_v4.00',

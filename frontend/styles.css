@@ -69,29 +69,35 @@ a {
 
 .brand {
   display: flex;
-  align-items: center;
-  gap: 10px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
 }
 
-.brand-mark {
-  width: 5px;
-  height: 38px;
-  border-radius: 999px;
-  background: var(--accent);
+.brand-card {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  padding: 0;
 }
 
-.brand-title {
-  margin: 0;
-  font-family: 'Sora', 'Manrope', sans-serif;
-  letter-spacing: 0.01em;
-  font-size: 1.35rem;
-  font-weight: 700;
+.brand-logo-frame {
+  width: 100%;
+  max-width: 204px;
+}
+
+.brand-logo {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 
 .brand-subtitle {
-  margin: 4px 0 0;
+  margin: 0;
   color: #b5b5b7;
   font-size: 0.76rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .sidebar-nav {

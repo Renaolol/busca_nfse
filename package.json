@@ -20,6 +20,7 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:deploy": "prisma migrate deploy",
     "nfe:reset": "node scripts/reset-nfe-data.js",
+    "nfe:reclassificar-ambiente": "node scripts/reclassify-nfe-environment.js",
     "nfe:separar-cte": "ts-node -r tsconfig-paths/register scripts/separate-cte-documents.ts",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down -v",

@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
-import { AdnDFeResult, NfseAdnClient } from './nfse-adn.types';
+import { AdnDFeResult, AdnEventosResult, NfseAdnClient } from './nfse-adn.types';
 
 @Injectable()
 export class FakeNfseAdnClient implements NfseAdnClient {
@@ -46,11 +46,14 @@ export class FakeNfseAdnClient implements NfseAdnClient {
     chaveAcesso: string;
     ambiente: NfseAmbiente;
     certificateId: string;
-  }): Promise<unknown> {
+  }): Promise<AdnEventosResult> {
     return {
-      chaveAcesso: params.chaveAcesso,
-      ambiente: params.ambiente,
-      eventos: []
+      statusCode: 200,
+      data: {
+        chaveAcesso: params.chaveAcesso,
+        ambiente: params.ambiente,
+        eventos: []
+      }
     };
   }
 }

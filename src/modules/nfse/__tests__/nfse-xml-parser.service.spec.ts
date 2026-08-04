@@ -99,6 +99,7 @@ describe('NfseXmlParserService', () => {
     const parsed = parser.parse(xml);
 
     expect(parsed.chaveAcesso).toBe('42167012244454248000106000000000002924081114719252');
+    expect(parsed.tpAmb).toBeUndefined();
     expect(parsed.numeroNfse).toBe('29');
     expect(parsed.serie).toBe('900');
     expect(parsed.status).toBe('100');
@@ -112,6 +113,26 @@ describe('NfseXmlParserService', () => {
     expect(parsed.valorServico).toBe('1720.00');
     expect(parsed.descricaoServico).toContain('consultoria');
     expect(parsed.competencia?.toISOString()).toBe('2024-08-01T00:00:00.000Z');
+  });
+
+  it('parseia tpAmb do XML nacional para classificar o ambiente fiscal', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42110092227260384000138000000000005726070184044075">
+    <nNFSe>57</nNFSe>
+    <cStat>100</cStat>
+    <DPS>
+      <infDPS>
+        <tpAmb>1</tpAmb>
+      </infDPS>
+    </DPS>
+  </infNFSe>
+</NFSe>`;
+
+    const parsed = parser.parse(xml);
+
+    expect(parsed.chaveAcesso).toBe('42110092227260384000138000000000005726070184044075');
+    expect(parsed.tpAmb).toBe('1');
   });
 
   it('parseia aliquota ISS do layout nacional em pAliqAplic', () => {

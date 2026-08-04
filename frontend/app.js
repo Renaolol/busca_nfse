@@ -264,7 +264,7 @@ const state = {
       valorMin: '',
       valorMax: '',
       xmlCompleto: 'Todos',
-      ambiente: 'Todos'
+      ambiente: 'producao'
     },
     cteDocs: {
       cliente: 'Todos',
@@ -1518,11 +1518,12 @@ function renderSidebar() {
     <aside class="sidebar ${state.mobileSidebarOpen ? 'mobile-open' : ''}">
       <div>
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true"></span>
-          <div>
-            <h1 class="brand-title">NotaSync</h1>
-            <p class="brand-subtitle">GCONT Gestao Contabil</p>
+          <div class="brand-card" aria-label="NotaSync">
+            <div class="brand-logo-frame">
+              <img class="brand-logo" src="/app/assets/notasync-logo-horizontal.png" alt="NotaSync" />
+            </div>
           </div>
+          <p class="brand-subtitle">GCONT Gestao Contabil</p>
         </div>
       </div>
       <nav class="sidebar-nav" aria-label="Menu principal">
@@ -7813,7 +7814,7 @@ async function applyNfeDocsFilters(form) {
     valorMin: String(data.get('valorMin') || '').trim(),
     valorMax: String(data.get('valorMax') || '').trim(),
     xmlCompleto: String(data.get('xmlCompleto') || 'Todos'),
-    ambiente: String(data.get('ambiente') || 'Todos')
+    ambiente: String(data.get('ambiente') || 'producao')
   };
   state.selectedNfeIds = new Set();
 
@@ -8948,7 +8949,7 @@ function resetNfeDocsSearch() {
     valorMin: '',
     valorMax: '',
     xmlCompleto: 'Todos',
-    ambiente: 'Todos'
+    ambiente: 'producao'
   };
   state.nfeSearch.hasSearched = false;
   state.nfeSearch.results = [];
@@ -12097,7 +12098,11 @@ function mapNfeAmbienteLabel(ambiente) {
 }
 
 function mapNfseAmbienteLabel(ambiente) {
-  return mapNfeAmbienteLabel(ambiente);
+  if (ambiente === 'producao_restrita') {
+    return 'Homologacao';
+  }
+
+  return 'Producao';
 }
 
 function mapNfeTipoLabel(tipoRelacao) {
@@ -13080,7 +13085,9 @@ async function runManualEventsSyncOverlay(params) {
       const summary = await params.requestSync(target);
       const detail = normalizeSingleEventsSyncDetail(summary, target);
       const updatedDocument =
-        detail.status === 'sincronizado' && typeof params.fetchUpdatedDocument === 'function'
+        detail.status !== 'falha_certificado' &&
+        detail.status !== 'falha_api' &&
+        typeof params.fetchUpdatedDocument === 'function'
           ? await params.fetchUpdatedDocument(target).catch(() => null)
           : null;
 
@@ -13182,7 +13189,8 @@ function buildResolvedEventsSyncRow(documentType, target, detail, updatedDocumen
     eventCountLabel: `${Number(detail?.eventosEncontrados || 0)} encontrado(s) / ${Number(detail?.eventosImportados || 0)} importado(s)`,
     statusLabel: mapSyncAuditStatusLabel(detail?.status),
     statusTone: resolveSyncAuditStatusTone(detail?.status),
-    message: String(detail?.mensagem || '').trim() || (detail?.status === 'sincronizado' ? 'Consulta concluida com sucesso.' : '-'),
+    message:
+      normalizeSyncAuditMessage(detail) || (detail?.status === 'sincronizado' ? 'Consulta concluida com sucesso.' : '-'),
     openActionId: document?.id || target?.id || null
   };
 }
@@ -13327,10 +13335,32 @@ function buildEventsSyncAuditRows(documentType, summary) {
       eventCountLabel: `${Number(detail?.eventosEncontrados || 0)} encontrado(s) / ${Number(detail?.eventosImportados || 0)} importado(s)`,
       statusLabel: mapSyncAuditStatusLabel(detail?.status),
       statusTone,
-      message: String(detail?.mensagem || '').trim(),
+      message: normalizeSyncAuditMessage(detail),
       openActionId: document?.id || null
     };
   });
+}
+
+function normalizeSyncAuditMessage(detail) {
+  const raw = String(detail?.mensagem || '').trim();
+  if (!raw) {
+    return '';
+  }
+
+  const normalized = normalizeSearchText(raw);
+  if (raw.startsWith('{') || raw.startsWith('[') || normalized.includes('"lotedfe"') || normalized.includes('"statusprocessamento"')) {
+    if (detail?.status === 'sem_eventos') {
+      return 'Nenhum evento encontrado no ADN';
+    }
+
+    if (detail?.status === 'nao_localizado_endpoint_eventos') {
+      return 'Nao localizado no endpoint de eventos';
+    }
+
+    return 'Resposta retornada pelo servico externo fora do formato esperado.';
+  }
+
+  return raw;
 }
 
 function findDocumentBySyncAudit(documentType, documentoId) {
@@ -13375,7 +13405,8 @@ function resolveSyncAuditDocumentLabel(documentType, detail, document, index) {
 
 function resolveSyncAuditSecondaryLabel(documentType, detail, document) {
   if (documentType === 'nfse') {
-    const ambiente = document?.ambiente ? mapNfseAmbienteLabel(document.ambiente) : detail?.ambiente ? mapNfseAmbienteLabel(detail.ambiente) : '';
+    const ambienteBruto = document?.ambiente || detail?.ambiente || detail?.diagnostico?.ambienteDocumento || '';
+    const ambiente = ambienteBruto ? mapNfseAmbienteLabel(ambienteBruto) : '';
     const estabelecimento = document?.prestador || document?.cliente || '';
     return [ambiente, estabelecimento].filter(Boolean).join(' • ');
   }
@@ -13392,6 +13423,10 @@ function resolveSyncAuditEventLabel(detail, document) {
 
   if (detail?.status === 'falha_api') {
     return 'Falha na consulta';
+  }
+
+  if (detail?.status === 'nao_localizado_endpoint_eventos') {
+    return 'Nao localizado no endpoint';
   }
 
   if (detail?.status === 'sem_eventos') {
@@ -13411,6 +13446,8 @@ function mapSyncAuditStatusLabel(status) {
   switch (status) {
     case 'sincronizado':
       return 'Sincronizado';
+    case 'nao_localizado_endpoint_eventos':
+      return 'Nao localizado no endpoint';
     case 'sem_eventos':
       return 'Sem evento';
     case 'falha_certificado':
@@ -13426,6 +13463,8 @@ function resolveSyncAuditStatusTone(status) {
   switch (status) {
     case 'sincronizado':
       return 'success';
+    case 'nao_localizado_endpoint_eventos':
+      return 'warning';
     case 'sem_eventos':
       return 'neutral';
     case 'falha_certificado':
@@ -13970,7 +14009,7 @@ async function fetchCompareSpedStoredDocuments({ client, dateRange }) {
     {
       cliente: client.id,
       tipo: 'Recebida',
-      ambiente: 'Todos',
+      ambiente: 'producao',
       emissaoInicio: dateRange?.dataInicio || '',
       emissaoFim: dateRange?.dataFim || '',
       status: 'Todos',

@@ -246,9 +246,138 @@ describe('NfeService', () => {
       all: true
     });
 
-    expect(result.total).toBe(2);
+    expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        skip: expect.anything(),
+        take: expect.anything()
+      })
+    );
+    expect(result.total).toBe(1);
     expect(result.items).toHaveLength(1);
+    expect(result.pageSize).toBe(1);
+    expect(result.totalPages).toBe(1);
     expect(result.items[0].id).toBe('doc-completo');
+  });
+
+  it('nao colapsa a mesma chave entre producao e homologacao na listagem geral', async () => {
+    prisma.nfeDocumento.count.mockResolvedValueOnce(2);
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-prod',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        numeroNfe: '123',
+        serie: '1',
+        modelo: '55',
+        dataEmissao: new Date('2026-06-01T00:00:00.000Z'),
+        dataAutorizacao: new Date('2026-06-01T01:00:00.000Z'),
+        cnpjEmitente: '12345678000199',
+        razaoSocialEmitente: 'EMITENTE LTDA',
+        cnpjDestinatario: '99887766000155',
+        razaoSocialDestinatario: 'DESTINATARIO LTDA',
+        valorTotal: new Prisma.Decimal('890.00'),
+        resumoDisponivel: true,
+        xmlCompletoDisponivel: true,
+        xmlResumoPath: 'nfe/producao/12345678000199/2026/06/resumos/a.xml',
+        xmlCompletoPath: 'nfe/producao/12345678000199/2026/06/xml/a.xml',
+        hashResumo: 'hash-prod',
+        hashXmlCompleto: 'hash-prod-full',
+        updatedAt: new Date('2026-08-03T09:31:00.000Z'),
+        createdAt: new Date('2026-08-03T09:31:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-hom',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.homologacao,
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        numeroNfe: '123',
+        serie: '1',
+        modelo: '55',
+        dataEmissao: new Date('2026-06-01T00:00:00.000Z'),
+        dataAutorizacao: new Date('2026-06-01T01:00:00.000Z'),
+        cnpjEmitente: '12345678000199',
+        razaoSocialEmitente: 'EMITENTE LTDA',
+        cnpjDestinatario: '99887766000155',
+        razaoSocialDestinatario: 'DESTINATARIO LTDA',
+        valorTotal: new Prisma.Decimal('890.00'),
+        resumoDisponivel: true,
+        xmlCompletoDisponivel: true,
+        xmlResumoPath: 'nfe/homologacao/12345678000199/2026/06/resumos/a.xml',
+        xmlCompletoPath: 'nfe/homologacao/12345678000199/2026/06/xml/a.xml',
+        hashResumo: 'hash-hom',
+        hashXmlCompleto: 'hash-hom-full',
+        updatedAt: new Date('2026-08-03T09:31:00.000Z'),
+        createdAt: new Date('2026-08-03T09:31:00.000Z'),
+        eventos: []
+      }
+    ]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      all: true
+    });
+
+    expect(result.total).toBe(2);
+    expect(result.items).toHaveLength(2);
+    expect(result.items.map((item) => item.ambiente).sort()).toEqual([
+      NfeAmbiente.homologacao,
+      NfeAmbiente.producao
+    ]);
+  });
+
+  it('classifica XML importado com tpAmb=2 como homologacao', async () => {
+    const result = await service.importXml({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: NfeAmbiente.producao,
+      xmlBase64: Buffer.from(
+        `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe35260612345678000199550010000001231000001231">
+      <ide>
+        <mod>55</mod>
+        <serie>1</serie>
+        <nNF>123</nNF>
+        <tpAmb>2</tpAmb>
+        <dhEmi>2026-06-29T10:00:00-03:00</dhEmi>
+      </ide>
+      <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
+      <dest><CNPJ>99888777000166</CNPJ><xNome>Cliente Teste</xNome></dest>
+      <total><ICMSTot><vNF>150.00</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat><dhRecbto>2026-06-29T10:00:01-03:00</dhRecbto></infProt></protNFe>
+</nfeProc>`,
+        'utf8'
+      ).toString('base64')
+    });
+
+    expect(storage.putObject).toHaveBeenCalledWith(
+      expect.stringContaining('nfe/homologacao/12345678000199/2026/06/xml/35260612345678000199550010000001231000001231.xml'),
+      expect.any(String)
+    );
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          ambiente_chaveAcesso: {
+            ambiente: NfeAmbiente.homologacao,
+            chaveAcesso: '35260612345678000199550010000001231000001231'
+          }
+        },
+        create: expect.objectContaining({
+          ambiente: NfeAmbiente.homologacao
+        })
+      })
+    );
+    expect(result).toMatchObject({
+      ambiente: NfeAmbiente.homologacao,
+      chaveAcesso: '35260612345678000199550010000001231000001231'
+    });
   });
 
   it('retorna estatisticas agregadas do dashboard por cliente', async () => {
@@ -2454,6 +2583,78 @@ describe('NfeService', () => {
       eventosImportados: 1,
       falhas: 0
     });
+  });
+
+  it('classifica evento com tpAmb=2 como homologacao', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        numeroNfe: '123',
+        origem: 'distribuicao_nsu',
+        eventos: []
+      }
+    ]);
+    (distribuicaoClient.consultarPorChave as jest.Mock).mockResolvedValueOnce({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado por chave',
+      ultNsu: 0n,
+      maxNsu: 0n,
+      documents: [
+        {
+          schema: 'procEventoNFe_v1.00.xsd',
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<procEventoNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.00">
+  <evento versao="1.00">
+    <infEvento Id="ID1101113526061234567800019955001000000123100000123101">
+      <tpAmb>2</tpAmb>
+      <CNPJ>12345678000199</CNPJ>
+      <chNFe>35260612345678000199550010000001231000001231</chNFe>
+      <dhEvento>2026-07-13T14:10:00-03:00</dhEvento>
+      <tpEvento>110111</tpEvento>
+      <nSeqEvento>1</nSeqEvento>
+      <detEvento versao="1.00">
+        <descEvento>Cancelamento</descEvento>
+      </detEvento>
+    </infEvento>
+  </evento>
+</procEventoNFe>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+
+    expect(storage.putObject).toHaveBeenCalledWith(
+      expect.stringContaining(
+        'nfe/homologacao/12345678000199/2026/07/eventos/35260612345678000199550010000001231000001231_110111_1.xml'
+      ),
+      expect.any(String)
+    );
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          ambiente_chaveAcesso: {
+            ambiente: NfeAmbiente.homologacao,
+            chaveAcesso: '35260612345678000199550010000001231000001231'
+          }
+        },
+        create: expect.objectContaining({
+          ambiente: NfeAmbiente.homologacao
+        })
+      })
+    );
   });
 
   it('sincroniza eventos de CT-e usando o filtro compartilhado', async () => {

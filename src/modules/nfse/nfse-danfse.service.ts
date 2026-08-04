@@ -1078,23 +1078,33 @@ export class NfseDanfseService {
 
     const valorIrrf = this.extractFromPaths(xml, [
       ['infDPS', 'valores', 'trib', 'tribFed', 'vRetIRRF'],
-      ['valores', 'trib', 'tribFed', 'vRetIRRF']
+      ['valores', 'trib', 'tribFed', 'vRetIRRF'],
+      ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorIr'],
+      ['InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorIr']
     ]);
     const valorContribuicaoPrevidenciaria = this.extractFromPaths(xml, [
       ['infDPS', 'valores', 'trib', 'tribFed', 'vRetCP'],
-      ['valores', 'trib', 'tribFed', 'vRetCP']
+      ['valores', 'trib', 'tribFed', 'vRetCP'],
+      ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorInss'],
+      ['InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorInss']
     ]);
     const valorContribuicoesSociais = this.extractFromPaths(xml, [
       ['infDPS', 'valores', 'trib', 'tribFed', 'vRetCSLL'],
-      ['valores', 'trib', 'tribFed', 'vRetCSLL']
+      ['valores', 'trib', 'tribFed', 'vRetCSLL'],
+      ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorCsll'],
+      ['InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorCsll']
     ]);
     const valorPis = this.extractFromPaths(xml, [
       ['infDPS', 'valores', 'trib', 'tribFed', 'piscofins', 'vPis'],
-      ['valores', 'trib', 'tribFed', 'piscofins', 'vPis']
+      ['valores', 'trib', 'tribFed', 'piscofins', 'vPis'],
+      ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorPis'],
+      ['InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorPis']
     ]);
     const valorCofins = this.extractFromPaths(xml, [
       ['infDPS', 'valores', 'trib', 'tribFed', 'piscofins', 'vCofins'],
-      ['valores', 'trib', 'tribFed', 'piscofins', 'vCofins']
+      ['valores', 'trib', 'tribFed', 'piscofins', 'vCofins'],
+      ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorCofins'],
+      ['InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorCofins']
     ]);
 
     const vIbsTot = this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'gIBS', 'vIBSTot']]);
