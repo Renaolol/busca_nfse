@@ -259,6 +259,76 @@ describe('NfeService', () => {
     expect(result.items[0].id).toBe('doc-completo');
   });
 
+  it('nao colapsa a mesma chave entre producao e homologacao na listagem geral', async () => {
+    prisma.nfeDocumento.count.mockResolvedValueOnce(2);
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-prod',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        numeroNfe: '123',
+        serie: '1',
+        modelo: '55',
+        dataEmissao: new Date('2026-06-01T00:00:00.000Z'),
+        dataAutorizacao: new Date('2026-06-01T01:00:00.000Z'),
+        cnpjEmitente: '12345678000199',
+        razaoSocialEmitente: 'EMITENTE LTDA',
+        cnpjDestinatario: '99887766000155',
+        razaoSocialDestinatario: 'DESTINATARIO LTDA',
+        valorTotal: new Prisma.Decimal('890.00'),
+        resumoDisponivel: true,
+        xmlCompletoDisponivel: true,
+        xmlResumoPath: 'nfe/producao/12345678000199/2026/06/resumos/a.xml',
+        xmlCompletoPath: 'nfe/producao/12345678000199/2026/06/xml/a.xml',
+        hashResumo: 'hash-prod',
+        hashXmlCompleto: 'hash-prod-full',
+        updatedAt: new Date('2026-08-03T09:31:00.000Z'),
+        createdAt: new Date('2026-08-03T09:31:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-hom',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.homologacao,
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        numeroNfe: '123',
+        serie: '1',
+        modelo: '55',
+        dataEmissao: new Date('2026-06-01T00:00:00.000Z'),
+        dataAutorizacao: new Date('2026-06-01T01:00:00.000Z'),
+        cnpjEmitente: '12345678000199',
+        razaoSocialEmitente: 'EMITENTE LTDA',
+        cnpjDestinatario: '99887766000155',
+        razaoSocialDestinatario: 'DESTINATARIO LTDA',
+        valorTotal: new Prisma.Decimal('890.00'),
+        resumoDisponivel: true,
+        xmlCompletoDisponivel: true,
+        xmlResumoPath: 'nfe/homologacao/12345678000199/2026/06/resumos/a.xml',
+        xmlCompletoPath: 'nfe/homologacao/12345678000199/2026/06/xml/a.xml',
+        hashResumo: 'hash-hom',
+        hashXmlCompleto: 'hash-hom-full',
+        updatedAt: new Date('2026-08-03T09:31:00.000Z'),
+        createdAt: new Date('2026-08-03T09:31:00.000Z'),
+        eventos: []
+      }
+    ]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      all: true
+    });
+
+    expect(result.total).toBe(2);
+    expect(result.items).toHaveLength(2);
+    expect(result.items.map((item) => item.ambiente).sort()).toEqual([
+      NfeAmbiente.homologacao,
+      NfeAmbiente.producao
+    ]);
+  });
+
   it('classifica XML importado com tpAmb=2 como homologacao', async () => {
     const result = await service.importXml({
       clienteId: 'cliente-1',
