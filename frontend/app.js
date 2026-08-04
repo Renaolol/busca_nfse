@@ -11617,7 +11617,11 @@ function mapNfeAmbienteLabel(ambiente) {
 }
 
 function mapNfseAmbienteLabel(ambiente) {
-  return mapNfeAmbienteLabel(ambiente);
+  if (ambiente === 'producao_restrita') {
+    return 'Homologacao';
+  }
+
+  return 'Producao';
 }
 
 function mapNfeTipoLabel(tipoRelacao) {

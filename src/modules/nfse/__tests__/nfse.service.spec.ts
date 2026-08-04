@@ -1147,6 +1147,9 @@ describe('NfseService', () => {
           eventosImportados: 0,
           mensagem: 'Endpoint de eventos do ADN retornou HTTP 404 para a chave consultada.',
           diagnostico: {
+            documentoId: 'doc-evt-404',
+            chaveAcesso: '42110092206960810000176000000000077726062205552016',
+            ambienteDocumento: 'producao',
             statusCode: 404,
             message: null,
             contentType: 'application/json; charset=utf-8',

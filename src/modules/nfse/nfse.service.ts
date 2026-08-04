@@ -771,7 +771,7 @@ export class NfseService {
         });
         const statusCode = this.extractStatusCode(response);
         if (this.isNotFoundEventoSyncStatus(statusCode)) {
-          const diagnostico = this.buildEventoEndpointDiagnostic(response);
+          const diagnostico = this.buildEventoEndpointDiagnosticWithDocument(response, document);
           this.logger.warn(
             `Consulta de eventos ADN retornou 404 para a chave ${document.chaveAcesso}: ${JSON.stringify(diagnostico)}`
           );
@@ -2048,6 +2048,18 @@ export class NfseService {
         null,
       rawBodyPreview: this.buildPayloadPreview(this.extractRawBody(payload), 1200),
       parsedDataPreview: this.buildPayloadPreview(this.extractResponseData(payload), 1200)
+    };
+  }
+
+  private buildEventoEndpointDiagnosticWithDocument(
+    payload: unknown,
+    document: { ambiente: Ambiente; chaveAcesso: string; id: string }
+  ): Record<string, unknown> {
+    return {
+      documentoId: document.id,
+      chaveAcesso: document.chaveAcesso,
+      ambienteDocumento: this.toDtoAmbiente(document.ambiente),
+      ...this.buildEventoEndpointDiagnostic(payload)
     };
   }
 
