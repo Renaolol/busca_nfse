@@ -13,7 +13,9 @@ describe('NfseService', () => {
     },
     nfseDocumento: {
       count: jest.fn(),
+      findFirst: jest.fn(),
       findUnique: jest.fn(),
+      create: jest.fn(),
       update: jest.fn(),
       upsert: jest.fn(),
       findMany: jest.fn(),
@@ -687,7 +689,8 @@ describe('NfseService', () => {
 </CompNfse>`;
 
     prisma.nfseDocumento.findUnique.mockResolvedValue(null);
-    prisma.nfseDocumento.upsert.mockResolvedValue({
+    prisma.nfseDocumento.findFirst.mockResolvedValue(null);
+    prisma.nfseDocumento.create.mockResolvedValue({
       id: 'doc-267',
       clienteId: 'cliente-1',
       estabelecimentoId: 'estab-1',
@@ -708,12 +711,10 @@ describe('NfseService', () => {
       ambiente: 'producao'
     });
 
-    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledWith(
+    expect(prisma.nfseDocumento.create).toHaveBeenCalledWith(
       expect.objectContaining({
-        update: expect.objectContaining({
-          nsu: null
-        }),
-        create: expect.objectContaining({
+        data: expect.objectContaining({
+          ambiente: Ambiente.producao,
           nsu: null,
           chaveAcesso: '42110092206960810000176000000000026726041826944060',
           numeroNfse: '267'
@@ -1114,14 +1115,26 @@ describe('NfseService', () => {
     });
     adnClient.getEventosByChave.mockResolvedValue({
       statusCode: 404,
-      rawBody: '{"message":"Not Found","path":"/contribuintes/NFSe/42110092206960810000176000000000077726062205552016/Eventos"}',
+      rawBody:
+        '{"StatusProcessamento":"NENHUM_DOCUMENTO_LOCALIZADO","LoteDFe":[],"Alertas":[],"Erros":[{"Mensagem":{},"Codigo":"E2240","Descricao":"Nenhum documento localizado -não existem documentos fiscais para a chave de acesso informada."}],"TipoAmbiente":"HOMOLOGACAO","VersaoAplicativo":"1.0.0.0","DataHoraProcessamento":"2026-08-04T11:45:41.1146376-03:00"}',
       headers: {
         'content-type': 'application/json; charset=utf-8',
         'x-request-id': 'req-404'
       },
       data: {
-        message: 'Not Found',
-        path: '/contribuintes/NFSe/42110092206960810000176000000000077726062205552016/Eventos'
+        StatusProcessamento: 'NENHUM_DOCUMENTO_LOCALIZADO',
+        LoteDFe: [],
+        Alertas: [],
+        Erros: [
+          {
+            Mensagem: {},
+            Codigo: 'E2240',
+            Descricao: 'Nenhum documento localizado -não existem documentos fiscais para a chave de acesso informada.'
+          }
+        ],
+        TipoAmbiente: 'HOMOLOGACAO',
+        VersaoAplicativo: '1.0.0.0',
+        DataHoraProcessamento: '2026-08-04T11:45:41.1146376-03:00'
       }
     });
 
@@ -1145,22 +1158,84 @@ describe('NfseService', () => {
           status: 'nao_localizado_endpoint_eventos',
           eventosEncontrados: 0,
           eventosImportados: 0,
-          mensagem: 'Endpoint de eventos do ADN retornou HTTP 404 para a chave consultada.',
+          mensagem: 'E2240 - Nenhum documento localizado -não existem documentos fiscais para a chave de acesso informada.',
           diagnostico: {
             documentoId: 'doc-evt-404',
             chaveAcesso: '42110092206960810000176000000000077726062205552016',
             ambienteDocumento: 'producao',
             statusCode: 404,
-            message: null,
+            message: 'E2240 - Nenhum documento localizado -não existem documentos fiscais para a chave de acesso informada.',
             contentType: 'application/json; charset=utf-8',
             requestId: 'req-404',
             rawBodyPreview:
-              '{"message":"Not Found","path":"/contribuintes/NFSe/42110092206960810000176000000000077726062205552016/Eventos"}',
+              '{"StatusProcessamento":"NENHUM_DOCUMENTO_LOCALIZADO","LoteDFe":[],"Alertas":[],"Erros":[{"Mensagem":{},"Codigo":"E2240","Descricao":"Nenhum documento localizado -não existem documentos fiscais para a chave de acesso informada."}],"TipoAmbiente":"HOMOLOGACAO","VersaoAplicativo":"1.0.0.0","DataHoraProcessamento":"2026-08-04T11:45:41.1146376-03:00"}',
             parsedDataPreview:
-              '{"message":"Not Found","path":"/contribuintes/NFSe/42110092206960810000176000000000077726062205552016/Eventos"}'
+              '{"StatusProcessamento":"NENHUM_DOCUMENTO_LOCALIZADO","LoteDFe":[],"Alertas":[],"Erros":[{"Mensagem":{},"Codigo":"E2240","Descricao":"Nenhum documento localizado -não existem documentos fiscais para a chave de acesso informada."}],"TipoAmbiente":"HOMOLOGACAO","VersaoAplicativo":"1.0.0.0","DataHoraProcessamento":"2026-08-04T11:45:41.1146376-03:00"}'
           }
         }
       ]
+    });
+  });
+
+  it('corrige o ambiente do documento antes da consulta de eventos com base no tpAmb do XML salvo', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-evt-amb-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao_restrita,
+        chaveAcesso: '42110092227260384000138000000000005726070184044075',
+        xmlPath: 'nfse/producao_restrita/27260384000138/2026/07/xml/42110092227260384000138000000000005726070184044075.xml',
+        dataEmissao: new Date('2026-07-20T20:21:44.000Z'),
+        createdAt: new Date('2026-07-20T20:21:44.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42110092227260384000138000000000005726070184044075">
+    <nNFSe>57</nNFSe>
+    <DPS><infDPS><tpAmb>1</tpAmb></infDPS></DPS>
+  </infNFSe>
+</NFSe>`,
+        'utf8'
+      )
+    );
+    prisma.nfseDocumento.update.mockResolvedValue({
+      id: 'doc-evt-amb-1',
+      ambiente: Ambiente.producao
+    });
+    prisma.certificado.findFirst.mockResolvedValue({
+      id: 'cert-1',
+      validadeFim: new Date('2099-01-01T00:00:00.000Z')
+    });
+    adnClient.getEventosByChave.mockResolvedValue({
+      statusCode: 200,
+      data: {
+        eventos: []
+      }
+    });
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      limit: 1
+    });
+
+    expect(prisma.nfseDocumento.update).toHaveBeenCalledWith({
+      where: { id: 'doc-evt-amb-1' },
+      data: {
+        ambiente: Ambiente.producao
+      }
+    });
+    expect(adnClient.getEventosByChave).toHaveBeenCalledWith({
+      chaveAcesso: '42110092227260384000138000000000005726070184044075',
+      ambiente: 'producao',
+      certificateId: 'cert-1'
+    });
+    expect(result.detalhes[0]).toMatchObject({
+      ambiente: 'producao',
+      status: 'sem_eventos'
     });
   });
 

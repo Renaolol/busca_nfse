@@ -1235,6 +1235,18 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     return ambiente === Ambiente.producao ? NfseAmbiente.PRODUCAO : NfseAmbiente.PRODUCAO_RESTRITA;
   }
 
+  private resolveNfseAmbienteFromParsed(parsed: Pick<ParsedNfse, 'tpAmb'> | undefined, fallback: Ambiente): Ambiente {
+    if (parsed?.tpAmb === '1') {
+      return Ambiente.producao;
+    }
+
+    if (parsed?.tpAmb === '2') {
+      return Ambiente.producao_restrita;
+    }
+
+    return fallback;
+  }
+
   private async resolveInitialNsuForOnlyNew(clienteId: string, cnpjConsulta: string, ambiente: Ambiente): Promise<bigint> {
     const documento = await this.prisma.nfseDocumento.findFirst({
       where: {
@@ -1712,18 +1724,23 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       };
     }
 
-    const existingDocument = await this.prisma.nfseDocumento.findUnique({
+    const effectiveAmbiente = this.resolveNfseAmbienteFromParsed(parsedXml, params.control.ambiente);
+    const existingDocument = await this.prisma.nfseDocumento.findFirst({
       where: {
-        ambiente_chaveAcesso: {
-          ambiente: params.control.ambiente,
-          chaveAcesso: chave
-        }
+        chaveAcesso: chave
       },
       select: {
+        id: true,
+        ambiente: true,
         status: true,
         dataCancelamento: true
       }
     });
+    if (existingDocument?.ambiente && existingDocument.ambiente !== effectiveAmbiente) {
+      this.logger.warn(
+        `NFS-e ${chave} recebida via NSU com tpAmb=${parsedXml?.tpAmb ?? 'desconhecido'}; corrigindo ambiente de ${existingDocument.ambiente} para ${effectiveAmbiente}.`
+      );
+    }
     const normalizedStatus = this.normalizeStatus(parsedXml?.status) ?? 'autorizada';
     const isCanceledDocument =
       normalizedStatus === 'cancelada' ||
@@ -1744,9 +1761,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       this.normalizeCnpj(parsedXml?.cnpjPrestador) ??
       this.normalizeCnpj(parsedXml?.cnpjTomador) ??
       params.control.cnpjConsulta;
-    const xmlKey = `nfse/${params.control.ambiente}/${cnpjPasta}/${year}/${month}/xml/${chave}.xml`;
+    const xmlKey = `nfse/${effectiveAmbiente}/${cnpjPasta}/${year}/${month}/xml/${chave}.xml`;
     await this.storage.putObject(xmlKey, params.document.xml);
-    const danfseKey = `nfse/${params.control.ambiente}/${cnpjPasta}/${year}/${month}/danfse/${chave}.pdf`;
+    const danfseKey = `nfse/${effectiveAmbiente}/${cnpjPasta}/${year}/${month}/danfse/${chave}.pdf`;
     const municipioFallback = await this.buildDanfseMunicipioFallback({
       cnpjPrestador: parsedXml?.cnpjPrestador ?? params.control.cnpjConsulta,
       cnpjTomador: parsedXml?.cnpjTomador,
@@ -1799,7 +1816,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     const createData: Prisma.NfseDocumentoUncheckedCreateInput = {
       clienteId: params.control.clienteId,
       estabelecimentoId: params.control.estabelecimentoId,
-      ambiente: params.control.ambiente,
+      ambiente: effectiveAmbiente,
       nsu: params.document.nsu,
       chaveAcesso: chave,
       numeroNfse: parsedXml?.numeroNfse,
@@ -1828,7 +1845,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     };
 
     await this.upsertDocumentoResolvingNsuConflict({
-      ambiente: params.control.ambiente,
+      ambiente: effectiveAmbiente,
       clienteId: params.control.clienteId,
       chaveAcesso: chave,
       nsu: params.document.nsu,

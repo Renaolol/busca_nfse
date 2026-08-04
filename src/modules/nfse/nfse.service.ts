@@ -758,28 +758,30 @@ export class NfseService {
 
     for (const document of documents) {
       try {
-        let certificate = certificateByEstablishment.get(document.estabelecimentoId);
+        const effectiveDocument = await this.reconcileDocumentAmbienteBeforeEventSync(document);
+
+        let certificate = certificateByEstablishment.get(effectiveDocument.estabelecimentoId);
         if (!certificate) {
-          certificate = await this.findUsableCertificate(dto.clienteId, document.estabelecimentoId);
-          certificateByEstablishment.set(document.estabelecimentoId, certificate);
+          certificate = await this.findUsableCertificate(dto.clienteId, effectiveDocument.estabelecimentoId);
+          certificateByEstablishment.set(effectiveDocument.estabelecimentoId, certificate);
         }
 
         const response = await this.fetchEventosByChaveWithRetry({
-          chaveAcesso: document.chaveAcesso,
-          ambiente: this.toExternalAmbiente(document.ambiente),
+          chaveAcesso: effectiveDocument.chaveAcesso,
+          ambiente: this.toExternalAmbiente(effectiveDocument.ambiente),
           certificateId: certificate.id
         });
         const statusCode = this.extractStatusCode(response);
         if (this.isNotFoundEventoSyncStatus(statusCode)) {
-          const diagnostico = this.buildEventoEndpointDiagnosticWithDocument(response, document);
+          const diagnostico = this.buildEventoEndpointDiagnosticWithDocument(response, effectiveDocument);
           this.logger.warn(
-            `Consulta de eventos ADN retornou 404 para a chave ${document.chaveAcesso}: ${JSON.stringify(diagnostico)}`
+            `Consulta de eventos ADN retornou 404 para a chave ${effectiveDocument.chaveAcesso}: ${JSON.stringify(diagnostico)}`
           );
           detalhes.push({
-            documentoId: document.id,
-            chaveAcesso: document.chaveAcesso,
-            estabelecimentoId: document.estabelecimentoId,
-            ambiente: this.toDtoAmbiente(document.ambiente),
+            documentoId: effectiveDocument.id,
+            chaveAcesso: effectiveDocument.chaveAcesso,
+            estabelecimentoId: effectiveDocument.estabelecimentoId,
+            ambiente: this.toDtoAmbiente(effectiveDocument.ambiente),
             status: 'nao_localizado_endpoint_eventos',
             eventosEncontrados: 0,
             eventosImportados: 0,
@@ -792,10 +794,10 @@ export class NfseService {
         if (statusCode !== undefined && statusCode !== 200) {
           falhas += 1;
           detalhes.push({
-            documentoId: document.id,
-            chaveAcesso: document.chaveAcesso,
-            estabelecimentoId: document.estabelecimentoId,
-            ambiente: this.toDtoAmbiente(document.ambiente),
+            documentoId: effectiveDocument.id,
+            chaveAcesso: effectiveDocument.chaveAcesso,
+            estabelecimentoId: effectiveDocument.estabelecimentoId,
+            ambiente: this.toDtoAmbiente(effectiveDocument.ambiente),
             status: 'falha_api',
             eventosEncontrados: 0,
             eventosImportados: 0,
@@ -804,13 +806,13 @@ export class NfseService {
           continue;
         }
 
-        const xmls = this.extractEventoImportXmls(response, document.chaveAcesso);
+        const xmls = this.extractEventoImportXmls(response, effectiveDocument.chaveAcesso);
         const importedBefore = eventosImportados;
         for (const xml of xmls) {
           await this.importXml({
             clienteId: dto.clienteId,
-            estabelecimentoId: document.estabelecimentoId,
-            ambiente: this.toDtoAmbiente(document.ambiente),
+            estabelecimentoId: effectiveDocument.estabelecimentoId,
+            ambiente: this.toDtoAmbiente(effectiveDocument.ambiente),
             xml
           });
           eventosImportados += 1;
@@ -821,10 +823,10 @@ export class NfseService {
         }
         eventosEncontrados += xmls.length;
         detalhes.push({
-          documentoId: document.id,
-          chaveAcesso: document.chaveAcesso,
-          estabelecimentoId: document.estabelecimentoId,
-          ambiente: this.toDtoAmbiente(document.ambiente),
+          documentoId: effectiveDocument.id,
+          chaveAcesso: effectiveDocument.chaveAcesso,
+          estabelecimentoId: effectiveDocument.estabelecimentoId,
+          ambiente: this.toDtoAmbiente(effectiveDocument.ambiente),
           status: xmls.length > 0 ? 'sincronizado' : 'sem_eventos',
           eventosEncontrados: xmls.length,
           eventosImportados: eventosImportados - importedBefore,
@@ -876,20 +878,30 @@ export class NfseService {
 
   private async importNfseXml(dto: ImportXmlDto, parsed: ParsedNfse) {
     const hash = this.parser.getHash(dto.xml);
-    const ambiente = dto.ambiente === 'producao_restrita' ? Ambiente.producao_restrita : Ambiente.producao;
-    const existing = await this.prisma.nfseDocumento.findUnique({
-      where: {
-        ambiente_chaveAcesso: {
-          ambiente,
-          chaveAcesso: parsed.chaveAcesso
-        }
-      },
-      include: {
-        eventos: true
-      }
-    });
-    const cancelamentoDate = this.resolveCancelamentoDate(existing);
-    const hasCancelamento = this.hasCancelamento(existing);
+    const ambienteSolicitado = dto.ambiente === 'producao_restrita' ? Ambiente.producao_restrita : Ambiente.producao;
+    const ambiente = this.resolveNfseAmbienteFromParsed(parsed, ambienteSolicitado);
+    const existing = await this.findDocumentoByChaveAnyAmbiente(parsed.chaveAcesso, ambiente);
+    const existingId = existing?.id;
+    const previousAmbiente = existing?.ambiente;
+    if (existingId && previousAmbiente && previousAmbiente !== ambiente) {
+      this.logger.warn(
+        `NFS-e ${parsed.chaveAcesso} importada com tpAmb=${parsed.tpAmb ?? 'desconhecido'}; corrigindo ambiente de ${previousAmbiente} para ${ambiente}.`
+      );
+    }
+    const existingWithEventos = existingId
+      ? await this.prisma.nfseDocumento.findUnique({
+          where: { id: existingId },
+          include: {
+            eventos: true
+          }
+        })
+      : null;
+    const existingResolved = existingWithEventos && previousAmbiente && previousAmbiente !== ambiente
+      ? await this.reclassifyDocumentoAmbiente(existingWithEventos, ambiente)
+      : existingWithEventos;
+    const existingForUpdate = existingResolved ?? existingWithEventos;
+    const cancelamentoDate = this.resolveCancelamentoDate(existingForUpdate);
+    const hasCancelamento = this.hasCancelamento(existingForUpdate);
 
     const date = parsed.dataEmissao ?? new Date();
     const year = date.getUTCFullYear();
@@ -928,72 +940,71 @@ export class NfseService {
 
     const competencia = parsed.competencia ?? new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
 
-    const nfse = await this.prisma.nfseDocumento.upsert({
-      where: {
-        ambiente_chaveAcesso: {
-          ambiente,
-          chaveAcesso: parsed.chaveAcesso
-        }
-      },
-      update: {
-        clienteId: dto.clienteId,
-        estabelecimentoId: dto.estabelecimentoId,
-        nsu: null,
-        numeroNfse: parsed.numeroNfse,
-        serie: parsed.serie,
-        dataEmissao: parsed.dataEmissao,
-        status,
-        dataCancelamento: cancelamentoDate ?? undefined,
-        cnpjPrestador: parsed.cnpjPrestador,
-        razaoSocialPrestador: parsed.razaoSocialPrestador,
-        cnpjTomador: parsed.cnpjTomador,
-        razaoSocialTomador: parsed.razaoSocialTomador,
-        municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo,
-        municipioPrestacaoNome,
-        valorServico: this.toDecimal(parsed.valorServico),
-        valorDeducoes: this.toDecimal(parsed.valorDeducoes),
-        valorIss: this.toDecimal(parsed.valorIss),
-        aliquotaIss: this.toDecimal(parsed.aliquotaIss),
-        codigoServicoNacional: parsed.codigoServicoNacional,
-        itemListaServico: parsed.itemListaServico,
-        descricaoServico: parsed.descricaoServico,
-        xmlPath: xmlKey,
-        danfsePath: danfseKey,
-        hashXml: hash,
-        competencia,
-        origem: DocumentoOrigem.importacao_xml
-      },
-      create: {
-        clienteId: dto.clienteId,
-        estabelecimentoId: dto.estabelecimentoId,
-        ambiente,
-        nsu: null,
-        chaveAcesso: parsed.chaveAcesso,
-        numeroNfse: parsed.numeroNfse,
-        serie: parsed.serie,
-        dataEmissao: parsed.dataEmissao,
-        status,
-        dataCancelamento: cancelamentoDate ?? undefined,
-        cnpjPrestador: parsed.cnpjPrestador,
-        razaoSocialPrestador: parsed.razaoSocialPrestador,
-        cnpjTomador: parsed.cnpjTomador,
-        razaoSocialTomador: parsed.razaoSocialTomador,
-        municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo,
-        municipioPrestacaoNome,
-        valorServico: this.toDecimal(parsed.valorServico),
-        valorDeducoes: this.toDecimal(parsed.valorDeducoes),
-        valorIss: this.toDecimal(parsed.valorIss),
-        aliquotaIss: this.toDecimal(parsed.aliquotaIss),
-        codigoServicoNacional: parsed.codigoServicoNacional,
-        itemListaServico: parsed.itemListaServico,
-        descricaoServico: parsed.descricaoServico,
-        xmlPath: xmlKey,
-        danfsePath: danfseKey,
-        hashXml: hash,
-        competencia,
-        origem: DocumentoOrigem.importacao_xml
-      }
-    });
+    const nfse = existingId
+      ? await this.prisma.nfseDocumento.update({
+          where: { id: existingId },
+          data: {
+            clienteId: dto.clienteId,
+            estabelecimentoId: dto.estabelecimentoId,
+            ambiente,
+            nsu: null,
+            numeroNfse: parsed.numeroNfse,
+            serie: parsed.serie,
+            dataEmissao: parsed.dataEmissao,
+            status,
+            dataCancelamento: cancelamentoDate ?? undefined,
+            cnpjPrestador: parsed.cnpjPrestador,
+            razaoSocialPrestador: parsed.razaoSocialPrestador,
+            cnpjTomador: parsed.cnpjTomador,
+            razaoSocialTomador: parsed.razaoSocialTomador,
+            municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo,
+            municipioPrestacaoNome,
+            valorServico: this.toDecimal(parsed.valorServico),
+            valorDeducoes: this.toDecimal(parsed.valorDeducoes),
+            valorIss: this.toDecimal(parsed.valorIss),
+            aliquotaIss: this.toDecimal(parsed.aliquotaIss),
+            codigoServicoNacional: parsed.codigoServicoNacional,
+            itemListaServico: parsed.itemListaServico,
+            descricaoServico: parsed.descricaoServico,
+            xmlPath: xmlKey,
+            danfsePath: danfseKey,
+            hashXml: hash,
+            competencia,
+            origem: DocumentoOrigem.importacao_xml
+          }
+        })
+      : await this.prisma.nfseDocumento.create({
+          data: {
+            clienteId: dto.clienteId,
+            estabelecimentoId: dto.estabelecimentoId,
+            ambiente,
+            nsu: null,
+            chaveAcesso: parsed.chaveAcesso,
+            numeroNfse: parsed.numeroNfse,
+            serie: parsed.serie,
+            dataEmissao: parsed.dataEmissao,
+            status,
+            dataCancelamento: cancelamentoDate ?? undefined,
+            cnpjPrestador: parsed.cnpjPrestador,
+            razaoSocialPrestador: parsed.razaoSocialPrestador,
+            cnpjTomador: parsed.cnpjTomador,
+            razaoSocialTomador: parsed.razaoSocialTomador,
+            municipioPrestacaoCodigo: parsed.municipioPrestacaoCodigo,
+            municipioPrestacaoNome,
+            valorServico: this.toDecimal(parsed.valorServico),
+            valorDeducoes: this.toDecimal(parsed.valorDeducoes),
+            valorIss: this.toDecimal(parsed.valorIss),
+            aliquotaIss: this.toDecimal(parsed.aliquotaIss),
+            codigoServicoNacional: parsed.codigoServicoNacional,
+            itemListaServico: parsed.itemListaServico,
+            descricaoServico: parsed.descricaoServico,
+            xmlPath: xmlKey,
+            danfsePath: danfseKey,
+            hashXml: hash,
+            competencia,
+            origem: DocumentoOrigem.importacao_xml
+          }
+        });
 
     return {
       id: nfse.id,
@@ -1987,6 +1998,106 @@ export class NfseService {
     return ambiente === Ambiente.producao_restrita ? 'producao_restrita' : 'producao';
   }
 
+  private resolveNfseAmbienteFromParsed(parsed: Pick<ParsedNfse, 'tpAmb'>, fallback: Ambiente): Ambiente {
+    if (parsed.tpAmb === '1') {
+      return Ambiente.producao;
+    }
+
+    if (parsed.tpAmb === '2') {
+      return Ambiente.producao_restrita;
+    }
+
+    return fallback;
+  }
+
+  private async reconcileDocumentAmbienteBeforeEventSync<
+    T extends { id: string; chaveAcesso: string; estabelecimentoId: string; ambiente: Ambiente; xmlPath?: string | null }
+  >(document: T): Promise<T> {
+    if (!document.xmlPath) {
+      return document;
+    }
+
+    try {
+      const xml = (await this.storage.getObject(document.xmlPath)).toString('utf8');
+      const parsed = this.parser.parse(xml);
+      const ambienteCorrigido = this.resolveNfseAmbienteFromParsed(parsed, document.ambiente);
+      if (ambienteCorrigido === document.ambiente) {
+        return document;
+      }
+
+      await this.prisma.nfseDocumento.update({
+        where: { id: document.id },
+        data: {
+          ambiente: ambienteCorrigido
+        }
+      });
+      this.logger.warn(
+        `NFS-e ${document.chaveAcesso} teve ambiente corrigido antes da consulta de eventos: ${document.ambiente} -> ${ambienteCorrigido}.`
+      );
+
+      return {
+        ...document,
+        ambiente: ambienteCorrigido
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao reconciliar ambiente da NFS-e ${document.chaveAcesso} antes da consulta de eventos: ${this.toErrorMessage(error)}`
+      );
+      return document;
+    }
+  }
+
+  private async findDocumentoByChaveAnyAmbiente(chaveAcesso: string, preferredAmbiente: Ambiente) {
+    const preferred = await this.prisma.nfseDocumento.findUnique({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente: preferredAmbiente,
+          chaveAcesso
+        }
+      }
+    });
+    if (preferred) {
+      return preferred;
+    }
+
+    return this.prisma.nfseDocumento.findFirst({
+      where: {
+        chaveAcesso
+      }
+    });
+  }
+
+  private async reclassifyDocumentoAmbiente(
+    document: Prisma.NfseDocumentoGetPayload<{ include: { eventos: true } }>,
+    targetAmbiente: Ambiente
+  ) {
+    const conflicting = await this.prisma.nfseDocumento.findUnique({
+      where: {
+        ambiente_chaveAcesso: {
+          ambiente: targetAmbiente,
+          chaveAcesso: document.chaveAcesso
+        }
+      },
+      include: {
+        eventos: true
+      }
+    });
+
+    if (conflicting && conflicting.id !== document.id) {
+      return conflicting;
+    }
+
+    return this.prisma.nfseDocumento.update({
+      where: { id: document.id },
+      data: {
+        ambiente: targetAmbiente
+      },
+      include: {
+        eventos: true
+      }
+    });
+  }
+
   private async findUsableCertificate(clienteId: string, estabelecimentoId: string): Promise<{ id: string }> {
     const certificate = await this.prisma.certificado.findFirst({
       where: {
@@ -2026,6 +2137,11 @@ export class NfseService {
   }
 
   private buildEventoEndpointNotFoundMessage(payload: unknown): string {
+    const adnErrorDescription = this.extractAdnErrorDescription(payload);
+    if (adnErrorDescription) {
+      return adnErrorDescription;
+    }
+
     const message = this.extractSyncMessage(payload);
     if (message && !/^not found$/i.test(message.trim())) {
       return message;
@@ -2039,7 +2155,7 @@ export class NfseService {
 
     return {
       statusCode: this.extractStatusCode(payload) ?? null,
-      message: this.extractSyncMessage(payload) ?? null,
+      message: this.extractAdnErrorDescription(payload) ?? this.extractSyncMessage(payload) ?? null,
       contentType: this.extractHeaderValue(headers, 'content-type') ?? null,
       requestId:
         this.extractHeaderValue(headers, 'x-request-id') ??
@@ -2085,6 +2201,37 @@ export class NfseService {
         lower.includes('falha')
       ) {
         return trimmed;
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractAdnErrorDescription(payload: unknown): string | undefined {
+    const data = this.extractResponseData(payload);
+    if (!data || typeof data !== 'object') {
+      return undefined;
+    }
+
+    const errors = (data as { Erros?: unknown; erros?: unknown }).Erros ?? (data as { erros?: unknown }).erros;
+    if (!Array.isArray(errors)) {
+      return undefined;
+    }
+
+    for (const item of errors) {
+      if (!item || typeof item !== 'object') {
+        continue;
+      }
+
+      const descricao = (item as { Descricao?: unknown; descricao?: unknown }).Descricao ?? (item as { descricao?: unknown }).descricao;
+      const codigo = (item as { Codigo?: unknown; codigo?: unknown }).Codigo ?? (item as { codigo?: unknown }).codigo;
+      if (typeof descricao === 'string' && descricao.trim()) {
+        const descricaoNormalizada = descricao.replace(/\s+/g, ' ').trim();
+        if (typeof codigo === 'string' && codigo.trim()) {
+          return `${codigo.trim()} - ${descricaoNormalizada}`;
+        }
+
+        return descricaoNormalizada;
       }
     }
 
