@@ -4133,6 +4133,7 @@ function renderXmlReader30Page() {
     <section class="page-section compare-page">
       ${renderPageHeader({
         title: 'Leitor XML 3.0',
+        badgeText: 'Em desenvolvimento',
         description: 'Consulte e abra XMLs ja armazenados no Nota Sync.',
         actions: []
       })}
@@ -7086,11 +7087,14 @@ function renderToasts() {
   `;
 }
 
-function renderPageHeader({ title, description, actions }) {
+function renderPageHeader({ title, description, actions, badgeText = '' }) {
   return `
     <div class="page-header">
       <div>
-        <h2 class="page-title">${escapeHtml(title)}</h2>
+        <div class="page-title-row">
+          <h2 class="page-title">${escapeHtml(title)}</h2>
+          ${badgeText ? `<span class="page-title-badge">${escapeHtml(badgeText)}</span>` : ''}
+        </div>
         <p class="page-description">${escapeHtml(description)}</p>
       </div>
       <div class="page-actions">${actions.join('')}</div>

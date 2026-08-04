@@ -292,6 +292,27 @@ a {
   font-size: 1.52rem;
 }
 
+.page-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.page-title-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: #e7f8ef;
+  border: 1px solid #b4e8ca;
+  color: #0e6c42;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .page-description {
   margin: 7px 0 0;
   color: var(--text-secondary);
