@@ -20,6 +20,7 @@ const navItems = [
   { key: 'buscas', label: 'Buscas', icon: 'search', route: '/buscas' },
   { key: 'armazenados', label: 'Armazenados', icon: 'file', route: '/xmls' },
   { key: 'compara-sped', label: 'Compara SPED', icon: 'compare', route: '/compara-sped' },
+  { key: 'leitor-xml', label: 'Leitor XML 3.0', icon: 'file', route: '/leitor-xml' },
   { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' },
   { key: 'alertas', label: 'Alertas', icon: 'alert', route: '/alertas' }
 ];
@@ -72,6 +73,10 @@ const pageMeta = {
   'compara-sped': {
     title: 'Compara SPED',
     description: 'Compare arquivos SPED Fiscal com os documentos integrados da Dominio.'
+  },
+  'leitor-xml': {
+    title: 'Leitor XML 3.0',
+    description: 'Consulte e abra XMLs ja armazenados no Nota Sync.'
   }
 };
 
@@ -1602,6 +1607,8 @@ function renderCurrentPage() {
       return renderCteDocumentsPage();
     case 'compara-sped':
       return renderComparaSpedPage();
+    case 'leitor-xml':
+      return renderXmlReader30Page();
     case 'alertas':
       return renderAlertsPage();
     case 'configuracoes':
@@ -4026,9 +4033,20 @@ function renderComparaSpedPage() {
           </article>
         </div>
       </section>
+    </section>
+  `;
+}
+
+function renderXmlReader30Page() {
+  return `
+    <section class="page-section compare-page">
+      ${renderPageHeader({
+        title: 'Leitor XML 3.0',
+        description: 'Consulte e abra XMLs ja armazenados no Nota Sync.',
+        actions: []
+      })}
 
       ${renderXmlReader30Section()}
-
     </section>
   `;
 }
@@ -4047,7 +4065,7 @@ function renderXmlReader30Section() {
       <div class="compare-card-header">
         <div>
           <h3 class="card-title">Leitor XML 3.0</h3>
-          <p class="card-subtitle">Leia os XMLs ja armazenados no Nota Sync sem sair da pagina de comparacao.</p>
+          <p class="card-subtitle">Leia os XMLs ja armazenados no Nota Sync em uma tela dedicada.</p>
         </div>
         ${statusBadge(`${currentCount} item(s)`, currentCount ? 'success' : 'neutral')}
       </div>
@@ -6141,6 +6159,7 @@ function parseRoute(hash) {
     '/xmls-nfe': 'xmls-nfe',
     '/xmls-cte': 'xmls-cte',
     '/compara-sped': 'compara-sped',
+    '/leitor-xml': 'leitor-xml',
     '/alertas': 'alertas',
     '/configuracoes': 'configuracoes'
   };
