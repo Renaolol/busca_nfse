@@ -4833,7 +4833,7 @@ async function downloadSelectedXmlReader30Batch() {
   }
 }
 
-function renderXmlReader30ResultsTable(results) {
+function renderXmlReader30ResultsTableLegacyUnused(results) {
   const selectableRows = results.filter((row) => canDownloadXmlReader30Row(row));
   const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
   const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
@@ -4918,7 +4918,7 @@ function renderXmlReader30ResultsTable(results) {
   `;
 }
 
-function resetXmlReader30Search() {
+function resetXmlReader30SearchLegacyUnused() {
   state.selectedXmlReaderIds = new Set();
   state.xmlReader30 = {
     hasSearched: false,
@@ -4935,7 +4935,7 @@ function resetXmlReader30Search() {
   state.tableState.xmlReader30 = 'data';
 }
 
-async function executeXmlReader30Search(form) {
+async function executeXmlReader30SearchLegacyUnused(form) {
   const data = new FormData(form);
   const cliente = String(data.get('cliente') || '').trim();
   const documento = String(data.get('documento') || 'todos').trim();
@@ -5003,7 +5003,7 @@ async function executeXmlReader30Search(form) {
   render();
 }
 
-function mapXmlReader30Item(documentType, doc) {
+function mapXmlReader30ItemLegacyUnused(documentType, doc) {
   if (documentType === 'nfse') {
     const xml = doc;
     return {
@@ -6260,7 +6260,7 @@ function renderXmlDetailsModal(xmlId) {
   `;
 }
 
-function renderNfeDetailsModal(nfeId) {
+function renderNfeDetailsModalLegacyUnused(nfeId) {
   const doc = findNfeById(nfeId);
   if (!doc) {
     return '';
@@ -6314,7 +6314,7 @@ function renderNfeDetailsModal(nfeId) {
   `;
 }
 
-function renderCteDetailsModal(cteId) {
+function renderCteDetailsModalLegacyUnused(cteId) {
   const doc = findCteById(cteId);
   if (!doc) {
     return '';
@@ -6364,7 +6364,7 @@ function renderCteDetailsModal(cteId) {
   `;
 }
 
-function renderXmlDetailsModal(xmlId) {
+function renderXmlDetailsModalLegacyUnused(xmlId) {
   const xml = findXmlById(xmlId);
   if (!xml) {
     return '';
