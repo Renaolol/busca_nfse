@@ -15313,11 +15313,15 @@ function matchCompareSpedDocuments(spedDocs, dominioDocs) {
 function compareSpedAndDominioDocs(spedDoc, dominioDoc) {
   const diffs = [];
 
-  if (String(spedDoc.numero || '').trim() !== String(dominioDoc.numeroNfe || '').trim()) {
+  const numeroSped = normalizeCompareDocumentNumberKey(spedDoc.numero || '');
+  const numeroDominio = normalizeCompareDocumentNumberKey(dominioDoc.numeroNfe || dominioDoc.numero || '');
+  if (numeroSped !== numeroDominio) {
     diffs.push(`Numero ${spedDoc.numero || '-'} x ${dominioDoc.numeroNfe || '-'}`);
   }
 
-  if (String(spedDoc.serie || '').trim() !== String(dominioDoc.serie || '').trim()) {
+  const serieSped = normalizeCompareSeriesKey(spedDoc.serie || '');
+  const serieDominio = normalizeCompareSeriesKey(dominioDoc.serie || '');
+  if (serieSped !== serieDominio) {
     diffs.push(`Serie ${spedDoc.serie || '-'} x ${dominioDoc.serie || '-'}`);
   }
 
@@ -15327,10 +15331,10 @@ function compareSpedAndDominioDocs(spedDoc, dominioDoc) {
     diffs.push(`Valor ${formatCurrency(valorSped)} x ${formatCurrency(valorDominio)}`);
   }
 
-  const dataSped = String(spedDoc.dataEmissao || '').trim();
-  const dataDominio = formatDate(dominioDoc.dataEmissao || '');
+  const dataSped = normalizeCompareDateKey(spedDoc.dataEmissao || '');
+  const dataDominio = normalizeCompareDateKey(dominioDoc.dataEmissao || '');
   if (dataSped && dataDominio && dataSped !== dataDominio) {
-    diffs.push(`Data ${dataSped} x ${dataDominio}`);
+    diffs.push(`Data ${formatDate(dataSped)} x ${formatDate(dataDominio)}`);
   }
 
   return diffs;
@@ -15357,16 +15361,71 @@ function buildCompareCandidateKeys(doc) {
     keys.push(`CHAVE:${chave}`);
   }
 
-  const serie = String(doc?.serie || '').trim() || '-';
-  const numero = String(doc?.numero || doc?.numeroNfe || '').trim() || '-';
-  const date = normalizeCompareDateKey(doc?.dataEmissao || '') || formatCompareMonth(doc?.dataEmissao || '') || '-';
+  const modelo = normalizeCompareModelKey(doc?.modelo || '');
+  const serie = normalizeCompareSeriesKey(doc?.serie || '');
+  const numero = normalizeCompareDocumentNumberKey(doc?.numero || doc?.numeroNfe || '');
+  const exactDate = normalizeCompareDateKey(doc?.dataEmissao || '');
+  const monthDate = formatCompareMonth(doc?.dataEmissao || '');
   const value = Number.isFinite(Number(doc?.valor)) ? Number(toNumber(doc.valor)).toFixed(2) : '0.00';
-  keys.push(`FALLBACK:${serie}|${numero}|${date}|${value}`);
+  const partyCnpj = normalizeDigits(doc?.emitenteCnpj || doc?.contraparteCnpj || doc?.cnpj || '');
+
+  if (serie || numero) {
+    if (partyCnpj && exactDate) {
+      keys.push(`DOC-PARTY-DATE:${modelo}|${partyCnpj}|${serie}|${numero}|${exactDate}`);
+    }
+    if (partyCnpj && monthDate) {
+      keys.push(`DOC-PARTY-MONTH:${modelo}|${partyCnpj}|${serie}|${numero}|${monthDate}`);
+    }
+    if (partyCnpj) {
+      keys.push(`DOC-PARTY-VALUE:${modelo}|${partyCnpj}|${serie}|${numero}|${value}`);
+    }
+    if (exactDate) {
+      keys.push(`DOC-DATE:${modelo}|${serie}|${numero}|${exactDate}`);
+    }
+    if (monthDate) {
+      keys.push(`DOC-MONTH:${modelo}|${serie}|${numero}|${monthDate}`);
+    }
+    keys.push(`FALLBACK:${modelo}|${serie}|${numero}|${exactDate || monthDate || '-'}|${value}`);
+  }
+
   return [...new Set(keys)];
 }
 
 function buildCompareFingerprint(doc) {
   return buildCompareCandidateKeys(doc)[0] || '';
+}
+
+function normalizeCompareDocumentNumberKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '-';
+  }
+
+  const digits = normalizeDigits(raw);
+  if (digits) {
+    return String(Number(digits));
+  }
+
+  return raw.toUpperCase();
+}
+
+function normalizeCompareSeriesKey(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return '-';
+  }
+
+  const digits = normalizeDigits(raw);
+  if (digits) {
+    return String(Number(digits));
+  }
+
+  return raw.toUpperCase();
+}
+
+function normalizeCompareModelKey(value) {
+  const raw = String(value || '').trim();
+  return raw || '-';
 }
 
 function parseCompareSpedDate(value) {
