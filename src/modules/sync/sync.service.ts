@@ -90,6 +90,12 @@ type PastNsuRecoveryExecutionState = {
   rows: PastNsuRecoveryExecutionRow[];
 };
 
+type PersistDfeDocumentResult = {
+  nsu?: bigint;
+  kind: 'evento' | 'nfse';
+  outcome: 'saved' | 'existing';
+};
+
 type NightlySweepConfigFile = {
   enabled?: boolean;
   activeSlots?: string[];
@@ -513,7 +519,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        const persistedDocuments: Array<{ nsu?: bigint; kind: 'evento' | 'nfse' }> = [];
+        const persistedDocuments: PersistDfeDocumentResult[] = [];
         try {
           for (const document of documents) {
             const persisted = await this.persistDfeDocumentFromNsu({
@@ -528,7 +534,13 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               control.ambiente,
               persisted.nsu ?? nextNsu,
               'sucesso',
-              persisted.kind === 'evento' ? 'Evento sincronizado' : 'Documento sincronizado'
+              persisted.outcome === 'existing'
+                ? persisted.kind === 'evento'
+                  ? 'Evento retornado pelo ADN ja estava armazenado'
+                  : 'Documento retornado pelo ADN ja estava armazenado'
+                : persisted.kind === 'evento'
+                  ? 'Evento sincronizado'
+                  : 'Documento sincronizado'
             );
           }
         } catch (error) {
@@ -550,6 +562,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           (max, document) => (document.nsu && document.nsu > max ? document.nsu : max),
           nextNsu
         );
+        const savedDocuments = persistedDocuments.filter((document) => document.outcome === 'saved');
+        const existingDocuments = persistedDocuments.filter((document) => document.outcome === 'existing');
         const lastKind = persistedDocuments[persistedDocuments.length - 1]?.kind ?? 'nfse';
 
         await this.prisma.nfseSyncControle.update({
@@ -557,20 +571,24 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           data: {
             ultimoNsuConsultado: maxProcessedNsu,
             ultimoNsuComDocumento: maxProcessedNsu,
-            totalDocumentosBaixados: {
-              increment: persistedDocuments.length
-            },
+            ...(savedDocuments.length > 0
+              ? {
+                  totalDocumentosBaixados: {
+                    increment: savedDocuments.length
+                  }
+                }
+              : {}),
             ultimaExecucao: new Date(),
             proximaExecucao:
               isDailyMode && this.dailySyncStopOnFirstDocument
                 ? new Date(Date.now() + this.dailySyncSuccessCooldownMs)
                 : null,
-            ultimaMensagem: this.buildSuccessMessage(persistedDocuments.length, lastKind)
+            ultimaMensagem: this.buildSuccessMessage(savedDocuments.length, existingDocuments.length, lastKind)
           }
         });
 
-        documentsSaved += persistedDocuments.length;
-        documentsSavedForControl += persistedDocuments.length;
+        documentsSaved += savedDocuments.length;
+        documentsSavedForControl += savedDocuments.length;
         currentNsu = maxProcessedNsu;
 
         if (isDailyMode && this.dailySyncStopOnFirstDocument) {
@@ -890,6 +908,23 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             document
           });
           const persistedNsu = persisted.nsu ?? nsu;
+          if (persisted.outcome === 'existing') {
+            detail.documentosIgnoradosExistentes += 1;
+            result.documentosIgnoradosExistentes += 1;
+            if (execution) {
+              this.updatePastNsuRecoveryExecutionRow(execution, control.id, persistedNsu, {
+                status: 'ja_baixado',
+                mensagem: 'Documento retornado pelo ADN ja estava armazenado.',
+                chaveAcesso: dfeResult.chaveAcesso ?? null
+              });
+              this.syncPastNsuRecoveryExecution(
+                execution,
+                result,
+                `NSU ${persistedNsu.toString()} retornou documento ja existente.`
+              );
+            }
+            continue;
+          }
           maxRecoveredNsu =
             maxRecoveredNsu && maxRecoveredNsu > persistedNsu ? maxRecoveredNsu : persistedNsu;
           detail.documentosSalvos += 1;
@@ -1686,7 +1721,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       ambiente: Ambiente;
     };
     document: AdnDFeDocument;
-  }): Promise<{ nsu?: bigint; kind: 'evento' | 'nfse' }> {
+  }): Promise<PersistDfeDocumentResult> {
     let chave = params.document.chaveAcesso;
     let parsedXml: ParsedNfse | null = null;
     let parsedEvento: ParsedNfseEvento | null = null;
@@ -1720,22 +1755,37 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
       return {
         nsu: params.document.nsu,
-        kind: 'evento'
+        kind: 'evento',
+        outcome: 'saved'
       };
     }
 
+    const hash = this.parser.getHash(params.document.xml);
     const effectiveAmbiente = this.resolveNfseAmbienteFromParsed(parsedXml, params.control.ambiente);
     const existingDocument = await this.prisma.nfseDocumento.findFirst({
       where: {
+        clienteId: params.control.clienteId,
         chaveAcesso: chave
       },
       select: {
         id: true,
         ambiente: true,
         status: true,
-        dataCancelamento: true
+        dataCancelamento: true,
+        nsu: true,
+        xmlPath: true,
+        numeroNfse: true,
+        dataEmissao: true,
+        hashXml: true
       }
     });
+    if (this.shouldSkipPersistedDocumento(existingDocument, hash, params.document.nsu)) {
+      return {
+        nsu: params.document.nsu ?? existingDocument?.nsu ?? undefined,
+        kind: 'nfse',
+        outcome: 'existing'
+      };
+    }
     if (existingDocument?.ambiente && existingDocument.ambiente !== effectiveAmbiente) {
       this.logger.warn(
         `NFS-e ${chave} recebida via NSU com tpAmb=${parsedXml?.tpAmb ?? 'desconhecido'}; corrigindo ambiente de ${existingDocument.ambiente} para ${effectiveAmbiente}.`
@@ -1784,8 +1834,6 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       descricaoServico: parsedXml?.descricaoServico
     });
     await this.storage.putObject(danfseKey, danfsePdf);
-    const hash = this.parser.getHash(params.document.xml);
-
     const updateData: Prisma.NfseDocumentoUncheckedUpdateInput = {
       nsu: params.document.nsu,
       numeroNfse: parsedXml?.numeroNfse,
@@ -1855,16 +1903,25 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     return {
       nsu: params.document.nsu,
-      kind: 'nfse'
+      kind: 'nfse',
+      outcome: 'saved'
     };
   }
 
-  private buildSuccessMessage(count: number, kind: 'evento' | 'nfse'): string {
-    if (count === 1) {
+  private buildSuccessMessage(savedCount: number, existingCount: number, kind: 'evento' | 'nfse'): string {
+    if (savedCount === 0 && existingCount > 0) {
+      return existingCount === 1
+        ? kind === 'evento'
+          ? 'Evento ja existente'
+          : 'Documento ja existente'
+        : `Lote ADN sem novos documentos; ${existingCount} item(ns) ja existia(m)`;
+    }
+
+    if (savedCount === 1) {
       return kind === 'evento' ? 'Evento sincronizado com sucesso' : 'Documento sincronizado com sucesso';
     }
 
-    return `Lote ADN sincronizado com ${count} documento(s)`;
+    return `Lote ADN sincronizado com ${savedCount} documento(s)`;
   }
 
   private async persistEventoFromNsu(params: {
@@ -1984,6 +2041,25 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
   private hasDocumentoFiscalData(doc: Pick<NfseDocumento, 'xmlPath' | 'numeroNfse' | 'dataEmissao'>): boolean {
     return Boolean(doc.xmlPath || doc.numeroNfse || doc.dataEmissao);
+  }
+
+  private shouldSkipPersistedDocumento(
+    doc:
+      | Pick<NfseDocumento, 'nsu' | 'xmlPath' | 'numeroNfse' | 'dataEmissao' | 'hashXml'>
+      | null
+      | undefined,
+    incomingHash: string,
+    incomingNsu?: bigint
+  ): boolean {
+    if (!doc || !this.hasDocumentoFiscalData(doc)) {
+      return false;
+    }
+
+    if (doc.hashXml && doc.hashXml !== incomingHash) {
+      return false;
+    }
+
+    return incomingNsu === undefined || doc.nsu === incomingNsu;
   }
 
   private buildCancelamentoDocumentoData(

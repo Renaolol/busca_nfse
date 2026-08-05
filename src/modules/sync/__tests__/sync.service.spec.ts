@@ -926,6 +926,105 @@ describe('SyncService', () => {
     expect(prisma.nfseSyncControle.update.mock.calls.at(-1)?.[0].data.ultimoNsuConsultado).toBeUndefined();
   });
 
+  it('nao conta como salvo um XML ja existente por chave durante o reprocessamento de NSUs', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        nsuInicial: 2n,
+        ultimoNsuConsultado: 2n,
+        ultimoNsuComDocumento: 0n,
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-01T00:00:00.000Z')
+      }
+    ]);
+    prisma.nfseDocumento.findFirst.mockImplementation(({ where }) => {
+      if (where?.nsu === 1n) {
+        return Promise.resolve({
+          xmlPath: 'nfse/producao/12345678000199/2026/06/xml/1.xml',
+          numeroNfse: '1',
+          dataEmissao: new Date('2026-06-03T12:00:00.000Z')
+        });
+      }
+
+      if (where?.nsu === 2n) {
+        return Promise.resolve(null);
+      }
+
+      if (
+        where?.chaveAcesso === '42110092206960810000176000000000000226062205552016' ||
+        where?.chaveAcesso === '42110092206960810000176000000000000326062205552017'
+      ) {
+        return Promise.resolve({
+          id: 'doc-existing',
+          ambiente: Ambiente.producao,
+          status: 'autorizada',
+          dataCancelamento: null,
+          nsu: null,
+          xmlPath: 'nfse/producao/12345678000199/2026/06/xml/42110092206960810000176000000000000226062205552016.xml',
+          numeroNfse: '2',
+          dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+          hashXml: 'hash'
+        });
+      }
+
+      return Promise.resolve(null);
+    });
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 2n,
+      hasDocument: true,
+      chaveAcesso: '42110092206960810000176000000000000226062205552016',
+      documents: [
+        {
+          chaveAcesso: '42110092206960810000176000000000000226062205552016',
+          xml: '<NFSe><chaveAcesso>42110092206960810000176000000000000226062205552016</chaveAcesso><numeroNFSe>2</numeroNFSe></NFSe>'
+        },
+        {
+          chaveAcesso: '42110092206960810000176000000000000326062205552017',
+          xml: '<NFSe><chaveAcesso>42110092206960810000176000000000000326062205552017</chaveAcesso><numeroNFSe>3</numeroNFSe></NFSe>'
+        }
+      ],
+      xml: '<NFSe><chaveAcesso>42110092206960810000176000000000000226062205552016</chaveAcesso><numeroNFSe>2</numeroNFSe></NFSe>',
+      statusCode: 200,
+      rawResponse: {}
+    });
+    parser.parse.mockImplementation((xml: string) => ({
+      chaveAcesso: xml.match(/<chaveAcesso>([^<]+)<\/chaveAcesso>/)?.[1] ?? '',
+      numeroNfse: xml.match(/<numeroNFSe>([^<]+)<\/numeroNFSe>/)?.[1] ?? '',
+      dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+      status: '100',
+      cnpjPrestador: '12345678000199'
+    }));
+
+    const result = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+
+    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(prisma.nfseDocumento.upsert).not.toHaveBeenCalled();
+    expect(prisma.nfseDocumento.update).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        nsusAvaliados: 2,
+        nsusConsultados: 1,
+        documentosSalvos: 0,
+        nsusIgnoradosComDocumento: 1,
+        documentosIgnoradosExistentes: 2,
+        semDocumento: 0
+      })
+    );
+    expect(prisma.nfseSyncControle.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ctrl-1' },
+        data: expect.objectContaining({
+          ultimaMensagem:
+            'Recuperacao de NSUs passados: 0 documento(s) salvo(s), 3 ja existente(s), 0 sem documento.'
+        })
+      })
+    );
+  });
+
   it('reprocessa NSU com retry quando ADN retorna timeout temporario', async () => {
     const sleepSpy = jest.spyOn(service as any, 'sleep').mockImplementation(async () => undefined);
 
