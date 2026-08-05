@@ -6,6 +6,9 @@ export interface ParsedNfse {
   tpAmb?: string;
   numeroNfse?: string;
   serie?: string;
+  dpsId?: string;
+  numeroDps?: string;
+  serieDps?: string;
   dataEmissao?: Date;
   competencia?: Date;
   status?: string;
@@ -75,6 +78,9 @@ export class NfseXmlParserService {
       tpAmb: this.extract(xml, ['tpAmb']),
       numeroNfse: this.extract(xml, ['numeroNFSe', 'numeroNfse', 'Numero', 'nNFSe']),
       serie: this.extract(xml, ['serie']),
+      dpsId: this.extractDpsId(xml),
+      numeroDps: this.extract(xml, ['nDPS']) ?? this.extractNumeroDpsFromId(this.extractDpsId(xml)),
+      serieDps: this.extractNestedAny(xml, ['DPS'], ['serie']) ?? this.extract(xml, ['serie']),
       dataEmissao: this.parseDate(this.extract(xml, ['dataEmissao', 'DataEmissao', 'dhEmi', 'dhProc'])),
       competencia: this.parseDateOnly(this.extract(xml, ['competencia', 'dCompet'])),
       status: this.extract(xml, ['status', 'Situacao', 'cStat']),
@@ -208,6 +214,26 @@ export class NfseXmlParserService {
     return this.extract(xml, ['tpEvento', 'tipoEvento', 'cEvento']);
   }
 
+  private extractDpsId(xml: string): string | undefined {
+    const candidate = this.extractAttribute(xml, 'infDPS', 'Id');
+    return this.normalizeDpsId(candidate);
+  }
+
+  private extractNumeroDpsFromId(dpsId?: string): string | undefined {
+    const normalized = this.normalizeDpsId(dpsId);
+    if (!normalized || normalized.length < 15) {
+      return undefined;
+    }
+
+    const digits = normalized.replace(/\D/g, '');
+    if (digits.length < 42) {
+      return undefined;
+    }
+
+    const numero = digits.slice(-15).replace(/^0+/, '');
+    return numero || '0';
+  }
+
   private isCancelamentoEvento(tipoEvento?: string, descricao?: string): boolean {
     const tipo = this.normalizeSearchText(tipoEvento);
     const texto = this.normalizeSearchText(descricao);
@@ -337,6 +363,29 @@ export class NfseXmlParserService {
     }
 
     return trimmed;
+  }
+
+  private normalizeDpsId(value?: string): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const trimmed = value.trim().toUpperCase();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    const exact = trimmed.match(/DPS\d{42}/);
+    if (exact?.[0]) {
+      return exact[0];
+    }
+
+    const digits = trimmed.replace(/\D/g, '');
+    if (digits.length === 42) {
+      return `DPS${digits}`;
+    }
+
+    return trimmed.startsWith('DPS') ? trimmed : undefined;
   }
 
   private normalizeCnpj(value?: string): string | undefined {

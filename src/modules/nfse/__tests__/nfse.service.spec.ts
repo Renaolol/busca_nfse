@@ -1071,10 +1071,10 @@ describe('NfseService', () => {
 
   it('recupera NFS-e faltante a partir do Id inferido da DPS', async () => {
     prisma.clienteEstabelecimento.findFirst.mockImplementation(({ where }) => {
-      if (where?.clienteId === 'cliente-1' && where?.cnpj === '06960810000176') {
+      if (where?.clienteId === 'cliente-1' && where?.cnpj === '10652054000195') {
         return Promise.resolve({
           id: 'estab-1',
-          cnpj: '06960810000176',
+          cnpj: '10652054000195',
           municipioCodigoIbge: '4211009'
         });
       }
@@ -1088,25 +1088,44 @@ describe('NfseService', () => {
     prisma.nfseDocumento.findMany.mockResolvedValue([
       {
         ambiente: Ambiente.producao,
-        serie: '70000',
+        serie: '900',
         numeroNfse: '84',
-        chaveAcesso: '42110092206960810000176000000000008426070112345678',
-        cnpjPrestador: '06960810000176',
-        municipioPrestacaoCodigo: '4211009'
+        chaveAcesso: '4211009221065205400019500000000008426070112345678',
+        cnpjPrestador: '10652054000195',
+        municipioPrestacaoCodigo: '4211009',
+        xmlPath: 'nfse/producao/10652054000195/2026/07/xml/4211009221065205400019500000000008426070112345678.xml'
       }
     ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="UTF-8"?>
+<NFSe>
+  <infNFSe Id="NFS4211009221065205400019500000000008426070112345678">
+    <chaveAcesso>4211009221065205400019500000000008426070112345678</chaveAcesso>
+    <nNFSe>84</nNFSe>
+    <DPS>
+      <infDPS Id="DPS421100921065205400019500900000000000001084">
+        <serie>900</serie>
+        <nDPS>1084</nDPS>
+      </infDPS>
+    </DPS>
+  </infNFSe>
+</NFSe>`,
+        'utf8'
+      )
+    );
     emissorPublicoClient.getNfseByDpsId.mockResolvedValue({
       statusCode: 200,
-      dpsId: 'DPS4211009206960810000176700000000000000083',
+      dpsId: 'DPS421100921065205400019500900000000000001083',
       xml: `<?xml version="1.0" encoding="UTF-8"?>
 <NFSe>
   <infNFSe>
-    <chaveAcesso>42110092206960810000176000000000008326070112345679</chaveAcesso>
+    <chaveAcesso>4211009221065205400019500000000008326070112345679</chaveAcesso>
     <numeroNFSe>83</numeroNFSe>
-    <serie>70000</serie>
+    <serie>900</serie>
     <tpAmb>1</tpAmb>
     <dataEmissao>2026-07-10T10:31:00-03:00</dataEmissao>
-    <prestador><cnpj>06960810000176</cnpj><razaoSocial>CLINILAB LABORATORIO DE ANALISES CLINICAS LTDA</razaoSocial></prestador>
+    <prestador><cnpj>10652054000195</cnpj><razaoSocial>CLINILAB LABORATORIO DE ANALISES CLINICAS LTDA</razaoSocial></prestador>
     <tomador><cnpj>11111111000111</cnpj><razaoSocial>TOMADOR TESTE</razaoSocial></tomador>
     <valorServico>405.00</valorServico>
   </infNFSe>
@@ -1116,12 +1135,12 @@ describe('NfseService', () => {
 
     const result = await service.recuperarPorDps({
       clienteId: 'cliente-1',
-      cnpjConsulta: '06960810000176',
+      cnpjConsulta: '10652054000195',
       ambiente: 'producao',
       lacunas: [
         {
           ambiente: 'producao',
-          serie: '70000',
+          serie: '900',
           numeroInicial: 83,
           numeroFinal: 83
         }
@@ -1129,7 +1148,7 @@ describe('NfseService', () => {
     });
 
     expect(emissorPublicoClient.getNfseByDpsId).toHaveBeenCalledWith({
-      dpsId: 'DPS4211009206960810000176700000000000000083',
+      dpsId: 'DPS421100921065205400019500900000000000001083',
       ambiente: 'producao',
       certificateId: 'cert-1'
     });
@@ -1142,8 +1161,8 @@ describe('NfseService', () => {
     expect(result.detalhes).toEqual([
       expect.objectContaining({
         numeroDps: '83',
-        dpsId: 'DPS4211009206960810000176700000000000000083',
-        chaveAcesso: '42110092206960810000176000000000008326070112345679',
+        dpsId: 'DPS421100921065205400019500900000000000001083',
+        chaveAcesso: '4211009221065205400019500000000008326070112345679',
         status: 'recuperada'
       })
     ]);

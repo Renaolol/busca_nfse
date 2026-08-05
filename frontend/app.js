@@ -5692,7 +5692,7 @@ function renderNfseRecoverByDpsModal() {
       <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1120px); max-width:1120px;">
         <div class="modal-header">
           <h3 class="modal-title">Recuperar NFS-e faltantes por DPS</h3>
-          <p class="modal-subtitle">${escapeHtml(state.modal.clientName || 'Cliente selecionado')} • o sistema vai inferir o Id da DPS pelas notas vizinhas e consultar o Emissor Publico.</p>
+          <p class="modal-subtitle">${escapeHtml(state.modal.clientName || 'Cliente selecionado')} • o sistema vai inferir o Id da DPS pelas notas vizinhas e, quando houver XML salvo, usar a DPS real da nota anterior ou posterior.</p>
         </div>
         <div class="modal-body">
           <form id="nfseRecoverByDpsForm">
@@ -5720,7 +5720,7 @@ function renderNfseRecoverByDpsModal() {
                 : ''
             }
             <p class="card-subtitle" style="margin-top:10px;">
-              A recuperacao usa o CNPJ emissor, a serie e a numeracao faltante para montar o Id da DPS automaticamente. Se a SEFIN nao expor a consulta dessa DPS, o detalhe volta com a falha individual.
+              A recuperacao tenta primeiro derivar a DPS real a partir do XML da NFS-e vizinha. Se isso nao for possivel, cai no modo de inferencia pelo CNPJ emissor, serie e numeracao faltante.
             </p>
             ${errorMessage ? `<div class="table-state error" style="margin-top:14px;">${escapeHtml(errorMessage)}</div>` : ''}
             <div class="modal-footer" style="padding:18px 0 0;">
@@ -5733,7 +5733,7 @@ function renderNfseRecoverByDpsModal() {
               ? `
                 <div style="margin-top:18px;">
                   <div class="form-grid four" style="margin-bottom:18px;">
-                    ${detailItem('DPS solicitadas', String(result.requestedDps || 0))}
+                    ${detailItem('NFS-e faltantes', String(result.requestedDps || 0))}
                     ${detailItem('Processadas', String(result.processedDps || 0))}
                     ${detailItem('XMLs recuperados', String(result.documentsRecovered || 0))}
                     ${detailItem('Falhas', String(result.failures || 0))}
@@ -5743,7 +5743,7 @@ function renderNfseRecoverByDpsModal() {
                       ? `
                         <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(52vh, 520px);">
                           <div style="display:grid; grid-template-columns:minmax(160px, .8fr) minmax(260px, 1.4fr) minmax(160px, .8fr) minmax(360px, 1.8fr); gap:0; min-width:940px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
-                            <div style="padding:12px 14px;">DPS</div>
+                            <div style="padding:12px 14px;">NFS-e faltante</div>
                             <div style="padding:12px 14px;">Id inferido</div>
                             <div style="padding:12px 14px;">Status</div>
                             <div style="padding:12px 14px;">Mensagem</div>

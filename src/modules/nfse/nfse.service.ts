@@ -64,7 +64,7 @@ type RecuperacaoDpsDetail = {
 
 type DocumentoRecoveryNeighbor = Pick<
   NfseDocumento,
-  'ambiente' | 'serie' | 'numeroNfse' | 'chaveAcesso' | 'cnpjPrestador' | 'municipioPrestacaoCodigo'
+  'ambiente' | 'serie' | 'numeroNfse' | 'chaveAcesso' | 'cnpjPrestador' | 'municipioPrestacaoCodigo' | 'xmlPath'
 >;
 
 @Injectable()
@@ -1065,7 +1065,7 @@ export class NfseService {
     for (const lacuna of lacunas) {
       for (let numero = lacuna.numeroInicial; numero <= lacuna.numeroFinal; numero += 1) {
         requestedDps += 1;
-        const inferred = this.inferDpsLookupContext(indexedDocs, lacuna, numero, cnpjConsulta);
+        const inferred = await this.inferDpsLookupContext(indexedDocs, lacuna, numero, cnpjConsulta);
         if (!inferred.ok) {
           failures += 1;
           detalhes.push({
@@ -1108,7 +1108,7 @@ export class NfseService {
               ambiente: this.toDtoAmbiente(lacuna.ambiente),
               xml: response.xml
             },
-            DocumentoOrigem.consulta_chave
+            DocumentoOrigem.consulta_dps
           );
           documentsRecovered += 1;
           detalhes.push({
@@ -2464,7 +2464,8 @@ export class NfseService {
         numeroNfse: true,
         chaveAcesso: true,
         cnpjPrestador: true,
-        municipioPrestacaoCodigo: true
+        municipioPrestacaoCodigo: true,
+        xmlPath: true
       }
     });
 
@@ -2486,12 +2487,12 @@ export class NfseService {
     return index;
   }
 
-  private inferDpsLookupContext(
+  private async inferDpsLookupContext(
     docsIndex: Map<string, DocumentoRecoveryNeighbor[]>,
     gap: RecuperacaoDpsGap,
-    numeroDps: number,
+    numeroNfse: number,
     inscricaoFederal: string
-  ): { ok: true; dpsId: string } | { ok: false; dpsId: string | null; message: string } {
+  ): Promise<{ ok: true; dpsId: string } | { ok: false; dpsId: string | null; message: string }> {
     const serie = this.normalizeSerie(gap.serie);
     if (!serie) {
       return {
@@ -2508,22 +2509,42 @@ export class NfseService {
           .filter(([key]) => key.startsWith(`${gap.ambiente}:`))
           .flatMap(([, docs]) => docs);
 
-    const neighbor = this.pickRecoveryNeighbor(fallbackCandidates, numeroDps);
-    if (!neighbor) {
+    const neighbors = this.pickRecoveryNeighbors(fallbackCandidates, numeroNfse);
+    if (!neighbors.length) {
       return {
         ok: false,
         dpsId: null,
-        message: `Nenhuma NFS-e vizinha foi encontrada no ambiente ${this.toDtoAmbiente(gap.ambiente)} para inferir o municipio da DPS ${numeroDps}.`
+        message: `Nenhuma NFS-e vizinha foi encontrada no ambiente ${this.toDtoAmbiente(gap.ambiente)} para inferir a DPS da NFS-e ${numeroNfse}.`
       };
     }
 
+    for (const neighbor of neighbors) {
+      const reference = await this.loadRecoveryDpsReference(neighbor);
+      if (!reference) {
+        continue;
+      }
+
+      const delta = numeroNfse - reference.numeroNfse;
+      const targetNumeroDps = reference.numeroDps + delta;
+      if (targetNumeroDps <= 0) {
+        continue;
+      }
+
+      return {
+        ok: true,
+        dpsId: this.replaceDpsSequence(reference.dpsId, targetNumeroDps)
+      };
+    }
+
+    const fallbackNeighbor = neighbors[0];
     const codigoMunicipioEmissao =
-      this.extractMunicipioCodigoFromChaveAcesso(neighbor.chaveAcesso) ?? this.normalizeMunicipioCodigo(neighbor.municipioPrestacaoCodigo);
+      this.extractMunicipioCodigoFromChaveAcesso(fallbackNeighbor.chaveAcesso) ??
+      this.normalizeMunicipioCodigo(fallbackNeighbor.municipioPrestacaoCodigo);
     if (!codigoMunicipioEmissao) {
       return {
         ok: false,
         dpsId: null,
-        message: `Nao foi possivel inferir o municipio de emissao a partir da NFS-e vizinha ${neighbor.numeroNfse ?? '-'}.`
+        message: `Nao foi possivel inferir o municipio de emissao a partir da NFS-e vizinha ${fallbackNeighbor.numeroNfse ?? '-'}.`
       };
     }
 
@@ -2533,33 +2554,94 @@ export class NfseService {
         codigoMunicipioEmissao,
         inscricaoFederal,
         serie,
-        numeroDps
+        numeroDps: numeroNfse
       })
     };
   }
 
-  private pickRecoveryNeighbor(candidates: DocumentoRecoveryNeighbor[], numeroDps: number): DocumentoRecoveryNeighbor | null {
+  private pickRecoveryNeighbors(candidates: DocumentoRecoveryNeighbor[], numeroNfse: number): DocumentoRecoveryNeighbor[] {
     if (!candidates.length) {
+      return [];
+    }
+
+    return [...candidates].sort((left, right) => {
+      const leftNumero = this.parseNumeroNfse(left.numeroNfse) ?? 0;
+      const rightNumero = this.parseNumeroNfse(right.numeroNfse) ?? 0;
+      const leftDistance = Math.abs(leftNumero - numeroNfse);
+      const rightDistance = Math.abs(rightNumero - numeroNfse);
+      if (leftDistance !== rightDistance) {
+        return leftDistance - rightDistance;
+      }
+
+      const leftIsPrevious = leftNumero <= numeroNfse ? 0 : 1;
+      const rightIsPrevious = rightNumero <= numeroNfse ? 0 : 1;
+      if (leftIsPrevious !== rightIsPrevious) {
+        return leftIsPrevious - rightIsPrevious;
+      }
+
+      return leftNumero - rightNumero;
+    });
+  }
+
+  private async loadRecoveryDpsReference(neighbor: DocumentoRecoveryNeighbor): Promise<{
+    dpsId: string;
+    numeroDps: number;
+    numeroNfse: number;
+  } | null> {
+    if (!neighbor.xmlPath) {
       return null;
     }
 
-    let best: DocumentoRecoveryNeighbor | null = null;
-    let bestDistance = Number.POSITIVE_INFINITY;
-
-    for (const candidate of candidates) {
-      const numero = this.parseNumeroNfse(candidate.numeroNfse);
-      if (!numero) {
-        continue;
+    try {
+      const xml = (await this.storage.getObject(neighbor.xmlPath)).toString('utf8');
+      const parsed = this.parser.parse(xml);
+      const dpsId = this.normalizeDpsId(parsed.dpsId);
+      const numeroDps = this.parseRecoveryDpsNumber(parsed.numeroDps) ?? this.parseRecoveryDpsNumberFromId(dpsId);
+      const numeroNfse = this.parseNumeroNfse(parsed.numeroNfse) ?? this.parseNumeroNfse(neighbor.numeroNfse);
+      if (!dpsId || !numeroDps || !numeroNfse) {
+        return null;
       }
 
-      const distance = Math.abs(numero - numeroDps);
-      if (distance < bestDistance) {
-        best = candidate;
-        bestDistance = distance;
-      }
+      return {
+        dpsId,
+        numeroDps,
+        numeroNfse
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Falha ao carregar XML da NFS-e vizinha ${neighbor.chaveAcesso} para inferir DPS: ${this.toErrorMessage(error)}`
+      );
+      return null;
+    }
+  }
+
+  private parseRecoveryDpsNumber(value?: string | null): number | undefined {
+    const digits = String(value || '').replace(/\D/g, '');
+    if (!digits) {
+      return undefined;
     }
 
-    return best ?? candidates[0] ?? null;
+    const parsed = Number.parseInt(digits, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+  }
+
+  private parseRecoveryDpsNumberFromId(dpsId?: string | null): number | undefined {
+    const normalized = this.normalizeDpsId(dpsId);
+    if (!normalized) {
+      return undefined;
+    }
+
+    return this.parseRecoveryDpsNumber(normalized.slice(-15));
+  }
+
+  private replaceDpsSequence(dpsId: string, numeroDps: number): string {
+    const normalized = this.normalizeDpsId(dpsId);
+    if (!normalized || normalized.length <= 15) {
+      return dpsId;
+    }
+
+    const sequence = String(Math.trunc(numeroDps)).padStart(15, '0').slice(-15);
+    return `${normalized.slice(0, -15)}${sequence}`;
   }
 
   private buildDpsId(params: {
@@ -2588,6 +2670,21 @@ export class NfseService {
   private normalizeMunicipioCodigo(value?: string | null): string | undefined {
     const digits = String(value || '').replace(/\D/g, '');
     return digits.length === 7 ? digits : undefined;
+  }
+
+  private normalizeDpsId(value?: string | null): string | undefined {
+    const trimmed = String(value || '').trim().toUpperCase();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    const exact = trimmed.match(/DPS\d{42}/);
+    if (exact?.[0]) {
+      return exact[0];
+    }
+
+    const digits = trimmed.replace(/\D/g, '');
+    return digits.length === 42 ? `DPS${digits}` : undefined;
   }
 
   private toExternalAmbiente(ambiente: Ambiente): NfseAmbiente {

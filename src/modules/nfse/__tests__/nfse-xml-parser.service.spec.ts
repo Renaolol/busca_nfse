@@ -102,6 +102,8 @@ describe('NfseXmlParserService', () => {
     expect(parsed.tpAmb).toBeUndefined();
     expect(parsed.numeroNfse).toBe('29');
     expect(parsed.serie).toBe('900');
+    expect(parsed.dpsId).toBeUndefined();
+    expect(parsed.numeroDps).toBeUndefined();
     expect(parsed.status).toBe('100');
     expect(parsed.cnpjPrestador).toBe('44454248000106');
     expect(parsed.razaoSocialPrestador).toContain('TASSIANI');
@@ -133,6 +135,27 @@ describe('NfseXmlParserService', () => {
 
     expect(parsed.chaveAcesso).toBe('42110092227260384000138000000000005726070184044075');
     expect(parsed.tpAmb).toBe('1');
+  });
+
+  it('extrai o Id e o numero da DPS quando presentes no XML', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42110092210652054000195000000000008426070112345678">
+    <nNFSe>84</nNFSe>
+    <DPS>
+      <infDPS Id="DPS421100921065205400019500900000000000001084">
+        <serie>900</serie>
+        <nDPS>1084</nDPS>
+      </infDPS>
+    </DPS>
+  </infNFSe>
+</NFSe>`;
+
+    const parsed = parser.parse(xml);
+
+    expect(parsed.dpsId).toBe('DPS421100921065205400019500900000000000001084');
+    expect(parsed.numeroDps).toBe('1084');
+    expect(parsed.serieDps).toBe('900');
   });
 
   it('parseia aliquota ISS do layout nacional em pAliqAplic', () => {

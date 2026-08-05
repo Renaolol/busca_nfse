@@ -109,6 +109,8 @@ export class RealNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
               rawResponse: data ?? response.body
             };
           }
+
+          continue;
         }
 
         if (response.statusCode !== 404 && response.statusCode !== 400) {
