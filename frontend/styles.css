@@ -1230,6 +1230,15 @@ tbody tr:hover {
   min-width: 0;
 }
 
+.xml-reader30-column-header-select {
+  min-width: 110px;
+}
+
+.xml-reader30-column-header-select .xml-reader30-column-header-inner {
+  justify-content: flex-start;
+  gap: 4px;
+}
+
 .xml-reader30-column-title {
   display: inline-flex;
   align-items: center;
@@ -1240,8 +1249,8 @@ tbody tr:hover {
 .xml-reader30-column-title-select {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
   white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .xml-reader30-column-menu-wrap {
@@ -1297,10 +1306,10 @@ tbody tr:hover {
 
 .xml-reader30-select-all-checkbox,
 .xml-reader30-check > input[data-action="xml-reader30-toggle-all"] {
-  width: 15px;
-  height: 15px;
-  min-width: 15px;
-  min-height: 15px;
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  min-height: 16px;
   transform: none;
 }
 

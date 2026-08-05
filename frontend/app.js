@@ -18,7 +18,13 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'quantidade',
   'valorUnitario',
   'valorTotal',
-  'valorTotalNfXml'
+  'valorTotalNfXml',
+  'icmsStRet',
+  'cstCsosn',
+  'cfop',
+  'baseCalculoIcms',
+  'aliquotaIcms',
+  'valorIcms'
 ];
 const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
@@ -541,6 +547,10 @@ function onDocumentClick(event) {
   }
 
   if (action === 'alert-toggle-resolved') {
+    return;
+  }
+
+  if (action === 'xml-reader30-select' || action === 'xml-reader30-toggle-all') {
     return;
   }
 
@@ -1687,6 +1697,30 @@ function onDocumentChange(event) {
     return;
   }
 
+  const action = target.getAttribute('data-action');
+  if (action === 'xml-reader30-select') {
+    const selectionKey = target.getAttribute('data-selection-key');
+    if (!selectionKey) {
+      return;
+    }
+    setXmlReader30Selection(selectionKey, target.checked);
+    render();
+    return;
+  }
+
+  if (action === 'xml-reader30-toggle-all') {
+    const checked = target.checked;
+    getXmlReader30SelectionRows().forEach((row) => {
+      const selectionKey = getXmlReader30SelectionKey(row);
+      if (!selectionKey) {
+        return;
+      }
+      setXmlReader30Selection(selectionKey, checked);
+    });
+    render();
+    return;
+  }
+
   if (target.id === 'clientsFilterStatusBusca') {
     state.filters.clients.statusBusca = target.value;
   }
@@ -1788,7 +1822,6 @@ function onDocumentMouseUp() {
   }
 
   state.xmlReader30.selectionDrag = null;
-  render();
 }
 
 function stopXmlReader30ScrollDrag() {
@@ -5003,7 +5036,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                 .map(
                   (column, index) => `
                     <th
-                      class="xml-reader30-column-header"
+                      class="xml-reader30-column-header ${column.key === 'select' ? 'xml-reader30-column-header-select' : ''}"
                       data-action="xml-reader30-column-drag"
                       data-column-key="${escapeHtml(column.key)}"
                       data-column-index="${index}"
@@ -5014,7 +5047,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                         <span class="xml-reader30-column-title">
                           ${
                             column.key === 'select'
-                              ? `<span class="xml-reader30-column-title-select">Checkbox <input class="xml-reader30-select-all-checkbox" type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" /></span>`
+                              ? `<span class="xml-reader30-column-title-select">Checkbox</span><input class="xml-reader30-select-all-checkbox" type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />`
                               : column.headerHtml || escapeHtml(column.label)
                           }
                         </span>
