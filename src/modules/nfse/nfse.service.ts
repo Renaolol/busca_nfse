@@ -2937,19 +2937,6 @@ export class NfseService {
     return tipoEvento?.trim() || undefined;
   }
 
-  private normalizeChaveAcesso(value?: string | null): string | undefined {
-    if (!value) {
-      return undefined;
-    }
-
-    const digits = value.replace(/\D/g, '');
-    if (digits.length >= 50) {
-      return digits.slice(0, 50);
-    }
-
-    return digits || undefined;
-  }
-
   private parseUnknownDate(value: unknown): Date | undefined {
     if (!value) {
       return undefined;
