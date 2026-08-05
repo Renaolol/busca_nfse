@@ -1163,6 +1163,18 @@ tbody tr:hover {
   padding: 0 8px;
 }
 
+.xml-reader30-check {
+  width: 54px;
+  min-width: 54px;
+  text-align: center;
+}
+
+.xml-reader30-check input {
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+
 .xml-reader30-column-header {
   position: relative;
   cursor: grab;
@@ -1172,6 +1184,39 @@ tbody tr:hover {
 
 .xml-reader30-column-header:hover {
   background: #f2f6ff;
+}
+
+.xml-reader30-column-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.xml-reader30-column-title {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.xml-reader30-column-menu {
+  border: 0;
+  background: transparent;
+  color: #778199;
+  cursor: pointer;
+  flex: 0 0 auto;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 4px;
+  border-radius: 6px;
+}
+
+.xml-reader30-column-menu:hover {
+  background: rgba(97, 124, 255, 0.08);
+  color: var(--accent);
 }
 
 .xml-reader30-column-header.is-dragging {
