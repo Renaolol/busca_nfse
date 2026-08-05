@@ -8,27 +8,12 @@ export interface NfseEmissorPublicoNfseResult {
   message?: string;
 }
 
-export interface NfseEmissorPublicoDpsResult {
-  statusCode: number;
-  dpsId: string;
-  xml?: string;
-  chaveAcesso?: string;
-  rawResponse: unknown;
-  message?: string;
-}
-
 export interface NfseEmissorPublicoClient {
   getNfseByChave(params: {
     chaveAcesso: string;
     ambiente: NfseAmbiente;
     certificateId: string;
   }): Promise<NfseEmissorPublicoNfseResult>;
-
-  getDpsById(params: {
-    dpsId: string;
-    ambiente: NfseAmbiente;
-    certificateId: string;
-  }): Promise<NfseEmissorPublicoDpsResult>;
 }
 
 export const NFSE_EMISSOR_PUBLICO_CLIENT = Symbol('NFSE_EMISSOR_PUBLICO_CLIENT');

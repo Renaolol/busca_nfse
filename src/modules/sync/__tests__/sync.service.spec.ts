@@ -1071,7 +1071,7 @@ describe('SyncService', () => {
       rawResponse: {}
     });
 
-    const execution = await service.startPastNsuRecoveryExecution('cliente-1');
+    const execution = await service.startPastNsuRecoveryExecution({ clienteId: 'cliente-1' });
 
     let latestExecution = execution;
     for (let attempt = 0; attempt < 20 && latestExecution.status === 'running'; attempt += 1) {
@@ -1156,6 +1156,82 @@ describe('SyncService', () => {
       })
     );
     expect(sleepSpy).toHaveBeenCalled();
+  });
+
+  it('restringe a auditoria de lacunas aos NSUs inferidos pela vizinhanca de numeracao', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 60n,
+        nsuInicial: 1n,
+        ultimoNsuComDocumento: 52n,
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-01T00:00:00.000Z')
+      }
+    ]);
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        nsu: 50n,
+        numeroNfse: '9',
+        serie: '900'
+      },
+      {
+        nsu: 52n,
+        numeroNfse: '11',
+        serie: '900'
+      }
+    ]);
+    prisma.nfseDocumento.findFirst.mockResolvedValue(null);
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 51n,
+      hasDocument: false,
+      statusCode: 404,
+      message: 'Sem documento para o NSU informado',
+      rawResponse: {}
+    });
+
+    const execution = await service.startPastNsuRecoveryExecution({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '12345678000199',
+      ambiente: Ambiente.producao,
+      lacunas: [
+        {
+          ambiente: Ambiente.producao,
+          serie: '900',
+          numeroInicial: 10,
+          numeroFinal: 10
+        }
+      ]
+    });
+
+    let latestExecution = execution;
+    for (let attempt = 0; attempt < 20 && latestExecution.status === 'running'; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+      latestExecution = service.getPastNsuRecoveryExecution(execution.executionId);
+    }
+
+    expect(latestExecution.status).toBe('completed');
+    expect(latestExecution.rows.map((row) => row.nsu)).toEqual(['51']);
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledWith({
+      cnpjConsulta: '12345678000199',
+      nsu: 51n,
+      ambiente: NfseAmbiente.PRODUCAO,
+      certificateId: 'cert-1'
+    });
+    expect(latestExecution.summary).toEqual(
+      expect.objectContaining({
+        controlesEncontrados: 1,
+        nsusAvaliados: 1,
+        nsusConsultados: 1,
+        documentosSalvos: 0,
+        semDocumento: 1
+      })
+    );
   });
 
   it('continua reprocessamento apos esgotar retries de timeout em um NSU', async () => {

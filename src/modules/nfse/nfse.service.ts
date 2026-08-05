@@ -4,8 +4,7 @@ import JSZip from 'jszip';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
 import {
   NFSE_EMISSOR_PUBLICO_CLIENT,
-  NfseEmissorPublicoClient,
-  NfseEmissorPublicoDpsResult
+  NfseEmissorPublicoClient
 } from '../../integrations/nfse-emissor-publico/nfse-emissor-publico.types';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
 import { NFSE_ADN_CLIENT, NfseAdnClient } from '../../integrations/nfse-adn/nfse-adn.types';
@@ -17,7 +16,6 @@ import { DanfseRenderInput, NfseDanfseService } from './nfse-danfse.service';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
 import { RecuperarNfsePorChaveDto } from './dto/recuperar-por-chave.dto';
-import { RecuperarNfseLacunasDto } from './dto/recuperar-lacunas.dto';
 import { ReprocessarDanfsesDto } from './dto/reprocessar-danfses.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
 import { SincronizarNfseEventosDto } from './dto/sincronizar-eventos.dto';
@@ -1015,132 +1013,6 @@ export class NfseService {
       ambiente: this.toDtoAmbiente(ambiente),
       requestedKeys: chavesAcesso.length,
       processedKeys: detalhes.length,
-      documentsRecovered,
-      failures,
-      detalhes
-    };
-  }
-
-  async recuperarLacunas(dto: RecuperarNfseLacunasDto) {
-    const lacunas = this.normalizeRecoveryGaps(dto.lacunas);
-    if (lacunas.length === 0) {
-      throw new BadRequestException('Informe ao menos uma lacuna valida para recuperar as NFS-e faltantes.');
-    }
-
-    const estabelecimento = await this.resolveRecoveryEstablishment(dto);
-    const certificate = await this.findUsableCertificate(dto.clienteId, estabelecimento.id);
-    const limitDocuments = Math.min(200, Math.max(1, dto.limitDocuments ?? 100));
-    const documentosPendentes = this.expandGapNumbers(lacunas, limitDocuments);
-    if (documentosPendentes.length === 0) {
-      throw new BadRequestException('Nenhum numero pendente elegivel foi encontrado nas lacunas informadas.');
-    }
-
-    const detalhes: Array<{
-      numero: number;
-      serie: string | null;
-      ambiente: 'producao' | 'producao_restrita';
-      municipioPrestacaoCodigo?: string;
-      dpsId?: string;
-      chaveAcesso?: string;
-      status: 'recuperada' | 'falha';
-      mensagem: string;
-      documentoId?: string;
-    }> = [];
-    let documentsRecovered = 0;
-    let failures = 0;
-
-    for (const documento of documentosPendentes) {
-      const ambiente = documento.ambiente;
-      const municipioPrestacaoCodigo = await this.resolveMunicipioCodigoForRecovery({
-        clienteId: dto.clienteId,
-        cnpjPrestador: estabelecimento.cnpj,
-        ambiente,
-        serie: documento.serie,
-        estabelecimentoMunicipioCodigo: estabelecimento.municipioCodigoIbge,
-        explicitMunicipioCodigo: dto.municipioPrestacaoCodigo
-      });
-      const dpsId = this.buildDpsId({
-        municipioPrestacaoCodigo,
-        cnpjPrestador: estabelecimento.cnpj,
-        serie: documento.serie,
-        numero: documento.numero
-      });
-
-      if (!dpsId) {
-        failures += 1;
-        detalhes.push({
-          numero: documento.numero,
-          serie: documento.serie,
-          ambiente: this.toDtoAmbiente(ambiente),
-          municipioPrestacaoCodigo,
-          status: 'falha',
-          mensagem: 'Nao foi possivel montar o identificador da DPS para esta lacuna.'
-        });
-        continue;
-      }
-
-      const dpsResponse = await this.emissorPublicoClient.getDpsById({
-        dpsId,
-        ambiente: this.toExternalAmbiente(ambiente),
-        certificateId: certificate.id
-      });
-
-      try {
-        const resolvedXml =
-          dpsResponse.xml && this.canImportRecoveredXml(dpsResponse.xml)
-            ? dpsResponse.xml
-            : await this.resolveRecoveredXmlFromDpsResponse(dpsResponse, ambiente, certificate.id);
-
-        if (!resolvedXml) {
-          throw new Error(
-            dpsResponse.message ||
-              'A consulta da DPS nao retornou XML importavel nem chave de acesso suficiente para baixar a NFS-e.'
-          );
-        }
-
-        const persisted = await this.importXmlWithOrigin(
-          {
-            clienteId: dto.clienteId,
-            estabelecimentoId: estabelecimento.id,
-            ambiente: this.toDtoAmbiente(ambiente),
-            xml: resolvedXml
-          },
-          DocumentoOrigem.consulta_dps
-        );
-        documentsRecovered += 1;
-        detalhes.push({
-          numero: documento.numero,
-          serie: documento.serie,
-          ambiente: this.toDtoAmbiente(ambiente),
-          municipioPrestacaoCodigo,
-          dpsId,
-          chaveAcesso: persisted.chaveAcesso,
-          status: 'recuperada',
-          mensagem: 'NFS-e localizada pela DPS e armazenada com sucesso.',
-          documentoId: persisted.id
-        });
-      } catch (error) {
-        failures += 1;
-        detalhes.push({
-          numero: documento.numero,
-          serie: documento.serie,
-          ambiente: this.toDtoAmbiente(ambiente),
-          municipioPrestacaoCodigo,
-          dpsId,
-          chaveAcesso: dpsResponse.chaveAcesso,
-          status: 'falha',
-          mensagem: this.toErrorMessage(error)
-        });
-      }
-    }
-
-    return {
-      clienteId: dto.clienteId,
-      estabelecimentoId: estabelecimento.id,
-      cnpjConsulta: estabelecimento.cnpj,
-      requestedRanges: lacunas.length,
-      requestedNumbers: documentosPendentes.length,
-      processedNumbers: detalhes.length,
       documentsRecovered,
       failures,
       detalhes
@@ -2528,112 +2400,6 @@ export class NfseService {
     return digits.length === 50 ? digits : undefined;
   }
 
-  private normalizeRecoveryGaps(
-    gaps: Array<{
-      ambiente?: 'producao' | 'producao_restrita';
-      serie?: string | null;
-      numeroInicial: number;
-      numeroFinal: number;
-    }>
-  ): Array<{ ambiente: Ambiente; serie: string | null; numeroInicial: number; numeroFinal: number }> {
-    const normalized: Array<{ ambiente: Ambiente; serie: string | null; numeroInicial: number; numeroFinal: number }> = [];
-
-    for (const gap of gaps) {
-      const numeroInicial = Math.trunc(Number(gap?.numeroInicial || 0));
-      const numeroFinal = Math.trunc(Number(gap?.numeroFinal || 0));
-      if (numeroInicial <= 0 || numeroFinal <= 0 || numeroFinal < numeroInicial) {
-        continue;
-      }
-
-      normalized.push({
-        ambiente: gap?.ambiente === 'producao_restrita' ? Ambiente.producao_restrita : Ambiente.producao,
-        serie: String(gap?.serie || '').trim() || null,
-        numeroInicial,
-        numeroFinal
-      });
-    }
-
-    return normalized;
-  }
-
-  private expandGapNumbers(
-    gaps: Array<{ ambiente: Ambiente; serie: string | null; numeroInicial: number; numeroFinal: number }>,
-    limit: number
-  ): Array<{ ambiente: Ambiente; serie: string | null; numero: number }> {
-    const items: Array<{ ambiente: Ambiente; serie: string | null; numero: number }> = [];
-
-    for (const gap of gaps) {
-      for (let numero = gap.numeroInicial; numero <= gap.numeroFinal; numero += 1) {
-        items.push({
-          ambiente: gap.ambiente,
-          serie: gap.serie,
-          numero
-        });
-        if (items.length >= limit) {
-          return items;
-        }
-      }
-    }
-
-    return items;
-  }
-
-  private buildDpsId(params: {
-    municipioPrestacaoCodigo?: string;
-    cnpjPrestador: string;
-    serie?: string | null;
-    numero: number;
-  }): string | undefined {
-    const municipioPrestacaoCodigo = this.normalizeMunicipioCodigoIbge(params.municipioPrestacaoCodigo);
-    const cnpjPrestador = this.normalizeCnpj(params.cnpjPrestador);
-    const serieDigits = String(params.serie || '')
-      .replace(/\D/g, '')
-      .trim();
-    const numero = Math.trunc(Number(params.numero || 0));
-
-    if (!municipioPrestacaoCodigo || !cnpjPrestador || !serieDigits || numero <= 0) {
-      return undefined;
-    }
-
-    const serie = serieDigits.slice(-5).padStart(5, '0');
-    const numeroDps = String(numero).padStart(12, '0');
-    return `DPS${municipioPrestacaoCodigo}2${cnpjPrestador}${serie}${numeroDps}`;
-  }
-
-  private canImportRecoveredXml(xml: string): boolean {
-    try {
-      const parsed = this.parser.parseAny(xml);
-      return parsed.kind === 'nfse';
-    } catch {
-      return false;
-    }
-  }
-
-  private async resolveRecoveredXmlFromDpsResponse(
-    response: NfseEmissorPublicoDpsResult,
-    ambiente: Ambiente,
-    certificateId: string
-  ): Promise<string | undefined> {
-    const chaveAcesso = this.normalizeChaveAcesso(response.chaveAcesso);
-    if (!chaveAcesso) {
-      return undefined;
-    }
-
-    const nfseResponse = await this.emissorPublicoClient.getNfseByChave({
-      chaveAcesso,
-      ambiente: this.toExternalAmbiente(ambiente),
-      certificateId
-    });
-
-    if (nfseResponse.statusCode !== 200 || !nfseResponse.xml) {
-      throw new Error(
-        nfseResponse.message ?? `Falha ao baixar NFS-e pela chave retornada da DPS. HTTP ${nfseResponse.statusCode}.`
-      );
-    }
-
-    return nfseResponse.xml;
-  }
-
   private async resolveRecoveryEstablishment(
     dto: Pick<RecuperarNfsePorChaveDto, 'clienteId' | 'estabelecimentoId' | 'cnpjConsulta'>
   ): Promise<{ id: string; cnpj: string; municipioCodigoIbge?: string | null }> {
@@ -2679,43 +2445,6 @@ export class NfseService {
     }
 
     return estabelecimento;
-  }
-
-  private async resolveMunicipioCodigoForRecovery(params: {
-    clienteId: string;
-    cnpjPrestador: string;
-    ambiente: Ambiente;
-    serie?: string | null;
-    estabelecimentoMunicipioCodigo?: string | null;
-    explicitMunicipioCodigo?: string | null;
-  }): Promise<string | undefined> {
-    const explicitMunicipioCodigo = this.normalizeMunicipioCodigoIbge(params.explicitMunicipioCodigo);
-    if (explicitMunicipioCodigo) {
-      return explicitMunicipioCodigo;
-    }
-
-    const where: Prisma.NfseDocumentoWhereInput = {
-      clienteId: params.clienteId,
-      ambiente: params.ambiente,
-      cnpjPrestador: this.normalizeCnpj(params.cnpjPrestador),
-      municipioPrestacaoCodigo: {
-        not: null
-      }
-    };
-
-    if (params.serie != null) {
-      where.serie = params.serie;
-    }
-
-    const documento = await this.prisma.nfseDocumento.findFirst({
-      where,
-      orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
-      select: {
-        municipioPrestacaoCodigo: true
-      }
-    });
-
-    return this.normalizeMunicipioCodigoIbge(documento?.municipioPrestacaoCodigo) ?? this.normalizeMunicipioCodigoIbge(params.estabelecimentoMunicipioCodigo);
   }
 
   private async reclassifyDocumentoAmbiente(

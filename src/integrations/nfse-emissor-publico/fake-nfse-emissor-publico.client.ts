@@ -1,10 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
-import {
-  NfseEmissorPublicoClient,
-  NfseEmissorPublicoDpsResult,
-  NfseEmissorPublicoNfseResult
-} from './nfse-emissor-publico.types';
+import { NfseEmissorPublicoClient, NfseEmissorPublicoNfseResult } from './nfse-emissor-publico.types';
 
 @Injectable()
 export class FakeNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
@@ -44,32 +40,6 @@ export class FakeNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
         mock: true,
         certificateId: params.certificateId
       }
-    };
-  }
-
-  async getDpsById(params: {
-    dpsId: string;
-    ambiente: NfseAmbiente;
-    certificateId: string;
-  }): Promise<NfseEmissorPublicoDpsResult> {
-    const numero = params.dpsId.replace(/\D/g, '').slice(-12).replace(/^0+/, '') || '1';
-    const chaveAcesso = `421100900000000000000000000000${numero.padStart(6, '0')}26080512345678`.slice(0, 50);
-    const nfse = await this.getNfseByChave({
-      chaveAcesso,
-      ambiente: params.ambiente,
-      certificateId: params.certificateId
-    });
-
-    return {
-      statusCode: nfse.statusCode,
-      dpsId: params.dpsId,
-      chaveAcesso,
-      xml: nfse.xml,
-      rawResponse: {
-        mock: true,
-        certificateId: params.certificateId
-      },
-      message: nfse.message
     };
   }
 }

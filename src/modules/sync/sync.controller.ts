@@ -65,7 +65,7 @@ export class SyncController {
   @Post('sync/reprocessar-nsus-passados/execucao')
   @Roles('admin')
   startPastNsuRecoveryExecution(@Body() dto: StartPastNsuRecoveryExecutionDto) {
-    return this.syncService.startPastNsuRecoveryExecution(dto.clienteId);
+    return this.syncService.startPastNsuRecoveryExecution(dto);
   }
 
   @Get('sync/reprocessar-nsus-passados/execucao/:executionId')

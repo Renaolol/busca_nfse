@@ -28,6 +28,7 @@ import { LocalStorageService } from '../storage/storage.service';
 import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
 import { StartSyncDto } from './dto/start-sync.dto';
 import { ReprocessPastNsusDto } from './dto/reprocess-past-nsus.dto';
+import { StartPastNsuRecoveryExecutionDto } from './dto/start-past-nsu-recovery-execution.dto';
 
 type ReprocessPastNsusDetail = {
   controleId: string;
@@ -82,12 +83,45 @@ type PastNsuRecoveryExecutionRow = {
 type PastNsuRecoveryExecutionState = {
   executionId: string;
   clienteId: string;
+  requestSignature: string;
   status: 'running' | 'completed' | 'failed';
   startedAt: string;
   finishedAt: string | null;
   currentMessage: string | null;
   summary: ReprocessPastNsusResult;
   rows: PastNsuRecoveryExecutionRow[];
+};
+
+type NormalizedGapAuditRange = {
+  ambiente: Ambiente;
+  serie: string | null;
+  numeroInicial: number;
+  numeroFinal: number;
+  quantidade: number;
+  label: string;
+};
+
+type StoredNfseNumberIndexItem = {
+  nsu: bigint;
+  numero: number;
+  serie: string | null;
+};
+
+type PlannedPastNsuRange = {
+  nsuInicial: bigint;
+  nsuFinal: bigint;
+  lacunaLabels: string[];
+};
+
+type PreparedPastNsuRecoveryControl = {
+  control: NfseSyncControle;
+  ranges: PlannedPastNsuRange[];
+};
+
+type PreparedPastNsuRecoveryPlan = {
+  mode: 'full' | 'gap-audit';
+  controls: PreparedPastNsuRecoveryControl[];
+  currentMessage: string;
 };
 
 type PersistDfeDocumentResult = {
@@ -617,36 +651,42 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     return this.reprocessPastNsusInternal(options);
   }
 
-  async startPastNsuRecoveryExecution(clienteId: string): Promise<PastNsuRecoveryExecutionState> {
-    await this.ensureClient(clienteId);
+  async startPastNsuRecoveryExecution(dto: StartPastNsuRecoveryExecutionDto): Promise<PastNsuRecoveryExecutionState> {
+    await this.ensureClient(dto.clienteId);
+
+    const requestOptions: ReprocessPastNsusDto = {
+      clienteId: dto.clienteId,
+      cnpjConsulta: dto.cnpjConsulta,
+      ambiente: dto.ambiente,
+      lacunas: dto.lacunas
+    };
+    const requestSignature = this.buildPastNsuRecoveryRequestSignature(requestOptions);
 
     const existingRunning = [...this.pastNsuRecoveryExecutions.values()].find(
-      (execution) => execution.clienteId === clienteId && execution.status === 'running'
+      (execution) => execution.requestSignature === requestSignature && execution.status === 'running'
     );
     if (existingRunning) {
       return this.clonePastNsuRecoveryExecution(existingRunning);
     }
 
-    const controls = await this.prisma.nfseSyncControle.findMany({
-      where: { clienteId },
-      orderBy: [{ updatedAt: 'asc' }, { createdAt: 'asc' }]
-    });
-    const summary = this.createEmptyReprocessPastNsusResult(controls.length);
+    const plan = await this.preparePastNsuRecoveryPlan(requestOptions);
+    const summary = this.createEmptyReprocessPastNsusResult(plan.controls.length);
     const execution: PastNsuRecoveryExecutionState = {
       executionId: randomUUID(),
-      clienteId,
-      status: controls.length > 0 ? 'running' : 'completed',
+      clienteId: dto.clienteId,
+      requestSignature,
+      status: plan.controls.length > 0 ? 'running' : 'completed',
       startedAt: new Date().toISOString(),
-      finishedAt: controls.length > 0 ? null : new Date().toISOString(),
-      currentMessage: controls.length > 0 ? 'Preparando reprocessamento dos NSUs do cliente...' : 'Nenhum controle encontrado para este cliente.',
+      finishedAt: plan.controls.length > 0 ? null : new Date().toISOString(),
+      currentMessage: plan.currentMessage,
       summary,
-      rows: this.createPastNsuRecoveryExecutionRows(controls, 1n)
+      rows: this.createPastNsuRecoveryExecutionRows(plan.controls)
     };
 
     this.pastNsuRecoveryExecutions.set(execution.executionId, execution);
 
-    if (controls.length > 0) {
-      void this.runPastNsuRecoveryExecution(execution.executionId, { clienteId });
+    if (plan.controls.length > 0) {
+      void this.runPastNsuRecoveryExecution(execution.executionId, requestOptions, plan);
     }
 
     return this.clonePastNsuRecoveryExecution(execution);
@@ -663,37 +703,21 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
   private async reprocessPastNsusInternal(
     options: ReprocessPastNsusDto = {},
-    execution?: PastNsuRecoveryExecutionState
+    execution?: PastNsuRecoveryExecutionState,
+    preparedPlan?: PreparedPastNsuRecoveryPlan
   ): Promise<ReprocessPastNsusResult> {
-    if (options.clienteId) {
-      await this.ensureClient(options.clienteId);
-    }
-
-    const controls = await this.prisma.nfseSyncControle.findMany({
-      where: options.clienteId ? { clienteId: options.clienteId } : {},
-      orderBy: [{ updatedAt: 'asc' }, { createdAt: 'asc' }]
-    });
-
-    const result: ReprocessPastNsusResult = {
-      controlesEncontrados: controls.length,
-      controlesProcessados: 0,
-      nsusAvaliados: 0,
-      nsusConsultados: 0,
-      nsusIgnoradosComDocumento: 0,
-      documentosSalvos: 0,
-      documentosIgnoradosExistentes: 0,
-      semDocumento: 0,
-      falhas: 0,
-      interrompidoPorRateLimit: false,
-      ultimaMensagem: null,
-      detalhes: []
-    };
+    const plan = preparedPlan ?? (await this.preparePastNsuRecoveryPlan(options));
+    const controls = plan.controls;
+    const result = this.createEmptyReprocessPastNsusResult(controls.length);
 
     if (execution) {
-      this.syncPastNsuRecoveryExecution(execution, result, execution.currentMessage);
+      this.syncPastNsuRecoveryExecution(execution, result, plan.currentMessage);
     }
 
-    for (const control of controls) {
+    for (const controlPlan of controls) {
+      const control = controlPlan.control;
+      const plannedRanges = controlPlan.ranges;
+
       if (this.isRateLimitCooldownActive()) {
         result.interrompidoPorRateLimit = true;
         result.ultimaMensagem = 'Recuperacao interrompida por cooldown de rate limit do ADN';
@@ -703,21 +727,26 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         break;
       }
 
-      const startNsu = 1n;
-      const detail = this.createReprocessDetail(control, startNsu);
+      const detail = this.createReprocessDetail(control, plannedRanges);
       result.detalhes.push(detail);
       if (execution) {
         this.syncPastNsuRecoveryExecution(
           execution,
           result,
-          `Preparando controle ${control.cnpjConsulta} em ${String(control.ambiente)}.`
+          plan.mode === 'gap-audit'
+            ? `Preparando auditoria por NSU para ${control.cnpjConsulta} em ${String(control.ambiente)}.`
+            : `Preparando controle ${control.cnpjConsulta} em ${String(control.ambiente)}.`
         );
       }
 
-      if (control.ultimoNsuConsultado < startNsu) {
+      if (plannedRanges.length === 0) {
         result.controlesProcessados += 1;
         if (execution) {
-          this.syncPastNsuRecoveryExecution(execution, result, `Controle ${control.cnpjConsulta} sem NSUs passados para avaliar.`);
+          this.syncPastNsuRecoveryExecution(
+            execution,
+            result,
+            `Controle ${control.cnpjConsulta} sem faixa NSU elegivel para avaliar.`
+          );
         }
         continue;
       }
@@ -737,11 +766,13 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         result.falhas += 1;
         result.ultimaMensagem = message;
         if (execution) {
-          for (let nsu = startNsu; nsu <= control.ultimoNsuConsultado; nsu += 1n) {
-            this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
-              status: 'erro',
-              mensagem: message
-            });
+          for (const range of plannedRanges) {
+            for (let nsu = range.nsuInicial; nsu <= range.nsuFinal; nsu += 1n) {
+              this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
+                status: 'erro',
+                mensagem: message
+              });
+            }
           }
           this.syncPastNsuRecoveryExecution(execution, result, message);
         }
@@ -761,221 +792,227 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       let maxRecoveredNsu: bigint | null = null;
       let shouldStopAll = false;
 
-      for (let nsu = startNsu; nsu <= control.ultimoNsuConsultado; nsu += 1n) {
-        detail.nsusAvaliados += 1;
-        result.nsusAvaliados += 1;
-        if (execution) {
-          this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
-            status: 'consultando',
-            mensagem: 'Verificando se o NSU ja possui documento salvo...'
-          });
-          this.syncPastNsuRecoveryExecution(
-            execution,
-            result,
-            `Analisando NSU ${nsu.toString()} para ${control.cnpjConsulta}.`
-          );
-        }
-
-        if (
-          await this.hasFiscalDocumentForNsu({
-            clienteId: control.clienteId,
-            ambiente: control.ambiente,
-            nsu
-          })
-        ) {
-          detail.nsusIgnoradosComDocumento += 1;
-          result.nsusIgnoradosComDocumento += 1;
+      for (const range of plannedRanges) {
+        for (let nsu = range.nsuInicial; nsu <= range.nsuFinal; nsu += 1n) {
+          detail.nsusAvaliados += 1;
+          result.nsusAvaliados += 1;
           if (execution) {
             this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
-              status: 'ja_baixado',
-              mensagem: 'Documento deste NSU ja estava armazenado.'
+              status: 'consultando',
+              mensagem: 'Verificando se o NSU ja possui documento salvo...'
             });
-            this.syncPastNsuRecoveryExecution(execution, result, `NSU ${nsu.toString()} ja estava baixado.`);
-          }
-          continue;
-        }
-
-        const { result: dfeResult, attempts } = await this.fetchPastNsuWithRetries({
-          cnpjConsulta: control.cnpjConsulta,
-          nsu,
-          ambiente: this.toNfseAmbiente(control.ambiente),
-          certificateId: certificate.id
-        });
-        detail.nsusConsultados += attempts;
-        result.nsusConsultados += attempts;
-
-        if (this.isCertificateDecryptError(dfeResult)) {
-          const message =
-            'Falha ao descriptografar certificado/senha. Verifique CERT_MASTER_KEY e recadastre o certificado.';
-          detail.falhas += 1;
-          result.falhas += 1;
-          result.ultimaMensagem = message;
-          if (execution) {
-            this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
-              status: 'erro',
-              mensagem: message
-            });
-            this.syncPastNsuRecoveryExecution(execution, result, message);
-          }
-          await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nsu, 'erro_certificado', message);
-          break;
-        }
-
-        if (this.mustRetryWithoutAdvancingNsu(dfeResult)) {
-          const isRateLimitError = dfeResult.statusCode === 429;
-          const message =
-            dfeResult.message ??
-            (isRateLimitError ? 'Falha na consulta ADN. HTTP 429.' : 'Falha temporaria ao consultar ADN');
-
-          if (isRateLimitError) {
-            this.activateRateLimitCooldown();
-            result.interrompidoPorRateLimit = true;
+            this.syncPastNsuRecoveryExecution(
+              execution,
+              result,
+              `Analisando NSU ${nsu.toString()} para ${control.cnpjConsulta}.`
+            );
           }
 
-          detail.falhas += 1;
-          result.falhas += 1;
-          result.ultimaMensagem = message;
-          if (execution) {
-            this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
-              status: 'erro',
-              mensagem: message
-            });
-            this.syncPastNsuRecoveryExecution(execution, result, message);
+          if (
+            await this.hasFiscalDocumentForNsu({
+              clienteId: control.clienteId,
+              ambiente: control.ambiente,
+              nsu
+            })
+          ) {
+            detail.nsusIgnoradosComDocumento += 1;
+            result.nsusIgnoradosComDocumento += 1;
+            if (execution) {
+              this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
+                status: 'ja_baixado',
+                mensagem: 'Documento deste NSU ja estava armazenado.'
+              });
+              this.syncPastNsuRecoveryExecution(execution, result, `NSU ${nsu.toString()} ja estava baixado.`);
+            }
+            continue;
           }
-          await this.logSync(
-            control.clienteId,
-            control.id,
-            certificate.id,
-            control.ambiente,
+
+          const { result: dfeResult, attempts } = await this.fetchPastNsuWithRetries({
+            cnpjConsulta: control.cnpjConsulta,
             nsu,
-            isRateLimitError ? 'rate_limit' : 'erro_api',
-            message
-          );
+            ambiente: this.toNfseAmbiente(control.ambiente),
+            certificateId: certificate.id
+          });
+          detail.nsusConsultados += attempts;
+          result.nsusConsultados += attempts;
 
-          if (isRateLimitError) {
-            shouldStopAll = true;
+          if (this.isCertificateDecryptError(dfeResult)) {
+            const message =
+              'Falha ao descriptografar certificado/senha. Verifique CERT_MASTER_KEY e recadastre o certificado.';
+            detail.falhas += 1;
+            result.falhas += 1;
+            result.ultimaMensagem = message;
+            if (execution) {
+              this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
+                status: 'erro',
+                mensagem: message
+              });
+              this.syncPastNsuRecoveryExecution(execution, result, message);
+            }
+            await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nsu, 'erro_certificado', message);
             break;
           }
 
-          continue;
-        }
+          if (this.mustRetryWithoutAdvancingNsu(dfeResult)) {
+            const isRateLimitError = dfeResult.statusCode === 429;
+            const message =
+              dfeResult.message ??
+              (isRateLimitError ? 'Falha na consulta ADN. HTTP 429.' : 'Falha temporaria ao consultar ADN');
 
-        const documents = this.getResultDocuments(dfeResult, nsu).filter(
-          (document) => !document.nsu || document.nsu <= control.ultimoNsuConsultado
-        );
-        if (!dfeResult.hasDocument || documents.length === 0) {
-          detail.semDocumento += 1;
-          result.semDocumento += 1;
-          if (execution) {
-            this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
-              status: 'sem_documento',
-              chaveAcesso: dfeResult.chaveAcesso ?? null,
-              mensagem: dfeResult.message ?? 'NSU sem documento retornado pelo ADN.'
-            });
-            this.syncPastNsuRecoveryExecution(execution, result, `NSU ${nsu.toString()} nao retornou documento.`);
-          }
-          continue;
-        }
+            if (isRateLimitError) {
+              this.activateRateLimitCooldown();
+              result.interrompidoPorRateLimit = true;
+            }
 
-        let requestedNsuResolved = false;
-        for (const document of documents) {
-          if (
-            document.nsu &&
-            (await this.hasFiscalDocumentForNsu({
-              clienteId: control.clienteId,
-              ambiente: control.ambiente,
-              nsu: document.nsu
-            }))
-          ) {
-            detail.documentosIgnoradosExistentes += 1;
-            result.documentosIgnoradosExistentes += 1;
-            requestedNsuResolved = requestedNsuResolved || document.nsu === nsu;
+            detail.falhas += 1;
+            result.falhas += 1;
+            result.ultimaMensagem = message;
             if (execution) {
-              this.updatePastNsuRecoveryExecutionRow(execution, control.id, document.nsu ?? nsu, {
-                status: 'ja_baixado',
-                mensagem: 'Documento retornado pelo ADN ja estava armazenado.',
-                chaveAcesso: dfeResult.chaveAcesso ?? null
+              this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
+                status: 'erro',
+                mensagem: message
               });
-              this.syncPastNsuRecoveryExecution(
-                execution,
-                result,
-                `NSU ${(document.nsu ?? nsu).toString()} retornou documento ja existente.`
-              );
+              this.syncPastNsuRecoveryExecution(execution, result, message);
+            }
+            await this.logSync(
+              control.clienteId,
+              control.id,
+              certificate.id,
+              control.ambiente,
+              nsu,
+              isRateLimitError ? 'rate_limit' : 'erro_api',
+              message
+            );
+
+            if (isRateLimitError) {
+              shouldStopAll = true;
+              break;
+            }
+
+            continue;
+          }
+
+          const documents = this.getResultDocuments(dfeResult, nsu).filter(
+            (document) => !document.nsu || document.nsu <= control.ultimoNsuConsultado
+          );
+          if (!dfeResult.hasDocument || documents.length === 0) {
+            detail.semDocumento += 1;
+            result.semDocumento += 1;
+            if (execution) {
+              this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
+                status: 'sem_documento',
+                chaveAcesso: dfeResult.chaveAcesso ?? null,
+                mensagem: dfeResult.message ?? 'NSU sem documento retornado pelo ADN.'
+              });
+              this.syncPastNsuRecoveryExecution(execution, result, `NSU ${nsu.toString()} nao retornou documento.`);
             }
             continue;
           }
 
-          const persisted = await this.persistDfeDocumentFromNsu({
-            control,
-            document
-          });
-          const persistedNsu = persisted.nsu ?? nsu;
-          if (persisted.outcome === 'existing') {
-            detail.documentosIgnoradosExistentes += 1;
-            result.documentosIgnoradosExistentes += 1;
+          let requestedNsuResolved = false;
+          for (const document of documents) {
+            if (
+              document.nsu &&
+              (await this.hasFiscalDocumentForNsu({
+                clienteId: control.clienteId,
+                ambiente: control.ambiente,
+                nsu: document.nsu
+              }))
+            ) {
+              detail.documentosIgnoradosExistentes += 1;
+              result.documentosIgnoradosExistentes += 1;
+              requestedNsuResolved = requestedNsuResolved || document.nsu === nsu;
+              if (execution) {
+                this.updatePastNsuRecoveryExecutionRow(execution, control.id, document.nsu ?? nsu, {
+                  status: 'ja_baixado',
+                  mensagem: 'Documento retornado pelo ADN ja estava armazenado.',
+                  chaveAcesso: dfeResult.chaveAcesso ?? null
+                });
+                this.syncPastNsuRecoveryExecution(
+                  execution,
+                  result,
+                  `NSU ${(document.nsu ?? nsu).toString()} retornou documento ja existente.`
+                );
+              }
+              continue;
+            }
+
+            const persisted = await this.persistDfeDocumentFromNsu({
+              control,
+              document
+            });
+            const persistedNsu = persisted.nsu ?? nsu;
+            if (persisted.outcome === 'existing') {
+              detail.documentosIgnoradosExistentes += 1;
+              result.documentosIgnoradosExistentes += 1;
+              requestedNsuResolved = requestedNsuResolved || persistedNsu === nsu;
+              if (execution) {
+                this.updatePastNsuRecoveryExecutionRow(execution, control.id, persistedNsu, {
+                  status: 'ja_baixado',
+                  mensagem: 'Documento retornado pelo ADN ja estava armazenado.',
+                  chaveAcesso: dfeResult.chaveAcesso ?? null
+                });
+                this.syncPastNsuRecoveryExecution(
+                  execution,
+                  result,
+                  `NSU ${persistedNsu.toString()} retornou documento ja existente.`
+                );
+              }
+              continue;
+            }
             requestedNsuResolved = requestedNsuResolved || persistedNsu === nsu;
+            maxRecoveredNsu =
+              maxRecoveredNsu && maxRecoveredNsu > persistedNsu ? maxRecoveredNsu : persistedNsu;
+            detail.documentosSalvos += 1;
+            result.documentosSalvos += 1;
             if (execution) {
               this.updatePastNsuRecoveryExecutionRow(execution, control.id, persistedNsu, {
-                status: 'ja_baixado',
-                mensagem: 'Documento retornado pelo ADN ja estava armazenado.',
+                status: 'baixado',
+                mensagem:
+                  persisted.kind === 'evento'
+                    ? 'Evento recuperado com sucesso para este NSU.'
+                    : 'Documento recuperado com sucesso para este NSU.',
                 chaveAcesso: dfeResult.chaveAcesso ?? null
               });
               this.syncPastNsuRecoveryExecution(
                 execution,
                 result,
-                `NSU ${persistedNsu.toString()} retornou documento ja existente.`
+                `NSU ${persistedNsu.toString()} recuperado com sucesso.`
               );
             }
-            continue;
-          }
-          requestedNsuResolved = requestedNsuResolved || persistedNsu === nsu;
-          maxRecoveredNsu =
-            maxRecoveredNsu && maxRecoveredNsu > persistedNsu ? maxRecoveredNsu : persistedNsu;
-          detail.documentosSalvos += 1;
-          result.documentosSalvos += 1;
-          if (execution) {
-            this.updatePastNsuRecoveryExecutionRow(execution, control.id, persistedNsu, {
-              status: 'baixado',
-              mensagem:
-                persisted.kind === 'evento'
-                  ? 'Evento recuperado com sucesso para este NSU.'
-                  : 'Documento recuperado com sucesso para este NSU.',
-              chaveAcesso: dfeResult.chaveAcesso ?? null
-            });
-            this.syncPastNsuRecoveryExecution(
-              execution,
-              result,
-              `NSU ${persistedNsu.toString()} recuperado com sucesso.`
+            await this.logSync(
+              control.clienteId,
+              control.id,
+              certificate.id,
+              control.ambiente,
+              persistedNsu,
+              'sucesso',
+              persisted.kind === 'evento'
+                ? 'Evento recuperado no reprocessamento de NSUs passados'
+                : 'Documento recuperado no reprocessamento de NSUs passados'
             );
           }
-          await this.logSync(
-            control.clienteId,
-            control.id,
-            certificate.id,
-            control.ambiente,
-            persistedNsu,
-            'sucesso',
-            persisted.kind === 'evento'
-              ? 'Evento recuperado no reprocessamento de NSUs passados'
-              : 'Documento recuperado no reprocessamento de NSUs passados'
-          );
+
+          if (!requestedNsuResolved) {
+            detail.semDocumento += 1;
+            result.semDocumento += 1;
+            if (execution) {
+              this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
+                status: 'sem_documento',
+                chaveAcesso: dfeResult.chaveAcesso ?? null,
+                mensagem: this.buildIndirectNsuDocumentMessage(nsu, documents)
+              });
+              this.syncPastNsuRecoveryExecution(
+                execution,
+                result,
+                `NSU ${nsu.toString()} retornou apenas documentos vinculados a outros NSUs.`
+              );
+            }
+          }
         }
 
-        if (!requestedNsuResolved) {
-          detail.semDocumento += 1;
-          result.semDocumento += 1;
-          if (execution) {
-            this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
-              status: 'sem_documento',
-              chaveAcesso: dfeResult.chaveAcesso ?? null,
-              mensagem: this.buildIndirectNsuDocumentMessage(nsu, documents)
-            });
-            this.syncPastNsuRecoveryExecution(
-              execution,
-              result,
-              `NSU ${nsu.toString()} retornou apenas documentos vinculados a outros NSUs.`
-            );
-          }
+        if (shouldStopAll) {
+          break;
         }
       }
 
@@ -1558,24 +1595,330 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
+  private async preparePastNsuRecoveryPlan(options: ReprocessPastNsusDto = {}): Promise<PreparedPastNsuRecoveryPlan> {
+    if (options.clienteId) {
+      await this.ensureClient(options.clienteId);
+    }
+
+    const normalizedGaps = this.normalizeGapAuditRanges(options.lacunas);
+    const cnpjConsulta = this.normalizeCnpj(options.cnpjConsulta);
+    const where: Prisma.NfseSyncControleWhereInput = {};
+
+    if (options.clienteId) {
+      where.clienteId = options.clienteId;
+    }
+
+    if (cnpjConsulta) {
+      where.cnpjConsulta = cnpjConsulta;
+    }
+
+    if (options.ambiente) {
+      where.ambiente = options.ambiente;
+    } else if (normalizedGaps.length > 0) {
+      const ambientes = [...new Set(normalizedGaps.map((gap) => gap.ambiente))];
+      where.ambiente = ambientes.length === 1 ? ambientes[0] : { in: ambientes };
+    }
+
+    const controls = await this.prisma.nfseSyncControle.findMany({
+      where,
+      orderBy: [{ updatedAt: 'asc' }, { createdAt: 'asc' }]
+    });
+
+    if (normalizedGaps.length === 0) {
+      return {
+        mode: 'full',
+        controls: controls.map((control) => ({
+          control,
+          ranges:
+            control.ultimoNsuConsultado >= 1n
+              ? [
+                  {
+                    nsuInicial: 1n,
+                    nsuFinal: control.ultimoNsuConsultado,
+                    lacunaLabels: []
+                  }
+                ]
+              : []
+        })),
+        currentMessage:
+          controls.length > 0
+            ? 'Preparando reprocessamento dos NSUs do cliente...'
+            : 'Nenhum controle encontrado para este cliente.'
+      };
+    }
+
+    const preparedControls: PreparedPastNsuRecoveryControl[] = [];
+
+    for (const control of controls) {
+      const controlGaps = normalizedGaps.filter((gap) => gap.ambiente === control.ambiente);
+      if (controlGaps.length === 0) {
+        continue;
+      }
+
+      const storedDocs = await this.prisma.nfseDocumento.findMany({
+        where: {
+          clienteId: control.clienteId,
+          ambiente: control.ambiente,
+          cnpjPrestador: control.cnpjConsulta,
+          nsu: {
+            not: null
+          },
+          numeroNfse: {
+            not: null
+          }
+        },
+        select: {
+          nsu: true,
+          numeroNfse: true,
+          serie: true
+        },
+        orderBy: [{ nsu: 'asc' }]
+      });
+
+      const ranges = this.buildGapAuditRangesForControl(control, controlGaps, storedDocs);
+      if (ranges.length > 0) {
+        preparedControls.push({
+          control,
+          ranges
+        });
+      }
+    }
+
+    return {
+      mode: 'gap-audit',
+      controls: preparedControls,
+      currentMessage:
+        preparedControls.length > 0
+          ? 'Preparando auditoria das lacunas pelos NSUs provaveis...'
+          : 'Nenhuma faixa NSU provavel foi encontrada para as lacunas informadas.'
+    };
+  }
+
+  private normalizeGapAuditRanges(gaps?: Array<{
+    ambiente?: Ambiente;
+    serie?: string | null;
+    numeroInicial?: number;
+    numeroFinal?: number;
+  }>): NormalizedGapAuditRange[] {
+    const normalized: NormalizedGapAuditRange[] = [];
+
+    for (const gap of gaps ?? []) {
+      const numeroInicial = Math.trunc(Number(gap?.numeroInicial || 0));
+      const numeroFinal = Math.trunc(Number(gap?.numeroFinal || 0));
+      if (numeroInicial <= 0 || numeroFinal < numeroInicial) {
+        continue;
+      }
+
+      const serie = this.normalizeSerie(gap?.serie);
+      const ambiente = gap?.ambiente === Ambiente.producao_restrita ? Ambiente.producao_restrita : Ambiente.producao;
+      normalized.push({
+        ambiente,
+        serie,
+        numeroInicial,
+        numeroFinal,
+        quantidade: numeroFinal - numeroInicial + 1,
+        label: this.buildGapLabel({
+          ambiente,
+          serie,
+          numeroInicial,
+          numeroFinal
+        })
+      });
+    }
+
+    return normalized;
+  }
+
+  private buildGapAuditRangesForControl(
+    control: Pick<NfseSyncControle, 'ultimoNsuConsultado'>,
+    gaps: NormalizedGapAuditRange[],
+    storedDocs: Array<{ nsu: bigint | null; numeroNfse: string | null; serie: string | null }>
+  ): PlannedPastNsuRange[] {
+    const index = this.buildStoredNfseNumberIndex(storedDocs);
+    const ranges = gaps
+      .map((gap) => this.inferGapAuditRange(control, gap, index))
+      .filter((range): range is PlannedPastNsuRange => Boolean(range));
+
+    return this.mergePlannedPastNsuRanges(ranges);
+  }
+
+  private buildStoredNfseNumberIndex(
+    storedDocs: Array<{ nsu: bigint | null; numeroNfse: string | null; serie: string | null }>
+  ): Map<string, StoredNfseNumberIndexItem[]> {
+    const grouped = new Map<string, StoredNfseNumberIndexItem[]>();
+
+    for (const doc of storedDocs) {
+      if (doc.nsu == null) {
+        continue;
+      }
+
+      const numero = this.parseNumeroNfse(doc.numeroNfse);
+      if (!numero) {
+        continue;
+      }
+
+      const serie = this.normalizeSerie(doc.serie);
+      const key = serie ?? '';
+      const items = grouped.get(key) ?? [];
+      items.push({
+        nsu: doc.nsu,
+        numero,
+        serie
+      });
+      grouped.set(key, items);
+    }
+
+    for (const items of grouped.values()) {
+      items.sort((left, right) => left.numero - right.numero || (left.nsu < right.nsu ? -1 : left.nsu > right.nsu ? 1 : 0));
+    }
+
+    return grouped;
+  }
+
+  private inferGapAuditRange(
+    control: Pick<NfseSyncControle, 'ultimoNsuConsultado'>,
+    gap: NormalizedGapAuditRange,
+    index: Map<string, StoredNfseNumberIndexItem[]>
+  ): PlannedPastNsuRange | null {
+    const items = index.get(gap.serie ?? '') ?? [];
+    const lower = [...items].reverse().find((item) => item.numero < gap.numeroInicial);
+    const upper = items.find((item) => item.numero > gap.numeroFinal);
+    const trailingFallbackWindow = Math.min(250, Math.max(60, gap.quantidade * 20));
+
+    if (lower && upper && upper.nsu > lower.nsu) {
+      const nsuDistance = this.toSafeNumber(upper.nsu - lower.nsu);
+      if (nsuDistance <= 250) {
+        return this.createPlannedPastNsuRange(lower.nsu + 1n, upper.nsu - 1n, gap.label);
+      }
+
+      const numeroDistance = upper.numero - lower.numero;
+      const buffer = Math.max(10, Math.min(60, gap.quantidade * 8));
+      if (numeroDistance > 0) {
+        const startApprox = this.toSafeNumber(lower.nsu) + Math.floor(((gap.numeroInicial - lower.numero) / numeroDistance) * nsuDistance);
+        const endApprox = this.toSafeNumber(lower.nsu) + Math.ceil(((gap.numeroFinal - lower.numero) / numeroDistance) * nsuDistance);
+        return this.createPlannedPastNsuRange(
+          BigInt(Math.max(this.toSafeNumber(lower.nsu) + 1, startApprox - buffer)),
+          BigInt(Math.min(this.toSafeNumber(upper.nsu) - 1, endApprox + buffer)),
+          gap.label
+        );
+      }
+    }
+
+    if (lower) {
+      return this.createPlannedPastNsuRange(
+        lower.nsu + 1n,
+        this.minBigInt(control.ultimoNsuConsultado, lower.nsu + BigInt(trailingFallbackWindow)),
+        gap.label
+      );
+    }
+
+    if (upper) {
+      return this.createPlannedPastNsuRange(
+        this.maxBigInt(1n, upper.nsu - BigInt(trailingFallbackWindow)),
+        upper.nsu - 1n,
+        gap.label
+      );
+    }
+
+    if (control.ultimoNsuConsultado < 1n) {
+      return null;
+    }
+
+    return this.createPlannedPastNsuRange(
+      this.maxBigInt(1n, control.ultimoNsuConsultado - BigInt(trailingFallbackWindow - 1)),
+      control.ultimoNsuConsultado,
+      gap.label
+    );
+  }
+
+  private createPlannedPastNsuRange(nsuInicial: bigint, nsuFinal: bigint, lacunaLabel: string): PlannedPastNsuRange | null {
+    if (nsuFinal < nsuInicial) {
+      return null;
+    }
+
+    return {
+      nsuInicial,
+      nsuFinal,
+      lacunaLabels: lacunaLabel ? [lacunaLabel] : []
+    };
+  }
+
+  private mergePlannedPastNsuRanges(ranges: PlannedPastNsuRange[]): PlannedPastNsuRange[] {
+    if (ranges.length === 0) {
+      return [];
+    }
+
+    const sorted = [...ranges].sort((left, right) =>
+      left.nsuInicial < right.nsuInicial ? -1 : left.nsuInicial > right.nsuInicial ? 1 : 0
+    );
+    const merged: PlannedPastNsuRange[] = [];
+
+    for (const range of sorted) {
+      const current = merged[merged.length - 1];
+      if (!current) {
+        merged.push({
+          ...range,
+          lacunaLabels: [...range.lacunaLabels]
+        });
+        continue;
+      }
+
+      if (range.nsuInicial <= current.nsuFinal + 1n) {
+        current.nsuFinal = this.maxBigInt(current.nsuFinal, range.nsuFinal);
+        current.lacunaLabels = [...new Set([...current.lacunaLabels, ...range.lacunaLabels])];
+        continue;
+      }
+
+      merged.push({
+        ...range,
+        lacunaLabels: [...range.lacunaLabels]
+      });
+    }
+
+    return merged;
+  }
+
+  private buildPastNsuRecoveryRequestSignature(options: ReprocessPastNsusDto): string {
+    const clienteId = String(options.clienteId || '').trim();
+    const cnpjConsulta = this.normalizeCnpj(options.cnpjConsulta) ?? '';
+    const ambiente = options.ambiente ?? '';
+    const gaps = this.normalizeGapAuditRanges(options.lacunas)
+      .map((gap) => `${gap.ambiente}:${gap.serie ?? ''}:${gap.numeroInicial}-${gap.numeroFinal}`)
+      .join('|');
+    return `${clienteId}:${cnpjConsulta}:${ambiente}:${gaps || 'full'}`;
+  }
+
+  private buildGapLabel(params: {
+    ambiente: Ambiente;
+    serie: string | null;
+    numeroInicial: number;
+    numeroFinal: number;
+  }): string {
+    const prefix = params.serie ? `Serie ${params.serie}` : 'Serie padrao';
+    const range = params.numeroInicial === params.numeroFinal ? String(params.numeroInicial) : `${params.numeroInicial} a ${params.numeroFinal}`;
+    return `${prefix} (${params.ambiente}): ${range}`;
+  }
+
   private createPastNsuRecoveryExecutionRows(
-    controls: Array<Pick<NfseSyncControle, 'id' | 'cnpjConsulta' | 'ambiente' | 'ultimoNsuConsultado'>>,
-    startNsu: bigint
+    controls: PreparedPastNsuRecoveryControl[]
   ): PastNsuRecoveryExecutionRow[] {
     const rows: PastNsuRecoveryExecutionRow[] = [];
 
-    for (const control of controls) {
-      for (let nsu = startNsu; nsu <= control.ultimoNsuConsultado; nsu += 1n) {
-        rows.push({
-          id: `${control.id}:${nsu.toString()}`,
-          controleId: control.id,
-          cnpjConsulta: control.cnpjConsulta,
-          ambiente: control.ambiente,
-          nsu: nsu.toString(),
-          status: 'na_fila',
-          chaveAcesso: null,
-          mensagem: 'Aguardando processamento deste NSU.'
-        });
+    for (const { control, ranges } of controls) {
+      for (const range of ranges) {
+        const waitingMessage = range.lacunaLabels.length > 0 ? `Aguardando processamento deste NSU. ${range.lacunaLabels.join(' • ')}` : 'Aguardando processamento deste NSU.';
+        for (let nsu = range.nsuInicial; nsu <= range.nsuFinal; nsu += 1n) {
+          rows.push({
+            id: `${control.id}:${nsu.toString()}`,
+            controleId: control.id,
+            cnpjConsulta: control.cnpjConsulta,
+            ambiente: control.ambiente,
+            nsu: nsu.toString(),
+            status: 'na_fila',
+            chaveAcesso: null,
+            mensagem: waitingMessage
+          });
+        }
       }
     }
 
@@ -1621,14 +1964,18 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     execution.currentMessage = currentMessage ?? result.ultimaMensagem ?? execution.currentMessage;
   }
 
-  private async runPastNsuRecoveryExecution(executionId: string, options: ReprocessPastNsusDto): Promise<void> {
+  private async runPastNsuRecoveryExecution(
+    executionId: string,
+    options: ReprocessPastNsusDto,
+    preparedPlan?: PreparedPastNsuRecoveryPlan
+  ): Promise<void> {
     const execution = this.pastNsuRecoveryExecutions.get(executionId);
     if (!execution) {
       return;
     }
 
     try {
-      const result = await this.reprocessPastNsusInternal(options, execution);
+      const result = await this.reprocessPastNsusInternal(options, execution, preparedPlan);
       execution.status = 'completed';
       execution.finishedAt = new Date().toISOString();
       execution.summary = this.cloneReprocessPastNsusResult(result);
@@ -1645,14 +1992,16 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private createReprocessDetail(control: NfseSyncControle, startNsu: bigint): ReprocessPastNsusDetail {
+  private createReprocessDetail(control: NfseSyncControle, ranges: PlannedPastNsuRange[]): ReprocessPastNsusDetail {
+    const firstRange = ranges[0];
+    const lastRange = ranges[ranges.length - 1];
     return {
       controleId: control.id,
       clienteId: control.clienteId,
       cnpjConsulta: control.cnpjConsulta,
       ambiente: control.ambiente,
-      nsuInicial: startNsu.toString(),
-      nsuFinal: control.ultimoNsuConsultado.toString(),
+      nsuInicial: firstRange?.nsuInicial?.toString() ?? '0',
+      nsuFinal: lastRange?.nsuFinal?.toString() ?? '0',
       nsusAvaliados: 0,
       nsusConsultados: 0,
       nsusIgnoradosComDocumento: 0,
@@ -2760,6 +3109,42 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     const digits = value.replace(/\D/g, '');
     return digits || undefined;
+  }
+
+  private normalizeSerie(value?: string | null): string | null {
+    const normalized = String(value ?? '').trim();
+    return normalized || null;
+  }
+
+  private parseNumeroNfse(value?: string | null): number | null {
+    if (!value) {
+      return null;
+    }
+
+    const digits = String(value).replace(/\D/g, '');
+    if (!digits) {
+      return null;
+    }
+
+    const parsed = Number.parseInt(digits, 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  private toSafeNumber(value: bigint): number {
+    const converted = Number(value);
+    if (!Number.isSafeInteger(converted)) {
+      throw new Error(`Valor bigint fora do intervalo seguro para number: ${value.toString()}`);
+    }
+
+    return converted;
+  }
+
+  private maxBigInt(left: bigint, right: bigint): bigint {
+    return left > right ? left : right;
+  }
+
+  private minBigInt(left: bigint, right: bigint): bigint {
+    return left < right ? left : right;
   }
 
   private async buildDanfseMunicipioFallback(params: {

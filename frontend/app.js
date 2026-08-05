@@ -929,8 +929,8 @@ function onDocumentClick(event) {
       openNfseRecoverByKeyModal();
       return;
     }
-    case 'nfse-recover-by-dps': {
-      openNfseRecoverByDpsModal();
+    case 'nfse-audit-gap-nsus': {
+      void runNfseGapAuditFromCurrentSearch();
       return;
     }
     case 'nfe-open-client-xmls': {
@@ -1461,11 +1461,6 @@ function onDocumentSubmit(event) {
     case 'nfseRecoverByKeyForm': {
       event.preventDefault();
       void submitNfseRecoverByKeyForm(target);
-      return;
-    }
-    case 'nfseRecoverByDpsForm': {
-      event.preventDefault();
-      void submitNfseRecoverByDpsForm(target);
       return;
     }
     case 'nfeDocsFilterForm': {
@@ -3691,7 +3686,7 @@ function renderXmlNumberingValidationSummary(query, validation) {
         state.dataSource === 'api'
           ? `
             <div style="display:flex; gap:10px; flex-wrap:wrap;">
-              <button class="btn primary" type="button" data-action="nfse-recover-by-dps">Recuperar faltantes automaticamente</button>
+              <button class="btn primary" type="button" data-action="nfse-audit-gap-nsus">Auditar lacunas por NSU</button>
               <button class="btn secondary" type="button" data-action="nfse-recover-by-key">Recuperar por chave</button>
             </div>
           `
@@ -5611,8 +5606,6 @@ function renderModal() {
       return renderEventsSyncReportModal();
     case 'past-nsu-recovery-report':
       return renderPastNsuRecoveryReportModal();
-    case 'nfse-recover-by-dps':
-      return renderNfseRecoverByDpsModal();
     case 'nfse-recover-by-key':
       return renderNfseRecoverByKeyModal();
     case 'download-by-key-report':
@@ -5666,108 +5659,6 @@ function renderRecoverPastNsusModal() {
             <button class="btn primary" type="submit">Iniciar recuperacao</button>
           </div>
         </form>
-      </div>
-    </div>
-  `;
-}
-
-function renderNfseRecoverByDpsModal() {
-  if (state.modal?.kind !== 'nfse-recover-by-dps') {
-    return '';
-  }
-
-  const submitting = Boolean(state.modal.submitting);
-  const result = state.modal.result || null;
-  const details = Array.isArray(result?.detalhes) ? result.detalhes : [];
-  const gapSummary = Array.isArray(state.modal.gapPreview) ? state.modal.gapPreview.filter(Boolean).join('; ') : '';
-  const errorMessage = String(state.modal.errorMessage || '').trim();
-  const requestedNumbers = Number(state.modal.requestedNumbers || 0);
-
-  return `
-    <div class="overlay" data-action="overlay-close">
-      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1180px); max-width:1180px;">
-        <div class="modal-header">
-          <h3 class="modal-title">Recuperar NFS-e faltantes pelas lacunas</h3>
-          <p class="modal-subtitle">${escapeHtml(state.modal.clientName || 'Cliente selecionado')} • o sistema tenta localizar a NFS-e pelo conjunto municipio + CNPJ + serie + numero.</p>
-        </div>
-        <div class="modal-body">
-          <form id="nfseRecoverByDpsForm">
-            <div class="form-grid two">
-              <label>
-                <span>Cliente</span>
-                <input type="text" value="${escapeHtml(state.modal.clientName || '')}" readonly />
-              </label>
-              <label>
-                <span>CNPJ consulta</span>
-                <input type="text" name="cnpjConsulta" value="${escapeHtml(state.modal.cnpjConsulta || '')}" readonly />
-              </label>
-              <label>
-                <span>Ambiente padrao</span>
-                <select name="ambiente" ${submitting ? 'disabled' : ''}>
-                  ${renderOptions(['producao', 'producao_restrita'], state.modal.ambiente || 'producao', {
-                    producao: 'Producao',
-                    producao_restrita: 'Producao restrita'
-                  })}
-                </select>
-              </label>
-              <label>
-                <span>Cliente ID</span>
-                <input type="text" name="clienteId" value="${escapeHtml(state.modal.clientId || '')}" readonly />
-              </label>
-            </div>
-            <p class="card-subtitle" style="margin:14px 0 10px; color:#8a5a00;">
-              Lacunas selecionadas: ${escapeHtml(gapSummary || 'Nenhuma')} • ${escapeHtml(String(requestedNumbers))} numero(s) faltante(s) nesta tentativa.
-            </p>
-            <p class="card-subtitle" style="margin-top:10px;">Se a API oficial da DPS nao localizar alguma nota, use o fluxo manual por chave apenas como fallback.</p>
-            ${errorMessage ? `<div class="table-state error" style="margin-top:14px;">${escapeHtml(errorMessage)}</div>` : ''}
-            <div class="modal-footer" style="padding:18px 0 0;">
-              <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Fechar</button>
-              <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Recuperando...' : 'Recuperar automaticamente'}</button>
-            </div>
-          </form>
-          ${
-            result
-              ? `
-                <div style="margin-top:18px;">
-                  <div class="form-grid four" style="margin-bottom:18px;">
-                    ${detailItem('Faixas solicitadas', String(result.requestedRanges || 0))}
-                    ${detailItem('Numeros tentados', String(result.requestedNumbers || 0))}
-                    ${detailItem('XMLs recuperados', String(result.documentsRecovered || 0))}
-                    ${detailItem('Falhas', String(result.failures || 0))}
-                  </div>
-                  ${
-                    details.length
-                      ? `
-                        <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(52vh, 520px);">
-                          <div style="display:grid; grid-template-columns:minmax(120px, .5fr) minmax(120px, .5fr) minmax(260px, 1.1fr) minmax(140px, .6fr) minmax(360px, 1.6fr); gap:0; min-width:920px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
-                            <div style="padding:12px 14px;">Numero</div>
-                            <div style="padding:12px 14px;">Serie</div>
-                            <div style="padding:12px 14px;">DPS ID</div>
-                            <div style="padding:12px 14px;">Status</div>
-                            <div style="padding:12px 14px;">Mensagem</div>
-                          </div>
-                          ${details
-                            .map(
-                              (detail) => `
-                                <div style="display:grid; grid-template-columns:minmax(120px, .5fr) minmax(120px, .5fr) minmax(260px, 1.1fr) minmax(140px, .6fr) minmax(360px, 1.6fr); gap:0; min-width:920px; border-bottom:1px solid #eef0f2; align-items:start;">
-                                  <div style="padding:14px;">${escapeHtml(String(detail?.numero || '-'))}</div>
-                                  <div style="padding:14px;">${escapeHtml(detail?.serie || '-')}</div>
-                                  <div style="padding:14px; font-family:monospace; font-size:12px; word-break:break-all;">${escapeHtml(detail?.dpsId || '-')}</div>
-                                  <div style="padding:14px;">${statusBadge(detail?.status === 'recuperada' ? 'Recuperada' : 'Falha', detail?.status === 'recuperada' ? 'success' : 'danger')}</div>
-                                  <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(detail?.mensagem || '-')}</div>
-                                </div>
-                              `
-                            )
-                            .join('')}
-                        </div>
-                      `
-                      : '<div class="table-state">Nenhum detalhe retornado para esta recuperacao.</div>'
-                  }
-                </div>
-              `
-              : ''
-          }
-        </div>
       </div>
     </div>
   `;
@@ -6394,6 +6285,9 @@ function renderPastNsuRecoveryReportModal() {
   const rowMode = state.modal.rowMode || 'controle';
   const currentMessage = String(state.modal.currentMessage || '').trim();
   const clientName = String(state.modal.clientName || 'Cliente selecionado');
+  const title = String(state.modal.title || 'Auditoria do reprocessamento de NSUs');
+  const runningLabel = String(state.modal.runningLabel || 'reprocessamento em andamento.');
+  const completedLabel = String(state.modal.completedLabel || 'reprocessamento concluido.');
   const processedCount = Number(summary?.controlesProcessados || 0);
   const totalCount = Number(summary?.controlesEncontrados || state.modal.totalCount || 0);
   const documentosSalvos = Number(summary?.documentosSalvos || 0);
@@ -6407,8 +6301,8 @@ function renderPastNsuRecoveryReportModal() {
     <div class="overlay" data-action="overlay-close">
       <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1440px); max-width:1440px;">
         <div class="modal-header">
-          <h3 class="modal-title">Auditoria do reprocessamento de NSUs</h3>
-          <p class="modal-subtitle">${escapeHtml(clientName)}${running ? ' • reprocessamento em andamento.' : ' • reprocessamento concluido.'}</p>
+          <h3 class="modal-title">${escapeHtml(title)}</h3>
+          <p class="modal-subtitle">${escapeHtml(clientName)}${running ? ` • ${escapeHtml(runningLabel)}` : ` • ${escapeHtml(completedLabel)}`}</p>
         </div>
         <div class="modal-body">
           ${
@@ -6497,7 +6391,7 @@ function renderPastNsuRecoveryReportModal() {
           }
         </div>
         <div class="modal-footer">
-          ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao do reprocessamento manual...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
+          ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao da execucao manual...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
         </div>
       </div>
     </div>
@@ -9654,6 +9548,167 @@ async function runPastNsuRecovery(clientId = null) {
   }
 }
 
+async function runNfseGapAuditFromCurrentSearch() {
+  if (state.dataSource !== 'api') {
+    pushToast('A auditoria por NSU so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const context = getCurrentNfseGapContext();
+  if (!context.clientId || !context.client) {
+    pushToast('Busque os XMLs da empresa antes de auditar as lacunas por NSU.', 'error');
+    return;
+  }
+
+  if (!context.cnpjConsulta) {
+    pushToast('Nao foi possivel identificar o CNPJ emissor para auditar as lacunas.', 'error');
+    return;
+  }
+
+  if (!context.lacunas.length) {
+    pushToast('Nenhuma lacuna valida foi encontrada na busca atual.', 'error');
+    return;
+  }
+
+  try {
+    pushToast(
+      `Auditoria das lacunas iniciada para ${context.client.razaoSocial || 'Cliente selecionado'}. Esta operacao pode demorar.`,
+      'info'
+    );
+    openPastNsuRecoveryReportModal({
+      title: 'Auditoria das lacunas por NSU',
+      runningLabel: 'auditoria em andamento.',
+      completedLabel: 'auditoria concluida.',
+      rowMode: 'nsu',
+      clientName: context.client.razaoSocial || 'Cliente selecionado',
+      totalCount: 0,
+      currentMessage: 'Preparando faixas provaveis de NSU para as lacunas detectadas...',
+      summary: {
+        controlesEncontrados: 0,
+        controlesProcessados: 0,
+        nsusAvaliados: 0,
+        nsusConsultados: 0,
+        documentosSalvos: 0,
+        nsusIgnoradosComDocumento: 0,
+        documentosIgnoradosExistentes: 0,
+        semDocumento: 0,
+        falhas: 0
+      },
+      rows: []
+    });
+
+    startExecutionMonitor(
+      'Auditoria',
+      1,
+      'Auditando os NSUs provaveis a partir das lacunas de numeracao...'
+    );
+    state.executionMonitor.currentClientName = context.client.razaoSocial || 'Cliente selecionado';
+    state.executionMonitor.updatedAt = new Date().toISOString();
+    render();
+
+    const execution = await apiRequest('/sync/reprocessar-nsus-passados/execucao', {
+      method: 'POST',
+      body: {
+        clienteId: context.clientId,
+        cnpjConsulta: context.cnpjConsulta,
+        ambiente: context.ambiente,
+        lacunas: context.lacunas
+      },
+      timeoutMs: 2 * 60 * 1000
+    });
+
+    updatePastNsuRecoveryOverlayState({
+      running: execution?.status === 'running',
+      title: 'Auditoria das lacunas por NSU',
+      runningLabel: 'auditoria em andamento.',
+      completedLabel: 'auditoria concluida.',
+      rowMode: 'nsu',
+      totalCount: Number(execution?.summary?.controlesEncontrados || 0),
+      currentMessage: String(execution?.currentMessage || 'Execucao iniciada.'),
+      summary: execution?.summary || {},
+      rows: buildPastNsuRecoveryLiveRows(execution)
+    });
+
+    let latestExecution = execution;
+    while (latestExecution?.status === 'running') {
+      await wait(900);
+      latestExecution = await apiRequest(
+        `/sync/reprocessar-nsus-passados/execucao/${encodeURIComponent(String(execution?.executionId || ''))}`,
+        {
+          method: 'GET',
+          timeoutMs: 2 * 60 * 1000
+        }
+      );
+
+      updatePastNsuRecoveryOverlayState({
+        running: latestExecution?.status === 'running',
+        title: 'Auditoria das lacunas por NSU',
+        runningLabel: 'auditoria em andamento.',
+        completedLabel: 'auditoria concluida.',
+        rowMode: 'nsu',
+        totalCount: Number(latestExecution?.summary?.controlesEncontrados || 0),
+        currentMessage: String(latestExecution?.currentMessage || 'Auditoria em andamento...'),
+        summary: latestExecution?.summary || {},
+        rows: buildPastNsuRecoveryLiveRows(latestExecution)
+      });
+    }
+
+    const result = latestExecution?.summary || {};
+    updatePastNsuRecoveryOverlayState({
+      running: false,
+      title: 'Auditoria das lacunas por NSU',
+      runningLabel: 'auditoria em andamento.',
+      completedLabel: 'auditoria concluida.',
+      rowMode: 'nsu',
+      totalCount: Number(result?.controlesEncontrados || 0),
+      currentMessage: String(result?.ultimaMensagem || 'Auditoria manual concluida.'),
+      summary: result,
+      rows: Array.isArray(state.modal?.rows) ? state.modal.rows : buildPastNsuRecoveryLiveRows({ rows: [] })
+    });
+
+    state.executionMonitor.total = Number(result?.controlesEncontrados || 1);
+    state.executionMonitor.processed = Number(result?.controlesProcessados || 0);
+    state.executionMonitor.successful = Number(result?.documentosSalvos || 0);
+    state.executionMonitor.failed = Number(result?.falhas || 0);
+    state.executionMonitor.message = 'Auditoria concluida. Atualizando painel...';
+    state.executionMonitor.updatedAt = new Date().toISOString();
+    render();
+
+    await refreshApiData();
+    if (state.xmlSearch.hasSearched && state.xmlSearch.lastQuery?.cliente === context.clientId) {
+      await executeXmlSearch();
+    }
+
+    finishExecutionMonitor(
+      `Auditoria finalizada. NSUs consultados: ${Number(result?.nsusConsultados || 0)}. XMLs salvos: ${Number(result?.documentosSalvos || 0)}. Sem documento: ${Number(result?.semDocumento || 0)}.`
+    );
+    pushToast(
+      `Auditoria das lacunas concluida: ${Number(result?.documentosSalvos || 0)} XML(s) salvo(s), ${Number(result?.nsusConsultados || 0)} NSU(s) consultado(s).`,
+      Number(result?.falhas || 0) > 0 ? 'error' : 'success'
+    );
+  } catch (error) {
+    state.executionMonitor.failed += 1;
+    finishExecutionMonitor('Auditoria das lacunas finalizada com falha.');
+    updatePastNsuRecoveryOverlayState({
+      running: false,
+      currentMessage: `Falha ao auditar lacunas por NSU: ${toErrorMessage(error)}`,
+      summary: {
+        controlesEncontrados: 0,
+        controlesProcessados: 0,
+        nsusAvaliados: 0,
+        nsusConsultados: 0,
+        documentosSalvos: 0,
+        nsusIgnoradosComDocumento: 0,
+        documentosIgnoradosExistentes: 0,
+        semDocumento: 0,
+        falhas: 1
+      },
+      rows: []
+    });
+    pushToast(`Falha ao auditar lacunas por NSU: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
 async function executeNfeDocsSearch() {
   if (!state.filters.nfeDocs.cliente) {
     resetNfeDocsSearch();
@@ -10593,83 +10648,6 @@ async function submitNfseRecoverByKeyForm(form) {
   }
 }
 
-async function submitNfseRecoverByDpsForm(form) {
-  if (state.modal?.kind !== 'nfse-recover-by-dps') {
-    return;
-  }
-
-  if (state.dataSource !== 'api') {
-    pushToast('A recuperacao automatica so esta disponivel com a API real conectada.', 'error');
-    return;
-  }
-
-  const data = new FormData(form);
-  const clienteId = String(data.get('clienteId') || state.modal.clientId || '').trim();
-  const cnpjConsulta = normalizeDigits(String(data.get('cnpjConsulta') || state.modal.cnpjConsulta || ''));
-  const ambiente = String(data.get('ambiente') || state.modal.ambiente || 'producao').trim() || 'producao';
-  const lacunas = Array.isArray(state.modal.lacunas) ? state.modal.lacunas : [];
-
-  if (!clienteId || !cnpjConsulta || !lacunas.length) {
-    pushToast('Nao ha contexto suficiente para recuperar automaticamente as NFS-e faltantes.', 'error');
-    return;
-  }
-
-  state.modal = {
-    ...state.modal,
-    submitting: true,
-    ambiente,
-    errorMessage: '',
-    result: null
-  };
-  render();
-
-  try {
-    const response = await apiRequest('/nfse/recuperar-lacunas', {
-      method: 'POST',
-      body: {
-        clienteId,
-        estabelecimentoId: state.modal.estabelecimentoId || undefined,
-        cnpjConsulta,
-        ambiente,
-        lacunas,
-        limitDocuments: Math.max(1, Number(state.modal.requestedNumbers || 0))
-      },
-      timeoutMs: Math.max(180000, Math.max(1, Number(state.modal.requestedNumbers || 0)) * 45000)
-    });
-
-    state.modal = {
-      ...state.modal,
-      submitting: false,
-      ambiente,
-      errorMessage: '',
-      result: response
-    };
-    render();
-
-    await refreshApiData();
-
-    if (state.xmlSearch.hasSearched && state.xmlSearch.lastQuery?.cliente === clienteId) {
-      await executeXmlSearch();
-    }
-
-    const recovered = Number(response?.documentsRecovered || 0);
-    const failures = Number(response?.failures || 0);
-    pushToast(
-      `Recuperacao automatica concluida: ${recovered} XML(s) recuperado(s)${failures ? `, ${failures} falha(s)` : ''}.`,
-      failures ? 'error' : 'success'
-    );
-  } catch (error) {
-    state.modal = {
-      ...state.modal,
-      submitting: false,
-      ambiente,
-      errorMessage: toErrorMessage(error)
-    };
-    render();
-    pushToast(`Falha ao recuperar lacunas automaticamente: ${toErrorMessage(error)}`, 'error');
-  }
-}
-
 function extractNfseRecoveryKeysFromText(value) {
   const raw = String(value || '').trim();
   if (!raw) {
@@ -11154,6 +11132,9 @@ function openPastNsuRecoveryReportModal(params) {
   openModal({
     kind: 'past-nsu-recovery-report',
     running: true,
+    title: params?.title || 'Auditoria do reprocessamento de NSUs',
+    runningLabel: params?.runningLabel || 'reprocessamento em andamento.',
+    completedLabel: params?.completedLabel || 'reprocessamento concluido.',
     rowMode: params?.rowMode || 'controle',
     clientName: params?.clientName || 'Cliente selecionado',
     totalCount: Number(params?.totalCount || 0),
@@ -11163,21 +11144,44 @@ function openPastNsuRecoveryReportModal(params) {
   });
 }
 
+function getCurrentNfseGapContext() {
+  const query = state.xmlSearch.lastQuery;
+  const validation = state.xmlSearch.numberingValidation;
+  const clientId = String(query?.cliente || '').trim();
+  const client = findClientById(clientId);
+  const cnpjConsulta = normalizeDigits(validation?.cnpjPrestador || client?.cnpj || '');
+  const lacunasRaw = Array.isArray(validation?.lacunas) ? validation.lacunas : [];
+  const lacunas = lacunasRaw
+    .map((gap) => ({
+      ambiente: String(gap?.ambiente || '') === 'producao_restrita' ? 'producao_restrita' : 'producao',
+      serie: gap?.serie == null ? null : String(gap.serie),
+      numeroInicial: Number(gap?.numeroInicial || 0),
+      numeroFinal: Number(gap?.numeroFinal || 0)
+    }))
+    .filter((gap) => gap.numeroInicial > 0 && gap.numeroFinal >= gap.numeroInicial);
+  const primeiroAmbiente = String(lacunas[0]?.ambiente || '').trim();
+  const ambiente = primeiroAmbiente === 'producao_restrita' ? 'producao_restrita' : 'producao';
+  const requestedNumbers = lacunas.reduce((total, gap) => total + (gap.numeroFinal - gap.numeroInicial + 1), 0);
+
+  return {
+    clientId,
+    client,
+    cnpjConsulta,
+    lacunas,
+    ambiente,
+    requestedNumbers,
+    gapPreview: lacunasRaw.slice(0, 5).map((gap) => formatXmlNumberingGap(gap))
+  };
+}
+
 function openNfseRecoverByKeyModal() {
   if (state.dataSource !== 'api') {
     pushToast('A recuperacao por chave so esta disponivel com a API real conectada.', 'error');
     return;
   }
 
-  const query = state.xmlSearch.lastQuery;
-  const validation = state.xmlSearch.numberingValidation;
-  const clientId = String(query?.cliente || '').trim();
-  const client = findClientById(clientId);
-  const cnpjConsulta = normalizeDigits(validation?.cnpjPrestador || client?.cnpj || '');
+  const { clientId, client, cnpjConsulta, ambiente, gapPreview } = getCurrentNfseGapContext();
   const estabelecimento = findEstablishmentByClientAndCnpj(clientId, cnpjConsulta);
-  const lacunas = Array.isArray(validation?.lacunas) ? validation.lacunas : [];
-  const primeiroAmbiente = String(lacunas[0]?.ambiente || '').trim();
-  const ambiente = primeiroAmbiente === 'producao_restrita' ? 'producao_restrita' : 'producao';
 
   if (!clientId || !client) {
     pushToast('Busque os XMLs da empresa antes de iniciar a recuperacao por chave.', 'error');
@@ -11200,64 +11204,7 @@ function openNfseRecoverByKeyModal() {
     submitting: false,
     result: null,
     errorMessage: '',
-    gapPreview: lacunas.slice(0, 5).map((gap) => formatXmlNumberingGap(gap))
-  });
-}
-
-function openNfseRecoverByDpsModal() {
-  if (state.dataSource !== 'api') {
-    pushToast('A recuperacao automatica so esta disponivel com a API real conectada.', 'error');
-    return;
-  }
-
-  const query = state.xmlSearch.lastQuery;
-  const validation = state.xmlSearch.numberingValidation;
-  const clientId = String(query?.cliente || '').trim();
-  const client = findClientById(clientId);
-  const cnpjConsulta = normalizeDigits(validation?.cnpjPrestador || client?.cnpj || '');
-  const estabelecimento = findEstablishmentByClientAndCnpj(clientId, cnpjConsulta);
-  const lacunas = Array.isArray(validation?.lacunas) ? validation.lacunas : [];
-
-  if (!clientId || !client || !lacunas.length) {
-    pushToast('Busque os XMLs com lacunas detectadas antes de iniciar a recuperacao automatica.', 'error');
-    return;
-  }
-
-  if (!cnpjConsulta) {
-    pushToast('Nao foi possivel identificar o CNPJ emissor para recuperar as NFS-e faltantes.', 'error');
-    return;
-  }
-
-  const requestedNumbers = lacunas.reduce((total, gap) => {
-    const start = Number(gap?.numeroInicial || 0);
-    const end = Number(gap?.numeroFinal || 0);
-    if (start <= 0 || end <= 0 || end < start) {
-      return total;
-    }
-    return total + (end - start + 1);
-  }, 0);
-  const requestedNumbersLimited = Math.min(200, requestedNumbers);
-  const primeiroAmbiente = String(lacunas[0]?.ambiente || '').trim();
-  const ambiente = primeiroAmbiente === 'producao_restrita' ? 'producao_restrita' : 'producao';
-
-  openModal({
-    kind: 'nfse-recover-by-dps',
-    clientId,
-    clientName: client.razaoSocial || 'Cliente selecionado',
-    cnpjConsulta,
-    estabelecimentoId: estabelecimento?.id || '',
-    ambiente,
-    requestedNumbers: requestedNumbersLimited,
-    submitting: false,
-    result: null,
-    errorMessage: '',
-    lacunas: lacunas.map((gap) => ({
-      ambiente: String(gap?.ambiente || '') === 'producao_restrita' ? 'producao_restrita' : 'producao',
-      serie: gap?.serie == null ? null : String(gap.serie),
-      numeroInicial: Number(gap?.numeroInicial || 0),
-      numeroFinal: Number(gap?.numeroFinal || 0)
-    })),
-    gapPreview: lacunas.slice(0, 5).map((gap) => formatXmlNumberingGap(gap))
+    gapPreview
   });
 }
 
