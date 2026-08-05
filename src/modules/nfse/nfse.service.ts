@@ -15,6 +15,10 @@ import { DownloadLoteDto } from './dto/download-lote.dto';
 import { DanfseRenderInput, NfseDanfseService } from './nfse-danfse.service';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { ListNfseGapAuditsQueryDto } from './dto/list-gap-audits.dto';
+import {
+  CreateNfseNumeracaoExcecaoDto,
+  ListNfseNumeracaoExcecoesQueryDto
+} from './dto/numeracao-excecao.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
 import { RecuperarNfsePorDpsDto } from './dto/recuperar-por-dps.dto';
 import { RecuperarNfsePorChaveDto } from './dto/recuperar-por-chave.dto';
@@ -44,6 +48,10 @@ type NfseNumeracaoValidation = {
 };
 
 type NfseDocumentoNumeracaoProjection = Pick<NfseDocumento, 'ambiente' | 'serie' | 'numeroNfse'>;
+type NfseNumeracaoExcecaoProjection = {
+  ambiente: Ambiente;
+  numeroNfse: number;
+};
 
 type RecuperacaoDpsGap = {
   ambiente: Ambiente;
@@ -106,13 +114,18 @@ export class NfseService {
     }
 
     if (query.all) {
-      const rawItems = await this.prisma.nfseDocumento.findMany({
-        where,
-        orderBy: { dataEmissao: 'desc' },
-        skip,
-        take: pageSize,
-        include: this.nfseDocumentoInclude()
-      });
+      const [rawItems, numeracaoExcecoes] = await Promise.all([
+        this.prisma.nfseDocumento.findMany({
+          where,
+          orderBy: { dataEmissao: 'desc' },
+          skip,
+          take: pageSize,
+          include: this.nfseDocumentoInclude()
+        }),
+        shouldValidateNumbering
+          ? this.loadNumberingExceptionsForValidation(query.clienteId, cnpjConsulta)
+          : Promise.resolve([])
+      ]);
       const { items: uniqueItems, duplicatesRemoved } = this.deduplicateDocumentosForList(rawItems);
       if (duplicatesRemoved > 0) {
         this.logger.warn(`Listagem de NFS-e ocultou ${duplicatesRemoved} duplicata(s) legada(s) por ambiente + chave_acesso.`);
@@ -121,7 +134,7 @@ export class NfseService {
       const total = uniqueItems.length;
       const items = await Promise.all(uniqueItems.map((item) => this.enrichDocumentoSummary(item)));
       const validacaoNumeracao = shouldValidateNumbering
-        ? this.buildNfseNumberingValidation(uniqueItems, cnpjConsulta)
+        ? this.buildNfseNumberingValidation(uniqueItems, cnpjConsulta, numeracaoExcecoes)
         : this.buildSkippedNumberingValidationNotApplied(query, cnpjConsulta);
 
       return {
@@ -134,7 +147,7 @@ export class NfseService {
       };
     }
 
-    const [total, rawItems] = await Promise.all([
+    const [total, rawItems, numeracaoExcecoes] = await Promise.all([
       this.prisma.nfseDocumento.count({ where }),
       this.prisma.nfseDocumento.findMany({
         where,
@@ -142,7 +155,10 @@ export class NfseService {
         skip,
         take: pageSize,
         include: this.nfseDocumentoInclude()
-      })
+      }),
+      shouldValidateNumbering
+        ? this.loadNumberingExceptionsForValidation(query.clienteId, cnpjConsulta)
+        : Promise.resolve([])
     ]);
     const { items: uniqueItems, duplicatesRemoved } = this.deduplicateDocumentosForList(rawItems);
     if (duplicatesRemoved > 0) {
@@ -151,7 +167,7 @@ export class NfseService {
 
     const items = await Promise.all(uniqueItems.map((item) => this.enrichDocumentoSummary(item)));
     const validacaoNumeracao = shouldValidateNumbering
-      ? this.buildNfseNumberingValidation(uniqueItems, cnpjConsulta)
+      ? this.buildNfseNumberingValidation(uniqueItems, cnpjConsulta, numeracaoExcecoes)
       : this.buildSkippedNumberingValidationNotApplied(query, cnpjConsulta);
 
     return {
@@ -250,7 +266,7 @@ export class NfseService {
     delete baseWhere.cnpjTomador;
     delete baseWhere.OR;
 
-    const [emitidas, tomadas] = await Promise.all([
+    const [emitidas, tomadas, numeracaoExcecoes] = await Promise.all([
       this.prisma.nfseDocumento.findMany({
         where: {
           ...baseWhere,
@@ -268,11 +284,14 @@ export class NfseService {
         orderBy: { dataEmissao: 'desc' },
         take: 500,
         include: this.nfseDocumentoInclude()
-      })
+      }),
+      shouldValidateNumbering
+        ? this.loadNumberingExceptionsForValidation(query.clienteId, cnpjConsulta)
+        : Promise.resolve([])
     ]);
 
     const validacaoNumeracaoEmitidas = shouldValidateNumbering
-      ? this.buildNfseNumberingValidation(emitidas, cnpjConsulta)
+      ? this.buildNfseNumberingValidation(emitidas, cnpjConsulta, numeracaoExcecoes)
       : this.buildSkippedNumberingValidationNotApplied(query, cnpjConsulta);
 
     return {
@@ -328,6 +347,17 @@ export class NfseService {
         updatedAt: true
       }
     });
+    const numberingExceptions = await this.prisma.nfseNumeracaoExcecao.findMany({
+      where: {
+        clienteId: { in: clients.map((client) => client.id) }
+      },
+      select: {
+        clienteId: true,
+        cnpjConsulta: true,
+        ambiente: true,
+        numeroNfse: true
+      }
+    });
 
     return clients
       .map((client) => {
@@ -342,8 +372,15 @@ export class NfseService {
             serie: document.serie,
             numeroNfse: document.numeroNfse
           }));
+        const ignoredNumbers = numberingExceptions
+          .filter((item) => item.clienteId === client.id)
+          .filter((item) => !cnpjConsulta || item.cnpjConsulta === cnpjConsulta)
+          .map((item) => ({
+            ambiente: item.ambiente,
+            numeroNfse: item.numeroNfse
+          }));
 
-        const validation = this.buildNfseNumberingValidation(visibleDocuments, cnpjConsulta);
+        const validation = this.buildNfseNumberingValidation(visibleDocuments, cnpjConsulta, ignoredNumbers);
         return {
           clienteId: client.id,
           razaoSocial: client.razaoSocial,
@@ -356,6 +393,60 @@ export class NfseService {
         };
       })
       .filter((row) => row.totalFaixasLacuna > 0);
+  }
+
+  async listNumberingExceptions(query: ListNfseNumeracaoExcecoesQueryDto = {}) {
+    const cnpjConsulta = this.normalizeCnpj(query.cnpjConsulta);
+    return this.prisma.nfseNumeracaoExcecao.findMany({
+      where: {
+        ...(query.clienteId ? { clienteId: query.clienteId } : {}),
+        ...(cnpjConsulta ? { cnpjConsulta } : {})
+      },
+      orderBy: [{ ambiente: 'asc' }, { numeroNfse: 'asc' }]
+    });
+  }
+
+  async createNumberingException(dto: CreateNfseNumeracaoExcecaoDto) {
+    const cnpjConsulta = this.normalizeCnpj(dto.cnpjConsulta);
+    if (!cnpjConsulta) {
+      throw new BadRequestException('Informe cnpjConsulta com 14 digitos para registrar a excecao de numeracao.');
+    }
+
+    return this.prisma.nfseNumeracaoExcecao.upsert({
+      where: {
+        clienteId_cnpjConsulta_ambiente_numeroNfse: {
+          clienteId: dto.clienteId,
+          cnpjConsulta,
+          ambiente: dto.ambiente,
+          numeroNfse: dto.numeroNfse
+        }
+      },
+      create: {
+        clienteId: dto.clienteId,
+        cnpjConsulta,
+        ambiente: dto.ambiente,
+        numeroNfse: dto.numeroNfse,
+        tipo: dto.tipo,
+        observacao: dto.observacao?.trim() || null
+      },
+      update: {
+        tipo: dto.tipo,
+        observacao: dto.observacao?.trim() || null
+      }
+    });
+  }
+
+  async deleteNumberingException(id: string, clienteId: string) {
+    const found = await this.prisma.nfseNumeracaoExcecao.findUnique({
+      where: { id }
+    });
+    if (!found || found.clienteId !== clienteId) {
+      throw new NotFoundException('Excecao de numeracao nao encontrada para o cliente informado.');
+    }
+
+    return this.prisma.nfseNumeracaoExcecao.delete({
+      where: { id }
+    });
   }
 
   private nfseDocumentoInclude(): Prisma.NfseDocumentoInclude {
@@ -760,9 +851,11 @@ export class NfseService {
 
   private buildNfseNumberingValidation(
     documents: NfseDocumentoNumeracaoProjection[],
-    cnpjConsulta?: string
+    cnpjConsulta?: string,
+    ignoredNumbers: NfseNumeracaoExcecaoProjection[] = []
   ): NfseNumeracaoValidation {
     const groupedNumbers = new Map<string, { ambiente: Ambiente; serie: string | null; numbers: Set<number> }>();
+    const ignoredNumberSet = this.buildIgnoredNumberSet(ignoredNumbers);
     let totalNumerosValidos = 0;
 
     for (const document of documents) {
@@ -799,13 +892,9 @@ export class NfseService {
           continue;
         }
 
-        lacunas.push({
-          ambiente: group.ambiente,
-          serie: group.serie,
-          numeroInicial: anterior + 1,
-          numeroFinal: atual - 1,
-          quantidade
-        });
+        lacunas.push(
+          ...this.buildNumberingGapsExcludingIgnored(group.ambiente, group.serie, anterior + 1, atual - 1, ignoredNumberSet)
+        );
       }
     });
 
@@ -830,6 +919,85 @@ export class NfseService {
       possuiNumeracaoPulada: lacunas.length > 0,
       lacunas
     };
+  }
+
+  private async loadNumberingExceptionsForValidation(
+    clienteId?: string,
+    cnpjConsulta?: string
+  ): Promise<NfseNumeracaoExcecaoProjection[]> {
+    if (!clienteId || !cnpjConsulta) {
+      return [];
+    }
+
+    return this.prisma.nfseNumeracaoExcecao.findMany({
+      where: {
+        clienteId,
+        cnpjConsulta
+      },
+      select: {
+        ambiente: true,
+        numeroNfse: true
+      }
+    });
+  }
+
+  private buildIgnoredNumberSet(ignoredNumbers: NfseNumeracaoExcecaoProjection[]): Set<string> {
+    return new Set(
+      ignoredNumbers
+        .map((item) => {
+          const numero = Number(item?.numeroNfse || 0);
+          if (!numero) {
+            return '';
+          }
+
+          return `${String(item.ambiente)}:${numero}`;
+        })
+        .filter(Boolean)
+    );
+  }
+
+  private buildNumberingGapsExcludingIgnored(
+    ambiente: Ambiente,
+    serie: string | null,
+    numeroInicial: number,
+    numeroFinal: number,
+    ignoredNumberSet: Set<string>
+  ): NfseNumeracaoGap[] {
+    const lacunas: NfseNumeracaoGap[] = [];
+    let rangeStart: number | null = null;
+
+    for (let numero = numeroInicial; numero <= numeroFinal; numero += 1) {
+      const ignored = ignoredNumberSet.has(`${String(ambiente)}:${numero}`);
+      if (ignored) {
+        if (rangeStart !== null) {
+          lacunas.push({
+            ambiente,
+            serie,
+            numeroInicial: rangeStart,
+            numeroFinal: numero - 1,
+            quantidade: numero - rangeStart
+          });
+          rangeStart = null;
+        }
+        continue;
+      }
+
+      if (rangeStart === null) {
+        rangeStart = numero;
+      }
+    }
+
+    if (rangeStart !== null) {
+      lacunas.push({
+        ambiente,
+        serie,
+        numeroInicial: rangeStart,
+        numeroFinal,
+        quantidade: numeroFinal - rangeStart + 1
+      });
+    }
+
+    return lacunas;
   }
 
   private parseNumeroNfse(value?: string | null): number | null {

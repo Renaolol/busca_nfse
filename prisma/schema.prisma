@@ -34,6 +34,11 @@ enum DocumentoOrigem {
   consulta_dps
 }
 
+enum NfseNumeracaoExcecaoTipo {
+  inutilizada
+  nao_existe
+}
+
 enum NfeAmbiente {
   producao
   homologacao
@@ -74,6 +79,7 @@ model Cliente {
   certificados     Certificado[]
   syncControles    NfseSyncControle[]
   documentos       NfseDocumento[]
+  numeracaoExcecoes NfseNumeracaoExcecao[]
   nfeSyncControles NfeSyncControle[]
   nfeDocumentos    NfeDocumento[]
   syncLogs         NfseSyncLog[]
@@ -218,6 +224,24 @@ model NfseEvento {
 
   @@unique([chaveAcesso, tipoEvento, dataEvento, hashXml], map: "nfse_eventos_chave_tipo_data_hash_key")
   @@map("nfse_eventos")
+}
+
+model NfseNumeracaoExcecao {
+  id         String                   @id @default(uuid()) @db.Uuid
+  clienteId  String                   @map("cliente_id") @db.Uuid
+  cnpjConsulta String                 @map("cnpj_consulta") @db.VarChar(14)
+  ambiente   Ambiente
+  numeroNfse Int                      @map("numero_nfse")
+  tipo       NfseNumeracaoExcecaoTipo
+  observacao String?                  @db.Text
+  createdAt  DateTime                 @default(now()) @map("created_at")
+  updatedAt  DateTime                 @updatedAt @map("updated_at")
+
+  cliente Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  @@unique([clienteId, cnpjConsulta, ambiente, numeroNfse], map: "nfse_numeracao_excecoes_cliente_cnpj_ambiente_numero_key")
+  @@index([clienteId, cnpjConsulta, ambiente], map: "nfse_numeracao_excecoes_cliente_cnpj_ambiente_idx")
+  @@map("nfse_numeracao_excecoes")
 }
 
 model NfseSyncLog {

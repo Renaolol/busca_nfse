@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import { ApiExtraModels, ApiOkResponse, ApiQuery, ApiTags, getSchemaPath } from '@nestjs/swagger';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
@@ -9,6 +9,11 @@ import { DashboardStatsQueryDto, DashboardStatsResponseDto } from './dto/dashboa
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { ListNfseGapAuditsQueryDto, NfseGapAuditOverviewRowDto } from './dto/list-gap-audits.dto';
 import { NfseNumeracaoValidationDto } from './dto/list-nfse-response.dto';
+import {
+  CreateNfseNumeracaoExcecaoDto,
+  ListNfseNumeracaoExcecoesQueryDto,
+  NfseNumeracaoExcecaoResponseDto
+} from './dto/numeracao-excecao.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
 import { RecuperarNfsePorDpsDto } from './dto/recuperar-por-dps.dto';
 import { RecuperarNfsePorChaveDto } from './dto/recuperar-por-chave.dto';
@@ -61,6 +66,28 @@ export class NfseController {
   @ApiOkResponse({ type: NfseGapAuditOverviewRowDto, isArray: true })
   listGapAudits(@Query() query: ListNfseGapAuditsQueryDto) {
     return this.nfseService.listGapAudits(query);
+  }
+
+  @Get('numeracao-excecoes')
+  @ApiOkResponse({ type: NfseNumeracaoExcecaoResponseDto, isArray: true })
+  @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })
+  listNumberingExceptions(@Query() query: ListNfseNumeracaoExcecoesQueryDto) {
+    return this.nfseService.listNumberingExceptions(query);
+  }
+
+  @Post('numeracao-excecoes')
+  @ApiOkResponse({ type: NfseNumeracaoExcecaoResponseDto })
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  createNumberingException(@Body() dto: CreateNfseNumeracaoExcecaoDto) {
+    return this.nfseService.createNumberingException(dto);
+  }
+
+  @Delete('numeracao-excecoes/:id')
+  @ApiOkResponse({ type: NfseNumeracaoExcecaoResponseDto })
+  @ApiQuery({ name: 'clienteId', required: true, description: 'Escopo do cliente para remover a excecao de numeracao' })
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  deleteNumberingException(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
+    return this.nfseService.deleteNumberingException(id, query.clienteId);
   }
 
   @Get('separadas')

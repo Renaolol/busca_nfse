@@ -198,6 +198,13 @@ Para consultar logs de sync por cliente, use `GET /sync/logs?clienteId=UUID`.
 Para consultar o status do agendador, use `GET /sync/scheduler-status`.
 Para consultar os totais reais do dashboard sem depender da listagem limitada de NFS-e, use `GET /nfse/dashboard-stats`.
 Para recuperar lacunas de notas ja passadas pelo controle de NSU, use `POST /sync/reprocessar-nsus-passados`. Informe `clienteId` no body para limitar a recuperacao a um cliente especifico. A rotina varre do NSU 1 ate `ultimo_nsu_consultado`, pula NSUs com documento fiscal ja salvo, consulta apenas lacunas e nao altera `ultimo_nsu_consultado`.
+Para desconsiderar uma numeracao realmente inutilizada ou inexistente nas auditorias de NFS-e emitidas, use:
+
+- `GET /nfse/numeracao-excecoes?clienteId=...&cnpjConsulta=...`
+- `POST /nfse/numeracao-excecoes`
+- `DELETE /nfse/numeracao-excecoes/:id?clienteId=...`
+
+A excecao remove a numeracao da validacao de lacunas e evita que ela continue aparecendo como XML faltante no painel.
 
 ### Iniciar sync com modo
 

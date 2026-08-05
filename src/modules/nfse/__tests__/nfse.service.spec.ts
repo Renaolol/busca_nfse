@@ -1,4 +1,4 @@
-import { Ambiente } from '@prisma/client';
+import { Ambiente, NfseNumeracaoExcecaoTipo, Prisma } from '@prisma/client';
 import JSZip from 'jszip';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LocalStorageService } from '../../storage/storage.service';
@@ -26,6 +26,12 @@ describe('NfseService', () => {
     },
     nfseEvento: {
       upsert: jest.fn()
+    },
+    nfseNumeracaoExcecao: {
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
+      delete: jest.fn()
     },
     certificado: {
       findFirst: jest.fn()
@@ -62,6 +68,8 @@ describe('NfseService', () => {
     jest.resetAllMocks();
     prisma.clienteEstabelecimento.findFirst.mockResolvedValue(undefined);
     prisma.cliente.findMany.mockResolvedValue([]);
+    prisma.nfseNumeracaoExcecao.findMany.mockResolvedValue([]);
+    prisma.nfseNumeracaoExcecao.findUnique.mockResolvedValue(undefined);
   });
 
   it('pagina a listagem de NFS-e armazenadas', async () => {
@@ -393,6 +401,73 @@ describe('NfseService', () => {
     });
   });
 
+  it('ignora numeracao marcada como inutilizada na validacao das emitidas', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-emitida-82',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '421100921065205400019500900000000000000082426019600070930',
+        numeroNfse: '82',
+        serie: '900',
+        dataEmissao: new Date('2026-07-01T00:00:00.000Z'),
+        cnpjPrestador: '10652054000195',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador 1',
+        xmlPath: 'nfse/producao/10652054000195/2026/07/xml/doc-82.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-08-05T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-05T00:00:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-emitida-84',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '421100921065205400019500900000000000000084426019600070932',
+        numeroNfse: '84',
+        serie: '70000',
+        dataEmissao: new Date('2026-07-02T00:00:00.000Z'),
+        cnpjPrestador: '10652054000195',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '22222222000122',
+        razaoSocialTomador: 'Tomador 2',
+        xmlPath: 'nfse/producao/10652054000195/2026/07/xml/doc-84.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-08-05T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-05T00:00:00.000Z'),
+        eventos: []
+      }
+    ]);
+    prisma.nfseNumeracaoExcecao.findMany.mockResolvedValueOnce([
+      {
+        ambiente: Ambiente.producao,
+        numeroNfse: 83
+      }
+    ]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '10652054000195',
+      tipoRelacao: 'emitidas',
+      all: true
+    });
+
+    expect(result.validacaoNumeracao).toEqual({
+      aplicada: true,
+      cnpjPrestador: '10652054000195',
+      totalDocumentosAnalisados: 2,
+      totalNumerosValidos: 2,
+      totalFaixasLacuna: 0,
+      totalNumerosPulados: 0,
+      possuiNumeracaoPulada: false,
+      lacunas: []
+    });
+  });
+
   it('lista auditoria agregada apenas para empresas com lacunas visiveis', async () => {
     prisma.cliente.findMany.mockResolvedValue([
       {
@@ -589,6 +664,53 @@ describe('NfseService', () => {
       possuiNumeracaoPulada: false,
       lacunas: []
     });
+  });
+
+  it('cria ou atualiza a excecao de numeracao informada', async () => {
+    prisma.nfseNumeracaoExcecao.upsert.mockResolvedValue({
+      id: 'exc-1',
+      clienteId: 'cliente-1',
+      cnpjConsulta: '10652054000195',
+      ambiente: Ambiente.producao,
+      numeroNfse: 83,
+      tipo: NfseNumeracaoExcecaoTipo.inutilizada,
+      observacao: 'Inutilizada no sistema emissor',
+      createdAt: new Date('2026-08-05T14:00:00.000Z'),
+      updatedAt: new Date('2026-08-05T14:00:00.000Z')
+    });
+
+    const result = await service.createNumberingException({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '10.652.054/0001-95',
+      ambiente: Ambiente.producao,
+      numeroNfse: 83,
+      tipo: NfseNumeracaoExcecaoTipo.inutilizada,
+      observacao: 'Inutilizada no sistema emissor'
+    });
+
+    expect(prisma.nfseNumeracaoExcecao.upsert).toHaveBeenCalledWith({
+      where: {
+        clienteId_cnpjConsulta_ambiente_numeroNfse: {
+          clienteId: 'cliente-1',
+          cnpjConsulta: '10652054000195',
+          ambiente: Ambiente.producao,
+          numeroNfse: 83
+        }
+      },
+      create: {
+        clienteId: 'cliente-1',
+        cnpjConsulta: '10652054000195',
+        ambiente: Ambiente.producao,
+        numeroNfse: 83,
+        tipo: NfseNumeracaoExcecaoTipo.inutilizada,
+        observacao: 'Inutilizada no sistema emissor'
+      },
+      update: {
+        tipo: NfseNumeracaoExcecaoTipo.inutilizada,
+        observacao: 'Inutilizada no sistema emissor'
+      }
+    });
+    expect(result.id).toBe('exc-1');
   });
 
   it('colapsa duplicatas legadas por ambiente e chave_acesso na listagem ampla', async () => {

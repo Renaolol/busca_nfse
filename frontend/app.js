@@ -945,6 +945,10 @@ function onDocumentClick(event) {
       openNfseRecoverByKeyModal();
       return;
     }
+    case 'nfse-open-numbering-exception': {
+      openNfseNumberingExceptionModalForContext(getCurrentNfseGapContext());
+      return;
+    }
     case 'nfse-audit-gap-nsus': {
       void runNfseGapAuditFromCurrentSearch();
       return;
@@ -991,6 +995,24 @@ function onDocumentClick(event) {
         return;
       }
       openNfseRecoverByKeyModalForContext(getNfseGapContextFromAuditRow(row));
+      return;
+    }
+    case 'gap-audit-open-numbering-exception': {
+      const clientId = actionNode.getAttribute('data-client-id') || '';
+      const row = findNfseGapAuditRowByClientId(clientId);
+      if (!row) {
+        pushToast('Nao foi possivel localizar a empresa selecionada na auditoria.', 'error');
+        return;
+      }
+      openNfseNumberingExceptionModalForContext(getNfseGapContextFromAuditRow(row));
+      return;
+    }
+    case 'nfse-delete-numbering-exception': {
+      const exceptionId = actionNode.getAttribute('data-exception-id') || '';
+      if (!exceptionId) {
+        return;
+      }
+      void deleteNfseNumberingException(exceptionId);
       return;
     }
     case 'nfe-open-client-xmls': {
@@ -1526,6 +1548,11 @@ function onDocumentSubmit(event) {
     case 'nfseRecoverByKeyForm': {
       event.preventDefault();
       void submitNfseRecoverByKeyForm(target);
+      return;
+    }
+    case 'nfseNumberingExceptionForm': {
+      event.preventDefault();
+      void submitNfseNumberingExceptionForm(target);
       return;
     }
     case 'nfeDocsFilterForm': {
@@ -3702,6 +3729,7 @@ function renderNfseGapAuditPage() {
               <button class="btn secondary" type="button" data-action="gap-audit-run-nsu" data-client-id="${escapeHtml(row.clientId)}">Auditar NSU</button>
               <button class="btn secondary" type="button" data-action="gap-audit-recover-dps" data-client-id="${escapeHtml(row.clientId)}">Recuperar DPS</button>
               <button class="btn secondary" type="button" data-action="gap-audit-recover-key" data-client-id="${escapeHtml(row.clientId)}">Recuperar chave</button>
+              <button class="btn secondary" type="button" data-action="gap-audit-open-numbering-exception" data-client-id="${escapeHtml(row.clientId)}">Informar excecao</button>
             </div>
           </td>
         </tr>
@@ -3839,6 +3867,7 @@ function renderXmlNumberingValidationSummary(query, validation) {
               <button class="btn primary" type="button" data-action="nfse-audit-gap-nsus">Auditar lacunas por NSU</button>
               <button class="btn secondary" type="button" data-action="nfse-recover-by-dps">Recuperar por DPS</button>
               <button class="btn secondary" type="button" data-action="nfse-recover-by-key">Recuperar por chave</button>
+              <button class="btn secondary" type="button" data-action="nfse-open-numbering-exception">Informar excecao</button>
             </div>
           `
           : ''
@@ -5970,6 +5999,8 @@ function renderModal() {
       return renderNfseRecoverByDpsModal();
     case 'nfse-recover-by-key':
       return renderNfseRecoverByKeyModal();
+    case 'nfse-numbering-exception':
+      return renderNfseNumberingExceptionModal();
     case 'download-by-key-report':
       return renderDownloadByKeyReportModal();
     case 'dominio-import-report':
@@ -6221,6 +6252,112 @@ function renderNfseRecoverByKeyModal() {
               `
               : ''
           }
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderNfseNumberingExceptionModal() {
+  if (state.modal?.kind !== 'nfse-numbering-exception') {
+    return '';
+  }
+
+  const submitting = Boolean(state.modal.submitting);
+  const loading = Boolean(state.modal.loading);
+  const errorMessage = String(state.modal.errorMessage || '').trim();
+  const exceptions = Array.isArray(state.modal.exceptions) ? state.modal.exceptions : [];
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 980px); max-width:980px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Informar excecao de numeracao</h3>
+          <p class="modal-subtitle">${escapeHtml(state.modal.clientName || 'Cliente selecionado')} • marque notas inutilizadas ou que realmente nao existem para retirar da auditoria e da validacao de armazenamento.</p>
+        </div>
+        <div class="modal-body">
+          <form id="nfseNumberingExceptionForm">
+            <div class="form-grid two">
+              <label>
+                <span>Cliente</span>
+                <input type="text" value="${escapeHtml(state.modal.clientName || '')}" readonly />
+              </label>
+              <label>
+                <span>CNPJ consulta</span>
+                <input type="text" name="cnpjConsulta" value="${escapeHtml(state.modal.cnpjConsulta || '')}" readonly />
+              </label>
+              <label>
+                <span>Ambiente</span>
+                <select name="ambiente" ${submitting ? 'disabled' : ''}>
+                  ${renderOptions(['producao', 'producao_restrita'], state.modal.ambiente || 'producao', {
+                    producao: 'Producao',
+                    producao_restrita: 'Producao restrita'
+                  })}
+                </select>
+              </label>
+              <label>
+                <span>Numero da NFS-e</span>
+                <input name="numeroNfse" type="number" min="1" step="1" value="${escapeHtml(String(state.modal.numeroNfse || ''))}" ${submitting ? 'disabled' : ''} />
+              </label>
+              <label>
+                <span>Tipo</span>
+                <select name="tipo" ${submitting ? 'disabled' : ''}>
+                  ${renderOptions(['inutilizada', 'nao_existe'], state.modal.tipo || 'inutilizada', {
+                    inutilizada: 'Inutilizada',
+                    nao_existe: 'Nao existe'
+                  })}
+                </select>
+              </label>
+              <label>
+                <span>Cliente ID</span>
+                <input type="text" name="clienteId" value="${escapeHtml(state.modal.clientId || '')}" readonly />
+              </label>
+              <label style="grid-column: span 2;">
+                <span>Observacao</span>
+                <textarea name="observacao" rows="3" ${submitting ? 'disabled' : ''}>${escapeHtml(state.modal.observacao || '')}</textarea>
+              </label>
+            </div>
+            ${errorMessage ? `<div class="table-state error" style="margin-top:14px;">${escapeHtml(errorMessage)}</div>` : ''}
+            <div class="modal-footer" style="padding:18px 0 0;">
+              <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Fechar</button>
+              <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Salvando...' : 'Salvar excecao'}</button>
+            </div>
+          </form>
+          <div style="margin-top:18px;">
+            <h4 class="card-title" style="margin-bottom:8px;">Excecoes ja informadas</h4>
+            ${
+              loading
+                ? '<div class="table-state loading">Carregando excecoes...</div>'
+                : exceptions.length
+                  ? `
+                    <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(46vh, 420px);">
+                      <div style="display:grid; grid-template-columns:minmax(120px, .8fr) minmax(140px, .9fr) minmax(120px, .8fr) minmax(280px, 1.6fr) minmax(120px, .8fr); gap:0; min-width:760px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                        <div style="padding:12px 14px;">Ambiente</div>
+                        <div style="padding:12px 14px;">Numero</div>
+                        <div style="padding:12px 14px;">Tipo</div>
+                        <div style="padding:12px 14px;">Observacao</div>
+                        <div style="padding:12px 14px;">Acao</div>
+                      </div>
+                      ${exceptions
+                        .map(
+                          (row) => `
+                            <div style="display:grid; grid-template-columns:minmax(120px, .8fr) minmax(140px, .9fr) minmax(120px, .8fr) minmax(280px, 1.6fr) minmax(120px, .8fr); gap:0; min-width:760px; border-bottom:1px solid #eef0f2; align-items:start;">
+                              <div style="padding:14px;">${escapeHtml(mapNfseAmbienteLabel(row.ambiente || 'producao'))}</div>
+                              <div style="padding:14px;"><strong>${escapeHtml(String(row.numeroNfse || '-'))}</strong></div>
+                              <div style="padding:14px;">${statusBadge(mapNfseNumberingExceptionTypeLabel(row.tipo), row.tipo === 'inutilizada' ? 'warning' : 'neutral')}</div>
+                              <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.observacao || '-')}</div>
+                              <div style="padding:14px;">
+                                <button class="btn secondary" type="button" data-action="nfse-delete-numbering-exception" data-exception-id="${escapeHtml(row.id)}" ${submitting ? 'disabled' : ''}>Remover</button>
+                              </div>
+                            </div>
+                          `
+                        )
+                        .join('')}
+                    </div>
+                  `
+                  : '<div class="table-state">Nenhuma excecao de numeracao cadastrada para este cliente/CNPJ.</div>'
+            }
+          </div>
         </div>
       </div>
     </div>
@@ -11363,6 +11500,26 @@ function normalizeNfseGapAuditOverviewRows(payload) {
     .filter((row) => row.clientId);
 }
 
+function normalizeNfseNumberingExceptionRows(payload) {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  return payload
+    .map((row) => ({
+      id: String(row?.id || '').trim(),
+      clienteId: String(row?.clienteId || '').trim(),
+      cnpjConsulta: normalizeDigits(String(row?.cnpjConsulta || '')),
+      ambiente: String(row?.ambiente || 'producao'),
+      numeroNfse: Number(row?.numeroNfse || 0),
+      tipo: String(row?.tipo || 'inutilizada'),
+      observacao: row?.observacao == null ? '' : String(row.observacao),
+      createdAt: row?.createdAt ? String(row.createdAt) : '',
+      updatedAt: row?.updatedAt ? String(row.updatedAt) : ''
+    }))
+    .filter((row) => row.id && row.clienteId && row.numeroNfse > 0);
+}
+
 function normalizeXmlNumberingValidation(payload) {
   if (!payload || typeof payload !== 'object') {
     return null;
@@ -11879,6 +12036,75 @@ function getNfseGapContextFromAuditRow(row) {
   });
 }
 
+async function loadNfseNumberingExceptionsForModal() {
+  if (state.modal?.kind !== 'nfse-numbering-exception') {
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    loading: true,
+    errorMessage: ''
+  };
+  render();
+
+  try {
+    const query = new URLSearchParams();
+    query.set('clienteId', state.modal.clientId || '');
+    if (state.modal.cnpjConsulta) {
+      query.set('cnpjConsulta', state.modal.cnpjConsulta);
+    }
+    const payload = await apiRequest(`/nfse/numeracao-excecoes?${query.toString()}`);
+    if (state.modal?.kind !== 'nfse-numbering-exception') {
+      return;
+    }
+    state.modal = {
+      ...state.modal,
+      loading: false,
+      exceptions: normalizeNfseNumberingExceptionRows(payload)
+    };
+    render();
+  } catch (error) {
+    if (state.modal?.kind !== 'nfse-numbering-exception') {
+      return;
+    }
+    state.modal = {
+      ...state.modal,
+      loading: false,
+      errorMessage: toErrorMessage(error)
+    };
+    render();
+  }
+}
+
+function openNfseNumberingExceptionModalForContext(context) {
+  if (state.dataSource !== 'api') {
+    pushToast('O cadastro de excecoes de numeracao so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  if (!context?.clientId || !context?.client || !context?.cnpjConsulta) {
+    pushToast('Nao foi possivel identificar a empresa da numeracao a ser ignorada.', 'error');
+    return;
+  }
+
+  openModal({
+    kind: 'nfse-numbering-exception',
+    clientId: context.clientId,
+    clientName: context.client.razaoSocial || 'Cliente selecionado',
+    cnpjConsulta: context.cnpjConsulta,
+    ambiente: context.ambiente || 'producao',
+    numeroNfse: '',
+    tipo: 'inutilizada',
+    observacao: '',
+    submitting: false,
+    loading: true,
+    errorMessage: '',
+    exceptions: []
+  });
+  void loadNfseNumberingExceptionsForModal();
+}
+
 function openNfseRecoverByKeyModalForContext(context) {
   if (state.dataSource !== 'api') {
     pushToast('A recuperacao por chave so esta disponivel com a API real conectada.', 'error');
@@ -11989,6 +12215,131 @@ async function openXmlSearchForGapContext(context) {
   navigate('/xmls');
   await wait(0);
   await executeXmlSearch();
+}
+
+async function submitNfseNumberingExceptionForm(form) {
+  if (state.modal?.kind !== 'nfse-numbering-exception') {
+    return;
+  }
+
+  const data = new FormData(form);
+  const clienteId = String(data.get('clienteId') || state.modal.clientId || '').trim();
+  const cnpjConsulta = normalizeDigits(String(data.get('cnpjConsulta') || state.modal.cnpjConsulta || ''));
+  const ambiente = String(data.get('ambiente') || state.modal.ambiente || 'producao').trim() || 'producao';
+  const numeroNfse = Number(data.get('numeroNfse') || 0);
+  const tipo = String(data.get('tipo') || state.modal.tipo || 'inutilizada').trim() || 'inutilizada';
+  const observacao = String(data.get('observacao') || '').trim();
+
+  if (!clienteId || !cnpjConsulta || !Number.isInteger(numeroNfse) || numeroNfse <= 0) {
+    state.modal = {
+      ...state.modal,
+      errorMessage: 'Informe cliente, CNPJ e um numero valido da NFS-e para registrar a excecao.'
+    };
+    render();
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    submitting: true,
+    ambiente,
+    numeroNfse: String(numeroNfse),
+    tipo,
+    observacao,
+    errorMessage: ''
+  };
+  render();
+
+  try {
+    await apiRequest('/nfse/numeracao-excecoes', {
+      method: 'POST',
+      body: {
+        clienteId,
+        cnpjConsulta,
+        ambiente,
+        numeroNfse,
+        tipo,
+        observacao: observacao || undefined
+      }
+    });
+
+    if (state.modal?.kind === 'nfse-numbering-exception') {
+      state.modal = {
+        ...state.modal,
+        submitting: false,
+        numeroNfse: '',
+        observacao: '',
+        errorMessage: ''
+      };
+      render();
+    }
+
+    await refreshApiData();
+    if (state.xmlSearch.hasSearched && state.xmlSearch.lastQuery?.cliente === clienteId) {
+      await executeXmlSearch();
+    }
+    await loadNfseNumberingExceptionsForModal();
+    pushToast('Excecao de numeracao salva com sucesso.', 'success');
+  } catch (error) {
+    if (state.modal?.kind !== 'nfse-numbering-exception') {
+      return;
+    }
+    state.modal = {
+      ...state.modal,
+      submitting: false,
+      errorMessage: toErrorMessage(error)
+    };
+    render();
+    pushToast(`Falha ao salvar a excecao de numeracao: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function deleteNfseNumberingException(exceptionId) {
+  if (state.modal?.kind !== 'nfse-numbering-exception') {
+    return;
+  }
+
+  const clienteId = String(state.modal.clientId || '').trim();
+  if (!exceptionId || !clienteId) {
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    submitting: true,
+    errorMessage: ''
+  };
+  render();
+
+  try {
+    await apiRequest(`/nfse/numeracao-excecoes/${encodeURIComponent(exceptionId)}?clienteId=${encodeURIComponent(clienteId)}`, {
+      method: 'DELETE'
+    });
+    if (state.modal?.kind === 'nfse-numbering-exception') {
+      state.modal = {
+        ...state.modal,
+        submitting: false
+      };
+      render();
+    }
+    await refreshApiData();
+    if (state.xmlSearch.hasSearched && state.xmlSearch.lastQuery?.cliente === clienteId) {
+      await executeXmlSearch();
+    }
+    await loadNfseNumberingExceptionsForModal();
+    pushToast('Excecao de numeracao removida com sucesso.', 'success');
+  } catch (error) {
+    if (state.modal?.kind !== 'nfse-numbering-exception') {
+      return;
+    }
+    state.modal = {
+      ...state.modal,
+      submitting: false,
+      errorMessage: toErrorMessage(error)
+    };
+    render();
+    pushToast(`Falha ao remover a excecao de numeracao: ${toErrorMessage(error)}`, 'error');
+  }
 }
 
 function updatePastNsuRecoveryOverlayState(patch) {
@@ -14667,6 +15018,10 @@ function mapNfseAmbienteLabel(ambiente) {
   }
 
   return 'Producao';
+}
+
+function mapNfseNumberingExceptionTypeLabel(tipo) {
+  return tipo === 'nao_existe' ? 'Nao existe' : 'Inutilizada';
 }
 
 function mapNfeTipoLabel(tipoRelacao) {
