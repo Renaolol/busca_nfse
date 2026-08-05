@@ -4504,7 +4504,13 @@ function renderXmlReader30EmptyState() {
 }
 
 function renderXmlReader30ResultsTable(results) {
-  const selectableRows = (Array.isArray(results) ? results : []).filter((row) => getXmlReader30SelectionKey(row));
+  const sourceRows = Array.isArray(results) ? results : [];
+  const currentDocumentType = state.xmlReader30.lastQuery?.documento || 'todos';
+  if (currentDocumentType === 'nfe') {
+    return renderXmlReader30NfeResultsTable(sourceRows);
+  }
+
+  const selectableRows = sourceRows.filter((row) => getXmlReader30SelectionKey(row));
   const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
   const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
 
@@ -4541,8 +4547,8 @@ function renderXmlReader30ResultsTable(results) {
             ${renderTableRowsOrState({
               key: 'xmlReader30',
               colSpan: 9,
-              rowsHtml: results.length
-                ? results
+              rowsHtml: sourceRows.length
+                ? sourceRows
                     .map((row) => {
                       const actions = renderXmlReader30Actions(row);
                       const selectionKey = getXmlReader30SelectionKey(row);
@@ -4586,6 +4592,132 @@ function renderXmlReader30ResultsTable(results) {
       </div>
     </article>
   `;
+}
+
+function renderXmlReader30NfeResultsTable(results) {
+  const selectableRows = (Array.isArray(results) ? results : []).filter((row) => getXmlReader30SelectionKey(row));
+  const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
+  const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
+  const displayedRows = expandXmlReader30NfeRows(results);
+
+  return `
+    <article class="card" style="margin-top: 2px;">
+      <div class="xml-batch-bar">
+        <div>
+          <h3 class="card-title">XMLs encontrados</h3>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(displayedRows.length))} linha(s) itemizada(s) da NF-e do acervo interno.</p>
+        </div>
+        <div class="stack-mini" style="align-items:flex-end;">
+          ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
+          <span class="row-sub">Cada produto aparece em uma linha para facilitar a conferência.</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="xml-reader30-table" style="min-width: 1380px;">
+          <thead>
+            <tr>
+              <th class="xml-reader30-check">
+                <input type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />
+              </th>
+              <th>Número NF</th>
+              <th>Status NF-e</th>
+              <th>Data Emissão</th>
+              <th>Produto</th>
+              <th>Quantidade</th>
+              <th>Valor Unitário</th>
+              <th>Valor Total</th>
+              <th>Valor Total NF XML R$</th>
+              <th>Ações</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderTableRowsOrState({
+              key: 'xmlReader30',
+              colSpan: 10,
+              rowsHtml: displayedRows.length
+                ? displayedRows
+                    .map((row) => {
+                      const actions = renderXmlReader30Actions(row);
+                      const selectionKey = getXmlReader30SelectionKey(row);
+                      const statusTone = row.raw?.cancelada ? 'danger' : row.raw?.statusFiscal === 'Autorizada' ? 'success' : row.statusTone || 'info';
+                      const numberLabel = row.numeroNf || row.numeroLabel || '-';
+                      return `
+                        <tr>
+                          <td class="xml-reader30-check">
+                            <input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Selecionar NF-e ${escapeHtml(String(numberLabel))}" />
+                          </td>
+                          <td>
+                            <span class="row-title">${escapeHtml(String(numberLabel))}</span>
+                          </td>
+                          <td>${statusBadge(row.statusNf || row.statusLabel || '-', statusTone)}</td>
+                          <td>${escapeHtml(row.dataEmissaoLabel || formatDate(row.dataEmissao || row.raw?.dataEmissao || ''))}</td>
+                          <td class="xml-reader30-doc">
+                            <span class="row-title">${escapeHtml(row.produto || '-')}</span>
+                          </td>
+                          <td>${escapeHtml(row.quantidade || '-')}</td>
+                          <td class="xml-reader30-money">${escapeHtml(row.valorUnitario || '-')}</td>
+                          <td class="xml-reader30-money">${escapeHtml(row.valorTotal || '-')}</td>
+                          <td class="xml-reader30-money">${escapeHtml(row.valorTotalNfXml || '-')}</td>
+                          <td>
+                            <div class="table-actions">${actions}</div>
+                          </td>
+                        </tr>
+                      `;
+                    })
+                    .join('')
+                : '',
+              emptyMessage: 'Nenhum XML encontrado para os filtros informados.'
+            })}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function expandXmlReader30NfeRows(rows) {
+  return (Array.isArray(rows) ? rows : []).flatMap((row) => {
+    if (!row || row.documentType !== 'nfe') {
+      return row ? [row] : [];
+    }
+
+    const items = extractNfeLineItems(row.raw?.conteudoXml || '');
+    const baseStatusLabel = resolveNfeLineItemStatusLabel(row.raw || row);
+    const baseStatusTone = row.raw?.cancelada ? 'danger' : row.raw?.statusFiscal === 'Autorizada' ? 'success' : row.statusTone || 'info';
+    const baseDataEmissao = formatDate(row.raw?.dataEmissao || row.dataEmissao || '');
+    const baseNumero = row.numeroLabel || '-';
+    const baseValorTotal = row.valorLabel || formatOptionalCurrency(row.raw?.valor) || '-';
+
+    if (!items.length) {
+      return [
+        {
+          ...row,
+          numeroNf: baseNumero,
+          statusNf: baseStatusLabel,
+          statusTone: baseStatusTone,
+          dataEmissaoLabel: baseDataEmissao,
+          produto: row.productLabel || '-',
+          quantidade: '-',
+          valorUnitario: '-',
+          valorTotal: '-',
+          valorTotalNfXml: baseValorTotal
+        }
+      ];
+    }
+
+    return items.map((item) => ({
+      ...row,
+      numeroNf: baseNumero,
+      statusNf: baseStatusLabel,
+      statusTone: baseStatusTone,
+      dataEmissaoLabel: baseDataEmissao,
+      produto: item.description || '-',
+      quantidade: item.quantity || '-',
+      valorUnitario: item.unitValueRaw || item.unitValue || '-',
+      valorTotal: item.totalValueRaw || item.totalValue || '-',
+      valorTotalNfXml: baseValorTotal
+    }));
+  });
 }
 
 function renderXmlReader30ResultsTableLegacyUnusedOld2(results) {
@@ -5118,6 +5250,7 @@ function mapXmlReader30Item(documentType, doc) {
 
   if (documentType === 'nfe') {
     const nfe = doc;
+    const nfeItems = extractNfeLineItems(nfe.conteudoXml || '');
     const productSummary = summarizeXmlReader30Products(documentType, nfe);
     return {
       documentType,
@@ -5153,7 +5286,12 @@ function mapXmlReader30Item(documentType, doc) {
         nfe.eventosResumo,
         nfe.tipo,
         productSummary.label,
-        productSummary.secondary
+        productSummary.secondary,
+        ...nfeItems.map((item) => item.description),
+        ...nfeItems.map((item) => item.code),
+        ...nfeItems.map((item) => item.quantity),
+        ...nfeItems.map((item) => item.unitValueRaw || item.unitValue || ''),
+        ...nfeItems.map((item) => item.totalValueRaw || item.totalValue || '')
       ]),
       raw: nfe
     };
@@ -7299,7 +7437,9 @@ function extractNfeLineItems(xmlString) {
         quantity: quantity || '-',
         unit: getXmlText(prodNode, 'uCom') || '-',
         unitValue: unitValue ? formatCurrency(unitValue) : '-',
+        unitValueRaw: unitValue || '-',
         totalValue: totalValue ? formatCurrency(totalValue) : '-',
+        totalValueRaw: totalValue || '-',
         cfop: getXmlText(prodNode, 'CFOP') || '-'
       };
     })
