@@ -11251,14 +11251,14 @@ function updatePastNsuRecoveryOverlayState(patch) {
   render();
 }
 
-function mapPastNsuRecoveryLiveRowStatusLabel(status) {
+function mapPastNsuRecoveryLiveRowStatusLabel(status, documentKind = null) {
   switch (status) {
     case 'ja_baixado':
-      return 'Ja baixado';
+      return documentKind === 'evento' ? 'Evento ja baixado' : 'Ja baixado';
     case 'consultando':
       return 'Consultando';
     case 'baixado':
-      return 'Baixado';
+      return documentKind === 'evento' ? 'Evento salvo' : 'Baixado';
     case 'sem_documento':
       return state.modal?.kind === 'past-nsu-recovery-report' && state.modal?.executionMode === 'gap-audit'
         ? 'Sem doc. proprio'
@@ -11294,7 +11294,7 @@ function buildPastNsuRecoveryLiveRows(execution) {
     cnpjConsulta: formatCnpj(row?.cnpjConsulta || '-') || '-',
     ambienteLabel: mapNfseAmbienteLabel(row?.ambiente),
     chaveAcesso: String(row?.chaveAcesso || '-'),
-    statusLabel: mapPastNsuRecoveryLiveRowStatusLabel(row?.status),
+    statusLabel: mapPastNsuRecoveryLiveRowStatusLabel(row?.status, row?.documentKind || null),
     statusTone: toneFromPastNsuRecoveryLiveStatus(row?.status),
     message: String(row?.mensagem || '').trim() || '-'
   }));

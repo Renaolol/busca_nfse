@@ -67,6 +67,7 @@ describe('SyncService', () => {
   const parser = {
     parse: jest.fn(),
     parseAny: jest.fn(),
+    isEventoXml: jest.fn(),
     getHash: jest.fn().mockReturnValue('hash')
   };
   const nfseService = {
@@ -98,11 +99,13 @@ describe('SyncService', () => {
     jest.clearAllMocks();
     parser.parse.mockReset();
     parser.parseAny.mockReset();
+    parser.isEventoXml.mockReset();
     parser.getHash.mockReturnValue('hash');
     parser.parseAny.mockImplementation((xml: string) => ({
       kind: 'nfse',
       nfse: parser.parse(xml)
     }));
+    parser.isEventoXml.mockImplementation((xml: string) => /<(?:\w+:)?(?:evento|procEvento)\b/i.test(xml));
     prisma.cliente.findUnique.mockResolvedValue({ id: 'cliente-1' });
     prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
       id: 'estab-1',
@@ -1156,6 +1159,78 @@ describe('SyncService', () => {
       })
     );
     expect(sleepSpy).toHaveBeenCalled();
+  });
+
+  it('marca explicitamente quando o NSU consultado corresponde a um evento', async () => {
+    const eventXml = `<?xml version="1.0" encoding="UTF-8"?>
+<evento xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infEvento>
+    <pedRegEvento>
+      <infPedReg>
+        <dhEvento>2026-06-03T15:43:08-03:00</dhEvento>
+        <CNPJAutor>06960810000176</CNPJAutor>
+        <chNFSe>42110092206960810000176000000000033326062205552016</chNFSe>
+        <e101101><xDesc>Cancelamento de NFS-e</xDesc></e101101>
+      </infPedReg>
+    </pedRegEvento>
+  </infEvento>
+</evento>`;
+
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 8n
+      }
+    ]);
+
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 9n,
+      hasDocument: true,
+      chaveAcesso: '42110092206960810000176000000000033326062205552016',
+      xml: eventXml,
+      statusCode: 200,
+      message: null,
+      rawResponse: {}
+    });
+
+    parser.parseAny.mockReturnValue({
+      kind: 'evento',
+      evento: {
+        chaveAcesso: '42110092206960810000176000000000033326062205552016',
+        tipoEvento: 'e101101',
+        dataEvento: new Date('2026-06-03T18:43:08.000Z'),
+        descricao: 'Cancelamento de NFS-e',
+        cnpjAutor: '06960810000176',
+        isCancelamento: true
+      }
+    });
+    parser.isEventoXml.mockReturnValue(true);
+    prisma.nfseDocumento.upsert.mockResolvedValue({
+      id: 'doc-evento',
+      chaveAcesso: '42110092206960810000176000000000033326062205552016'
+    });
+
+    const execution = await service.startPastNsuRecoveryExecution({ clienteId: 'cliente-1' });
+
+    let latestExecution = execution;
+    for (let attempt = 0; attempt < 20 && latestExecution.status === 'running'; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+      latestExecution = service.getPastNsuRecoveryExecution(execution.executionId);
+    }
+
+    expect(latestExecution.status).toBe('completed');
+    expect(latestExecution.rows.find((row) => row.nsu === '9')).toEqual(
+      expect.objectContaining({
+        status: 'baixado',
+        documentKind: 'evento',
+        chaveAcesso: '42110092206960810000176000000000033326062205552016',
+        mensagem: 'Evento recuperado com sucesso para este NSU.'
+      })
+    );
   });
 
   it('restringe a auditoria de lacunas aos NSUs inferidos pela vizinhanca de numeracao', async () => {

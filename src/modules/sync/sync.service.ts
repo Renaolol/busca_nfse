@@ -73,6 +73,8 @@ type PastNsuRecoveryExecutionRowStatus =
   | 'sem_documento'
   | 'erro';
 
+type PastNsuRecoveryExecutionRowDocumentKind = 'evento' | 'nfse' | null;
+
 type PastNsuRecoveryExecutionRow = {
   id: string;
   controleId: string;
@@ -80,6 +82,7 @@ type PastNsuRecoveryExecutionRow = {
   ambiente: Ambiente;
   nsu: string;
   status: PastNsuRecoveryExecutionRowStatus;
+  documentKind: PastNsuRecoveryExecutionRowDocumentKind;
   chaveAcesso: string | null;
   mensagem: string | null;
 };
@@ -132,7 +135,7 @@ type PreparedPastNsuRecoveryPlan = {
 type PersistDfeDocumentResult = {
   nsu?: bigint;
   kind: 'evento' | 'nfse';
-  outcome: 'saved' | 'existing';
+  outcome: 'saved' | 'existing' | 'updated';
   numeroNfse?: string | null;
   serie?: string | null;
 };
@@ -807,6 +810,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           if (execution) {
             this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
               status: 'consultando',
+              documentKind: null,
               mensagem: 'Verificando se o NSU ja possui documento salvo...'
             });
             this.syncPastNsuRecoveryExecution(
@@ -828,7 +832,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             if (execution) {
               this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
                 status: 'ja_baixado',
-                mensagem: 'Documento deste NSU ja estava armazenado.'
+                documentKind: 'nfse',
+                mensagem: 'NFS-e deste NSU ja estava armazenada.'
               });
               this.syncPastNsuRecoveryExecution(execution, result, `NSU ${nsu.toString()} ja estava baixado.`);
             }
@@ -853,6 +858,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             if (execution) {
               this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
                 status: 'erro',
+                documentKind: null,
                 mensagem: message
               });
               this.syncPastNsuRecoveryExecution(execution, result, message);
@@ -878,6 +884,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             if (execution) {
               this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
                 status: 'erro',
+                documentKind: null,
                 mensagem: message
               });
               this.syncPastNsuRecoveryExecution(execution, result, message);
@@ -909,6 +916,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             if (execution) {
               this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
                 status: 'sem_documento',
+                documentKind: null,
                 chaveAcesso: dfeResult.chaveAcesso ?? null,
                 mensagem: dfeResult.message ?? 'NSU sem documento retornado pelo ADN.'
               });
@@ -930,10 +938,15 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               detail.documentosIgnoradosExistentes += 1;
               result.documentosIgnoradosExistentes += 1;
               requestedNsuResolved = requestedNsuResolved || document.nsu === nsu;
+              const documentKind = this.inferDfeDocumentKind(document);
               if (execution) {
                 this.updatePastNsuRecoveryExecutionRow(execution, control.id, document.nsu ?? nsu, {
                   status: 'ja_baixado',
-                  mensagem: 'Documento retornado pelo ADN ja estava armazenado.',
+                  documentKind,
+                  mensagem:
+                    documentKind === 'evento'
+                      ? 'Evento deste NSU ja estava armazenado.'
+                      : 'Documento retornado pelo ADN ja estava armazenado.',
                   chaveAcesso: dfeResult.chaveAcesso ?? null
                 });
                 this.syncPastNsuRecoveryExecution(
@@ -950,20 +963,30 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               document
             });
             const persistedNsu = persisted.nsu ?? nsu;
-            if (persisted.outcome === 'existing') {
+            if (persisted.outcome === 'existing' || persisted.outcome === 'updated') {
               detail.documentosIgnoradosExistentes += 1;
               result.documentosIgnoradosExistentes += 1;
               requestedNsuResolved = requestedNsuResolved || persistedNsu === nsu;
               if (execution) {
                 this.updatePastNsuRecoveryExecutionRow(execution, control.id, persistedNsu, {
                   status: 'ja_baixado',
-                  mensagem: 'Documento retornado pelo ADN ja estava armazenado.',
+                  documentKind: persisted.kind,
+                  mensagem:
+                    persisted.outcome === 'updated'
+                      ? persisted.kind === 'evento'
+                        ? 'Evento deste lote ja existia e teve apenas o registro atualizado.'
+                        : 'Documento deste lote ja existia e teve apenas o registro atualizado.'
+                      : persisted.kind === 'evento'
+                        ? 'Evento retornado pelo ADN ja estava armazenado.'
+                        : 'Documento retornado pelo ADN ja estava armazenado.',
                   chaveAcesso: dfeResult.chaveAcesso ?? null
                 });
                 this.syncPastNsuRecoveryExecution(
                   execution,
                   result,
-                  `NSU ${persistedNsu.toString()} retornou documento ja existente.`
+                  persisted.outcome === 'updated'
+                    ? `NSU ${persistedNsu.toString()} retornou documento ja existente com atualizacao de registro.`
+                    : `NSU ${persistedNsu.toString()} retornou documento ja existente.`
                 );
               }
               continue;
@@ -983,6 +1006,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             if (execution) {
               this.updatePastNsuRecoveryExecutionRow(execution, control.id, persistedNsu, {
                 status: 'baixado',
+                documentKind: persisted.kind,
                 mensagem:
                   persisted.kind === 'evento'
                     ? 'Evento recuperado com sucesso para este NSU.'
@@ -1014,6 +1038,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             if (execution) {
               this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
                 status: 'sem_documento',
+                documentKind: null,
                 chaveAcesso: dfeResult.chaveAcesso ?? null,
                 mensagem: this.buildIndirectNsuDocumentMessage(nsu, documents)
               });
@@ -1956,6 +1981,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             ambiente: control.ambiente,
             nsu: nsu.toString(),
             status: 'na_fila',
+            documentKind: null,
             chaveAcesso: null,
             mensagem: waitingMessage
           });
@@ -2197,6 +2223,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         hashXml: true
       }
     });
+    const hadPersistedFiscalData = Boolean(existingDocument && this.hasDocumentoFiscalData(existingDocument));
     if (this.shouldSkipPersistedDocumento(existingDocument, hash, params.document.nsu)) {
       return {
         nsu: params.document.nsu ?? existingDocument?.nsu ?? undefined,
@@ -2324,7 +2351,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     return {
       nsu: params.document.nsu,
       kind: 'nfse',
-      outcome: 'saved',
+      outcome: hadPersistedFiscalData ? 'updated' : 'saved',
       numeroNfse: parsedXml?.numeroNfse ?? null,
       serie: parsedXml?.serie ?? null
     };
@@ -2348,13 +2375,22 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
   private buildIndirectNsuDocumentMessage(requestedNsu: bigint, documents: AdnDFeDocument[]): string {
     const relatedNsus = [...new Set(documents.map((document) => document.nsu).filter((nsu): nsu is bigint => nsu !== undefined))];
+    const onlyEventos = documents.length > 0 && documents.every((document) => this.inferDfeDocumentKind(document) === 'evento');
 
     if (relatedNsus.length === 0) {
-      return `O ADN retornou documentos no lote, mas nenhum item trouxe NSU individual para associacao ao NSU ${requestedNsu.toString()}.`;
+      return onlyEventos
+        ? `O ADN retornou apenas eventos no lote, mas nenhum item trouxe NSU individual para associacao ao NSU ${requestedNsu.toString()}.`
+        : `O ADN retornou documentos no lote, mas nenhum item trouxe NSU individual para associacao ao NSU ${requestedNsu.toString()}.`;
     }
 
     const nsuList = relatedNsus.map((nsu) => nsu.toString()).join(', ');
-    return `O ADN retornou apenas documentos vinculados aos NSUs ${nsuList}; nenhum item ficou associado ao NSU ${requestedNsu.toString()}.`;
+    return onlyEventos
+      ? `O ADN retornou apenas eventos vinculados aos NSUs ${nsuList}; nenhum item ficou associado ao NSU ${requestedNsu.toString()}.`
+      : `O ADN retornou apenas documentos vinculados aos NSUs ${nsuList}; nenhum item ficou associado ao NSU ${requestedNsu.toString()}.`;
+  }
+
+  private inferDfeDocumentKind(document: Pick<AdnDFeDocument, 'xml'>): Exclude<PastNsuRecoveryExecutionRowDocumentKind, null> {
+    return this.parser.isEventoXml(document.xml) ? 'evento' : 'nfse';
   }
 
   private async persistEventoFromNsu(params: {
