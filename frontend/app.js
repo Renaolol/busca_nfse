@@ -5078,24 +5078,19 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                   `
                 )
                 .join('')}
-              <th>Acoes</th>
             </tr>
           </thead>
           <tbody>
             ${renderTableRowsOrState({
               key: 'xmlReader30',
-              colSpan: visibleColumns.length + 1,
+              colSpan: visibleColumns.length,
               rowsHtml: displayedRows.length
                 ? displayedRows
                     .map((row) => {
-                      const actions = renderXmlReader30Actions(row);
                       const statusTone = row.raw?.cancelada ? 'danger' : row.raw?.statusFiscal === 'Autorizada' ? 'success' : row.statusTone || 'info';
                       return `
                         <tr>
                           ${visibleColumns.map((column) => renderXmlReader30NfeColumnCell(column, row, statusTone)).join('')}
-                          <td>
-                            <div class="table-actions">${actions}</div>
-                          </td>
                         </tr>
                       `;
                     })
