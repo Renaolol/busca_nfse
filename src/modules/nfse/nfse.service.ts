@@ -2456,7 +2456,6 @@ export class NfseService {
         clienteId,
         cnpjPrestador,
         ambiente: { in: ambientes },
-        chaveAcesso: { not: null },
         numeroNfse: { not: null }
       },
       select: {
