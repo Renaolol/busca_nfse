@@ -1172,15 +1172,15 @@ tbody tr:hover {
 }
 
 .xml-reader30-doc {
-  width: 420px;
-  min-width: 420px;
-  max-width: 520px;
+  width: 260px;
+  min-width: 260px;
+  max-width: 320px;
   white-space: nowrap;
 }
 
 .xml-reader30-quantity {
-  width: 72px;
-  min-width: 72px;
+  width: 60px;
+  min-width: 60px;
   text-align: center;
   white-space: nowrap;
 }
@@ -1192,34 +1192,35 @@ tbody tr:hover {
 .xml-reader30-money {
   white-space: nowrap;
   font-weight: 700;
+  min-width: 84px;
 }
 
 .xml-reader30-icms-currency {
-  min-width: 110px;
+  min-width: 92px;
 }
 
 .xml-reader30-icms-code {
-  min-width: 90px;
+  min-width: 72px;
   text-align: center;
   white-space: nowrap;
 }
 
 .xml-reader30-icms-cfop {
-  min-width: 80px;
+  min-width: 72px;
   text-align: center;
   white-space: nowrap;
 }
 
 .xml-reader30-icms-number {
-  min-width: 130px;
+  min-width: 98px;
   text-align: center;
   white-space: nowrap;
 }
 
 .xml-reader30-product {
-  width: 420px;
-  min-width: 420px;
-  max-width: 520px;
+  width: 260px;
+  min-width: 260px;
+  max-width: 320px;
   white-space: nowrap;
 }
 
@@ -1380,8 +1381,8 @@ tbody tr:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: top;
-  padding: 3px 8px;
-  line-height: 1.15;
+  padding: 2px 6px;
+  line-height: 1.1;
 }
 
 .xml-reader30-reorderable-table tbody td {

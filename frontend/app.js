@@ -5005,7 +5005,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
   const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
   const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
   const visibleColumns = getXmlReader30VisibleNfeColumns();
-  const minWidth = 260 + visibleColumns.length * 130;
+  const minWidth = 180 + visibleColumns.length * 95;
 
   return `
     <article class="card" style="margin-top: 2px;">
