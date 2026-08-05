@@ -261,6 +261,7 @@ Valores aceitos:
 
 Use `POST /nfse/importar-xml` para carregar XMLs legados de NFS-e ou XMLs de evento.
 Use `POST /nfse/recuperar-por-chave` para recuperar XMLs faltantes que estejam disponiveis no Portal Nacional/Emissor Publico. O endpoint recebe `clienteId`, `cnpjConsulta`, `ambiente` e a lista `chavesAcesso`; para cada chave, o backend consulta a API oficial e importa o XML retornado.
+Use `POST /nfse/recuperar-lacunas` para tentar localizar automaticamente NFS-e faltantes a partir das lacunas de numeracao detectadas na listagem. O endpoint recebe `clienteId`, `cnpjConsulta` e `lacunas` (serie + faixa numerica), monta o identificador da DPS com municipio/CNPJ/serie/numero, consulta o Emissor Publico oficial e, quando necessario, faz o encadeamento DPS -> chave -> XML da NFS-e.
 Notas aplicam deduplicacao por `ambiente + chave_acesso` e geram/salvam o DANFSE em PDF.
 Eventos sao vinculados pela chave da NFS-e referenciada (`chNFSe`) e salvos em `nfse_eventos`; evento de cancelamento (`e101101`) marca a nota relacionada como `cancelada`, preenche `data_cancelamento` e forca regeneracao futura do DANFSE.
 

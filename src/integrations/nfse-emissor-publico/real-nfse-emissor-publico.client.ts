@@ -11,7 +11,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { LocalStorageService } from '../../modules/storage/storage.service';
 import { CryptoService } from '../../modules/shared/crypto.service';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
-import { NfseEmissorPublicoClient, NfseEmissorPublicoNfseResult } from './nfse-emissor-publico.types';
+import {
+  NfseEmissorPublicoClient,
+  NfseEmissorPublicoDpsResult,
+  NfseEmissorPublicoNfseResult
+} from './nfse-emissor-publico.types';
 
 type PfxCredentials = {
   mode: 'pfx';
@@ -81,6 +85,54 @@ export class RealNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
     }
   }
 
+  async getDpsById(params: {
+    dpsId: string;
+    ambiente: NfseAmbiente;
+    certificateId: string;
+  }): Promise<NfseEmissorPublicoDpsResult> {
+    try {
+      const certificate = await this.loadCertificate(params.certificateId);
+      const url = this.buildDpsUrl(params.ambiente, params.dpsId);
+      const response = await this.doGetWithFallback(url, certificate);
+      const data = this.tryParseJson(response.body);
+
+      if (response.statusCode !== 200) {
+        return {
+          statusCode: response.statusCode,
+          dpsId: params.dpsId,
+          rawResponse: data ?? response.body,
+          message: this.extractMessage(data, `Falha na consulta da DPS no Emissor Publico. HTTP ${response.statusCode}.`)
+        };
+      }
+
+      const xml = this.extractNfseXml(data, response.body);
+      const chaveAcesso = this.extractChaveAcesso(data, response.body);
+      if (!xml && !chaveAcesso) {
+        return {
+          statusCode: 200,
+          dpsId: params.dpsId,
+          rawResponse: data ?? response.body,
+          message: 'Resposta do Emissor Publico sem XML da NFS-e ou chave de acesso da DPS.'
+        };
+      }
+
+      return {
+        statusCode: 200,
+        dpsId: params.dpsId,
+        xml,
+        chaveAcesso,
+        rawResponse: data ?? response.body
+      };
+    } catch (error) {
+      return {
+        statusCode: 0,
+        dpsId: params.dpsId,
+        rawResponse: { error: this.toErrorMessage(error) },
+        message: `Erro ao consultar DPS no Emissor Publico: ${this.toErrorMessage(error)}`
+      };
+    }
+  }
+
   private async loadCertificate(certificateId: string): Promise<Certificado> {
     const certificate = await this.prisma.certificado.findUnique({ where: { id: certificateId } });
     if (!certificate) {
@@ -115,6 +167,13 @@ export class RealNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
     const base = this.ensureTrailingSlash(baseUrl);
     const prefix = this.getPathPrefix();
     return new URL(`${prefix}/nfse/${this.onlyDigits(chaveAcesso)}`, base);
+  }
+
+  private buildDpsUrl(ambiente: NfseAmbiente, dpsId: string): URL {
+    const baseUrl = this.getBaseUrl(ambiente);
+    const base = this.ensureTrailingSlash(baseUrl);
+    const prefix = this.getPathPrefix();
+    return new URL(`${prefix}/dps/${encodeURIComponent(String(dpsId || '').trim())}`, base);
   }
 
   private getBaseUrl(ambiente: NfseAmbiente): string {
@@ -253,6 +312,30 @@ export class RealNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
       const xml = this.extractXmlCandidate(value);
       if (xml) {
         return xml;
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractChaveAcesso(payload: Record<string, unknown> | null, rawBody: string): string | undefined {
+    const rawMatch = rawBody.match(/\d{50}/);
+    if (rawMatch?.[0]) {
+      return rawMatch[0];
+    }
+
+    if (!payload) {
+      return undefined;
+    }
+
+    for (const value of this.collectValues(payload, 250)) {
+      if (typeof value !== 'string') {
+        continue;
+      }
+
+      const match = value.match(/\d{50}/);
+      if (match?.[0]) {
+        return match[0];
       }
     }
 

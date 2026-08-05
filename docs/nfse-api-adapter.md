@@ -10,6 +10,7 @@ As integracoes oficiais devem ser encapsuladas em adapters separados:
 - `getDFeByNsu(...)`: retorna o XML principal em `xml` para compatibilidade e, quando a API responder lote, retorna todos os itens em `documents`.
 - `getEventosByChave(...)`
 - `getNfseByChave(...)`
+- `getDpsById(...)`
 
 ## Implementacoes
 

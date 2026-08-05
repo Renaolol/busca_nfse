@@ -10,6 +10,7 @@ import { ImportXmlDto } from './dto/import-xml.dto';
 import { NfseNumeracaoValidationDto } from './dto/list-nfse-response.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
 import { RecuperarNfsePorChaveDto } from './dto/recuperar-por-chave.dto';
+import { RecuperarNfseLacunasDto } from './dto/recuperar-lacunas.dto';
 import { ReprocessarDanfsesDto, ReprocessarDanfsesResponseDto } from './dto/reprocessar-danfses.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
 import { SincronizarNfseEventosDto, SincronizarNfseEventosResponseDto } from './dto/sincronizar-eventos.dto';
@@ -126,6 +127,12 @@ export class NfseController {
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   recuperarPorChave(@Body() dto: RecuperarNfsePorChaveDto) {
     return this.nfseService.recuperarPorChave(dto);
+  }
+
+  @Post('recuperar-lacunas')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  recuperarLacunas(@Body() dto: RecuperarNfseLacunasDto) {
+    return this.nfseService.recuperarLacunas(dto);
   }
 
   @Post('download-lote')

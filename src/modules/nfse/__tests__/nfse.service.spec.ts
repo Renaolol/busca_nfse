@@ -39,7 +39,8 @@ describe('NfseService', () => {
     getEventosByChave: jest.fn()
   };
   const emissorPublicoClient = {
-    getNfseByChave: jest.fn()
+    getNfseByChave: jest.fn(),
+    getDpsById: jest.fn()
   };
 
   const parser = new NfseXmlParserService();
@@ -1065,6 +1066,110 @@ describe('NfseService', () => {
         status: 'falha',
         mensagem: 'NFS-e nao localizada no Emissor Publico.'
       }
+    ]);
+  });
+
+  it('recupera lacuna de numeracao consultando DPS e depois a NFS-e oficial', async () => {
+    prisma.clienteEstabelecimento.findFirst.mockImplementation(({ where }) => {
+      if (where?.clienteId === 'cliente-1' && where?.cnpj === '06960810000176') {
+        return Promise.resolve({
+          id: 'estab-1',
+          cnpj: '06960810000176',
+          municipioCodigoIbge: '4211009'
+        });
+      }
+
+      return Promise.resolve(undefined);
+    });
+    prisma.certificado.findFirst.mockResolvedValue({
+      id: 'cert-1',
+      validadeFim: new Date('2099-01-01T00:00:00.000Z')
+    });
+    prisma.nfseDocumento.findFirst
+      .mockResolvedValueOnce({
+        municipioPrestacaoCodigo: '4211009'
+      })
+      .mockResolvedValueOnce(null);
+    prisma.nfseDocumento.findUnique.mockResolvedValue(null);
+    prisma.nfseDocumento.create.mockResolvedValue({
+      id: 'doc-rec-dps-1',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: Ambiente.producao,
+      nsu: null,
+      chaveAcesso: '42110092206960810000176000000000064126070112345678',
+      numeroNfse: '641',
+      origem: 'consulta_dps',
+      xmlPath: 'nfse/producao/06960810000176/2026/07/xml/42110092206960810000176000000000064126070112345678.xml',
+      danfsePath: 'nfse/producao/06960810000176/2026/07/danfse/42110092206960810000176000000000064126070112345678.pdf'
+    });
+    storage.putObject.mockResolvedValue('/tmp/nfse-file');
+    emissorPublicoClient.getDpsById.mockResolvedValue({
+      statusCode: 200,
+      dpsId: 'DPS4211009206960810000176700000000000641',
+      chaveAcesso: '42110092206960810000176000000000064126070112345678',
+      rawResponse: { ok: true }
+    });
+    emissorPublicoClient.getNfseByChave.mockResolvedValue({
+      statusCode: 200,
+      chaveAcesso: '42110092206960810000176000000000064126070112345678',
+      xml: `<?xml version="1.0" encoding="UTF-8"?>
+<NFSe>
+  <infNFSe>
+    <chaveAcesso>42110092206960810000176000000000064126070112345678</chaveAcesso>
+    <numeroNFSe>641</numeroNFSe>
+    <serie>70000</serie>
+    <tpAmb>1</tpAmb>
+    <dataEmissao>2026-07-10T10:31:00-03:00</dataEmissao>
+    <prestador><cnpj>06960810000176</cnpj><razaoSocial>CLINILAB LABORATORIO DE ANALISES CLINICAS LTDA</razaoSocial></prestador>
+    <tomador><cnpj>11111111000111</cnpj><razaoSocial>TOMADOR TESTE</razaoSocial></tomador>
+    <valorServico>405.00</valorServico>
+  </infNFSe>
+</NFSe>`
+    });
+
+    const result = await service.recuperarLacunas({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '06960810000176',
+      ambiente: 'producao',
+      lacunas: [
+        {
+          ambiente: 'producao',
+          serie: '70000',
+          numeroInicial: 641,
+          numeroFinal: 641
+        }
+      ]
+    });
+
+    expect(emissorPublicoClient.getDpsById).toHaveBeenCalledWith({
+      dpsId: 'DPS4211009206960810000176700000000000641',
+      ambiente: 'producao',
+      certificateId: 'cert-1'
+    });
+    expect(emissorPublicoClient.getNfseByChave).toHaveBeenCalledWith({
+      chaveAcesso: '42110092206960810000176000000000064126070112345678',
+      ambiente: 'producao',
+      certificateId: 'cert-1'
+    });
+    expect(result).toMatchObject({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      cnpjConsulta: '06960810000176',
+      requestedRanges: 1,
+      requestedNumbers: 1,
+      processedNumbers: 1,
+      documentsRecovered: 1,
+      failures: 0
+    });
+    expect(result.detalhes).toEqual([
+      expect.objectContaining({
+        numero: 641,
+        serie: '70000',
+        status: 'recuperada',
+        documentoId: 'doc-rec-dps-1',
+        chaveAcesso: '42110092206960810000176000000000064126070112345678'
+      })
     ]);
   });
 
