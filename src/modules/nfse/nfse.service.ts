@@ -727,13 +727,12 @@ export class NfseService {
       }
 
       totalNumerosValidos += 1;
-      const serie = this.normalizeSerie(document.serie);
-      const groupKey = `${document.ambiente}:${serie ?? ''}`;
+      const groupKey = String(document.ambiente);
       const current =
         groupedNumbers.get(groupKey) ??
         {
           ambiente: document.ambiente,
-          serie,
+          serie: null,
           numbers: new Set<number>()
         };
 
@@ -769,14 +768,6 @@ export class NfseService {
       const ambienteDiff = String(left.ambiente).localeCompare(String(right.ambiente));
       if (ambienteDiff !== 0) {
         return ambienteDiff;
-      }
-
-      const serieDiff = String(left.serie ?? '').localeCompare(String(right.serie ?? ''), 'pt-BR', {
-        numeric: true,
-        sensitivity: 'base'
-      });
-      if (serieDiff !== 0) {
-        return serieDiff;
       }
 
       return left.numeroInicial - right.numeroInicial;
@@ -2494,15 +2485,7 @@ export class NfseService {
     inscricaoFederal: string
   ): Promise<{ ok: true; dpsId: string } | { ok: false; dpsId: string | null; message: string }> {
     const serie = this.normalizeSerie(gap.serie);
-    if (!serie) {
-      return {
-        ok: false,
-        dpsId: null,
-        message: 'Nao foi possivel inferir a serie da DPS para esta lacuna.'
-      };
-    }
-
-    const candidates = docsIndex.get(`${gap.ambiente}:${serie}`) ?? [];
+    const candidates = serie ? docsIndex.get(`${gap.ambiente}:${serie}`) ?? [] : [];
     const fallbackCandidates = candidates.length
       ? candidates
       : Array.from(docsIndex.entries())
@@ -2549,12 +2532,21 @@ export class NfseService {
       };
     }
 
+    const serieFallback = serie ?? this.normalizeSerie(fallbackNeighbor.serie);
+    if (!serieFallback) {
+      return {
+        ok: false,
+        dpsId: null,
+        message: `Nao foi possivel inferir a serie da DPS a partir da NFS-e vizinha ${fallbackNeighbor.numeroNfse ?? '-'}.`
+      };
+    }
+
     return {
       ok: true,
       dpsId: this.buildDpsId({
         codigoMunicipioEmissao,
         inscricaoFederal,
-        serie,
+        serie: serieFallback,
         numeroDps: numeroNfse
       })
     };

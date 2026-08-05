@@ -198,12 +198,92 @@ describe('NfseService', () => {
       lacunas: [
         {
           ambiente: Ambiente.producao,
-          serie: 'A1',
+          serie: null,
           numeroInicial: 102,
           numeroFinal: 102,
           quantidade: 1
         }
       ]
+    });
+  });
+
+  it('ignora a serie ao validar numeracao de NFS-e emitidas', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-emitida-55',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000005526019687178145',
+        numeroNfse: '55',
+        serie: '900',
+        dataEmissao: new Date('2026-01-31T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador 1',
+        xmlPath: null,
+        danfsePath: null,
+        createdAt: new Date('2026-01-31T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-31T00:00:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-emitida-56',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000005626019687178146',
+        numeroNfse: '56',
+        serie: '70000',
+        dataEmissao: new Date('2026-01-31T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '22222222000122',
+        razaoSocialTomador: 'Tomador 2',
+        xmlPath: null,
+        danfsePath: null,
+        createdAt: new Date('2026-01-31T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-31T00:00:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-emitida-57',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000005726019687178147',
+        numeroNfse: '57',
+        serie: '900',
+        dataEmissao: new Date('2026-02-01T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '33333333000133',
+        razaoSocialTomador: 'Tomador 3',
+        xmlPath: null,
+        danfsePath: null,
+        createdAt: new Date('2026-02-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-02-01T00:00:00.000Z'),
+        eventos: []
+      }
+    ]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '06960810000176',
+      tipoRelacao: 'emitidas',
+      all: true
+    });
+
+    expect(result.validacaoNumeracao).toEqual({
+      aplicada: true,
+      cnpjPrestador: '06960810000176',
+      totalDocumentosAnalisados: 3,
+      totalNumerosValidos: 3,
+      totalFaixasLacuna: 0,
+      totalNumerosPulados: 0,
+      possuiNumeracaoPulada: false,
+      lacunas: []
     });
   });
 
