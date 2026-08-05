@@ -2518,21 +2518,22 @@ export class NfseService {
       };
     }
 
-    for (const neighbor of neighbors) {
-      const reference = await this.loadRecoveryDpsReference(neighbor);
-      if (!reference) {
-        continue;
-      }
+    const previousNeighbors = neighbors.filter((neighbor) => (this.parseNumeroNfse(neighbor.numeroNfse) ?? 0) < numeroNfse);
+    const nextNeighbors = neighbors.filter((neighbor) => (this.parseNumeroNfse(neighbor.numeroNfse) ?? 0) > numeroNfse);
 
-      const delta = numeroNfse - reference.numeroNfse;
-      const targetNumeroDps = reference.numeroDps + delta;
-      if (targetNumeroDps <= 0) {
-        continue;
-      }
-
+    const inferredFromPrevious = await this.tryInferDpsFromNeighbors(previousNeighbors, numeroNfse);
+    if (inferredFromPrevious) {
       return {
         ok: true,
-        dpsId: this.replaceDpsSequence(reference.dpsId, targetNumeroDps)
+        dpsId: inferredFromPrevious
+      };
+    }
+
+    const inferredFromNext = await this.tryInferDpsFromNeighbors(nextNeighbors, numeroNfse);
+    if (inferredFromNext) {
+      return {
+        ok: true,
+        dpsId: inferredFromNext
       };
     }
 
@@ -2613,6 +2614,28 @@ export class NfseService {
       );
       return null;
     }
+  }
+
+  private async tryInferDpsFromNeighbors(
+    neighbors: DocumentoRecoveryNeighbor[],
+    numeroNfse: number
+  ): Promise<string | null> {
+    for (const neighbor of neighbors) {
+      const reference = await this.loadRecoveryDpsReference(neighbor);
+      if (!reference) {
+        continue;
+      }
+
+      const delta = numeroNfse - reference.numeroNfse;
+      const targetNumeroDps = reference.numeroDps + delta;
+      if (targetNumeroDps <= 0) {
+        continue;
+      }
+
+      return this.replaceDpsSequence(reference.dpsId, targetNumeroDps);
+    }
+
+    return null;
   }
 
   private parseRecoveryDpsNumber(value?: string | null): number | undefined {
