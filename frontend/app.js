@@ -176,6 +176,7 @@ const state = {
     results: [],
     lastQuery: null,
     numberingValidation: null,
+    informativeRows: 0,
     lastSearchedAt: null,
     page: 1,
     pageSize: SEARCH_PAGE_SIZE,
@@ -3909,6 +3910,7 @@ function renderXmlSearchSummary() {
   const client = findClientById(query.cliente);
   const filteredXmls = getFilteredXmls();
   const totalResults = Number(state.xmlSearch.total || filteredXmls.length || 0);
+  const informativeRows = Number(state.xmlSearch.informativeRows || 0);
   const totalValue = sumListedDocumentValues(filteredXmls);
   const periodText =
     query.emissaoInicio || query.emissaoFim
@@ -3920,7 +3922,7 @@ function renderXmlSearchSummary() {
       <div class="progress-meta">
         <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
         <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
-        <span>Resultado: <strong>${escapeHtml(String(totalResults))} XML(s)</strong></span>
+        <span>Resultado: <strong>${escapeHtml(String(totalResults))} XML(s)${informativeRows ? ` + ${escapeHtml(String(informativeRows))} excecao(oes)` : ''}</strong></span>
         <span>Pagina: <strong>${escapeHtml(`${state.xmlSearch.page}/${Math.max(1, state.xmlSearch.totalPages || 1)}`)}</strong></span>
         <span>Valor somado: <strong>${escapeHtml(formatCurrency(totalValue))}</strong></span>
         <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.xmlSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
@@ -4066,23 +4068,37 @@ function renderNfseGapAuditPreview(gaps) {
 
 function renderXmlsTableCard(xmls) {
   const selectableXmls = xmls.filter((xml) => Boolean(xml.apiNfseId));
+  const informativeRowsCount = xmls.filter((xml) => Boolean(xml?.isNumberingException)).length;
+  const syncableRowsCount = xmls.filter((xml) => canSyncXmlEvents(xml)).length;
   const selectedVisibleCount = selectableXmls.filter((xml) => state.selectedXmlIds.has(xml.id)).length;
   const allVisibleSelected = selectableXmls.length > 0 && selectedVisibleCount === selectableXmls.length;
   const batchDisabled = selectedVisibleCount > 0 ? '' : 'disabled';
   const totalValue = sumListedDocumentValues(xmls);
   const totalResults = Number(state.xmlSearch.total || xmls.length || 0);
   const syncEventsDisabled =
-    state.xmlEventsSyncRunning || state.dataSource !== 'api' || state.tableState.xmls === 'loading' || !xmls.length
+    state.xmlEventsSyncRunning || state.dataSource !== 'api' || state.tableState.xmls === 'loading' || !syncableRowsCount
       ? 'disabled'
       : '';
   const syncEventsLabel = state.xmlEventsSyncRunning ? 'Buscando eventos...' : 'Buscar eventos da listagem';
+  const subtitleParts = [
+    `Mostrando ${escapeHtml(String(xmls.length))} registro(s).`,
+    `${selectedVisibleCount} selecionado(s).`,
+    `Valor total: ${escapeHtml(formatCurrency(totalValue))}.`
+  ];
+  if (totalResults > 0 || informativeRowsCount > 0) {
+    subtitleParts.splice(
+      1,
+      0,
+      `${escapeHtml(String(totalResults))} XML(s)${informativeRowsCount ? ` e ${escapeHtml(String(informativeRowsCount))} excecao(oes) informada(s)` : ''}.`
+    );
+  }
 
   return `
     <article class="card">
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">Arquivos encontrados</h3>
-          <p class="card-subtitle">Mostrando ${escapeHtml(String(xmls.length))} de ${escapeHtml(String(totalResults))} XML(s). ${selectedVisibleCount} selecionado(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
+          <p class="card-subtitle">${subtitleParts.join(' ')}</p>
         </div>
         <div class="table-actions">
           <button class="btn secondary" type="button" data-action="xmls-sync-events-listed" ${syncEventsDisabled}>${escapeHtml(syncEventsLabel)}</button>
@@ -4134,13 +4150,17 @@ function renderXmlsTableCard(xmls) {
                     <td>${escapeHtml(xml.tipo)}</td>
                     <td>${renderXmlStatusBadges(xml)}</td>
                     <td>
-                      <div class="table-actions">
-                        <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar detalhes</button>
-                        <button class="icon-btn" data-action="xml-sync-events" data-xml-id="${xml.id}" ${xmlSyncDisabled}>Buscar eventos</button>
-                        <button class="icon-btn" data-action="xml-view" data-xml-id="${xml.id}">Ver XML</button>
-                        <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
-                        <button class="icon-btn" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
-                      </div>
+                      ${
+                        xml.isNumberingException
+                          ? '<span class="row-sub">Somente informativo</span>'
+                          : `<div class="table-actions">
+                              <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar detalhes</button>
+                              <button class="icon-btn" data-action="xml-sync-events" data-xml-id="${xml.id}" ${xmlSyncDisabled}>Buscar eventos</button>
+                              <button class="icon-btn" data-action="xml-view" data-xml-id="${xml.id}">Ver XML</button>
+                              <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
+                              <button class="icon-btn" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
+                            </div>`
+                      }
                     </td>
                   </tr>`;
                 })
@@ -8297,10 +8317,19 @@ function statusBadge(text, tone, extraClass = '') {
 function renderNfseNumber(xml) {
   const numero = escapeHtml(xml.numeroNfse || '-');
   const cancelBadge = xml.cancelada ? statusBadge('Cancelada', 'danger', 'nfse-cancel-chip') : '';
-  return `<div class="nfse-number-cell"><strong>${numero}</strong>${cancelBadge}</div>`;
+  const exceptionBadge = xml.isNumberingException ? statusBadge('Excecao', 'warning', 'nfse-cancel-chip') : '';
+  return `<div class="nfse-number-cell"><strong>${numero}</strong>${cancelBadge}${exceptionBadge}</div>`;
 }
 
 function renderXmlStatusBadges(xml) {
+  if (xml.isNumberingException) {
+    const badges = [statusBadge('Excecao aplicada', 'warning')];
+    if (xml.numberingExceptionType) {
+      badges.push(statusBadge(mapNfseNumberingExceptionTypeLabel(xml.numberingExceptionType), 'neutral'));
+    }
+    return `<div class="status-stack">${badges.join('')}</div>`;
+  }
+
   const badges = [statusBadge(xml.statusArmazenamento, toneFromStorageStatus(xml.statusArmazenamento))];
   if (xml.cancelada) {
     badges.push(statusBadge('Cancelada', 'danger', 'nfse-cancel-chip'));
@@ -10752,6 +10781,7 @@ async function applyXmlFilters(form) {
     state.xmlSearch.results = [];
     state.xmlSearch.lastQuery = null;
     state.xmlSearch.numberingValidation = null;
+    state.xmlSearch.informativeRows = 0;
     state.xmlSearch.total = 0;
     state.xmlSearch.totalPages = 0;
     state.xmlSearch.page = 1;
@@ -10770,6 +10800,7 @@ async function applyXmlFilters(form) {
     state.xmlSearch.results = [];
     state.xmlSearch.lastQuery = null;
     state.xmlSearch.numberingValidation = null;
+    state.xmlSearch.informativeRows = 0;
     state.xmlSearch.total = 0;
     state.xmlSearch.totalPages = 0;
     state.xmlSearch.page = 1;
@@ -10790,6 +10821,7 @@ async function applyXmlFilters(form) {
   if (state.dataSource !== 'api') {
     state.xmlSearch.results = getFilteredXmlsFromSource(state.xmlFiles);
     state.xmlSearch.numberingValidation = null;
+    state.xmlSearch.informativeRows = 0;
     state.xmlSearch.lastSearchedAt = new Date().toISOString();
     state.xmlSearch.total = state.xmlSearch.results.length;
     state.xmlSearch.totalPages = state.xmlSearch.results.length ? 1 : 0;
@@ -11032,6 +11064,12 @@ function getFilteredXmlsFromSource(source) {
     const matchesClient = filters.cliente === 'Todos' || !filters.cliente || xml.clientId === filters.cliente;
     const matchesCnpj = !filters.cnpj || normalizeDigits(xml.cnpj).includes(filters.cnpj);
     const matchesNumero = !filters.numero || String(xml.numeroNfse).includes(filters.numero);
+
+    if (xml?.isNumberingException) {
+      const matchesTipo = filters.tipo === 'Todos' || filters.tipo === 'Emitida';
+      return matchesClient && matchesCnpj && matchesNumero && matchesTipo;
+    }
+
     const matchesMunicipio = filters.municipio === 'Todos' || xml.municipio === filters.municipio;
     const matchesTipo = filters.tipo === 'Todos' || xml.tipo === filters.tipo;
     const matchesStatus = filters.status === 'Todos' || xml.statusArmazenamento === filters.status;
@@ -11360,6 +11398,7 @@ function resetXmlSearch() {
   state.xmlSearch.results = [];
   state.xmlSearch.lastQuery = null;
   state.xmlSearch.numberingValidation = null;
+  state.xmlSearch.informativeRows = 0;
   state.xmlSearch.lastSearchedAt = null;
   state.xmlSearch.page = 1;
   state.xmlSearch.pageSize = SEARCH_PAGE_SIZE;
@@ -11459,8 +11498,11 @@ async function executeXmlSearch() {
     const payload = normalizePaginatedResponse(await apiRequest(`/nfse?${query.toString()}`));
     const xmls = buildXmlFilesFromApi(payload.items, state.clients);
     state.xmlFiles = mergeXmlFilesById(state.xmlFiles, xmls);
-    state.xmlSearch.results = getFilteredXmlsFromSource(xmls);
+    const filteredXmls = getFilteredXmlsFromSource(xmls);
+    const informativeRows = await loadXmlNumberingExceptionRowsForSearch(state.filters.xmls, filteredXmls);
+    state.xmlSearch.results = [...filteredXmls, ...informativeRows];
     state.xmlSearch.numberingValidation = payload.validacaoNumeracao;
+    state.xmlSearch.informativeRows = informativeRows.length;
     state.xmlSearch.lastSearchedAt = new Date().toISOString();
     state.xmlSearch.page = 1;
     state.xmlSearch.pageSize = payload.pageSize;
@@ -11471,6 +11513,7 @@ async function executeXmlSearch() {
   } catch (error) {
     state.xmlSearch.results = [];
     state.xmlSearch.numberingValidation = null;
+    state.xmlSearch.informativeRows = 0;
     state.xmlSearch.total = 0;
     state.xmlSearch.totalPages = 0;
     state.tableState.xmls = 'error';
@@ -11779,6 +11822,88 @@ function normalizeNfseNumberingExceptionRows(payload) {
       updatedAt: row?.updatedAt ? String(row.updatedAt) : ''
     }))
     .filter((row) => row.id && row.clienteId && row.numeroNfse > 0);
+}
+
+async function loadXmlNumberingExceptionRowsForSearch(filters, existingXmls = []) {
+  const numeroPesquisado = Number.parseInt(String(filters?.numero || '').trim(), 10);
+  if (!Number.isInteger(numeroPesquisado) || numeroPesquisado <= 0) {
+    return [];
+  }
+
+  if (!filters?.cliente || filters?.tipo === 'Tomada') {
+    return [];
+  }
+
+  const xmls = Array.isArray(existingXmls) ? existingXmls : [];
+  if (xmls.some((xml) => xml?.tipo === 'Emitida' && Number.parseInt(String(xml?.numeroNfse || ''), 10) === numeroPesquisado)) {
+    return [];
+  }
+
+  const client = findClientById(filters.cliente);
+  const cnpjConsulta = normalizeDigits(client?.cnpj || '');
+  if (!client || !cnpjConsulta) {
+    return [];
+  }
+
+  try {
+    const query = new URLSearchParams({
+      clienteId: client.id,
+      cnpjConsulta
+    });
+    const payload = await apiRequest(`/nfse/numeracao-excecoes?${query.toString()}`);
+    const exceptions = normalizeNfseNumberingExceptionRows(payload).filter((row) => row.numeroNfse === numeroPesquisado);
+    if (!exceptions.length) {
+      return [];
+    }
+
+    const selectedException =
+      exceptions.find((row) => row.ambiente === 'producao') ||
+      [...exceptions].sort((left, right) => Date.parse(right.updatedAt || right.createdAt || 0) - Date.parse(left.updatedAt || left.createdAt || 0))[0];
+
+    return selectedException ? [buildXmlNumberingExceptionRow(selectedException, client)] : [];
+  } catch (error) {
+    console.error('Falha ao carregar excecao de numeracao para a busca de XMLs.', error);
+    return [];
+  }
+}
+
+function buildXmlNumberingExceptionRow(exception, client) {
+  const timestamp = exception.updatedAt || exception.createdAt || new Date().toISOString();
+  return {
+    id: `xml-exception-${exception.id}`,
+    apiNfseId: '',
+    clientId: exception.clienteId,
+    estabelecimentoId: null,
+    cliente: client?.razaoSocial || 'Cliente nao identificado',
+    cnpj: exception.cnpjConsulta || normalizeDigits(client?.cnpj || ''),
+    municipio: '-',
+    numeroNfse: String(exception.numeroNfse),
+    codigoVerificacao: '-',
+    chaveAcesso: '',
+    ambiente: exception.ambiente || 'producao',
+    dataEmissao: timestamp,
+    dataDownload: timestamp,
+    valor: 0,
+    tipo: 'Emitida',
+    statusArmazenamento: 'Excecao aplicada',
+    statusFiscal: mapNfseNumberingExceptionTypeLabel(exception.tipo),
+    cancelada: false,
+    dataCancelamento: null,
+    codigoServicoPrestado: '-',
+    descricaoServico: exception.observacao || 'Numeracao marcada manualmente como excecao.',
+    eventos: [],
+    eventosResumo: [],
+    caminhoServidor: '-',
+    prestador: client?.razaoSocial || '-',
+    tomador: '-',
+    contraparteNome: 'Excecao de numeracao',
+    iss: 0,
+    conteudoXml: null,
+    isNumberingException: true,
+    numberingExceptionId: exception.id,
+    numberingExceptionType: exception.tipo,
+    numberingExceptionObservacao: exception.observacao || ''
+  };
 }
 
 function normalizeXmlNumberingValidation(payload) {
