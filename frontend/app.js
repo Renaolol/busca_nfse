@@ -925,6 +925,10 @@ function onDocumentClick(event) {
       });
       return;
     }
+    case 'nfse-recover-by-key': {
+      openNfseRecoverByKeyModal();
+      return;
+    }
     case 'nfe-open-client-xmls': {
       const clientId = actionNode.getAttribute('data-client-id');
       if (!clientId) {
@@ -1448,6 +1452,11 @@ function onDocumentSubmit(event) {
     case 'xmlsFilterForm': {
       event.preventDefault();
       void applyXmlFilters(target);
+      return;
+    }
+    case 'nfseRecoverByKeyForm': {
+      event.preventDefault();
+      void submitNfseRecoverByKeyForm(target);
       return;
     }
     case 'nfeDocsFilterForm': {
@@ -3665,9 +3674,16 @@ function renderXmlNumberingValidationSummary(query, validation) {
   const suffix = hiddenCount > 0 ? ` (+${hiddenCount} faixa(s))` : '';
 
   return `
-    <p class="card-subtitle" style="margin-top:12px; color:#8a5a00;">
-      Atencao: foram encontradas ${escapeHtml(String(validation.totalNumerosPulados || 0))} numeracao(oes) pulada(s) em ${escapeHtml(String(validation.totalFaixasLacuna || 0))} faixa(s). ${escapeHtml(preview)}${escapeHtml(suffix)}
-    </p>
+    <div style="display:flex; gap:12px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; margin-top:12px;">
+      <p class="card-subtitle" style="margin:0; color:#8a5a00;">
+        Atencao: foram encontradas ${escapeHtml(String(validation.totalNumerosPulados || 0))} numeracao(oes) pulada(s) em ${escapeHtml(String(validation.totalFaixasLacuna || 0))} faixa(s). ${escapeHtml(preview)}${escapeHtml(suffix)}
+      </p>
+      ${
+        state.dataSource === 'api'
+          ? '<button class="btn secondary" type="button" data-action="nfse-recover-by-key">Recuperar faltantes por chave</button>'
+          : ''
+      }
+    </div>
   `;
 }
 
@@ -5581,6 +5597,8 @@ function renderModal() {
       return renderEventsSyncReportModal();
     case 'past-nsu-recovery-report':
       return renderPastNsuRecoveryReportModal();
+    case 'nfse-recover-by-key':
+      return renderNfseRecoverByKeyModal();
     case 'download-by-key-report':
       return renderDownloadByKeyReportModal();
     case 'dominio-import-report':
@@ -5632,6 +5650,109 @@ function renderRecoverPastNsusModal() {
             <button class="btn primary" type="submit">Iniciar recuperacao</button>
           </div>
         </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderNfseRecoverByKeyModal() {
+  if (state.modal?.kind !== 'nfse-recover-by-key') {
+    return '';
+  }
+
+  const submitting = Boolean(state.modal.submitting);
+  const result = state.modal.result || null;
+  const details = Array.isArray(result?.detalhes) ? result.detalhes : [];
+  const gapSummary = Array.isArray(state.modal.gapPreview) ? state.modal.gapPreview.filter(Boolean).join('; ') : '';
+  const errorMessage = String(state.modal.errorMessage || '').trim();
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1100px); max-width:1100px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Recuperar NFS-e faltantes por chave</h3>
+          <p class="modal-subtitle">${escapeHtml(state.modal.clientName || 'Cliente selecionado')} • cole as chaves localizadas no Portal Nacional.</p>
+        </div>
+        <div class="modal-body">
+          <form id="nfseRecoverByKeyForm">
+            <div class="form-grid two">
+              <label>
+                <span>Cliente</span>
+                <input type="text" value="${escapeHtml(state.modal.clientName || '')}" readonly />
+              </label>
+              <label>
+                <span>CNPJ consulta</span>
+                <input type="text" name="cnpjConsulta" value="${escapeHtml(state.modal.cnpjConsulta || '')}" readonly />
+              </label>
+              <label>
+                <span>Ambiente</span>
+                <select name="ambiente" ${submitting ? 'disabled' : ''}>
+                  ${renderOptions(['producao', 'producao_restrita'], state.modal.ambiente || 'producao', {
+                    producao: 'Producao',
+                    producao_restrita: 'Producao restrita'
+                  })}
+                </select>
+              </label>
+              <label>
+                <span>Cliente ID</span>
+                <input type="text" name="clienteId" value="${escapeHtml(state.modal.clientId || '')}" readonly />
+              </label>
+            </div>
+            ${
+              gapSummary
+                ? `<p class="card-subtitle" style="margin:14px 0 10px; color:#8a5a00;">Lacunas detectadas na busca atual: ${escapeHtml(gapSummary)}</p>`
+                : ''
+            }
+            <label style="display:block; margin-top:12px;">
+              <span>Chaves de acesso</span>
+              <textarea name="chaves" rows="8" placeholder="Cole uma chave ou URL do portal por linha." ${submitting ? 'disabled' : ''}>${escapeHtml(state.modal.keyText || '')}</textarea>
+            </label>
+            <p class="card-subtitle" style="margin-top:10px;">A API oficial nao lista a chave a partir da numeracao pulada. Aqui o sistema consulta o Emissor Publico usando as chaves informadas.</p>
+            ${errorMessage ? `<div class="table-state error" style="margin-top:14px;">${escapeHtml(errorMessage)}</div>` : ''}
+            <div class="modal-footer" style="padding:18px 0 0;">
+              <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Fechar</button>
+              <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Recuperando...' : 'Recuperar XMLs'}</button>
+            </div>
+          </form>
+          ${
+            result
+              ? `
+                <div style="margin-top:18px;">
+                  <div class="form-grid four" style="margin-bottom:18px;">
+                    ${detailItem('Chaves solicitadas', String(result.requestedKeys || 0))}
+                    ${detailItem('Processadas', String(result.processedKeys || 0))}
+                    ${detailItem('XMLs recuperados', String(result.documentsRecovered || 0))}
+                    ${detailItem('Falhas', String(result.failures || 0))}
+                  </div>
+                  ${
+                    details.length
+                      ? `
+                        <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(52vh, 520px);">
+                          <div style="display:grid; grid-template-columns:minmax(260px, 1.4fr) minmax(140px, .7fr) minmax(360px, 1.8fr); gap:0; min-width:760px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                            <div style="padding:12px 14px;">Chave de acesso</div>
+                            <div style="padding:12px 14px;">Status</div>
+                            <div style="padding:12px 14px;">Mensagem</div>
+                          </div>
+                          ${details
+                            .map(
+                              (detail) => `
+                                <div style="display:grid; grid-template-columns:minmax(260px, 1.4fr) minmax(140px, .7fr) minmax(360px, 1.8fr); gap:0; min-width:760px; border-bottom:1px solid #eef0f2; align-items:start;">
+                                  <div style="padding:14px; font-family:monospace; font-size:12px; word-break:break-all;">${escapeHtml(detail?.chaveAcesso || '-')}</div>
+                                  <div style="padding:14px;">${statusBadge(detail?.status === 'recuperada' ? 'Recuperada' : 'Falha', detail?.status === 'recuperada' ? 'success' : 'danger')}</div>
+                                  <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(detail?.mensagem || '-')}</div>
+                                </div>
+                              `
+                            )
+                            .join('')}
+                        </div>
+                      `
+                      : '<div class="table-state">Nenhum detalhe retornado para esta recuperacao.</div>'
+                  }
+                </div>
+              `
+              : ''
+          }
+        </div>
       </div>
     </div>
   `;
@@ -10264,6 +10385,110 @@ async function executeXmlSearch() {
   render();
 }
 
+async function submitNfseRecoverByKeyForm(form) {
+  if (state.modal?.kind !== 'nfse-recover-by-key') {
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('A recuperacao por chave so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const data = new FormData(form);
+  const clienteId = String(data.get('clienteId') || state.modal.clientId || '').trim();
+  const cnpjConsulta = normalizeDigits(String(data.get('cnpjConsulta') || state.modal.cnpjConsulta || ''));
+  const ambiente = String(data.get('ambiente') || state.modal.ambiente || 'producao').trim() || 'producao';
+  const keyText = String(data.get('chaves') || '');
+  const chavesAcesso = extractNfseRecoveryKeysFromText(keyText);
+
+  if (!clienteId) {
+    pushToast('Cliente nao informado para a recuperacao das NFS-e faltantes.', 'error');
+    return;
+  }
+
+  if (!cnpjConsulta) {
+    pushToast('CNPJ emissor nao informado para a recuperacao das NFS-e faltantes.', 'error');
+    return;
+  }
+
+  if (!chavesAcesso.length) {
+    pushToast('Cole ao menos uma chave de acesso valida para recuperar os XMLs faltantes.', 'error');
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    submitting: true,
+    ambiente,
+    keyText,
+    errorMessage: '',
+    result: null
+  };
+  render();
+
+  try {
+    const response = await apiRequest('/nfse/recuperar-por-chave', {
+      method: 'POST',
+      body: {
+        clienteId,
+        estabelecimentoId: state.modal.estabelecimentoId || undefined,
+        cnpjConsulta,
+        ambiente,
+        chavesAcesso
+      },
+      timeoutMs: Math.max(180000, chavesAcesso.length * 45000)
+    });
+
+    state.modal = {
+      ...state.modal,
+      submitting: false,
+      ambiente,
+      keyText,
+      errorMessage: '',
+      result: response
+    };
+    render();
+
+    await refreshApiData();
+
+    if (state.xmlSearch.hasSearched && state.xmlSearch.lastQuery?.cliente === clienteId) {
+      await executeXmlSearch();
+    }
+
+    const recovered = Number(response?.documentsRecovered || 0);
+    const failures = Number(response?.failures || 0);
+    pushToast(
+      `Recuperacao de NFS-e concluida: ${recovered} XML(s) recuperado(s)${failures ? `, ${failures} falha(s)` : ''}.`,
+      failures ? 'error' : 'success'
+    );
+  } catch (error) {
+    state.modal = {
+      ...state.modal,
+      submitting: false,
+      ambiente,
+      keyText,
+      errorMessage: toErrorMessage(error)
+    };
+    render();
+    pushToast(`Falha ao recuperar NFS-e por chave: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+function extractNfseRecoveryKeysFromText(value) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return [];
+  }
+
+  const matches = raw.match(/\d{50}/g) || [];
+  if (!matches.length) {
+    return [];
+  }
+
+  return [...new Set(matches.map((item) => String(item).trim()).filter(Boolean))];
+}
+
 function normalizePaginatedResponse(payload) {
   if (Array.isArray(payload)) {
     return {
@@ -10740,6 +10965,47 @@ function openPastNsuRecoveryReportModal(params) {
     currentMessage: params?.currentMessage || 'Preparando reprocessamento...',
     summary: params?.summary || {},
     rows: Array.isArray(params?.rows) ? params.rows : []
+  });
+}
+
+function openNfseRecoverByKeyModal() {
+  if (state.dataSource !== 'api') {
+    pushToast('A recuperacao por chave so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const query = state.xmlSearch.lastQuery;
+  const validation = state.xmlSearch.numberingValidation;
+  const clientId = String(query?.cliente || '').trim();
+  const client = findClientById(clientId);
+  const cnpjConsulta = normalizeDigits(validation?.cnpjPrestador || client?.cnpj || '');
+  const estabelecimento = findEstablishmentByClientAndCnpj(clientId, cnpjConsulta);
+  const lacunas = Array.isArray(validation?.lacunas) ? validation.lacunas : [];
+  const primeiroAmbiente = String(lacunas[0]?.ambiente || '').trim();
+  const ambiente = primeiroAmbiente === 'producao_restrita' ? 'producao_restrita' : 'producao';
+
+  if (!clientId || !client) {
+    pushToast('Busque os XMLs da empresa antes de iniciar a recuperacao por chave.', 'error');
+    return;
+  }
+
+  if (!cnpjConsulta) {
+    pushToast('Nao foi possivel identificar o CNPJ emissor para recuperar as NFS-e faltantes.', 'error');
+    return;
+  }
+
+  openModal({
+    kind: 'nfse-recover-by-key',
+    clientId,
+    clientName: client.razaoSocial || 'Cliente selecionado',
+    cnpjConsulta,
+    estabelecimentoId: estabelecimento?.id || '',
+    ambiente,
+    keyText: '',
+    submitting: false,
+    result: null,
+    errorMessage: '',
+    gapPreview: lacunas.slice(0, 5).map((gap) => formatXmlNumberingGap(gap))
   });
 }
 

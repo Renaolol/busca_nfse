@@ -1025,6 +1025,82 @@ describe('SyncService', () => {
     );
   });
 
+  it('finaliza o NSU consultado como sem documento quando o ADN retorna apenas itens de outros NSUs', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        nsuInicial: 54n,
+        ultimoNsuConsultado: 54n,
+        ultimoNsuComDocumento: 0n,
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-01T00:00:00.000Z')
+      }
+    ]);
+    prisma.nfseDocumento.findFirst.mockImplementation(({ where }) => {
+      if (typeof where?.nsu === 'bigint' && where.nsu !== 52n) {
+        return Promise.resolve({
+          xmlPath: `nfse/producao/12345678000199/2026/06/xml/${where.nsu.toString()}.xml`,
+          numeroNfse: where.nsu.toString(),
+          dataEmissao: new Date('2026-06-03T12:00:00.000Z')
+        });
+      }
+
+      return Promise.resolve(null);
+    });
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 52n,
+      hasDocument: true,
+      chaveAcesso: '4211009221065205400019500000000003526010859256454',
+      documents: [
+        {
+          nsu: 53n,
+          chaveAcesso: '4211009221065205400019500000000003526010859256454',
+          xml: '<NFSe><chaveAcesso>4211009221065205400019500000000003526010859256454</chaveAcesso><numeroNFSe>53</numeroNFSe></NFSe>'
+        },
+        {
+          nsu: 54n,
+          chaveAcesso: '4211009221065205400019500000000004526010859256455',
+          xml: '<NFSe><chaveAcesso>4211009221065205400019500000000004526010859256455</chaveAcesso><numeroNFSe>54</numeroNFSe></NFSe>'
+        }
+      ],
+      statusCode: 200,
+      rawResponse: {}
+    });
+
+    const execution = await service.startPastNsuRecoveryExecution('cliente-1');
+
+    let latestExecution = execution;
+    for (let attempt = 0; attempt < 20 && latestExecution.status === 'running'; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+      latestExecution = service.getPastNsuRecoveryExecution(execution.executionId);
+    }
+
+    expect(latestExecution.status).toBe('completed');
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
+    expect(latestExecution.summary).toEqual(
+      expect.objectContaining({
+        nsusAvaliados: 54,
+        nsusConsultados: 1,
+        nsusIgnoradosComDocumento: 53,
+        documentosSalvos: 0,
+        documentosIgnoradosExistentes: 2,
+        semDocumento: 1,
+        falhas: 0
+      })
+    );
+    expect(latestExecution.rows.find((row) => row.nsu === '52')).toEqual(
+      expect.objectContaining({
+        status: 'sem_documento',
+        chaveAcesso: '4211009221065205400019500000000003526010859256454',
+        mensagem: 'O ADN retornou apenas documentos vinculados aos NSUs 53, 54; nenhum item ficou associado ao NSU 52.'
+      })
+    );
+  });
+
   it('reprocessa NSU com retry quando ADN retorna timeout temporario', async () => {
     const sleepSpy = jest.spyOn(service as any, 'sleep').mockImplementation(async () => undefined);
 

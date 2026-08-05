@@ -877,6 +877,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
+        let requestedNsuResolved = false;
         for (const document of documents) {
           if (
             document.nsu &&
@@ -888,6 +889,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           ) {
             detail.documentosIgnoradosExistentes += 1;
             result.documentosIgnoradosExistentes += 1;
+            requestedNsuResolved = requestedNsuResolved || document.nsu === nsu;
             if (execution) {
               this.updatePastNsuRecoveryExecutionRow(execution, control.id, document.nsu ?? nsu, {
                 status: 'ja_baixado',
@@ -911,6 +913,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           if (persisted.outcome === 'existing') {
             detail.documentosIgnoradosExistentes += 1;
             result.documentosIgnoradosExistentes += 1;
+            requestedNsuResolved = requestedNsuResolved || persistedNsu === nsu;
             if (execution) {
               this.updatePastNsuRecoveryExecutionRow(execution, control.id, persistedNsu, {
                 status: 'ja_baixado',
@@ -925,6 +928,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             }
             continue;
           }
+          requestedNsuResolved = requestedNsuResolved || persistedNsu === nsu;
           maxRecoveredNsu =
             maxRecoveredNsu && maxRecoveredNsu > persistedNsu ? maxRecoveredNsu : persistedNsu;
           detail.documentosSalvos += 1;
@@ -955,6 +959,23 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               ? 'Evento recuperado no reprocessamento de NSUs passados'
               : 'Documento recuperado no reprocessamento de NSUs passados'
           );
+        }
+
+        if (!requestedNsuResolved) {
+          detail.semDocumento += 1;
+          result.semDocumento += 1;
+          if (execution) {
+            this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
+              status: 'sem_documento',
+              chaveAcesso: dfeResult.chaveAcesso ?? null,
+              mensagem: this.buildIndirectNsuDocumentMessage(nsu, documents)
+            });
+            this.syncPastNsuRecoveryExecution(
+              execution,
+              result,
+              `NSU ${nsu.toString()} retornou apenas documentos vinculados a outros NSUs.`
+            );
+          }
         }
       }
 
@@ -1922,6 +1943,17 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     return `Lote ADN sincronizado com ${savedCount} documento(s)`;
+  }
+
+  private buildIndirectNsuDocumentMessage(requestedNsu: bigint, documents: AdnDFeDocument[]): string {
+    const relatedNsus = [...new Set(documents.map((document) => document.nsu).filter((nsu): nsu is bigint => nsu !== undefined))];
+
+    if (relatedNsus.length === 0) {
+      return `O ADN retornou documentos no lote, mas nenhum item trouxe NSU individual para associacao ao NSU ${requestedNsu.toString()}.`;
+    }
+
+    const nsuList = relatedNsus.map((nsu) => nsu.toString()).join(', ');
+    return `O ADN retornou apenas documentos vinculados aos NSUs ${nsuList}; nenhum item ficou associado ao NSU ${requestedNsu.toString()}.`;
   }
 
   private async persistEventoFromNsu(params: {

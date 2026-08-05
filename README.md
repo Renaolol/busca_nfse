@@ -105,6 +105,8 @@ Veja `.env.example`.
 - `NFSE_ADN_CLIENT_MODE`: `real` (recomendado/obrigatorio em producao) ou `mock` (somente desenvolvimento).
 - `NFSE_API_BASE_URL_PRODUCAO` e `NFSE_API_BASE_URL_RESTRITA`: hosts do ADN.
 - `NFSE_ADN_PATH_PREFIX`: prefixo da API (padrao `contribuintes`).
+- `NFSE_EMISSOR_PUBLICO_API_BASE_URL_PRODUCAO` e `NFSE_EMISSOR_PUBLICO_API_BASE_URL_RESTRITA`: hosts do Emissor Publico usados para recuperar NFS-e por chave.
+- `NFSE_EMISSOR_PUBLICO_PATH_PREFIX`: prefixo do Emissor Publico (padrao `SefinNacional`).
 - `NFE_DISTRIBUICAO_CLIENT_MODE`: `mock` ou `real` para ativar o adapter da distribuicao NF-e.
 - `NFE_DISTRIBUICAO_URL_PRODUCAO` e `NFE_DISTRIBUICAO_URL_HOMOLOGACAO`: URLs do `NFeDistribuicaoDFe` do Ambiente Nacional publicadas no portal da NF-e.
 - `NFE_DISTRIBUICAO_TIMEOUT_MS`: timeout das chamadas SOAP de distribuicao NF-e.
@@ -258,6 +260,7 @@ Valores aceitos:
 ## Importacao de XML
 
 Use `POST /nfse/importar-xml` para carregar XMLs legados de NFS-e ou XMLs de evento.
+Use `POST /nfse/recuperar-por-chave` para recuperar XMLs faltantes que estejam disponiveis no Portal Nacional/Emissor Publico. O endpoint recebe `clienteId`, `cnpjConsulta`, `ambiente` e a lista `chavesAcesso`; para cada chave, o backend consulta a API oficial e importa o XML retornado.
 Notas aplicam deduplicacao por `ambiente + chave_acesso` e geram/salvam o DANFSE em PDF.
 Eventos sao vinculados pela chave da NFS-e referenciada (`chNFSe`) e salvos em `nfse_eventos`; evento de cancelamento (`e101101`) marca a nota relacionada como `cancelada`, preenche `data_cancelamento` e forca regeneracao futura do DANFSE.
 

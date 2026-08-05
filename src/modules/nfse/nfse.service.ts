@@ -2,6 +2,10 @@ import { BadRequestException, Inject, Injectable, Logger, NotFoundException } fr
 import { Ambiente, DocumentoOrigem, NfseDocumento, Prisma } from '@prisma/client';
 import JSZip from 'jszip';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
+import {
+  NFSE_EMISSOR_PUBLICO_CLIENT,
+  NfseEmissorPublicoClient
+} from '../../integrations/nfse-emissor-publico/nfse-emissor-publico.types';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
 import { NFSE_ADN_CLIENT, NfseAdnClient } from '../../integrations/nfse-adn/nfse-adn.types';
 import { LocalStorageService } from '../storage/storage.service';
@@ -11,6 +15,7 @@ import { DownloadLoteDto } from './dto/download-lote.dto';
 import { DanfseRenderInput, NfseDanfseService } from './nfse-danfse.service';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
+import { RecuperarNfsePorChaveDto } from './dto/recuperar-por-chave.dto';
 import { ReprocessarDanfsesDto } from './dto/reprocessar-danfses.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
 import { SincronizarNfseEventosDto } from './dto/sincronizar-eventos.dto';
@@ -53,7 +58,8 @@ export class NfseService {
     private readonly parser: NfseXmlParserService,
     private readonly storage: LocalStorageService,
     private readonly danfse: NfseDanfseService,
-    @Inject(NFSE_ADN_CLIENT) private readonly adnClient: NfseAdnClient
+    @Inject(NFSE_ADN_CLIENT) private readonly adnClient: NfseAdnClient,
+    @Inject(NFSE_EMISSOR_PUBLICO_CLIENT) private readonly emissorPublicoClient: NfseEmissorPublicoClient
   ) {}
 
   async findAll(query: QueryNfseDto) {
@@ -932,6 +938,78 @@ export class NfseService {
     }
 
     return this.importNfseXml(dto, parsedXml.nfse);
+  }
+
+  async recuperarPorChave(dto: RecuperarNfsePorChaveDto) {
+    const chavesAcesso = this.normalizeUniqueChavesAcesso(dto.chavesAcesso);
+    if (chavesAcesso.length === 0) {
+      throw new BadRequestException('Informe ao menos uma chave de acesso valida para recuperar as NFS-e faltantes.');
+    }
+
+    const estabelecimento = await this.resolveRecoveryEstablishment(dto);
+    const certificate = await this.findUsableCertificate(dto.clienteId, estabelecimento.id);
+    const ambiente = dto.ambiente === 'producao_restrita' ? Ambiente.producao_restrita : Ambiente.producao;
+    const detalhes: Array<{
+      chaveAcesso: string;
+      status: 'recuperada' | 'falha';
+      mensagem: string;
+      documentoId?: string;
+    }> = [];
+    let documentsRecovered = 0;
+    let failures = 0;
+
+    for (const chaveAcesso of chavesAcesso) {
+      const response = await this.emissorPublicoClient.getNfseByChave({
+        chaveAcesso,
+        ambiente: this.toExternalAmbiente(ambiente),
+        certificateId: certificate.id
+      });
+
+      if (response.statusCode !== 200 || !response.xml) {
+        failures += 1;
+        detalhes.push({
+          chaveAcesso,
+          status: 'falha',
+          mensagem: response.message ?? `Falha ao recuperar NFS-e por chave. HTTP ${response.statusCode}.`
+        });
+        continue;
+      }
+
+      try {
+        const persisted = await this.importXml({
+          clienteId: dto.clienteId,
+          estabelecimentoId: estabelecimento.id,
+          ambiente: this.toDtoAmbiente(ambiente),
+          xml: response.xml
+        });
+        documentsRecovered += 1;
+        detalhes.push({
+          chaveAcesso,
+          status: 'recuperada',
+          mensagem: 'NFS-e recuperada no Emissor Publico e armazenada com sucesso.',
+          documentoId: persisted.id
+        });
+      } catch (error) {
+        failures += 1;
+        detalhes.push({
+          chaveAcesso,
+          status: 'falha',
+          mensagem: this.toErrorMessage(error)
+        });
+      }
+    }
+
+    return {
+      clienteId: dto.clienteId,
+      estabelecimentoId: estabelecimento.id,
+      cnpjConsulta: estabelecimento.cnpj,
+      ambiente: this.toDtoAmbiente(ambiente),
+      requestedKeys: chavesAcesso.length,
+      processedKeys: detalhes.length,
+      documentsRecovered,
+      failures,
+      detalhes
+    };
   }
 
   async sincronizarEventos(dto: SincronizarNfseEventosDto) {
@@ -2281,6 +2359,81 @@ export class NfseService {
         chaveAcesso
       }
     });
+  }
+
+  private normalizeUniqueChavesAcesso(values: string[]): string[] {
+    const keys = new Set<string>();
+
+    for (const value of values) {
+      const normalized = this.normalizeChaveAcesso(value);
+      if (normalized) {
+        keys.add(normalized);
+      }
+    }
+
+    return Array.from(keys);
+  }
+
+  private normalizeChaveAcesso(value?: string | null): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const trimmed = String(value).trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    const exactKey = trimmed.match(/(\d{50})/);
+    if (exactKey?.[1]) {
+      return exactKey[1];
+    }
+
+    const digits = trimmed.replace(/\D/g, '');
+    return digits.length === 50 ? digits : undefined;
+  }
+
+  private async resolveRecoveryEstablishment(dto: RecuperarNfsePorChaveDto): Promise<{ id: string; cnpj: string }> {
+    if (dto.estabelecimentoId) {
+      const estabelecimento = await this.prisma.clienteEstabelecimento.findFirst({
+        where: {
+          id: dto.estabelecimentoId,
+          clienteId: dto.clienteId
+        },
+        select: {
+          id: true,
+          cnpj: true
+        }
+      });
+
+      if (!estabelecimento) {
+        throw new BadRequestException('Estabelecimento nao encontrado para o cliente informado.');
+      }
+
+      return estabelecimento;
+    }
+
+    const cnpjConsulta = this.normalizeCnpj(dto.cnpjConsulta);
+    if (!cnpjConsulta) {
+      throw new BadRequestException('Informe cnpjConsulta ou estabelecimentoId para recuperar NFS-e por chave.');
+    }
+
+    const estabelecimento = await this.prisma.clienteEstabelecimento.findFirst({
+      where: {
+        clienteId: dto.clienteId,
+        cnpj: cnpjConsulta
+      },
+      select: {
+        id: true,
+        cnpj: true
+      }
+    });
+
+    if (!estabelecimento) {
+      throw new BadRequestException(`Nenhum estabelecimento do cliente foi encontrado para o CNPJ ${cnpjConsulta}.`);
+    }
+
+    return estabelecimento;
   }
 
   private async reclassifyDocumentoAmbiente(
