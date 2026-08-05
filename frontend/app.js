@@ -8281,6 +8281,22 @@ function getXmlText(parent, localName) {
   return String(node?.textContent || '').trim();
 }
 
+function getFirstXmlText(parents, localNames) {
+  const nodes = (Array.isArray(parents) ? parents : []).filter(Boolean);
+  const tags = Array.isArray(localNames) ? localNames : [];
+
+  for (const parent of nodes) {
+    for (const localName of tags) {
+      const value = getXmlText(parent, localName);
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  return '';
+}
+
 function extractNfeLineItems(xmlString) {
   const xml = parseXmlDocumentSafe(xmlString);
   if (!xml) {
@@ -8316,16 +8332,16 @@ function extractNfeLineItemTaxValues(detNode, prodNode) {
   const icmsGroupNode = icmsNode
     ? Array.from(icmsNode.children || []).find((node) => node && node.nodeType === 1) || null
     : null;
-  const icmsSourceNode = icmsGroupNode || icmsNode || null;
-  const cstCsosn = getXmlText(icmsSourceNode, 'CST') || getXmlText(icmsSourceNode, 'CSOSN') || '0';
-  const icmsStRet = getXmlText(icmsSourceNode, 'vICMSSTRet') || getXmlText(icmsSourceNode, 'vICMSST') || '';
-  const baseCalculoIcms = getXmlText(icmsSourceNode, 'vBC') || '';
-  const aliquotaIcms = getXmlText(icmsSourceNode, 'pICMS') || '';
-  const valorIcms = getXmlText(icmsSourceNode, 'vICMS') || '';
+  const icmsSourceNodes = [icmsGroupNode, icmsNode, impostoNode, detNode, prodNode].filter(Boolean);
+  const cstCsosn = getFirstXmlText(icmsSourceNodes, ['CST', 'CSOSN']) || '0';
+  const icmsStRet = getFirstXmlText(icmsSourceNodes, ['vICMSSTRet', 'vICMSST', 'vBCSTRet']) || '0';
+  const baseCalculoIcms = getFirstXmlText(icmsSourceNodes, ['vBC', 'vBCST', 'vBCSTRet', 'vBCUFDest']) || '0';
+  const aliquotaIcms = getFirstXmlText(icmsSourceNodes, ['pICMS', 'pST', 'pICMSST', 'pICMSInter', 'pICMSInterPart']) || '0';
+  const valorIcms = getFirstXmlText(icmsSourceNodes, ['vICMS', 'vICMSST', 'vICMSDif', 'vICMSDeson']) || '0';
 
   return {
     cstCsosn,
-    cfop: getXmlText(prodNode, 'CFOP') || '0',
+    cfop: getFirstXmlText([prodNode, icmsGroupNode, icmsNode, impostoNode, detNode], ['CFOP']) || '0',
     icmsStRet: formatXmlReader30CurrencyValue(icmsStRet),
     icmsStRetRaw: icmsStRet || '0',
     baseCalculoIcms: formatXmlReader30DecimalValue(baseCalculoIcms),
