@@ -367,7 +367,24 @@ export class NfseService {
   }
 
   private deduplicateDocumentosForList<
-    T extends NfseDocumento & {
+    T extends Pick<
+      NfseDocumento,
+      | 'ambiente'
+      | 'chaveAcesso'
+      | 'hashXml'
+      | 'numeroNfse'
+      | 'serie'
+      | 'dataEmissao'
+      | 'cnpjPrestador'
+      | 'razaoSocialPrestador'
+      | 'cnpjTomador'
+      | 'razaoSocialTomador'
+      | 'valorServico'
+      | 'xmlPath'
+      | 'danfsePath'
+      | 'createdAt'
+      | 'updatedAt'
+    > & {
       eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
     }
   >(documents: T[]): { items: T[]; duplicatesRemoved: number } {
