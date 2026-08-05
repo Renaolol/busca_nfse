@@ -1149,6 +1149,28 @@ tbody tr:hover {
   font-weight: 700;
 }
 
+.xml-reader30-icms-currency {
+  min-width: 110px;
+}
+
+.xml-reader30-icms-code {
+  min-width: 90px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.xml-reader30-icms-cfop {
+  min-width: 80px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.xml-reader30-icms-number {
+  min-width: 130px;
+  text-align: center;
+  white-space: nowrap;
+}
+
 .xml-reader30-product {
   min-width: 220px;
   max-width: 300px;
@@ -1180,6 +1202,7 @@ tbody tr:hover {
   cursor: grab;
   user-select: none;
   transition: background-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+  overflow: visible;
 }
 
 .xml-reader30-column-header:hover {
@@ -1190,7 +1213,7 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 4px;
   width: 100%;
   min-width: 0;
 }
@@ -1202,21 +1225,67 @@ tbody tr:hover {
   flex: 1 1 auto;
 }
 
+.xml-reader30-column-menu-wrap {
+  position: relative;
+  flex: 0 0 auto;
+}
+
 .xml-reader30-column-menu {
   border: 0;
   background: transparent;
   color: #778199;
   cursor: pointer;
   flex: 0 0 auto;
-  font-size: 1rem;
+  font-size: 0.95rem;
   line-height: 1;
-  padding: 0 4px;
+  padding: 0 2px;
   border-radius: 6px;
 }
 
 .xml-reader30-column-menu:hover {
   background: rgba(97, 124, 255, 0.08);
   color: var(--accent);
+}
+
+.xml-reader30-column-menu-panel {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 15;
+  min-width: 150px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(17, 24, 39, 0.14);
+}
+
+.xml-reader30-column-menu-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 0.78rem;
+  color: #243041;
+  cursor: pointer;
+}
+
+.xml-reader30-column-menu-item:hover {
+  background: #eef3ff;
+  color: var(--accent);
+}
+
+.xml-reader30-column-title input[data-action="xml-reader30-toggle-all"],
+.xml-reader30-check > input[data-action="xml-reader30-toggle-all"] {
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  min-height: 12px;
+  transform: scale(0.9);
+  transform-origin: center;
 }
 
 .xml-reader30-column-header.is-dragging {
@@ -1251,6 +1320,7 @@ tbody tr:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: top;
+  padding: 6px 8px;
 }
 
 .icon-btn {

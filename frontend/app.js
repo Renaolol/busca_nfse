@@ -202,6 +202,7 @@ const state = {
     nfeColumnOrder: loadXmlReader30NfeColumnOrderStore(),
     hiddenNfeColumns: new Set(),
     selectionDrag: null,
+    columnMenuOpenKey: null,
     columnDrag: null
   },
   alerts: [],
@@ -520,6 +521,10 @@ function wireGlobalEvents() {
 function onDocumentClick(event) {
   const actionNode = event.target.closest('[data-action]');
   if (!actionNode) {
+    if (state.xmlReader30.columnMenuOpenKey) {
+      closeXmlReader30NfeColumnMenu();
+      render();
+    }
     return;
   }
 
@@ -534,6 +539,11 @@ function onDocumentClick(event) {
 
   if (action === 'alert-toggle-resolved') {
     return;
+  }
+
+  const isColumnMenuAction = action === 'xml-reader30-column-menu-toggle' || action === 'xml-reader30-column-menu-hide';
+  if (state.xmlReader30.columnMenuOpenKey && !isColumnMenuAction && !event.target.closest('[data-xml-reader30-column-menu-wrap]')) {
+    closeXmlReader30NfeColumnMenu();
   }
 
   event.preventDefault();
@@ -572,7 +582,15 @@ function onDocumentClick(event) {
       render();
       return;
     }
-    case 'xml-reader30-column-hide': {
+    case 'xml-reader30-column-menu-toggle': {
+      const columnKey = actionNode.getAttribute('data-column-key');
+      if (!columnKey) {
+        return;
+      }
+      toggleXmlReader30NfeColumnMenu(columnKey);
+      return;
+    }
+    case 'xml-reader30-column-menu-hide': {
       const columnKey = actionNode.getAttribute('data-column-key');
       if (!columnKey) {
         return;
@@ -4886,7 +4904,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
   const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
   const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
   const visibleColumns = getXmlReader30VisibleNfeColumns();
-  const minWidth = 260 + visibleColumns.length * 150;
+  const minWidth = 240 + visibleColumns.length * 120;
 
   return `
     <article class="card" style="margin-top: 2px;">
@@ -4923,14 +4941,32 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                               : column.headerHtml || escapeHtml(column.label)
                           }
                         </span>
-                        <button
-                          class="xml-reader30-column-menu"
-                          type="button"
-                          data-action="xml-reader30-column-hide"
-                          data-column-key="${escapeHtml(column.key)}"
-                          aria-label="Ocultar coluna ${escapeHtml(column.label)}"
-                          title="Ocultar coluna até atualizar a página"
-                        >&#8942;</button>
+                        <div class="xml-reader30-column-menu-wrap" data-xml-reader30-column-menu-wrap>
+                          <button
+                            class="xml-reader30-column-menu"
+                            type="button"
+                            data-action="xml-reader30-column-menu-toggle"
+                            data-column-key="${escapeHtml(column.key)}"
+                            aria-expanded="${state.xmlReader30.columnMenuOpenKey === column.key ? 'true' : 'false'}"
+                            aria-label="Abrir menu da coluna ${escapeHtml(column.label)}"
+                            title="Abrir menu"
+                          >&#8942;</button>
+                          ${
+                            state.xmlReader30.columnMenuOpenKey === column.key
+                              ? `
+                                <div class="xml-reader30-column-menu-panel" role="menu" aria-label="Menu da coluna ${escapeHtml(column.label)}">
+                                  <button
+                                    type="button"
+                                    class="xml-reader30-column-menu-item"
+                                    data-action="xml-reader30-column-menu-hide"
+                                    data-column-key="${escapeHtml(column.key)}"
+                                    role="menuitem"
+                                  >Excluir coluna</button>
+                                </div>
+                              `
+                              : ''
+                          }
+                        </div>
                       </div>
                     </th>
                   `
@@ -5038,7 +5074,7 @@ function getXmlReader30NfeColumnDefinitions() {
       label: 'Valor Unitario',
       className: 'xml-reader30-money',
       html: false,
-      render: (row) => row.valorUnitario || '-'
+      render: (row) => formatXmlReader30UnitValue(row.valorUnitario)
     },
     {
       key: 'valorTotal',
@@ -5053,6 +5089,48 @@ function getXmlReader30NfeColumnDefinitions() {
       className: 'xml-reader30-money',
       html: false,
       render: (row) => row.valorTotalNfXml || '-'
+    },
+    {
+      key: 'icmsStRet',
+      label: 'ICMS ST RET R$',
+      className: 'xml-reader30-money xml-reader30-icms-currency',
+      html: false,
+      render: (row) => row.icmsStRet || '-'
+    },
+    {
+      key: 'cstCsosn',
+      label: 'CST/CSOSN',
+      className: 'xml-reader30-icms-code',
+      html: false,
+      render: (row) => row.cstCsosn || '-'
+    },
+    {
+      key: 'cfop',
+      label: 'CFOP',
+      className: 'xml-reader30-icms-cfop',
+      html: false,
+      render: (row) => row.cfop || '-'
+    },
+    {
+      key: 'baseCalculoIcms',
+      label: 'Base de Cálculo ICMS',
+      className: 'xml-reader30-icms-number',
+      html: false,
+      render: (row) => row.baseCalculoIcms || '-'
+    },
+    {
+      key: 'aliquotaIcms',
+      label: 'Alíquota ICMS (%)',
+      className: 'xml-reader30-icms-number',
+      html: false,
+      render: (row) => row.aliquotaIcms || '-'
+    },
+    {
+      key: 'valorIcms',
+      label: 'Valor ICMS',
+      className: 'xml-reader30-icms-number',
+      html: false,
+      render: (row) => row.valorIcms || '-'
     }
   ];
 }
@@ -5066,6 +5144,39 @@ function renderXmlReader30NfeColumnCell(column, row, statusTone) {
   return `<td class="${escapeHtml(column.className || '')}">${escapeHtml(String(value ?? '-'))}</td>`;
 }
 
+function formatXmlReader30UnitValue(value) {
+  const normalizedValue = typeof value === 'string' ? value.replace(',', '.').trim() : value;
+  const numericValue = Number(normalizedValue);
+  if (Number.isFinite(numericValue)) {
+    return numericValue.toFixed(2);
+  }
+
+  return value ? String(value) : '-';
+}
+
+function formatXmlReader30DecimalValue(value) {
+  const normalizedValue = typeof value === 'string' ? value.replace(',', '.').trim() : value;
+  const numericValue = Number(normalizedValue);
+  if (!Number.isFinite(numericValue)) {
+    return value ? String(value) : '-';
+  }
+
+  return numericValue
+    .toFixed(2)
+    .replace(/\.00$/, '')
+    .replace(/(\.\d)0$/, '$1');
+}
+
+function formatXmlReader30CurrencyValue(value) {
+  const normalizedValue = typeof value === 'string' ? value.replace(',', '.').trim() : value;
+  const numericValue = Number(normalizedValue);
+  if (!Number.isFinite(numericValue)) {
+    return value ? String(value) : '-';
+  }
+
+  return formatCurrency(numericValue);
+}
+
 function hideXmlReader30NfeColumn(columnKey) {
   const normalizedKey = String(columnKey || '').trim();
   if (!normalizedKey) {
@@ -5077,7 +5188,26 @@ function hideXmlReader30NfeColumn(columnKey) {
     : new Set();
   nextHidden.add(normalizedKey);
   state.xmlReader30.hiddenNfeColumns = nextHidden;
+  closeXmlReader30NfeColumnMenu();
   render();
+}
+
+function toggleXmlReader30NfeColumnMenu(columnKey) {
+  const normalizedKey = String(columnKey || '').trim();
+  if (!normalizedKey) {
+    return;
+  }
+
+  state.xmlReader30.columnMenuOpenKey = state.xmlReader30.columnMenuOpenKey === normalizedKey ? null : normalizedKey;
+  render();
+}
+
+function closeXmlReader30NfeColumnMenu() {
+  if (!state.xmlReader30.columnMenuOpenKey) {
+    return;
+  }
+
+  state.xmlReader30.columnMenuOpenKey = null;
 }
 
 function expandXmlReader30NfeRows(rows) {
@@ -5269,6 +5399,7 @@ function resetXmlReader30Search() {
     nfeColumnOrder,
     hiddenNfeColumns,
     selectionDrag: null,
+    columnMenuOpenKey: null,
     columnDrag: null
   };
   state.selectedXmlReaderIds = new Set();
@@ -5708,7 +5839,13 @@ function mapXmlReader30Item(documentType, doc) {
         ...nfeItems.map((item) => item.code),
         ...nfeItems.map((item) => item.quantity),
         ...nfeItems.map((item) => item.unitValueRaw || item.unitValue || ''),
-        ...nfeItems.map((item) => item.totalValueRaw || item.totalValue || '')
+        ...nfeItems.map((item) => item.totalValueRaw || item.totalValue || ''),
+        ...nfeItems.map((item) => item.cstCsosn || ''),
+        ...nfeItems.map((item) => item.cfop || ''),
+        ...nfeItems.map((item) => item.baseCalculoIcmsRaw || item.baseCalculoIcms || ''),
+        ...nfeItems.map((item) => item.aliquotaIcmsRaw || item.aliquotaIcms || ''),
+        ...nfeItems.map((item) => item.valorIcmsRaw || item.valorIcms || ''),
+        ...nfeItems.map((item) => item.icmsStRetRaw || item.icmsStRet || '')
       ]),
       raw: nfe
     };
@@ -6021,6 +6158,7 @@ function resetXmlReader30SearchLegacyUnused() {
     nfeColumnOrder,
     hiddenNfeColumns,
     selectionDrag: null,
+    columnMenuOpenKey: null,
     columnDrag: null
   };
   state.tableState.xmlReader30 = 'data';
@@ -7844,7 +7982,13 @@ function renderDocumentInsightsSection(documentType, doc) {
       quantidade: item.quantity || '-',
       valorUnitario: item.unitValue || '-',
       valorTotal: item.totalValue || '-',
-      valorTotalNfXml: formatOptionalCurrency(doc.valor)
+      valorTotalNfXml: formatOptionalCurrency(doc.valor),
+      icmsStRet: item.icmsStRet || '-',
+      cstCsosn: item.cstCsosn || '-',
+      cfop: item.cfop || '-',
+      baseCalculoIcms: item.baseCalculoIcms || '-',
+      aliquotaIcms: item.aliquotaIcms || '-',
+      valorIcms: item.valorIcms || '-'
     }));
 
     return renderDocumentInsightsBlock(
@@ -7858,7 +8002,13 @@ function renderDocumentInsightsSection(documentType, doc) {
             { key: 'quantidade', label: 'Quantidade' },
             { key: 'valorUnitario', label: 'Valor Unitario' },
             { key: 'valorTotal', label: 'Valor Total' },
-            { key: 'valorTotalNfXml', label: 'Valor Total NF XML R$' }
+            { key: 'valorTotalNfXml', label: 'Valor Total NF XML R$' },
+            { key: 'icmsStRet', label: 'ICMS ST RET R$' },
+            { key: 'cstCsosn', label: 'CST/CSOSN' },
+            { key: 'cfop', label: 'CFOP' },
+            { key: 'baseCalculoIcms', label: 'Base de Cálculo ICMS' },
+            { key: 'aliquotaIcms', label: 'Alíquota ICMS (%)' },
+            { key: 'valorIcms', label: 'Valor ICMS' }
           ])
         : renderDocumentInsightsEmpty('Nao encontrei itens detalhados no XML carregado desta NF-e.')
     );
@@ -7984,6 +8134,7 @@ function extractNfeLineItems(xmlString) {
   return findXmlElementsByLocalName(xml, 'det')
     .map((detNode, index) => {
       const prodNode = findXmlElementsByLocalName(detNode, 'prod')[0] || detNode;
+      const taxValues = extractNfeLineItemTaxValues(detNode, prodNode);
       const quantity = getXmlText(prodNode, 'qCom');
       const unitValue = getXmlText(prodNode, 'vUnCom');
       const totalValue = getXmlText(prodNode, 'vProd');
@@ -7997,10 +8148,37 @@ function extractNfeLineItems(xmlString) {
         unitValueRaw: unitValue || '-',
         totalValue: totalValue ? formatCurrency(totalValue) : '-',
         totalValueRaw: totalValue || '-',
-        cfop: getXmlText(prodNode, 'CFOP') || '-'
+        ...taxValues
       };
     })
     .filter((item) => item.description !== '-' || item.code !== '-');
+}
+
+function extractNfeLineItemTaxValues(detNode, prodNode) {
+  const impostoNode = findXmlElementsByLocalName(detNode, 'imposto')[0] || detNode;
+  const icmsNode = findXmlElementsByLocalName(impostoNode, 'ICMS')[0] || null;
+  const icmsGroupNode = icmsNode
+    ? Array.from(icmsNode.children || []).find((node) => node && node.nodeType === 1) || null
+    : null;
+  const icmsSourceNode = icmsGroupNode || icmsNode || null;
+  const cstCsosn = getXmlText(icmsSourceNode, 'CST') || getXmlText(icmsSourceNode, 'CSOSN') || '-';
+  const icmsStRet = getXmlText(icmsSourceNode, 'vICMSSTRet') || getXmlText(icmsSourceNode, 'vICMSST') || '';
+  const baseCalculoIcms = getXmlText(icmsSourceNode, 'vBC') || '';
+  const aliquotaIcms = getXmlText(icmsSourceNode, 'pICMS') || '';
+  const valorIcms = getXmlText(icmsSourceNode, 'vICMS') || '';
+
+  return {
+    cstCsosn,
+    cfop: getXmlText(prodNode, 'CFOP') || '-',
+    icmsStRet: formatXmlReader30CurrencyValue(icmsStRet),
+    icmsStRetRaw: icmsStRet || '-',
+    baseCalculoIcms: formatXmlReader30DecimalValue(baseCalculoIcms),
+    baseCalculoIcmsRaw: baseCalculoIcms || '-',
+    aliquotaIcms: formatXmlReader30DecimalValue(aliquotaIcms),
+    aliquotaIcmsRaw: aliquotaIcms || '-',
+    valorIcms: formatXmlReader30DecimalValue(valorIcms),
+    valorIcmsRaw: valorIcms || '-'
+  };
 }
 
 function extractCteServiceSummary(xmlString) {
