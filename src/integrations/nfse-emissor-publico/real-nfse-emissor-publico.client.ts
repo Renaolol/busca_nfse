@@ -11,7 +11,11 @@ import { PrismaService } from '../../prisma/prisma.service';
 import { LocalStorageService } from '../../modules/storage/storage.service';
 import { CryptoService } from '../../modules/shared/crypto.service';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
-import { NfseEmissorPublicoClient, NfseEmissorPublicoNfseResult } from './nfse-emissor-publico.types';
+import {
+  NfseEmissorPublicoClient,
+  NfseEmissorPublicoDpsResult,
+  NfseEmissorPublicoNfseResult
+} from './nfse-emissor-publico.types';
 
 type PfxCredentials = {
   mode: 'pfx';
@@ -81,6 +85,62 @@ export class RealNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
     }
   }
 
+  async getNfseByDpsId(params: {
+    dpsId: string;
+    ambiente: NfseAmbiente;
+    certificateId: string;
+  }): Promise<NfseEmissorPublicoDpsResult> {
+    try {
+      const certificate = await this.loadCertificate(params.certificateId);
+      const urls = this.buildDpsUrls(params.ambiente, params.dpsId);
+      let lastResponse: { statusCode: number; headers: IncomingHttpHeaders; body: string } | null = null;
+
+      for (const url of urls) {
+        const response = await this.doGetWithFallback(url, certificate);
+        lastResponse = response;
+        if (response.statusCode === 200) {
+          const data = this.tryParseJson(response.body);
+          const xml = this.extractNfseXml(data, response.body);
+          if (xml) {
+            return {
+              statusCode: 200,
+              dpsId: params.dpsId,
+              xml,
+              rawResponse: data ?? response.body
+            };
+          }
+        }
+
+        if (response.statusCode !== 404 && response.statusCode !== 400) {
+          const data = this.tryParseJson(response.body);
+          return {
+            statusCode: response.statusCode,
+            dpsId: params.dpsId,
+            rawResponse: data ?? response.body,
+            message: this.extractMessage(data, `Falha na consulta da DPS no Emissor Publico. HTTP ${response.statusCode}.`)
+          };
+        }
+      }
+
+      const data = this.tryParseJson(lastResponse?.body ?? '');
+      return {
+        statusCode: lastResponse?.statusCode ?? 0,
+        dpsId: params.dpsId,
+        rawResponse: data ?? lastResponse?.body ?? null,
+        message:
+          this.extractMessage(data, '') ||
+          'Resposta do Emissor Publico sem XML da NFS-e para a DPS consultada.'
+      };
+    } catch (error) {
+      return {
+        statusCode: 0,
+        dpsId: params.dpsId,
+        rawResponse: { error: this.toErrorMessage(error) },
+        message: `Erro ao consultar DPS no Emissor Publico: ${this.toErrorMessage(error)}`
+      };
+    }
+  }
+
   private async loadCertificate(certificateId: string): Promise<Certificado> {
     const certificate = await this.prisma.certificado.findUnique({ where: { id: certificateId } });
     if (!certificate) {
@@ -117,6 +177,19 @@ export class RealNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
     return new URL(`${prefix}/nfse/${this.onlyDigits(chaveAcesso)}`, base);
   }
 
+  private buildDpsUrls(ambiente: NfseAmbiente, dpsId: string): URL[] {
+    const baseUrl = this.getBaseUrl(ambiente);
+    const base = this.ensureTrailingSlash(baseUrl);
+    const prefix = this.getPathPrefix();
+    const normalizedDpsId = this.normalizeDpsId(dpsId);
+    const digitsOnly = normalizedDpsId.replace(/\D/g, '');
+
+    return [
+      new URL(`${prefix}/dps/${normalizedDpsId}`, base),
+      new URL(`${prefix}/dps/${digitsOnly}`, base)
+    ];
+  }
+
   private getBaseUrl(ambiente: NfseAmbiente): string {
     const configured =
       ambiente === NfseAmbiente.PRODUCAO
@@ -143,6 +216,11 @@ export class RealNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
 
   private onlyDigits(value: string): string {
     return value.replace(/\D/g, '');
+  }
+
+  private normalizeDpsId(value: string): string {
+    const trimmed = String(value || '').trim().toUpperCase();
+    return trimmed.startsWith('DPS') ? trimmed : `DPS${trimmed.replace(/\D/g, '')}`;
   }
 
   private async doGetWithFallback(

@@ -39,7 +39,8 @@ describe('NfseService', () => {
     getEventosByChave: jest.fn()
   };
   const emissorPublicoClient = {
-    getNfseByChave: jest.fn()
+    getNfseByChave: jest.fn(),
+    getNfseByDpsId: jest.fn()
   };
 
   const parser = new NfseXmlParserService();
@@ -1065,6 +1066,134 @@ describe('NfseService', () => {
         status: 'falha',
         mensagem: 'NFS-e nao localizada no Emissor Publico.'
       }
+    ]);
+  });
+
+  it('recupera NFS-e faltante a partir do Id inferido da DPS', async () => {
+    prisma.clienteEstabelecimento.findFirst.mockImplementation(({ where }) => {
+      if (where?.clienteId === 'cliente-1' && where?.cnpj === '06960810000176') {
+        return Promise.resolve({
+          id: 'estab-1',
+          cnpj: '06960810000176',
+          municipioCodigoIbge: '4211009'
+        });
+      }
+
+      return Promise.resolve(undefined);
+    });
+    prisma.certificado.findFirst.mockResolvedValue({
+      id: 'cert-1',
+      validadeFim: new Date('2099-01-01T00:00:00.000Z')
+    });
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        ambiente: Ambiente.producao,
+        serie: '70000',
+        numeroNfse: '84',
+        chaveAcesso: '42110092206960810000176000000000008426070112345678',
+        cnpjPrestador: '06960810000176',
+        municipioPrestacaoCodigo: '4211009'
+      }
+    ]);
+    emissorPublicoClient.getNfseByDpsId.mockResolvedValue({
+      statusCode: 200,
+      dpsId: 'DPS4211009206960810000176700000000000000083',
+      xml: `<?xml version="1.0" encoding="UTF-8"?>
+<NFSe>
+  <infNFSe>
+    <chaveAcesso>42110092206960810000176000000000008326070112345679</chaveAcesso>
+    <numeroNFSe>83</numeroNFSe>
+    <serie>70000</serie>
+    <tpAmb>1</tpAmb>
+    <dataEmissao>2026-07-10T10:31:00-03:00</dataEmissao>
+    <prestador><cnpj>06960810000176</cnpj><razaoSocial>CLINILAB LABORATORIO DE ANALISES CLINICAS LTDA</razaoSocial></prestador>
+    <tomador><cnpj>11111111000111</cnpj><razaoSocial>TOMADOR TESTE</razaoSocial></tomador>
+    <valorServico>405.00</valorServico>
+  </infNFSe>
+</NFSe>`,
+      rawResponse: { ok: true }
+    });
+
+    const result = await service.recuperarPorDps({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '06960810000176',
+      ambiente: 'producao',
+      lacunas: [
+        {
+          ambiente: 'producao',
+          serie: '70000',
+          numeroInicial: 83,
+          numeroFinal: 83
+        }
+      ]
+    });
+
+    expect(emissorPublicoClient.getNfseByDpsId).toHaveBeenCalledWith({
+      dpsId: 'DPS4211009206960810000176700000000000000083',
+      ambiente: 'producao',
+      certificateId: 'cert-1'
+    });
+    expect(result).toMatchObject({
+      requestedDps: 1,
+      processedDps: 1,
+      documentsRecovered: 1,
+      failures: 0
+    });
+    expect(result.detalhes).toEqual([
+      expect.objectContaining({
+        numeroDps: '83',
+        dpsId: 'DPS4211009206960810000176700000000000000083',
+        chaveAcesso: '42110092206960810000176000000000008326070112345679',
+        status: 'recuperada'
+      })
+    ]);
+  });
+
+  it('retorna falha clara quando nao ha notas vizinhas para inferir o Id da DPS', async () => {
+    prisma.clienteEstabelecimento.findFirst.mockImplementation(({ where }) => {
+      if (where?.clienteId === 'cliente-1' && where?.cnpj === '06960810000176') {
+        return Promise.resolve({
+          id: 'estab-1',
+          cnpj: '06960810000176',
+          municipioCodigoIbge: '4211009'
+        });
+      }
+
+      return Promise.resolve(undefined);
+    });
+    prisma.certificado.findFirst.mockResolvedValue({
+      id: 'cert-1',
+      validadeFim: new Date('2099-01-01T00:00:00.000Z')
+    });
+    prisma.nfseDocumento.findMany.mockResolvedValue([]);
+
+    const result = await service.recuperarPorDps({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '06960810000176',
+      ambiente: 'producao',
+      lacunas: [
+        {
+          ambiente: 'producao',
+          serie: '70000',
+          numeroInicial: 83,
+          numeroFinal: 83
+        }
+      ]
+    });
+
+    expect(emissorPublicoClient.getNfseByDpsId).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      requestedDps: 1,
+      processedDps: 1,
+      documentsRecovered: 0,
+      failures: 1
+    });
+    expect(result.detalhes).toEqual([
+      expect.objectContaining({
+        numeroDps: '83',
+        status: 'falha',
+        mensagem: expect.stringContaining('Nenhuma NFS-e vizinha')
+      })
     ]);
   });
 

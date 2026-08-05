@@ -9,6 +9,7 @@ import { DashboardStatsQueryDto, DashboardStatsResponseDto } from './dto/dashboa
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { NfseNumeracaoValidationDto } from './dto/list-nfse-response.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
+import { RecuperarNfsePorDpsDto } from './dto/recuperar-por-dps.dto';
 import { RecuperarNfsePorChaveDto } from './dto/recuperar-por-chave.dto';
 import { ReprocessarDanfsesDto, ReprocessarDanfsesResponseDto } from './dto/reprocessar-danfses.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
@@ -126,6 +127,12 @@ export class NfseController {
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   recuperarPorChave(@Body() dto: RecuperarNfsePorChaveDto) {
     return this.nfseService.recuperarPorChave(dto);
+  }
+
+  @Post('recuperar-por-dps')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  recuperarPorDps(@Body() dto: RecuperarNfsePorDpsDto) {
+    return this.nfseService.recuperarPorDps(dto);
   }
 
   @Post('download-lote')

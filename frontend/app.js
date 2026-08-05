@@ -925,6 +925,10 @@ function onDocumentClick(event) {
       });
       return;
     }
+    case 'nfse-recover-by-dps': {
+      openNfseRecoverByDpsModal();
+      return;
+    }
     case 'nfse-recover-by-key': {
       openNfseRecoverByKeyModal();
       return;
@@ -1456,6 +1460,11 @@ function onDocumentSubmit(event) {
     case 'xmlsFilterForm': {
       event.preventDefault();
       void applyXmlFilters(target);
+      return;
+    }
+    case 'nfseRecoverByDpsForm': {
+      event.preventDefault();
+      void submitNfseRecoverByDpsForm(target);
       return;
     }
     case 'nfseRecoverByKeyForm': {
@@ -3687,6 +3696,7 @@ function renderXmlNumberingValidationSummary(query, validation) {
           ? `
             <div style="display:flex; gap:10px; flex-wrap:wrap;">
               <button class="btn primary" type="button" data-action="nfse-audit-gap-nsus">Auditar lacunas por NSU</button>
+              <button class="btn secondary" type="button" data-action="nfse-recover-by-dps">Recuperar por DPS</button>
               <button class="btn secondary" type="button" data-action="nfse-recover-by-key">Recuperar por chave</button>
             </div>
           `
@@ -5606,6 +5616,8 @@ function renderModal() {
       return renderEventsSyncReportModal();
     case 'past-nsu-recovery-report':
       return renderPastNsuRecoveryReportModal();
+    case 'nfse-recover-by-dps':
+      return renderNfseRecoverByDpsModal();
     case 'nfse-recover-by-key':
       return renderNfseRecoverByKeyModal();
     case 'download-by-key-report':
@@ -5659,6 +5671,104 @@ function renderRecoverPastNsusModal() {
             <button class="btn primary" type="submit">Iniciar recuperacao</button>
           </div>
         </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderNfseRecoverByDpsModal() {
+  if (state.modal?.kind !== 'nfse-recover-by-dps') {
+    return '';
+  }
+
+  const submitting = Boolean(state.modal.submitting);
+  const result = state.modal.result || null;
+  const details = Array.isArray(result?.detalhes) ? result.detalhes : [];
+  const gapSummary = Array.isArray(state.modal.gapPreview) ? state.modal.gapPreview.filter(Boolean).join('; ') : '';
+  const errorMessage = String(state.modal.errorMessage || '').trim();
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1120px); max-width:1120px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Recuperar NFS-e faltantes por DPS</h3>
+          <p class="modal-subtitle">${escapeHtml(state.modal.clientName || 'Cliente selecionado')} • o sistema vai inferir o Id da DPS pelas notas vizinhas e consultar o Emissor Publico.</p>
+        </div>
+        <div class="modal-body">
+          <form id="nfseRecoverByDpsForm">
+            <div class="form-grid two">
+              <label>
+                <span>Cliente</span>
+                <input type="text" value="${escapeHtml(state.modal.clientName || '')}" readonly />
+              </label>
+              <label>
+                <span>CNPJ consulta</span>
+                <input type="text" name="cnpjConsulta" value="${escapeHtml(state.modal.cnpjConsulta || '')}" readonly />
+              </label>
+              <label>
+                <span>Ambiente</span>
+                <input type="text" value="${escapeHtml(mapNfseAmbienteLabel(state.modal.ambiente || 'producao'))}" readonly />
+              </label>
+              <label>
+                <span>Cliente ID</span>
+                <input type="text" name="clienteId" value="${escapeHtml(state.modal.clientId || '')}" readonly />
+              </label>
+            </div>
+            ${
+              gapSummary
+                ? `<p class="card-subtitle" style="margin:14px 0 10px; color:#8a5a00;">Lacunas detectadas na busca atual: ${escapeHtml(gapSummary)}</p>`
+                : ''
+            }
+            <p class="card-subtitle" style="margin-top:10px;">
+              A recuperacao usa o CNPJ emissor, a serie e a numeracao faltante para montar o Id da DPS automaticamente. Se a SEFIN nao expor a consulta dessa DPS, o detalhe volta com a falha individual.
+            </p>
+            ${errorMessage ? `<div class="table-state error" style="margin-top:14px;">${escapeHtml(errorMessage)}</div>` : ''}
+            <div class="modal-footer" style="padding:18px 0 0;">
+              <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Fechar</button>
+              <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Recuperando...' : 'Recuperar XMLs'}</button>
+            </div>
+          </form>
+          ${
+            result
+              ? `
+                <div style="margin-top:18px;">
+                  <div class="form-grid four" style="margin-bottom:18px;">
+                    ${detailItem('DPS solicitadas', String(result.requestedDps || 0))}
+                    ${detailItem('Processadas', String(result.processedDps || 0))}
+                    ${detailItem('XMLs recuperados', String(result.documentsRecovered || 0))}
+                    ${detailItem('Falhas', String(result.failures || 0))}
+                  </div>
+                  ${
+                    details.length
+                      ? `
+                        <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(52vh, 520px);">
+                          <div style="display:grid; grid-template-columns:minmax(160px, .8fr) minmax(260px, 1.4fr) minmax(160px, .8fr) minmax(360px, 1.8fr); gap:0; min-width:940px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                            <div style="padding:12px 14px;">DPS</div>
+                            <div style="padding:12px 14px;">Id inferido</div>
+                            <div style="padding:12px 14px;">Status</div>
+                            <div style="padding:12px 14px;">Mensagem</div>
+                          </div>
+                          ${details
+                            .map(
+                              (detail) => `
+                                <div style="display:grid; grid-template-columns:minmax(160px, .8fr) minmax(260px, 1.4fr) minmax(160px, .8fr) minmax(360px, 1.8fr); gap:0; min-width:940px; border-bottom:1px solid #eef0f2; align-items:start;">
+                                  <div style="padding:14px;">${escapeHtml(`${detail?.numeroDps || '-'}${detail?.serie ? ` / serie ${detail.serie}` : ''}`)}</div>
+                                  <div style="padding:14px; font-family:monospace; font-size:12px; word-break:break-all;">${escapeHtml(detail?.dpsId || '-')}</div>
+                                  <div style="padding:14px;">${statusBadge(detail?.status === 'recuperada' ? 'Recuperada' : 'Falha', detail?.status === 'recuperada' ? 'success' : 'danger')}</div>
+                                  <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(detail?.mensagem || '-')}</div>
+                                </div>
+                              `
+                            )
+                            .join('')}
+                        </div>
+                      `
+                      : '<div class="table-state">Nenhum detalhe retornado para esta recuperacao.</div>'
+                  }
+                </div>
+              `
+              : ''
+          }
+        </div>
       </div>
     </div>
   `;
@@ -10678,6 +10788,93 @@ async function submitNfseRecoverByKeyForm(form) {
   }
 }
 
+async function submitNfseRecoverByDpsForm(form) {
+  if (state.modal?.kind !== 'nfse-recover-by-dps') {
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('A recuperacao por DPS so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const data = new FormData(form);
+  const clienteId = String(data.get('clienteId') || state.modal.clientId || '').trim();
+  const cnpjConsulta = normalizeDigits(String(data.get('cnpjConsulta') || state.modal.cnpjConsulta || ''));
+  const ambiente = String(state.modal.ambiente || 'producao').trim() || 'producao';
+  const lacunas = Array.isArray(state.modal.lacunas) ? state.modal.lacunas : [];
+  const requestedCount = lacunas.reduce(
+    (total, gap) => total + Math.max(0, Number(gap?.numeroFinal || 0) - Number(gap?.numeroInicial || 0) + 1),
+    0
+  );
+
+  if (!clienteId) {
+    pushToast('Cliente nao informado para a recuperacao das NFS-e faltantes.', 'error');
+    return;
+  }
+
+  if (!cnpjConsulta) {
+    pushToast('CNPJ emissor nao informado para a recuperacao das NFS-e faltantes.', 'error');
+    return;
+  }
+
+  if (!lacunas.length) {
+    pushToast('Nenhuma lacuna valida foi encontrada para a recuperacao por DPS.', 'error');
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    submitting: true,
+    errorMessage: '',
+    result: null
+  };
+  render();
+
+  try {
+    const response = await apiRequest('/nfse/recuperar-por-dps', {
+      method: 'POST',
+      body: {
+        clienteId,
+        estabelecimentoId: state.modal.estabelecimentoId || undefined,
+        cnpjConsulta,
+        ambiente,
+        lacunas
+      },
+      timeoutMs: Math.max(180000, requestedCount * 45000)
+    });
+
+    state.modal = {
+      ...state.modal,
+      submitting: false,
+      errorMessage: '',
+      result: response
+    };
+    render();
+
+    await refreshApiData();
+
+    if (state.xmlSearch.hasSearched && state.xmlSearch.lastQuery?.cliente === clienteId) {
+      await executeXmlSearch();
+    }
+
+    const recovered = Number(response?.documentsRecovered || 0);
+    const failures = Number(response?.failures || 0);
+    pushToast(
+      `Recuperacao por DPS concluida: ${recovered} XML(s) recuperado(s)${failures ? `, ${failures} falha(s)` : ''}.`,
+      failures ? 'error' : 'success'
+    );
+  } catch (error) {
+    state.modal = {
+      ...state.modal,
+      submitting: false,
+      errorMessage: toErrorMessage(error)
+    };
+    render();
+    pushToast(`Falha ao recuperar NFS-e por DPS: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
 function extractNfseRecoveryKeysFromText(value) {
   const raw = String(value || '').trim();
   if (!raw) {
@@ -11232,6 +11429,45 @@ function openNfseRecoverByKeyModal() {
     estabelecimentoId: estabelecimento?.id || '',
     ambiente,
     keyText: '',
+    submitting: false,
+    result: null,
+    errorMessage: '',
+    gapPreview
+  });
+}
+
+function openNfseRecoverByDpsModal() {
+  if (state.dataSource !== 'api') {
+    pushToast('A recuperacao por DPS so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const { clientId, client, cnpjConsulta, ambiente, gapPreview, lacunas } = getCurrentNfseGapContext();
+  const estabelecimento = findEstablishmentByClientAndCnpj(clientId, cnpjConsulta);
+
+  if (!clientId || !client) {
+    pushToast('Busque os XMLs da empresa antes de iniciar a recuperacao por DPS.', 'error');
+    return;
+  }
+
+  if (!cnpjConsulta) {
+    pushToast('Nao foi possivel identificar o CNPJ emissor para recuperar as NFS-e faltantes.', 'error');
+    return;
+  }
+
+  if (!Array.isArray(lacunas) || !lacunas.length) {
+    pushToast('Nenhuma lacuna valida foi encontrada para a recuperacao por DPS.', 'error');
+    return;
+  }
+
+  openModal({
+    kind: 'nfse-recover-by-dps',
+    clientId,
+    clientName: client.razaoSocial || 'Cliente selecionado',
+    cnpjConsulta,
+    estabelecimentoId: estabelecimento?.id || '',
+    ambiente,
+    lacunas,
     submitting: false,
     result: null,
     errorMessage: '',
