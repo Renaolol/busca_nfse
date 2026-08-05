@@ -299,6 +299,89 @@ describe('NfseService', () => {
     });
   });
 
+  it('desconsidera documentos marcados para ignorar na validacao de numeracao', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-emitida-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000000126019687178145',
+        numeroNfse: '1',
+        serie: '1',
+        dataEmissao: new Date('2026-01-01T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador 1',
+        xmlPath: null,
+        danfsePath: null,
+        ignorarNumeracaoValidacao: false,
+        createdAt: new Date('2026-01-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-01T00:00:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-emitida-2',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000000226019687178146',
+        numeroNfse: '2',
+        serie: '1',
+        dataEmissao: new Date('2026-01-02T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '22222222000122',
+        razaoSocialTomador: 'Tomador 2',
+        xmlPath: null,
+        danfsePath: null,
+        ignorarNumeracaoValidacao: false,
+        createdAt: new Date('2026-01-02T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-02T00:00:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-cancelada-2800',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000280026019687178147',
+        numeroNfse: '2800',
+        serie: '1',
+        dataEmissao: new Date('2026-01-03T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '33333333000133',
+        razaoSocialTomador: 'Tomador 3',
+        xmlPath: null,
+        danfsePath: null,
+        ignorarNumeracaoValidacao: true,
+        createdAt: new Date('2026-01-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-03T00:00:00.000Z'),
+        eventos: []
+      }
+    ]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '06960810000176',
+      tipoRelacao: 'emitidas',
+      all: true
+    });
+
+    expect(result.validacaoNumeracao).toEqual({
+      aplicada: true,
+      cnpjPrestador: '06960810000176',
+      totalDocumentosAnalisados: 2,
+      totalNumerosValidos: 2,
+      totalFaixasLacuna: 0,
+      totalNumerosPulados: 0,
+      possuiNumeracaoPulada: false,
+      lacunas: []
+    });
+  });
+
   it('considera apenas os XMLs visiveis da listagem ao validar numeracao paginada', async () => {
     prisma.nfseDocumento.count.mockResolvedValueOnce(380);
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
@@ -711,6 +794,34 @@ describe('NfseService', () => {
       }
     });
     expect(result.id).toBe('exc-1');
+  });
+
+  it('atualiza a marcacao de documento desconsiderado na validacao de numeracao', async () => {
+    prisma.nfseDocumento.findUnique.mockResolvedValue({
+      id: 'doc-1',
+      clienteId: 'cliente-1'
+    });
+    prisma.nfseDocumento.update.mockResolvedValue({
+      id: 'doc-1',
+      clienteId: 'cliente-1',
+      ignorarNumeracaoValidacao: true,
+      ignorarNumeracaoObservacao: 'Documento historico fora da sequencia atual.'
+    });
+
+    const result = await service.updateDocumentNumberingValidation('doc-1', {
+      clienteId: 'cliente-1',
+      ignorar: true,
+      observacao: 'Documento historico fora da sequencia atual.'
+    });
+
+    expect(prisma.nfseDocumento.update).toHaveBeenCalledWith({
+      where: { id: 'doc-1' },
+      data: {
+        ignorarNumeracaoValidacao: true,
+        ignorarNumeracaoObservacao: 'Documento historico fora da sequencia atual.'
+      }
+    });
+    expect(result.ignorarNumeracaoValidacao).toBe(true);
   });
 
   it('colapsa duplicatas legadas por ambiente e chave_acesso na listagem ampla', async () => {

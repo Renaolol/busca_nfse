@@ -20,6 +20,7 @@ import { RecuperarNfsePorChaveDto } from './dto/recuperar-por-chave.dto';
 import { ReprocessarDanfsesDto, ReprocessarDanfsesResponseDto } from './dto/reprocessar-danfses.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
 import { SincronizarNfseEventosDto, SincronizarNfseEventosResponseDto } from './dto/sincronizar-eventos.dto';
+import { UpdateNfseDocumentNumberingValidationDto } from './dto/update-document-numbering-validation.dto';
 import { NfseService } from './nfse.service';
 
 @ApiTags('nfse')
@@ -88,6 +89,12 @@ export class NfseController {
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   deleteNumberingException(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
     return this.nfseService.deleteNumberingException(id, query.clienteId);
+  }
+
+  @Post(':id/validacao-numeracao')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  updateDocumentNumberingValidation(@Param('id') id: string, @Body() dto: UpdateNfseDocumentNumberingValidationDto) {
+    return this.nfseService.updateDocumentNumberingValidation(id, dto);
   }
 
   @Get('separadas')

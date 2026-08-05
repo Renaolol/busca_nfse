@@ -1271,6 +1271,29 @@ function onDocumentClick(event) {
       void openXmlDetails(xmlId);
       return;
     }
+    case 'xml-toggle-numbering-validation': {
+      const xmlId = actionNode.getAttribute('data-xml-id');
+      if (!xmlId) {
+        return;
+      }
+      const xml = findXmlById(xmlId);
+      if (!xml || !xml.apiNfseId || !xml.clientId) {
+        pushToast('Nao foi possivel localizar a NFS-e para alterar a validacao de numeracao.', 'error');
+        return;
+      }
+      const ignore = !Boolean(xml.ignorarNumeracaoValidacao);
+      openModal({
+        kind: 'confirm',
+        title: ignore ? 'Desconsiderar documento na numeracao' : 'Voltar documento para a numeracao',
+        subtitle: ignore
+          ? `A NFS-e ${xml.numeroNfse || xml.chaveAcesso || xml.id} deixara de participar da validacao de numeracao e da auditoria de lacunas.`
+          : `A NFS-e ${xml.numeroNfse || xml.chaveAcesso || xml.id} voltara a participar da validacao de numeracao e da auditoria de lacunas.`,
+        confirmLabel: ignore ? 'Desconsiderar documento' : 'Voltar para numeracao',
+        intent: ignore ? 'warning' : 'info',
+        payload: { type: 'xml-toggle-numbering-validation', xmlId, ignore }
+      });
+      return;
+    }
     case 'xml-reader30-select': {
       const selectionKey = actionNode.getAttribute('data-selection-key');
       if (!selectionKey) {
@@ -4155,6 +4178,7 @@ function renderXmlsTableCard(xmls) {
                           ? '<span class="row-sub">Somente informativo</span>'
                           : `<div class="table-actions">
                               <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar detalhes</button>
+                              <button class="icon-btn" data-action="xml-toggle-numbering-validation" data-xml-id="${xml.id}">${escapeHtml(xml.ignorarNumeracaoValidacao ? 'Voltar numeracao' : 'Desconsiderar numeracao')}</button>
                               <button class="icon-btn" data-action="xml-sync-events" data-xml-id="${xml.id}" ${xmlSyncDisabled}>Buscar eventos</button>
                               <button class="icon-btn" data-action="xml-view" data-xml-id="${xml.id}">Ver XML</button>
                               <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
@@ -7523,6 +7547,8 @@ function renderXmlDetailsModal(xmlId) {
             ${detailItem('Descricao do servico', xml.descricaoServico || '-')}
             ${detailItem('Status de armazenamento', xml.statusArmazenamento)}
             ${detailItem('Situacao fiscal', xml.statusFiscal || '-')}
+            ${detailItem('Validacao de numeracao', xml.ignorarNumeracaoValidacao ? 'Desconsiderado nesta validacao' : 'Participa normalmente')}
+            ${detailItem('Obs. validacao numeracao', xml.ignorarNumeracaoObservacao || '-')}
             ${detailItem('Data de cancelamento', xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '-')}
             ${detailItem('Resumo de eventos', xml.eventosResumo || '-')}
           </div>
@@ -7532,6 +7558,9 @@ function renderXmlDetailsModal(xmlId) {
           </div>
         </div>
         <div class="modal-footer">
+          <button class="btn secondary" data-action="xml-toggle-numbering-validation" data-xml-id="${xml.id}">${escapeHtml(
+            xml.ignorarNumeracaoValidacao ? 'Voltar numeracao' : 'Desconsiderar numeracao'
+          )}</button>
           <button class="btn secondary" data-action="xml-sync-events" data-xml-id="${xml.id}" ${syncEventsDisabled}>Buscar eventos</button>
           <button class="btn secondary" data-action="xml-view" data-xml-id="${xml.id}">Ver conteudo XML</button>
           <button class="btn secondary" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
@@ -8331,6 +8360,9 @@ function renderXmlStatusBadges(xml) {
   }
 
   const badges = [statusBadge(xml.statusArmazenamento, toneFromStorageStatus(xml.statusArmazenamento))];
+  if (xml.ignorarNumeracaoValidacao) {
+    badges.push(statusBadge('Fora da numeracao', 'warning'));
+  }
   if (xml.cancelada) {
     badges.push(statusBadge('Cancelada', 'danger', 'nfse-cancel-chip'));
   } else if (xml.statusFiscal && xml.statusFiscal !== '-') {
@@ -12127,6 +12159,10 @@ async function executeConfirmAction(payload) {
       await runPastNsuRecovery(payload.clientId || null);
       return;
     }
+    case 'xml-toggle-numbering-validation': {
+      await updateXmlNumberingValidation(payload.xmlId, Boolean(payload.ignore));
+      return;
+    }
     case 'replace-certificate': {
       pushToast('Fluxo de substituicao iniciado (mock).', 'info');
       return;
@@ -12594,6 +12630,7 @@ async function openXmlSearchForGapContext(context) {
   state.xmlSearch.results = [];
   state.xmlSearch.lastQuery = null;
   state.xmlSearch.numberingValidation = null;
+  state.xmlSearch.informativeRows = 0;
   state.xmlSearch.total = 0;
   state.xmlSearch.totalPages = 0;
   state.selectedXmlIds = new Set();
@@ -13804,7 +13841,9 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
         tomador: doc.razaoSocialTomador || '-',
         contraparteNome,
         iss: toNumber(doc.valorIss),
-        conteudoXml: null
+        conteudoXml: null,
+        ignorarNumeracaoValidacao: Boolean(doc.ignorarNumeracaoValidacao),
+        ignorarNumeracaoObservacao: doc.ignorarNumeracaoObservacao || ''
       };
     })
     .sort((a, b) => Date.parse(b.dataDownload || 0) - Date.parse(a.dataDownload || 0));
@@ -15922,6 +15961,39 @@ async function openXmlDetails(xmlId) {
   }
 
   openModal({ kind: 'xml-details', xmlId });
+}
+
+async function updateXmlNumberingValidation(xmlId, ignore) {
+  const xml = findXmlById(xmlId);
+  if (!xml || !xml.apiNfseId || !xml.clientId) {
+    pushToast('NFS-e nao encontrada para alterar a validacao de numeracao.', 'error');
+    return;
+  }
+
+  try {
+    await apiRequest(`/nfse/${encodeURIComponent(xml.apiNfseId)}/validacao-numeracao`, {
+      method: 'POST',
+      body: {
+        clienteId: xml.clientId,
+        ignorar: Boolean(ignore),
+        observacao: ignore ? 'Documento desconsiderado manualmente na validacao de numeracao.' : undefined
+      }
+    });
+
+    await refreshApiData();
+    if (state.xmlSearch.hasSearched && state.xmlSearch.lastQuery?.cliente === xml.clientId) {
+      await executeXmlSearch();
+    }
+
+    pushToast(
+      ignore
+        ? `A NFS-e ${xml.numeroNfse || xml.chaveAcesso || xml.id} foi desconsiderada na validacao de numeracao.`
+        : `A NFS-e ${xml.numeroNfse || xml.chaveAcesso || xml.id} voltou a participar da validacao de numeracao.`,
+      'success'
+    );
+  } catch (error) {
+    pushToast(`Falha ao atualizar a validacao de numeracao da NFS-e: ${toErrorMessage(error)}`, 'error');
+  }
 }
 
 async function downloadXmlById(xmlId) {
