@@ -25,6 +25,7 @@ import { RecuperarNfsePorChaveDto } from './dto/recuperar-por-chave.dto';
 import { ReprocessarDanfsesDto } from './dto/reprocessar-danfses.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
 import { SincronizarNfseEventosDto } from './dto/sincronizar-eventos.dto';
+import { UpdateNfseDocumentNumberingValidationDto } from './dto/update-document-numbering-validation.dto';
 import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from './nfse-xml-parser.service';
 
 type NfseNumeracaoGap = {
@@ -47,7 +48,7 @@ type NfseNumeracaoValidation = {
   lacunas: NfseNumeracaoGap[];
 };
 
-type NfseDocumentoNumeracaoProjection = Pick<NfseDocumento, 'ambiente' | 'serie' | 'numeroNfse'>;
+type NfseDocumentoNumeracaoProjection = Pick<NfseDocumento, 'ambiente' | 'serie' | 'numeroNfse' | 'ignorarNumeracaoValidacao'>;
 type NfseNumeracaoExcecaoProjection = {
   ambiente: Ambiente;
   numeroNfse: number;
@@ -343,6 +344,7 @@ export class NfseService {
         valorServico: true,
         xmlPath: true,
         danfsePath: true,
+        ignorarNumeracaoValidacao: true,
         createdAt: true,
         updatedAt: true
       }
@@ -370,7 +372,8 @@ export class NfseService {
           .map((document) => ({
             ambiente: document.ambiente,
             serie: document.serie,
-            numeroNfse: document.numeroNfse
+            numeroNfse: document.numeroNfse,
+            ignorarNumeracaoValidacao: document.ignorarNumeracaoValidacao
           }));
         const ignoredNumbers = numberingExceptions
           .filter((item) => item.clienteId === client.id)
@@ -446,6 +449,28 @@ export class NfseService {
 
     return this.prisma.nfseNumeracaoExcecao.delete({
       where: { id }
+    });
+  }
+
+  async updateDocumentNumberingValidation(id: string, dto: UpdateNfseDocumentNumberingValidationDto) {
+    const found = await this.prisma.nfseDocumento.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        clienteId: true
+      }
+    });
+
+    if (!found || found.clienteId !== dto.clienteId) {
+      throw new NotFoundException('Documento NFS-e nao encontrado para o cliente informado.');
+    }
+
+    return this.prisma.nfseDocumento.update({
+      where: { id },
+      data: {
+        ignorarNumeracaoValidacao: dto.ignorar,
+        ignorarNumeracaoObservacao: dto.ignorar ? dto.observacao?.trim() || 'Documento desconsiderado na validacao de numeracao.' : null
+      }
     });
   }
 
@@ -854,11 +879,12 @@ export class NfseService {
     cnpjConsulta?: string,
     ignoredNumbers: NfseNumeracaoExcecaoProjection[] = []
   ): NfseNumeracaoValidation {
+    const documentsForValidation = documents.filter((document) => !document.ignorarNumeracaoValidacao);
     const groupedNumbers = new Map<string, { ambiente: Ambiente; serie: string | null; numbers: Set<number> }>();
     const ignoredNumberSet = this.buildIgnoredNumberSet(ignoredNumbers);
     let totalNumerosValidos = 0;
 
-    for (const document of documents) {
+    for (const document of documentsForValidation) {
       const numero = this.parseNumeroNfse(document.numeroNfse);
       if (numero === null) {
         continue;
@@ -912,7 +938,7 @@ export class NfseService {
     return {
       aplicada: true,
       cnpjPrestador: cnpjConsulta ?? null,
-      totalDocumentosAnalisados: documents.length,
+      totalDocumentosAnalisados: documentsForValidation.length,
       totalNumerosValidos,
       totalFaixasLacuna: lacunas.length,
       totalNumerosPulados,

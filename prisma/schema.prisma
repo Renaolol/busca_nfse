@@ -196,6 +196,8 @@ model NfseDocumento {
   xmlPath                  String?          @map("xml_path") @db.Text
   danfsePath               String?          @map("danfse_path") @db.Text
   hashXml                  String?          @map("hash_xml") @db.VarChar(128)
+  ignorarNumeracaoValidacao Boolean         @default(false) @map("ignorar_numeracao_validacao")
+  ignorarNumeracaoObservacao String?        @map("ignorar_numeracao_observacao") @db.Text
   origem                   DocumentoOrigem?
   createdAt                DateTime         @default(now()) @map("created_at")
   updatedAt                DateTime         @updatedAt @map("updated_at")

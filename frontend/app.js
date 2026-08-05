@@ -1303,6 +1303,29 @@ function onDocumentClick(event) {
       void openXmlDetails(xmlId);
       return;
     }
+    case 'xml-toggle-numbering-validation': {
+      const xmlId = actionNode.getAttribute('data-xml-id');
+      if (!xmlId) {
+        return;
+      }
+      const xml = findXmlById(xmlId);
+      if (!xml || !xml.apiNfseId || !xml.clientId) {
+        pushToast('Nao foi possivel localizar a NFS-e para alterar a validacao de numeracao.', 'error');
+        return;
+      }
+      const ignore = !Boolean(xml.ignorarNumeracaoValidacao);
+      openModal({
+        kind: 'confirm',
+        title: ignore ? 'Desconsiderar documento na numeracao' : 'Voltar documento para a numeracao',
+        subtitle: ignore
+          ? `A NFS-e ${xml.numeroNfse || xml.chaveAcesso || xml.id} deixara de participar da validacao de numeracao e da auditoria de lacunas.`
+          : `A NFS-e ${xml.numeroNfse || xml.chaveAcesso || xml.id} voltara a participar da validacao de numeracao e da auditoria de lacunas.`,
+        confirmLabel: ignore ? 'Desconsiderar documento' : 'Voltar para numeracao',
+        intent: ignore ? 'warning' : 'info',
+        payload: { type: 'xml-toggle-numbering-validation', xmlId, ignore }
+      });
+      return;
+    }
     case 'xml-reader30-select': {
       const selectionKey = actionNode.getAttribute('data-selection-key');
       if (!selectionKey) {
@@ -4229,6 +4252,7 @@ function renderXmlsTableCard(xmls) {
                           ? '<span class="row-sub">Somente informativo</span>'
                           : `<div class="table-actions">
                               <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar detalhes</button>
+                              <button class="icon-btn" data-action="xml-toggle-numbering-validation" data-xml-id="${xml.id}">${escapeHtml(xml.ignorarNumeracaoValidacao ? 'Voltar numeracao' : 'Desconsiderar numeracao')}</button>
                               <button class="icon-btn" data-action="xml-sync-events" data-xml-id="${xml.id}" ${xmlSyncDisabled}>Buscar eventos</button>
                               <button class="icon-btn" data-action="xml-view" data-xml-id="${xml.id}">Ver XML</button>
                               <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
@@ -6854,8 +6878,8 @@ function renderNfseNumberingExceptionModal() {
                 </select>
               </label>
               <label>
-                <span>Numero da NFS-e</span>
-                <input name="numeroNfse" type="number" min="1" step="1" value="${escapeHtml(String(state.modal.numeroNfse || ''))}" ${submitting ? 'disabled' : ''} />
+                <span>Numero(s) da NFS-e</span>
+                <textarea name="numeroNfse" rows="3" placeholder="Ex.: 555, 556, 560, 564 ou 555-562" ${submitting ? 'disabled' : ''}>${escapeHtml(String(state.modal.numeroNfse || ''))}</textarea>
               </label>
               <label>
                 <span>Tipo</span>
@@ -6876,9 +6900,10 @@ function renderNfseNumberingExceptionModal() {
               </label>
             </div>
             ${errorMessage ? `<div class="table-state error" style="margin-top:14px;">${escapeHtml(errorMessage)}</div>` : ''}
+            <p class="card-subtitle" style="margin-top:10px;">Voce pode informar numeros separados por virgula, espaco, ponto e virgula, quebra de linha ou uma faixa como <strong>555-562</strong>.</p>
             <div class="modal-footer" style="padding:18px 0 0;">
               <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Fechar</button>
-              <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Salvando...' : 'Salvar excecao'}</button>
+              <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Salvando...' : 'Salvar excecoes'}</button>
             </div>
           </form>
           <div style="margin-top:18px;">
@@ -7800,6 +7825,8 @@ function renderXmlDetailsModal(xmlId) {
             ${detailItem('Descricao do servico', xml.descricaoServico || '-')}
             ${detailItem('Status de armazenamento', xml.statusArmazenamento)}
             ${detailItem('Situacao fiscal', xml.statusFiscal || '-')}
+            ${detailItem('Validacao de numeracao', xml.ignorarNumeracaoValidacao ? 'Desconsiderado nesta validacao' : 'Participa normalmente')}
+            ${detailItem('Obs. validacao numeracao', xml.ignorarNumeracaoObservacao || '-')}
             ${detailItem('Data de cancelamento', xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '-')}
             ${detailItem('Resumo de eventos', xml.eventosResumo || '-')}
           </div>
@@ -7809,6 +7836,9 @@ function renderXmlDetailsModal(xmlId) {
           </div>
         </div>
         <div class="modal-footer">
+          <button class="btn secondary" data-action="xml-toggle-numbering-validation" data-xml-id="${xml.id}">${escapeHtml(
+            xml.ignorarNumeracaoValidacao ? 'Voltar numeracao' : 'Desconsiderar numeracao'
+          )}</button>
           <button class="btn secondary" data-action="xml-sync-events" data-xml-id="${xml.id}" ${syncEventsDisabled}>Buscar eventos</button>
           <button class="btn secondary" data-action="xml-view" data-xml-id="${xml.id}">Ver conteudo XML</button>
           <button class="btn secondary" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
@@ -8648,6 +8678,9 @@ function renderXmlStatusBadges(xml) {
   }
 
   const badges = [statusBadge(xml.statusArmazenamento, toneFromStorageStatus(xml.statusArmazenamento))];
+  if (xml.ignorarNumeracaoValidacao) {
+    badges.push(statusBadge('Fora da numeracao', 'warning'));
+  }
   if (xml.cancelada) {
     badges.push(statusBadge('Cancelada', 'danger', 'nfse-cancel-chip'));
   } else if (xml.statusFiscal && xml.statusFiscal !== '-') {
@@ -12444,6 +12477,10 @@ async function executeConfirmAction(payload) {
       await runPastNsuRecovery(payload.clientId || null);
       return;
     }
+    case 'xml-toggle-numbering-validation': {
+      await updateXmlNumberingValidation(payload.xmlId, Boolean(payload.ignore));
+      return;
+    }
     case 'replace-certificate': {
       pushToast('Fluxo de substituicao iniciado (mock).', 'info');
       return;
@@ -12808,6 +12845,79 @@ function openNfseNumberingExceptionModalForContext(context) {
   void loadNfseNumberingExceptionsForModal();
 }
 
+function parseNfseNumberingExceptionNumbers(rawValue) {
+  const source = String(rawValue || '')
+    .replace(/[–—]/g, '-')
+    .replace(/\r/g, '')
+    .trim();
+
+  if (!source) {
+    return { numbers: [], invalidTokens: [] };
+  }
+
+  const tokens = source
+    .split(/[\n,;]+/)
+    .map((token) => token.trim())
+    .filter(Boolean);
+  const numbers = [];
+  const invalidTokens = [];
+  const seen = new Set();
+
+  tokens.forEach((token) => {
+    const compact = token.replace(/\s+/g, ' ').trim();
+    if (!compact) {
+      return;
+    }
+
+    const rangeMatch = compact.match(/^(\d+)\s*(?:-|a)\s*(\d+)$/i);
+    if (rangeMatch) {
+      const start = Number.parseInt(rangeMatch[1], 10);
+      const end = Number.parseInt(rangeMatch[2], 10);
+      if (!Number.isInteger(start) || !Number.isInteger(end) || start <= 0 || end < start) {
+        invalidTokens.push(token);
+        return;
+      }
+
+      for (let value = start; value <= end; value += 1) {
+        if (seen.has(value)) {
+          continue;
+        }
+        seen.add(value);
+        numbers.push(value);
+      }
+      return;
+    }
+
+    const fragments = compact
+      .split(/\s+/)
+      .map((item) => item.trim())
+      .filter(Boolean);
+
+    fragments.forEach((fragment) => {
+      if (!/^\d+$/.test(fragment)) {
+        invalidTokens.push(fragment);
+        return;
+      }
+
+      const parsed = Number.parseInt(fragment, 10);
+      if (!Number.isInteger(parsed) || parsed <= 0) {
+        invalidTokens.push(fragment);
+        return;
+      }
+
+      if (!seen.has(parsed)) {
+        seen.add(parsed);
+        numbers.push(parsed);
+      }
+    });
+  });
+
+  return {
+    numbers,
+    invalidTokens
+  };
+}
+
 function openNfseRecoverByKeyModalForContext(context) {
   if (state.dataSource !== 'api') {
     pushToast('A recuperacao por chave so esta disponivel com a API real conectada.', 'error');
@@ -12911,6 +13021,7 @@ async function openXmlSearchForGapContext(context) {
   state.xmlSearch.results = [];
   state.xmlSearch.lastQuery = null;
   state.xmlSearch.numberingValidation = null;
+  state.xmlSearch.informativeRows = 0;
   state.xmlSearch.total = 0;
   state.xmlSearch.totalPages = 0;
   state.selectedXmlIds = new Set();
@@ -12929,14 +13040,24 @@ async function submitNfseNumberingExceptionForm(form) {
   const clienteId = String(data.get('clienteId') || state.modal.clientId || '').trim();
   const cnpjConsulta = normalizeDigits(String(data.get('cnpjConsulta') || state.modal.cnpjConsulta || ''));
   const ambiente = String(data.get('ambiente') || state.modal.ambiente || 'producao').trim() || 'producao';
-  const numeroNfse = Number(data.get('numeroNfse') || 0);
+  const numeroNfseRaw = String(data.get('numeroNfse') || '').trim();
   const tipo = String(data.get('tipo') || state.modal.tipo || 'inutilizada').trim() || 'inutilizada';
   const observacao = String(data.get('observacao') || '').trim();
+  const { numbers: numerosNfse, invalidTokens } = parseNfseNumberingExceptionNumbers(numeroNfseRaw);
 
-  if (!clienteId || !cnpjConsulta || !Number.isInteger(numeroNfse) || numeroNfse <= 0) {
+  if (!clienteId || !cnpjConsulta || numerosNfse.length === 0) {
     state.modal = {
       ...state.modal,
-      errorMessage: 'Informe cliente, CNPJ e um numero valido da NFS-e para registrar a excecao.'
+      errorMessage: 'Informe cliente, CNPJ e ao menos um numero valido da NFS-e para registrar a excecao.'
+    };
+    render();
+    return;
+  }
+
+  if (invalidTokens.length) {
+    state.modal = {
+      ...state.modal,
+      errorMessage: `Nao foi possivel interpretar estes itens: ${invalidTokens.join(', ')}.`
     };
     render();
     return;
@@ -12946,7 +13067,7 @@ async function submitNfseNumberingExceptionForm(form) {
     ...state.modal,
     submitting: true,
     ambiente,
-    numeroNfse: String(numeroNfse),
+    numeroNfse: numeroNfseRaw,
     tipo,
     observacao,
     errorMessage: ''
@@ -12954,17 +13075,19 @@ async function submitNfseNumberingExceptionForm(form) {
   render();
 
   try {
-    await apiRequest('/nfse/numeracao-excecoes', {
-      method: 'POST',
-      body: {
-        clienteId,
-        cnpjConsulta,
-        ambiente,
-        numeroNfse,
-        tipo,
-        observacao: observacao || undefined
-      }
-    });
+    for (const numeroNfse of numerosNfse) {
+      await apiRequest('/nfse/numeracao-excecoes', {
+        method: 'POST',
+        body: {
+          clienteId,
+          cnpjConsulta,
+          ambiente,
+          numeroNfse,
+          tipo,
+          observacao: observacao || undefined
+        }
+      });
+    }
 
     if (state.modal?.kind === 'nfse-numbering-exception') {
       state.modal = {
@@ -12982,7 +13105,10 @@ async function submitNfseNumberingExceptionForm(form) {
       await executeXmlSearch();
     }
     await loadNfseNumberingExceptionsForModal();
-    pushToast('Excecao de numeracao salva com sucesso.', 'success');
+    pushToast(
+      `${numerosNfse.length} excecao(oes) de numeracao salva(s) com sucesso.`,
+      'success'
+    );
   } catch (error) {
     if (state.modal?.kind !== 'nfse-numbering-exception') {
       return;
@@ -14121,7 +14247,9 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
         tomador: doc.razaoSocialTomador || '-',
         contraparteNome,
         iss: toNumber(doc.valorIss),
-        conteudoXml: null
+        conteudoXml: null,
+        ignorarNumeracaoValidacao: Boolean(doc.ignorarNumeracaoValidacao),
+        ignorarNumeracaoObservacao: doc.ignorarNumeracaoObservacao || ''
       };
     })
     .sort((a, b) => Date.parse(b.dataDownload || 0) - Date.parse(a.dataDownload || 0));
@@ -16239,6 +16367,39 @@ async function openXmlDetails(xmlId) {
   }
 
   openModal({ kind: 'xml-details', xmlId });
+}
+
+async function updateXmlNumberingValidation(xmlId, ignore) {
+  const xml = findXmlById(xmlId);
+  if (!xml || !xml.apiNfseId || !xml.clientId) {
+    pushToast('NFS-e nao encontrada para alterar a validacao de numeracao.', 'error');
+    return;
+  }
+
+  try {
+    await apiRequest(`/nfse/${encodeURIComponent(xml.apiNfseId)}/validacao-numeracao`, {
+      method: 'POST',
+      body: {
+        clienteId: xml.clientId,
+        ignorar: Boolean(ignore),
+        observacao: ignore ? 'Documento desconsiderado manualmente na validacao de numeracao.' : undefined
+      }
+    });
+
+    await refreshApiData();
+    if (state.xmlSearch.hasSearched && state.xmlSearch.lastQuery?.cliente === xml.clientId) {
+      await executeXmlSearch();
+    }
+
+    pushToast(
+      ignore
+        ? `A NFS-e ${xml.numeroNfse || xml.chaveAcesso || xml.id} foi desconsiderada na validacao de numeracao.`
+        : `A NFS-e ${xml.numeroNfse || xml.chaveAcesso || xml.id} voltou a participar da validacao de numeracao.`,
+      'success'
+    );
+  } catch (error) {
+    pushToast(`Falha ao atualizar a validacao de numeracao da NFS-e: ${toErrorMessage(error)}`, 'error');
+  }
 }
 
 async function downloadXmlById(xmlId) {

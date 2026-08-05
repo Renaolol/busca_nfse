@@ -206,6 +206,12 @@ Para desconsiderar uma numeracao realmente inutilizada ou inexistente nas audito
 
 A excecao remove a numeracao da validacao de lacunas e evita que ela continue aparecendo como XML faltante no painel.
 
+Para desconsiderar um documento ja armazenado na validacao de numeracao sem removelo do acervo, use:
+
+- `POST /nfse/:id/validacao-numeracao`
+
+Quando `ignorar=true`, a NFS-e continua visivel na listagem, mas deixa de participar da validacao de numeracao e da auditoria de lacunas. Isso atende casos de documentos historicos cancelados fora da sequencia atual.
+
 ### Iniciar sync com modo
 
 Endpoint: `POST /clientes/:clienteId/sync/iniciar`
