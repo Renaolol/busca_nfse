@@ -11454,7 +11454,9 @@ function getCurrentNfseGapContext() {
     lacunas,
     ambiente,
     requestedNumbers,
-    gapPreview: lacunasRaw.slice(0, 5).map((gap) => formatXmlNumberingGap(gap))
+    gapPreview: summarizeXmlNumberingGaps(lacunasRaw)
+      .slice(0, 5)
+      .map((gap) => formatXmlNumberingRange(gap))
   };
 }
 
