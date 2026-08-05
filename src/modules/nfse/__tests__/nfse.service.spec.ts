@@ -151,7 +151,7 @@ describe('NfseService', () => {
   });
 
   it('valida numeracao pulada na listagem de NFS-e emitidas', async () => {
-    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+    prisma.nfseDocumento.findMany.mockResolvedValue([
       {
         id: 'doc-emitida-101',
         clienteId: 'cliente-1',
@@ -165,7 +165,7 @@ describe('NfseService', () => {
         razaoSocialPrestador: 'Prestador Teste',
         cnpjTomador: '11111111000111',
         razaoSocialTomador: 'Tomador 1',
-        xmlPath: null,
+        xmlPath: 'nfse/producao/06960810000176/2026/06/xml/doc-101.xml',
         danfsePath: null,
         createdAt: new Date('2026-06-01T00:00:00.000Z'),
         updatedAt: new Date('2026-06-01T00:00:00.000Z'),
@@ -184,7 +184,7 @@ describe('NfseService', () => {
         razaoSocialPrestador: 'Prestador Teste',
         cnpjTomador: '22222222000122',
         razaoSocialTomador: 'Tomador 2',
-        xmlPath: null,
+        xmlPath: 'nfse/producao/06960810000176/2026/06/xml/doc-103.xml',
         danfsePath: null,
         createdAt: new Date('2026-06-03T00:00:00.000Z'),
         updatedAt: new Date('2026-06-03T00:00:00.000Z'),
@@ -220,7 +220,7 @@ describe('NfseService', () => {
   });
 
   it('ignora a serie ao validar numeracao de NFS-e emitidas', async () => {
-    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+    prisma.nfseDocumento.findMany.mockResolvedValue([
       {
         id: 'doc-emitida-55',
         clienteId: 'cliente-1',
@@ -234,7 +234,7 @@ describe('NfseService', () => {
         razaoSocialPrestador: 'Prestador Teste',
         cnpjTomador: '11111111000111',
         razaoSocialTomador: 'Tomador 1',
-        xmlPath: null,
+        xmlPath: 'nfse/producao/06960810000176/2026/01/xml/doc-55.xml',
         danfsePath: null,
         createdAt: new Date('2026-01-31T00:00:00.000Z'),
         updatedAt: new Date('2026-01-31T00:00:00.000Z'),
@@ -253,7 +253,7 @@ describe('NfseService', () => {
         razaoSocialPrestador: 'Prestador Teste',
         cnpjTomador: '22222222000122',
         razaoSocialTomador: 'Tomador 2',
-        xmlPath: null,
+        xmlPath: 'nfse/producao/06960810000176/2026/01/xml/doc-56.xml',
         danfsePath: null,
         createdAt: new Date('2026-01-31T00:00:00.000Z'),
         updatedAt: new Date('2026-01-31T00:00:00.000Z'),
@@ -272,7 +272,7 @@ describe('NfseService', () => {
         razaoSocialPrestador: 'Prestador Teste',
         cnpjTomador: '33333333000133',
         razaoSocialTomador: 'Tomador 3',
-        xmlPath: null,
+        xmlPath: 'nfse/producao/06960810000176/2026/02/xml/doc-57.xml',
         danfsePath: null,
         createdAt: new Date('2026-02-01T00:00:00.000Z'),
         updatedAt: new Date('2026-02-01T00:00:00.000Z'),
@@ -300,7 +300,7 @@ describe('NfseService', () => {
   });
 
   it('desconsidera documentos marcados para ignorar na validacao de numeracao', async () => {
-    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+    prisma.nfseDocumento.findMany.mockResolvedValue([
       {
         id: 'doc-emitida-1',
         clienteId: 'cliente-1',
@@ -314,7 +314,7 @@ describe('NfseService', () => {
         razaoSocialPrestador: 'Prestador Teste',
         cnpjTomador: '11111111000111',
         razaoSocialTomador: 'Tomador 1',
-        xmlPath: null,
+        xmlPath: 'nfse/producao/06960810000176/2026/01/xml/doc-1.xml',
         danfsePath: null,
         ignorarNumeracaoValidacao: false,
         createdAt: new Date('2026-01-01T00:00:00.000Z'),
@@ -334,7 +334,7 @@ describe('NfseService', () => {
         razaoSocialPrestador: 'Prestador Teste',
         cnpjTomador: '22222222000122',
         razaoSocialTomador: 'Tomador 2',
-        xmlPath: null,
+        xmlPath: 'nfse/producao/06960810000176/2026/01/xml/doc-2.xml',
         danfsePath: null,
         ignorarNumeracaoValidacao: false,
         createdAt: new Date('2026-01-02T00:00:00.000Z'),
@@ -354,7 +354,7 @@ describe('NfseService', () => {
         razaoSocialPrestador: 'Prestador Teste',
         cnpjTomador: '33333333000133',
         razaoSocialTomador: 'Tomador 3',
-        xmlPath: null,
+        xmlPath: 'nfse/producao/06960810000176/2026/01/xml/doc-2800.xml',
         danfsePath: null,
         ignorarNumeracaoValidacao: true,
         createdAt: new Date('2026-01-03T00:00:00.000Z'),
@@ -384,7 +384,7 @@ describe('NfseService', () => {
 
   it('considera apenas os XMLs visiveis da listagem ao validar numeracao paginada', async () => {
     prisma.nfseDocumento.count.mockResolvedValueOnce(380);
-    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+    prisma.nfseDocumento.findMany.mockResolvedValue([
       {
         id: 'doc-emitida-55',
         clienteId: 'cliente-1',
@@ -485,7 +485,7 @@ describe('NfseService', () => {
   });
 
   it('ignora numeracao marcada como inutilizada na validacao das emitidas', async () => {
-    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+    prisma.nfseDocumento.findMany.mockResolvedValue([
       {
         id: 'doc-emitida-82',
         clienteId: 'cliente-1',
@@ -688,7 +688,7 @@ describe('NfseService', () => {
 
   it('valida numeracao emitida mesmo com o filtro padrao de armazenado', async () => {
     prisma.nfseDocumento.count.mockResolvedValueOnce(2);
-    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+    prisma.nfseDocumento.findMany.mockResolvedValue([
       {
         id: 'doc-emitida-83',
         clienteId: 'cliente-1',
@@ -746,6 +746,101 @@ describe('NfseService', () => {
       totalNumerosPulados: 0,
       possuiNumeracaoPulada: false,
       lacunas: []
+    });
+  });
+
+  it('mantem a validacao de numeracao geral mesmo quando a listagem e filtrada por numero', async () => {
+    prisma.nfseDocumento.count.mockResolvedValueOnce(1);
+    prisma.nfseDocumento.findMany
+      .mockResolvedValueOnce([
+        {
+          id: 'doc-emitida-83',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: Ambiente.producao,
+          chaveAcesso: '421100921065205400019500900000000000000083426019600070931',
+          numeroNfse: '83',
+          serie: '900',
+          dataEmissao: new Date('2026-07-01T00:00:00.000Z'),
+          cnpjPrestador: '10652054000195',
+          razaoSocialPrestador: 'Prestador Teste',
+          cnpjTomador: '11111111000111',
+          razaoSocialTomador: 'Tomador 1',
+          xmlPath: 'nfse/producao/10652054000195/2026/07/xml/doc-83.xml',
+          danfsePath: null,
+          createdAt: new Date('2026-08-05T00:00:00.000Z'),
+          updatedAt: new Date('2026-08-05T00:00:00.000Z'),
+          eventos: []
+        }
+      ])
+      .mockResolvedValueOnce([
+        {
+          ambiente: Ambiente.producao,
+          chaveAcesso: '421100921065205400019500900000000000000083426019600070931',
+          hashXml: 'hash-83',
+          numeroNfse: '83',
+          serie: '900',
+          dataEmissao: new Date('2026-07-01T00:00:00.000Z'),
+          cnpjPrestador: '10652054000195',
+          razaoSocialPrestador: 'Prestador Teste',
+          cnpjTomador: '11111111000111',
+          razaoSocialTomador: 'Tomador 1',
+          valorServico: new Prisma.Decimal('145.00'),
+          xmlPath: 'nfse/producao/10652054000195/2026/07/xml/doc-83.xml',
+          danfsePath: null,
+          createdAt: new Date('2026-08-05T00:00:00.000Z'),
+          updatedAt: new Date('2026-08-05T00:00:00.000Z'),
+          ignorarNumeracaoValidacao: false
+        },
+        {
+          ambiente: Ambiente.producao,
+          chaveAcesso: '421100921065205400019500900000000000000183426019600071031',
+          hashXml: 'hash-183',
+          numeroNfse: '183',
+          serie: '900',
+          dataEmissao: new Date('2026-08-01T00:00:00.000Z'),
+          cnpjPrestador: '10652054000195',
+          razaoSocialPrestador: 'Prestador Teste',
+          cnpjTomador: '22222222000122',
+          razaoSocialTomador: 'Tomador 2',
+          valorServico: new Prisma.Decimal('180.00'),
+          xmlPath: 'nfse/producao/10652054000195/2026/08/xml/doc-183.xml',
+          danfsePath: null,
+          createdAt: new Date('2026-08-05T00:00:00.000Z'),
+          updatedAt: new Date('2026-08-05T00:00:00.000Z'),
+          ignorarNumeracaoValidacao: false
+        }
+      ]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '10652054000195',
+      tipoRelacao: 'emitidas',
+      numeroNfse: '83',
+      statusArmazenamento: 'Armazenado',
+      all: false,
+      page: 1,
+      pageSize: 100
+    });
+
+    expect(result.total).toBe(1);
+    expect(result.validacaoNumeracao).toEqual({
+      aplicada: true,
+      cnpjPrestador: '10652054000195',
+      totalDocumentosAnalisados: 2,
+      totalNumerosValidos: 2,
+      totalFaixasLacuna: 1,
+      totalNumerosPulados: 99,
+      possuiNumeracaoPulada: true,
+      lacunas: [
+        {
+          ambiente: Ambiente.producao,
+          serie: null,
+          numeroInicial: 84,
+          numeroFinal: 182,
+          quantidade: 99
+        }
+      ]
     });
   });
 
