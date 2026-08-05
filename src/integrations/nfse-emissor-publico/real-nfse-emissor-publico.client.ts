@@ -94,6 +94,7 @@ export class RealNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
       const certificate = await this.loadCertificate(params.certificateId);
       const urls = this.buildDpsUrls(params.ambiente, params.dpsId);
       let lastResponse: { statusCode: number; headers: IncomingHttpHeaders; body: string } | null = null;
+      let lastDiagnostic: Record<string, unknown> | undefined;
 
       for (const url of urls) {
         const response = await this.doGetWithFallback(url, certificate);
@@ -110,6 +111,44 @@ export class RealNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
             };
           }
 
+          const chaveAcesso = this.extractReferencedChaveAcesso(data, response.body);
+          if (chaveAcesso) {
+            const nfseResponse = await this.queryNfseByChaveWithCertificate({
+              chaveAcesso,
+              ambiente: params.ambiente,
+              certificate
+            });
+            if (nfseResponse.statusCode === 200 && nfseResponse.xml) {
+              return {
+                statusCode: 200,
+                dpsId: params.dpsId,
+                chaveAcesso,
+                xml: nfseResponse.xml,
+                rawResponse: {
+                  consultaDps: data ?? response.body,
+                  consultaNfsePorChave: nfseResponse.rawResponse
+                },
+                message: 'NFS-e recuperada pela chave referenciada na resposta da DPS.'
+              };
+            }
+
+            lastDiagnostic = this.buildDpsDiagnostic({
+              payload: data,
+              rawBody: response.body,
+              headers: response.headers,
+              chaveAcesso,
+              secondaryMessage: nfseResponse.message,
+              secondaryStatusCode: nfseResponse.statusCode
+            });
+            continue;
+          }
+
+          lastDiagnostic = this.buildDpsDiagnostic({
+            payload: data,
+            rawBody: response.body,
+            headers: response.headers
+          });
+
           continue;
         }
 
@@ -119,19 +158,36 @@ export class RealNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
             statusCode: response.statusCode,
             dpsId: params.dpsId,
             rawResponse: data ?? response.body,
-            message: this.extractMessage(data, `Falha na consulta da DPS no Emissor Publico. HTTP ${response.statusCode}.`)
+            message: this.extractMessage(data, `Falha na consulta da DPS no Emissor Publico. HTTP ${response.statusCode}.`),
+            diagnostic: this.buildDpsDiagnostic({
+              payload: data,
+              rawBody: response.body,
+              headers: response.headers
+            })
           };
         }
       }
 
       const data = this.tryParseJson(lastResponse?.body ?? '');
+      const chaveAcesso = this.extractReferencedChaveAcesso(data, lastResponse?.body ?? '');
+      const diagnostic =
+        lastDiagnostic ??
+        this.buildDpsDiagnostic({
+          payload: data,
+          rawBody: lastResponse?.body ?? '',
+          headers: lastResponse?.headers,
+          chaveAcesso
+        });
       return {
         statusCode: lastResponse?.statusCode ?? 0,
         dpsId: params.dpsId,
+        chaveAcesso,
         rawResponse: data ?? lastResponse?.body ?? null,
         message:
           this.extractMessage(data, '') ||
-          'Resposta do Emissor Publico sem XML da NFS-e para a DPS consultada.'
+          this.buildNoXmlMessage(diagnostic) ||
+          'Resposta do Emissor Publico sem XML da NFS-e para a DPS consultada.',
+        diagnostic
       };
     } catch (error) {
       return {
@@ -141,6 +197,42 @@ export class RealNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
         message: `Erro ao consultar DPS no Emissor Publico: ${this.toErrorMessage(error)}`
       };
     }
+  }
+
+  private async queryNfseByChaveWithCertificate(params: {
+    chaveAcesso: string;
+    ambiente: NfseAmbiente;
+    certificate: Certificado;
+  }): Promise<NfseEmissorPublicoNfseResult> {
+    const url = this.buildNfseUrl(params.ambiente, params.chaveAcesso);
+    const response = await this.doGetWithFallback(url, params.certificate);
+    const data = this.tryParseJson(response.body);
+
+    if (response.statusCode !== 200) {
+      return {
+        statusCode: response.statusCode,
+        chaveAcesso: params.chaveAcesso,
+        rawResponse: data ?? response.body,
+        message: this.extractMessage(data, `Falha na consulta ao Emissor Publico. HTTP ${response.statusCode}.`)
+      };
+    }
+
+    const xml = this.extractNfseXml(data, response.body);
+    if (!xml) {
+      return {
+        statusCode: 200,
+        chaveAcesso: params.chaveAcesso,
+        rawResponse: data ?? response.body,
+        message: 'Resposta do Emissor Publico sem XML da NFS-e.'
+      };
+    }
+
+    return {
+      statusCode: 200,
+      chaveAcesso: params.chaveAcesso,
+      xml,
+      rawResponse: data ?? response.body
+    };
   }
 
   private async loadCertificate(certificateId: string): Promise<Certificado> {
@@ -379,6 +471,149 @@ export class RealNfseEmissorPublicoClient implements NfseEmissorPublicoClient {
     }
 
     return trimmed;
+  }
+
+  private extractReferencedChaveAcesso(payload: Record<string, unknown> | null, rawBody: string): string | undefined {
+    const rawCandidates = [
+      ...this.extractXmlTagValues(rawBody, ['chNFSe', 'chNfse', 'chaveAcesso', 'ChaveAcesso']),
+      ...this.extractInlineFiftyDigitValues(rawBody)
+    ];
+    for (const candidate of rawCandidates) {
+      const chave = this.normalizeReferencedChaveAcesso(candidate);
+      if (chave) {
+        return chave;
+      }
+    }
+
+    if (!payload) {
+      return undefined;
+    }
+
+    for (const value of this.collectValues(payload, 250)) {
+      if (typeof value !== 'string') {
+        continue;
+      }
+
+      const chave = this.normalizeReferencedChaveAcesso(value);
+      if (chave) {
+        return chave;
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractXmlTagValues(xml: string, tags: string[]): string[] {
+    const values: string[] = [];
+    for (const tag of tags) {
+      const regex = new RegExp(`<(?:\\w+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${tag}>`, 'ig');
+      let match: RegExpExecArray | null;
+      while ((match = regex.exec(xml)) !== null) {
+        if (match[1]?.trim()) {
+          values.push(match[1].trim());
+        }
+      }
+    }
+
+    return values;
+  }
+
+  private extractInlineFiftyDigitValues(value: string): string[] {
+    return value.match(/\d{50}/g) ?? [];
+  }
+
+  private normalizeReferencedChaveAcesso(value?: string): string | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return undefined;
+    }
+
+    const exact = trimmed.match(/(\d{50})/);
+    if (exact?.[1]) {
+      return exact[1];
+    }
+
+    return undefined;
+  }
+
+  private buildDpsDiagnostic(params: {
+    payload: Record<string, unknown> | null;
+    rawBody: string;
+    headers?: IncomingHttpHeaders;
+    chaveAcesso?: string;
+    secondaryMessage?: string;
+    secondaryStatusCode?: number;
+  }): Record<string, unknown> {
+    return {
+      responseKind: this.detectDpsResponseKind(params.payload, params.rawBody),
+      contentType: params.headers?.['content-type'] ?? null,
+      chaveAcessoReferenciada: params.chaveAcesso ?? null,
+      consultaNfseStatusCode: params.secondaryStatusCode ?? null,
+      consultaNfseMensagem: params.secondaryMessage ?? null,
+      rawPreview: this.buildRawPreview(params.rawBody)
+    };
+  }
+
+  private detectDpsResponseKind(payload: Record<string, unknown> | null, rawBody: string): string {
+    const trimmed = rawBody.trim();
+    if (/<(?:\w+:)?DPS\b/i.test(trimmed) || /<(?:\w+:)?infDPS\b/i.test(trimmed)) {
+      return 'xml_dps';
+    }
+
+    if (/<(?:\w+:)?NFSe\b/i.test(trimmed) || /<(?:\w+:)?CompNfse\b/i.test(trimmed)) {
+      return 'xml_nfse';
+    }
+
+    if (trimmed.startsWith('{') || trimmed.startsWith('[') || payload) {
+      return 'json';
+    }
+
+    if (!trimmed) {
+      return 'empty';
+    }
+
+    return 'unknown';
+  }
+
+  private buildRawPreview(value: string): string | null {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    return trimmed.replace(/\s+/g, ' ').slice(0, 500);
+  }
+
+  private buildNoXmlMessage(diagnostic: Record<string, unknown> | undefined): string | undefined {
+    if (!diagnostic) {
+      return undefined;
+    }
+
+    const chaveAcesso = typeof diagnostic.chaveAcessoReferenciada === 'string' ? diagnostic.chaveAcessoReferenciada : '';
+    const responseKind = typeof diagnostic.responseKind === 'string' ? diagnostic.responseKind : '';
+    const secondaryMessage = typeof diagnostic.consultaNfseMensagem === 'string' ? diagnostic.consultaNfseMensagem : '';
+    const secondaryStatusCode =
+      typeof diagnostic.consultaNfseStatusCode === 'number' ? diagnostic.consultaNfseStatusCode : null;
+
+    if (chaveAcesso) {
+      return `A consulta da DPS retornou referencia para a NFS-e ${chaveAcesso}, mas a consulta por chave nao trouxe XML${
+        secondaryStatusCode ? ` (HTTP ${secondaryStatusCode})` : ''
+      }${secondaryMessage ? `: ${secondaryMessage}` : '.'}`;
+    }
+
+    if (responseKind === 'xml_dps') {
+      return 'A consulta da DPS retornou apenas o XML da DPS, sem XML importavel da NFS-e vinculada.';
+    }
+
+    if (responseKind === 'json') {
+      return 'A consulta da DPS retornou JSON sem XML importavel da NFS-e vinculada.';
+    }
+
+    return undefined;
   }
 
   private collectValues(payload: unknown, limit: number): unknown[] {

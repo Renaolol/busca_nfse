@@ -11,9 +11,11 @@ export interface NfseEmissorPublicoNfseResult {
 export interface NfseEmissorPublicoDpsResult {
   statusCode: number;
   dpsId: string;
+  chaveAcesso?: string;
   xml?: string;
   rawResponse: unknown;
   message?: string;
+  diagnostic?: Record<string, unknown>;
 }
 
 export interface NfseEmissorPublicoClient {

@@ -1093,7 +1093,7 @@ export class NfseService {
             serie: lacuna.serie,
             numeroDps: String(numero),
             dpsId: inferred.dpsId,
-            chaveAcesso: null,
+            chaveAcesso: response.chaveAcesso ?? null,
             status: 'falha',
             mensagem: response.message ?? `Falha ao recuperar NFS-e pela DPS ${inferred.dpsId}. HTTP ${response.statusCode}.`
           });
