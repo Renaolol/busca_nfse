@@ -4730,8 +4730,6 @@ function renderXmlReader30Section() {
   const reader = state.xmlReader30;
   const hasClients = state.clients.length > 0;
   const currentCount = Number(reader.total || reader.results.length || 0);
-  const currentType = reader.lastQuery?.documento || 'todos';
-  const currentTypeLabel = mapXmlReader30TypeLabel(currentType);
   const results = Array.isArray(reader.results) ? reader.results : [];
   const summary = reader.hasSearched && reader.lastQuery ? renderXmlReader30Summary() : '';
 
@@ -4746,20 +4744,11 @@ function renderXmlReader30Section() {
       </div>
 
       <form id="xmlReader30Form" class="form-grid compare-form">
-        <label class="field">
+        <label class="field compare-span-2">
           Empresa
           <select name="cliente" required ${hasClients ? '' : 'disabled'}>
             ${renderOptions(state.clients.map((client) => client.id), reader.lastQuery?.cliente || '', mapClientOptions(), 'Selecione a empresa')}
           </select>
-        </label>
-        <label class="field">
-          Documento
-          <select name="documento">${renderOptions(['todos', 'nfse', 'nfe', 'cte'], currentType, {
-            todos: 'Todos',
-            nfse: 'NFS-e',
-            nfe: 'NF-e',
-            cte: 'CT-e'
-          })}</select>
         </label>
         <label class="field">
           Emissao inicio
@@ -4773,15 +4762,15 @@ function renderXmlReader30Section() {
           Busca livre
           <input name="texto" placeholder="Chave, número, CNPJ, cliente, status..." value="${escapeHtml(reader.lastQuery?.texto || '')}" />
         </label>
-        <label class="field">
+        <label class="field compare-span-2">
           Status
-          <input value="${escapeHtml(reader.hasSearched ? `Pronto para consultar ${currentTypeLabel}` : 'Aguardando busca')}" disabled />
+          <input value="${escapeHtml(reader.hasSearched ? 'Pronto para consultar NF-e' : 'Aguardando busca')}" disabled />
         </label>
-        <div class="compare-upload-hint compare-span-3">
+        <div class="compare-upload-hint compare-span-4">
           <span class="compare-upload-dot"></span>
           <span>O leitor consulta o acervo interno ja carregado pelo Nota Sync e abre o XML bruto no visualizador padrao.</span>
         </div>
-        <div class="stack-actions compare-actions compare-span-3">
+        <div class="stack-actions compare-actions compare-span-4">
           <button class="btn primary" type="submit" ${hasClients ? '' : 'disabled'}>Buscar XML</button>
           <button class="btn secondary" type="button" data-action="xmlReader30-clear" ${reader.hasSearched || reader.lastQuery ? '' : 'disabled'}>Limpar</button>
         </div>
@@ -4814,7 +4803,6 @@ function renderXmlReader30Summary() {
     <article class="card" style="box-shadow:none; border-style:dashed; margin-top: 2px;">
       <div class="progress-meta">
         <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
-        <span>Documento: <strong>${escapeHtml(mapXmlReader30TypeLabel(query.documento || 'todos'))}</strong></span>
         <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
         <span>Resultado: <strong>${escapeHtml(String(state.xmlReader30.total || state.xmlReader30.results.length || 0))} XML(s)</strong></span>
         <span>Acervo lido: <strong>${escapeHtml(formatXmlReader30SourceTotals(state.xmlReader30.sourceTotals))}</strong></span>
@@ -5382,7 +5370,17 @@ function expandXmlReader30NfeRows(rows) {
           quantidade: '-',
           valorUnitario: '-',
           valorTotal: '-',
-          valorTotalNfXml: baseValorTotal
+          valorTotalNfXml: baseValorTotal,
+          icmsStRet: '0',
+          icmsStRetRaw: '0',
+          cstCsosn: '0',
+          cfop: '0',
+          baseCalculoIcms: '0',
+          baseCalculoIcmsRaw: '0',
+          aliquotaIcms: '0',
+          aliquotaIcmsRaw: '0',
+          valorIcms: '0',
+          valorIcmsRaw: '0'
         }
       ];
     }
@@ -5398,7 +5396,17 @@ function expandXmlReader30NfeRows(rows) {
       quantidade: item.quantity || '-',
       valorUnitario: item.unitValueRaw || item.unitValue || '-',
       valorTotal: item.totalValueRaw || item.totalValue || '-',
-      valorTotalNfXml: baseValorTotal
+      valorTotalNfXml: baseValorTotal,
+      icmsStRet: item.icmsStRet || '0',
+      icmsStRetRaw: item.icmsStRetRaw || '0',
+      cstCsosn: item.cstCsosn || '0',
+      cfop: item.cfop || '0',
+      baseCalculoIcms: item.baseCalculoIcms || '0',
+      baseCalculoIcmsRaw: item.baseCalculoIcmsRaw || '0',
+      aliquotaIcms: item.aliquotaIcms || '0',
+      aliquotaIcmsRaw: item.aliquotaIcmsRaw || '0',
+      valorIcms: item.valorIcms || '0',
+      valorIcmsRaw: item.valorIcmsRaw || '0'
     }));
   });
 }
@@ -5561,7 +5569,7 @@ async function submitXmlReader30Form(form) {
 async function executeXmlReader30Search(form) {
   const data = new FormData(form);
   const cliente = String(data.get('cliente') || '').trim();
-  const documento = String(data.get('documento') || 'todos').trim();
+  const documento = 'nfe';
   const emissaoInicio = String(data.get('emissaoInicio') || '').trim();
   const emissaoFim = String(data.get('emissaoFim') || '').trim();
   const texto = String(data.get('texto') || '').trim();

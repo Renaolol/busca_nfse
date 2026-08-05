@@ -892,6 +892,10 @@ textarea:focus-visible,
   grid-column: span 3;
 }
 
+.compare-span-4 {
+  grid-column: 1 / -1;
+}
+
 .compare-upload-hint {
   display: flex;
   align-items: center;
@@ -1964,7 +1968,8 @@ textarea {
   }
 
   .compare-span-2,
-  .compare-span-3 {
+  .compare-span-3,
+  .compare-span-4 {
     grid-column: span 2;
   }
 }
