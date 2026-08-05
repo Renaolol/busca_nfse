@@ -4044,7 +4044,7 @@ function renderXmlNumberingValidationSummary(query, validation) {
   }
 
   if (!validation.possuiNumeracaoPulada) {
-    return `<p class="card-subtitle" style="margin-top:12px;">Numeracao validada sem lacunas para ${escapeHtml(String(validation.totalNumerosValidos || 0))} documento(s) emitido(s) com numero fiscal.</p>`;
+    return `<p class="card-subtitle" style="margin-top:12px;">Numeracao geral da empresa validada sem lacunas para ${escapeHtml(String(validation.totalNumerosValidos || 0))} documento(s) emitido(s) armazenado(s), independentemente dos filtros da tabela.</p>`;
   }
 
   const summaryGaps = summarizeXmlNumberingGaps(validation.lacunas);
@@ -4057,7 +4057,7 @@ function renderXmlNumberingValidationSummary(query, validation) {
   return `
     <div style="display:flex; gap:12px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; margin-top:12px;">
       <p class="card-subtitle" style="margin:0; color:#8a5a00;">
-        Atencao: foram encontradas ${escapeHtml(String(totalNumerosResumo))} numeracao(oes) pulada(s) em ${escapeHtml(String(totalFaixasResumo))} faixa(s). ${escapeHtml(preview)}${escapeHtml(suffix)}
+        Atencao: a validacao geral da empresa encontrou ${escapeHtml(String(totalNumerosResumo))} numeracao(oes) pulada(s) em ${escapeHtml(String(totalFaixasResumo))} faixa(s), independentemente dos filtros da tabela. ${escapeHtml(preview)}${escapeHtml(suffix)}
       </p>
       ${
         state.dataSource === 'api'
