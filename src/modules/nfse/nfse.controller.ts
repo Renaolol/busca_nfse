@@ -7,6 +7,7 @@ import { DownloadLoteResponseDto } from './dto/download-lote-response.dto';
 import { DownloadDocumentDto } from './dto/download-document.dto';
 import { DashboardStatsQueryDto, DashboardStatsResponseDto } from './dto/dashboard-stats.dto';
 import { ImportXmlDto } from './dto/import-xml.dto';
+import { ListNfseGapAuditsQueryDto, NfseGapAuditOverviewRowDto } from './dto/list-gap-audits.dto';
 import { NfseNumeracaoValidationDto } from './dto/list-nfse-response.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
 import { RecuperarNfsePorDpsDto } from './dto/recuperar-por-dps.dto';
@@ -54,6 +55,12 @@ export class NfseController {
   @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })
   findAll(@Query() query: QueryNfseDto) {
     return this.nfseService.findAll(query);
+  }
+
+  @Get('auditoria-lacunas')
+  @ApiOkResponse({ type: NfseGapAuditOverviewRowDto, isArray: true })
+  listGapAudits(@Query() query: ListNfseGapAuditsQueryDto) {
+    return this.nfseService.listGapAudits(query);
   }
 
   @Get('separadas')

@@ -19,6 +19,7 @@ const navItems = [
   { key: 'certificados', label: 'Certificados', icon: 'shield', route: '/certificados' },
   { key: 'buscas', label: 'Buscas', icon: 'search', route: '/buscas' },
   { key: 'armazenados', label: 'Armazenados', icon: 'file', route: '/xmls' },
+  { key: 'auditoria-lacunas', label: 'Auditoria NFS-e', icon: 'alert', route: '/auditoria-lacunas' },
   { key: 'compara-sped', label: 'Compara SPED', icon: 'compare', route: '/compara-sped' },
   { key: 'leitor-xml', label: 'Leitor XML 3.0', icon: 'file', route: '/leitor-xml' },
   { key: 'configuracoes', label: 'Configuracoes', icon: 'settings', route: '/configuracoes' },
@@ -49,6 +50,10 @@ const pageMeta = {
   xmls: {
     title: 'XMLs NFS-e',
     description: 'Consulte XMLs armazenados de NFS-e no servidor interno.'
+  },
+  'auditoria-lacunas': {
+    title: 'Auditoria de Lacunas',
+    description: 'Liste por empresa as numeracoes visiveis em aberto e acione a auditoria das lacunas.'
   },
   'buscas-nfe': {
     title: 'Buscas NF-e',
@@ -165,6 +170,10 @@ const state = {
     pageSize: SEARCH_PAGE_SIZE,
     total: 0,
     totalPages: 0
+  },
+  nfseGapAuditOverview: {
+    rows: [],
+    lastLoadedAt: null
   },
   xmlReader30: {
     hasSearched: false,
@@ -310,6 +319,7 @@ const state = {
     runs: 'loading',
     nfeSync: 'loading',
     xmls: 'loading',
+    nfseGapAudit: 'loading',
     nfeDocs: 'loading',
     cteDocs: 'loading',
     xmlReader30: 'loading',
@@ -367,6 +377,7 @@ async function initializeData() {
   setGlobalLoading(false);
   render();
   syncDashboardAutoRefresh();
+  void ensureRouteDataLoaded({ silent: true });
 }
 
 async function hydrateFromApi() {
@@ -474,6 +485,7 @@ function wireGlobalEvents() {
     render();
     syncDashboardAutoRefresh();
     void refreshDashboardRouteData({ silent: true });
+    void ensureRouteDataLoaded({ silent: true });
   });
 
   document.addEventListener('click', onDocumentClick);
@@ -935,6 +947,50 @@ function onDocumentClick(event) {
     }
     case 'nfse-audit-gap-nsus': {
       void runNfseGapAuditFromCurrentSearch();
+      return;
+    }
+    case 'gap-audit-refresh': {
+      void loadNfseGapAuditOverview();
+      return;
+    }
+    case 'gap-audit-open-xmls': {
+      const clientId = actionNode.getAttribute('data-client-id') || '';
+      const row = findNfseGapAuditRowByClientId(clientId);
+      if (!row) {
+        pushToast('Nao foi possivel localizar a empresa selecionada na auditoria.', 'error');
+        return;
+      }
+      void openXmlSearchForGapContext(getNfseGapContextFromAuditRow(row));
+      return;
+    }
+    case 'gap-audit-run-nsu': {
+      const clientId = actionNode.getAttribute('data-client-id') || '';
+      const row = findNfseGapAuditRowByClientId(clientId);
+      if (!row) {
+        pushToast('Nao foi possivel localizar a empresa selecionada na auditoria.', 'error');
+        return;
+      }
+      void runNfseGapAuditForContext(getNfseGapContextFromAuditRow(row));
+      return;
+    }
+    case 'gap-audit-recover-dps': {
+      const clientId = actionNode.getAttribute('data-client-id') || '';
+      const row = findNfseGapAuditRowByClientId(clientId);
+      if (!row) {
+        pushToast('Nao foi possivel localizar a empresa selecionada na auditoria.', 'error');
+        return;
+      }
+      openNfseRecoverByDpsModalForContext(getNfseGapContextFromAuditRow(row));
+      return;
+    }
+    case 'gap-audit-recover-key': {
+      const clientId = actionNode.getAttribute('data-client-id') || '';
+      const row = findNfseGapAuditRowByClientId(clientId);
+      if (!row) {
+        pushToast('Nao foi possivel localizar a empresa selecionada na auditoria.', 'error');
+        return;
+      }
+      openNfseRecoverByKeyModalForContext(getNfseGapContextFromAuditRow(row));
       return;
     }
     case 'nfe-open-client-xmls': {
@@ -1661,6 +1717,8 @@ function renderCurrentPage() {
       return renderSearchRunsPage();
     case 'xmls':
       return renderXmlsPage();
+    case 'auditoria-lacunas':
+      return renderNfseGapAuditPage();
     case 'buscas-nfe':
       return renderNfeSyncPage();
     case 'xmls-nfe':
@@ -3618,6 +3676,92 @@ function renderXmlsPage() {
   `;
 }
 
+function renderNfseGapAuditPage() {
+  const rows = Array.isArray(state.nfseGapAuditOverview.rows) ? state.nfseGapAuditOverview.rows : [];
+  const totalEmpresas = rows.length;
+  const totalFaixas = rows.reduce((total, row) => total + Number(row?.totalFaixasLacuna || 0), 0);
+  const totalNumeros = rows.reduce((total, row) => total + Number(row?.totalNumerosPulados || 0), 0);
+  const totalDocumentos = rows.reduce((total, row) => total + Number(row?.totalDocumentosAnalisados || 0), 0);
+  const updatedAt = state.nfseGapAuditOverview.lastLoadedAt
+    ? formatDateTime(state.nfseGapAuditOverview.lastLoadedAt)
+    : '-';
+  const rowsHtml = rows
+    .map((row) => {
+      const preview = renderNfseGapAuditPreview(row.lacunas);
+      return `
+        <tr>
+          <td><strong>${escapeHtml(row.razaoSocial || 'Sem razao social')}</strong></td>
+          <td>${escapeHtml(formatCnpj(row.cnpjConsulta || ''))}</td>
+          <td>${escapeHtml(String(row.totalDocumentosAnalisados || 0))}</td>
+          <td>${statusBadge(`${Number(row.totalFaixasLacuna || 0)} faixa(s)`, Number(row.totalFaixasLacuna || 0) > 0 ? 'warning' : 'neutral')}</td>
+          <td>${escapeHtml(String(row.totalNumerosPulados || 0))}</td>
+          <td style="min-width:220px;">${escapeHtml(preview)}</td>
+          <td>
+            <div class="table-actions">
+              <button class="btn secondary" type="button" data-action="gap-audit-open-xmls" data-client-id="${escapeHtml(row.clientId)}">Abrir XMLs</button>
+              <button class="btn secondary" type="button" data-action="gap-audit-run-nsu" data-client-id="${escapeHtml(row.clientId)}">Auditar NSU</button>
+              <button class="btn secondary" type="button" data-action="gap-audit-recover-dps" data-client-id="${escapeHtml(row.clientId)}">Recuperar DPS</button>
+              <button class="btn secondary" type="button" data-action="gap-audit-recover-key" data-client-id="${escapeHtml(row.clientId)}">Recuperar chave</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join('');
+
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'Auditoria de Lacunas',
+        description: 'Liste por empresa as numeracoes visiveis em aberto e acione a auditoria das lacunas.',
+        actions: [actionButton('Atualizar auditoria', 'gap-audit-refresh', 'primary')]
+      })}
+
+      <section class="stats-grid">
+        ${statCard('users', 'Empresas com lacunas', String(totalEmpresas), 'empresas com numeracao visivel em aberto', 'warning')}
+        ${statCard('alert', 'Faixas abertas', String(totalFaixas), 'faixas consolidadas por numeracao visivel', 'warning')}
+        ${statCard('file', 'Numeros pulados', String(totalNumeros), 'numeros faltantes somados na auditoria', 'danger')}
+        ${statCard('folder', 'Documentos analisados', String(totalDocumentos), 'XMLs armazenados considerados na auditoria', 'neutral')}
+      </section>
+
+      <article class="card" style="box-shadow:none; border-style:dashed;">
+        <div class="progress-meta">
+          <span>Empresas listadas: <strong>${escapeHtml(String(totalEmpresas))}</strong></span>
+          <span>Faixas abertas: <strong>${escapeHtml(String(totalFaixas))}</strong></span>
+          <span>Numeros pulados: <strong>${escapeHtml(String(totalNumeros))}</strong></span>
+          <span>Atualizado: <strong>${escapeHtml(updatedAt)}</strong></span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>Empresa</th>
+                <th>CNPJ</th>
+                <th>Docs</th>
+                <th>Lacunas</th>
+                <th>Numeros</th>
+                <th>Preview</th>
+                <th>Acoes</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderTableRowsOrState({
+                key: 'nfseGapAudit',
+                colSpan: 7,
+                rowsHtml,
+                emptyMessage: 'Nenhuma empresa com lacunas visiveis foi encontrada.'
+              })}
+            </tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+  `;
+}
+
 function renderXmlSearchEmptyState() {
   return `
     <article class="card">
@@ -3774,6 +3918,21 @@ function summarizeXmlNumberingGaps(gaps) {
   }
 
   return merged;
+}
+
+function renderNfseGapAuditPreview(gaps) {
+  const summary = summarizeXmlNumberingGaps(gaps);
+  if (!summary.length) {
+    return '-';
+  }
+
+  const preview = summary
+    .slice(0, 5)
+    .map((gap) => formatXmlNumberingRange(gap))
+    .filter(Boolean)
+    .join('; ');
+  const hiddenCount = Math.max(0, summary.length - 5);
+  return hiddenCount > 0 ? `${preview} (+${hiddenCount} faixa(s))` : preview;
 }
 
 function renderXmlsTableCard(xmls) {
@@ -7673,6 +7832,7 @@ function parseRoute(hash) {
     '/certificados': 'certificados',
     '/buscas': 'buscas',
     '/xmls': 'xmls',
+    '/auditoria-lacunas': 'auditoria-lacunas',
     '/buscas-nfe': 'buscas-nfe',
     '/xmls-nfe': 'xmls-nfe',
     '/xmls-cte': 'xmls-cte',
@@ -9736,13 +9896,12 @@ async function runPastNsuRecovery(clientId = null) {
   }
 }
 
-async function runNfseGapAuditFromCurrentSearch() {
+async function runNfseGapAuditForContext(context) {
   if (state.dataSource !== 'api') {
     pushToast('A auditoria por NSU so esta disponivel com a API real conectada.', 'error');
     return;
   }
 
-  const context = getCurrentNfseGapContext();
   if (!context.clientId || !context.client) {
     pushToast('Busque os XMLs da empresa antes de auditar as lacunas por NSU.', 'error');
     return;
@@ -9903,6 +10062,10 @@ async function runNfseGapAuditFromCurrentSearch() {
     });
     pushToast(`Falha ao auditar lacunas por NSU: ${toErrorMessage(error)}`, 'error');
   }
+}
+
+async function runNfseGapAuditFromCurrentSearch() {
+  await runNfseGapAuditForContext(getCurrentNfseGapContext());
 }
 
 async function executeNfeDocsSearch() {
@@ -10754,6 +10917,40 @@ async function executeXmlSearch() {
   render();
 }
 
+async function loadNfseGapAuditOverview(options = {}) {
+  if (state.dataSource !== 'api') {
+    state.nfseGapAuditOverview = {
+      rows: [],
+      lastLoadedAt: null
+    };
+    state.tableState.nfseGapAudit = 'data';
+    render();
+    return;
+  }
+
+  const shouldKeepRows = Boolean(options.silent && state.nfseGapAuditOverview.rows.length);
+  if (!shouldKeepRows) {
+    state.tableState.nfseGapAudit = 'loading';
+    render();
+  }
+
+  try {
+    const payload = await apiRequest('/nfse/auditoria-lacunas');
+    state.nfseGapAuditOverview = {
+      rows: normalizeNfseGapAuditOverviewRows(payload),
+      lastLoadedAt: new Date().toISOString()
+    };
+    state.tableState.nfseGapAudit = 'data';
+  } catch (error) {
+    state.tableState.nfseGapAudit = 'error';
+    if (!options.silent) {
+      pushToast(`Falha ao carregar a auditoria de lacunas: ${toErrorMessage(error)}`, 'error');
+    }
+  }
+
+  render();
+}
+
 async function submitNfseRecoverByKeyForm(form) {
   if (state.modal?.kind !== 'nfse-recover-by-key') {
     return;
@@ -10972,6 +11169,33 @@ function normalizePaginatedResponse(payload) {
     totalPages,
     validacaoNumeracao
   };
+}
+
+function normalizeNfseGapAuditOverviewRows(payload) {
+  if (!Array.isArray(payload)) {
+    return [];
+  }
+
+  return payload
+    .map((row) => ({
+      clientId: String(row?.clienteId || '').trim(),
+      razaoSocial: String(row?.razaoSocial || '').trim(),
+      cnpjConsulta: normalizeDigits(String(row?.cnpjConsulta || '')),
+      totalDocumentosAnalisados: Number(row?.totalDocumentosAnalisados || 0),
+      totalNumerosValidos: Number(row?.totalNumerosValidos || 0),
+      totalFaixasLacuna: Number(row?.totalFaixasLacuna || 0),
+      totalNumerosPulados: Number(row?.totalNumerosPulados || 0),
+      lacunas: Array.isArray(row?.lacunas)
+        ? row.lacunas.map((gap) => ({
+            ambiente: String(gap?.ambiente || ''),
+            serie: gap?.serie == null ? null : String(gap.serie),
+            numeroInicial: Number(gap?.numeroInicial || 0),
+            numeroFinal: Number(gap?.numeroFinal || 0),
+            quantidade: Number(gap?.quantidade || 0)
+          }))
+        : []
+    }))
+    .filter((row) => row.clientId);
 }
 
 function normalizeXmlNumberingValidation(payload) {
@@ -11428,14 +11652,9 @@ function openPastNsuRecoveryReportModal(params) {
   });
 }
 
-function getCurrentNfseGapContext() {
-  const query = state.xmlSearch.lastQuery;
-  const validation = state.xmlSearch.numberingValidation;
-  const clientId = String(query?.cliente || '').trim();
-  const client = findClientById(clientId);
-  const cnpjConsulta = normalizeDigits(validation?.cnpjPrestador || client?.cnpj || '');
-  const lacunasRaw = Array.isArray(validation?.lacunas) ? validation.lacunas : [];
-  const lacunas = lacunasRaw
+function buildNfseGapContext({ clientId, client = null, cnpjConsulta, lacunasRaw }) {
+  const rawGaps = Array.isArray(lacunasRaw) ? lacunasRaw : [];
+  const lacunas = rawGaps
     .map((gap) => ({
       ambiente: String(gap?.ambiente || '') === 'producao_restrita' ? 'producao_restrita' : 'producao',
       serie: gap?.serie == null ? null : String(gap.serie),
@@ -11454,19 +11673,54 @@ function getCurrentNfseGapContext() {
     lacunas,
     ambiente,
     requestedNumbers,
-    gapPreview: summarizeXmlNumberingGaps(lacunasRaw)
+    gapPreview: summarizeXmlNumberingGaps(rawGaps)
       .slice(0, 5)
       .map((gap) => formatXmlNumberingRange(gap))
   };
 }
 
-function openNfseRecoverByKeyModal() {
+function findNfseGapAuditRowByClientId(clientId) {
+  const normalizedClientId = String(clientId || '').trim();
+  if (!normalizedClientId) {
+    return null;
+  }
+
+  return state.nfseGapAuditOverview.rows.find((row) => row?.clientId === normalizedClientId) || null;
+}
+
+function getCurrentNfseGapContext() {
+  const query = state.xmlSearch.lastQuery;
+  const validation = state.xmlSearch.numberingValidation;
+  const clientId = String(query?.cliente || '').trim();
+  const client = findClientById(clientId);
+
+  return buildNfseGapContext({
+    clientId,
+    client,
+    cnpjConsulta: normalizeDigits(validation?.cnpjPrestador || client?.cnpj || ''),
+    lacunasRaw: Array.isArray(validation?.lacunas) ? validation.lacunas : []
+  });
+}
+
+function getNfseGapContextFromAuditRow(row) {
+  const clientId = String(row?.clientId || '').trim();
+  const client = findClientById(clientId);
+
+  return buildNfseGapContext({
+    clientId,
+    client,
+    cnpjConsulta: normalizeDigits(row?.cnpjConsulta || client?.cnpj || ''),
+    lacunasRaw: Array.isArray(row?.lacunas) ? row.lacunas : []
+  });
+}
+
+function openNfseRecoverByKeyModalForContext(context) {
   if (state.dataSource !== 'api') {
     pushToast('A recuperacao por chave so esta disponivel com a API real conectada.', 'error');
     return;
   }
 
-  const { clientId, client, cnpjConsulta, ambiente, gapPreview } = getCurrentNfseGapContext();
+  const { clientId, client, cnpjConsulta, ambiente, gapPreview } = context;
   const estabelecimento = findEstablishmentByClientAndCnpj(clientId, cnpjConsulta);
 
   if (!clientId || !client) {
@@ -11494,13 +11748,17 @@ function openNfseRecoverByKeyModal() {
   });
 }
 
-function openNfseRecoverByDpsModal() {
+function openNfseRecoverByKeyModal() {
+  openNfseRecoverByKeyModalForContext(getCurrentNfseGapContext());
+}
+
+function openNfseRecoverByDpsModalForContext(context) {
   if (state.dataSource !== 'api') {
     pushToast('A recuperacao por DPS so esta disponivel com a API real conectada.', 'error');
     return;
   }
 
-  const { clientId, client, cnpjConsulta, ambiente, gapPreview, lacunas } = getCurrentNfseGapContext();
+  const { clientId, client, cnpjConsulta, ambiente, gapPreview, lacunas } = context;
   const estabelecimento = findEstablishmentByClientAndCnpj(clientId, cnpjConsulta);
 
   if (!clientId || !client) {
@@ -11531,6 +11789,41 @@ function openNfseRecoverByDpsModal() {
     errorMessage: '',
     gapPreview
   });
+}
+
+function openNfseRecoverByDpsModal() {
+  openNfseRecoverByDpsModalForContext(getCurrentNfseGapContext());
+}
+
+async function openXmlSearchForGapContext(context) {
+  if (!context?.clientId) {
+    pushToast('Nao foi possivel identificar a empresa da lacuna selecionada.', 'error');
+    return;
+  }
+
+  state.filters.xmls = {
+    cliente: context.clientId,
+    tipo: 'Emitida',
+    cnpj: '',
+    numero: '',
+    municipio: 'Todos',
+    emissaoInicio: '',
+    emissaoFim: '',
+    downloadInicio: '',
+    downloadFim: '',
+    status: 'Armazenado'
+  };
+  state.xmlSearch.hasSearched = false;
+  state.xmlSearch.results = [];
+  state.xmlSearch.lastQuery = null;
+  state.xmlSearch.numberingValidation = null;
+  state.xmlSearch.total = 0;
+  state.xmlSearch.totalPages = 0;
+  state.selectedXmlIds = new Set();
+
+  navigate('/xmls');
+  await wait(0);
+  await executeXmlSearch();
 }
 
 function updatePastNsuRecoveryOverlayState(patch) {
@@ -12013,6 +12306,7 @@ async function refreshApiData(options = {}) {
 
   try {
     await hydrateFromApi();
+    await ensureRouteDataLoaded({ silent: true });
   } catch (error) {
     if (!options.silent) {
       pushToast(`Falha ao atualizar dados reais: ${toErrorMessage(error)}`, 'error');
@@ -12046,6 +12340,16 @@ async function refreshDashboardRouteData(options = {}) {
     await refreshApiData(options);
   } finally {
     dashboardAutoRefreshRunning = false;
+  }
+}
+
+async function ensureRouteDataLoaded(options = {}) {
+  if (!state.dataReady || state.dataSource !== 'api') {
+    return;
+  }
+
+  if (state.route.name === 'auditoria-lacunas') {
+    await loadNfseGapAuditOverview(options);
   }
 }
 

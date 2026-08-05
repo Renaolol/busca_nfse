@@ -8,6 +8,9 @@ import { NfseXmlParserService } from '../nfse-xml-parser.service';
 
 describe('NfseService', () => {
   const prisma = {
+    cliente: {
+      findMany: jest.fn()
+    },
     clienteEstabelecimento: {
       findFirst: jest.fn()
     },
@@ -58,6 +61,7 @@ describe('NfseService', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     prisma.clienteEstabelecimento.findFirst.mockResolvedValue(undefined);
+    prisma.cliente.findMany.mockResolvedValue([]);
   });
 
   it('pagina a listagem de NFS-e armazenadas', async () => {
@@ -285,6 +289,176 @@ describe('NfseService', () => {
       possuiNumeracaoPulada: false,
       lacunas: []
     });
+  });
+
+  it('considera apenas os XMLs visiveis da listagem ao validar numeracao paginada', async () => {
+    prisma.nfseDocumento.count.mockResolvedValueOnce(380);
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-emitida-55',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000005526019687178145',
+        numeroNfse: '55',
+        serie: '900',
+        dataEmissao: new Date('2026-01-31T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador 1',
+        xmlPath: 'nfse/producao/06960810000176/2026/01/xml/doc-55.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-07-31T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-31T00:00:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-emitida-56',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000005626019687178146',
+        numeroNfse: '56',
+        serie: '70000',
+        dataEmissao: new Date('2026-01-31T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '22222222000122',
+        razaoSocialTomador: 'Tomador 2',
+        xmlPath: 'nfse/producao/06960810000176/2026/01/xml/doc-56.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-07-31T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-31T00:00:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-emitida-57',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000005726019687178147',
+        numeroNfse: '57',
+        serie: '900',
+        dataEmissao: new Date('2026-02-01T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '33333333000133',
+        razaoSocialTomador: 'Tomador 3',
+        xmlPath: 'nfse/producao/06960810000176/2026/02/xml/doc-57.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-08-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-emitida-58',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000005826019687178148',
+        numeroNfse: '58',
+        serie: '70000',
+        dataEmissao: new Date('2026-02-02T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '44444444000144',
+        razaoSocialTomador: 'Tomador 4',
+        xmlPath: 'nfse/producao/06960810000176/2026/02/xml/doc-58.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-08-02T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-02T00:00:00.000Z'),
+        eventos: []
+      }
+    ]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '06960810000176',
+      tipoRelacao: 'emitidas',
+      page: 1,
+      pageSize: 100
+    });
+
+    expect(result.total).toBe(380);
+    expect(result.validacaoNumeracao).toEqual({
+      aplicada: true,
+      cnpjPrestador: '06960810000176',
+      totalDocumentosAnalisados: 4,
+      totalNumerosValidos: 4,
+      totalFaixasLacuna: 0,
+      totalNumerosPulados: 0,
+      possuiNumeracaoPulada: false,
+      lacunas: []
+    });
+  });
+
+  it('lista auditoria agregada apenas para empresas com lacunas visiveis', async () => {
+    prisma.cliente.findMany.mockResolvedValue([
+      {
+        id: 'cliente-1',
+        razaoSocial: 'Empresa A',
+        cnpj: '06960810000176'
+      },
+      {
+        id: 'cliente-2',
+        razaoSocial: 'Empresa B',
+        cnpj: '10652054000195'
+      }
+    ]);
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        clienteId: 'cliente-1',
+        ambiente: Ambiente.producao,
+        serie: '900',
+        numeroNfse: '55',
+        cnpjPrestador: '06960810000176'
+      },
+      {
+        clienteId: 'cliente-1',
+        ambiente: Ambiente.producao,
+        serie: '70000',
+        numeroNfse: '57',
+        cnpjPrestador: '06960810000176'
+      },
+      {
+        clienteId: 'cliente-2',
+        ambiente: Ambiente.producao,
+        serie: '1',
+        numeroNfse: '10',
+        cnpjPrestador: '10652054000195'
+      },
+      {
+        clienteId: 'cliente-2',
+        ambiente: Ambiente.producao,
+        serie: '2',
+        numeroNfse: '11',
+        cnpjPrestador: '10652054000195'
+      }
+    ]);
+
+    const result = await service.listGapAudits();
+
+    expect(result).toEqual([
+      {
+        clienteId: 'cliente-1',
+        razaoSocial: 'Empresa A',
+        cnpjConsulta: '06960810000176',
+        totalDocumentosAnalisados: 2,
+        totalNumerosValidos: 2,
+        totalFaixasLacuna: 1,
+        totalNumerosPulados: 1,
+        lacunas: [
+          {
+            ambiente: Ambiente.producao,
+            serie: null,
+            numeroInicial: 56,
+            numeroFinal: 56,
+            quantidade: 1
+          }
+        ]
+      }
+    ]);
   });
 
   it('colapsa duplicatas legadas por ambiente e chave_acesso na listagem ampla', async () => {

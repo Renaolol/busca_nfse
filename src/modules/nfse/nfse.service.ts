@@ -14,6 +14,7 @@ import { DashboardStatsQueryDto } from './dto/dashboard-stats.dto';
 import { DownloadLoteDto } from './dto/download-lote.dto';
 import { DanfseRenderInput, NfseDanfseService } from './nfse-danfse.service';
 import { ImportXmlDto } from './dto/import-xml.dto';
+import { ListNfseGapAuditsQueryDto } from './dto/list-gap-audits.dto';
 import { QueryNfseDto } from './dto/query-nfse.dto';
 import { RecuperarNfsePorDpsDto } from './dto/recuperar-por-dps.dto';
 import { RecuperarNfsePorChaveDto } from './dto/recuperar-por-chave.dto';
@@ -133,7 +134,7 @@ export class NfseService {
       };
     }
 
-    const [total, rawItems, documentosNumeracao] = await Promise.all([
+    const [total, rawItems] = await Promise.all([
       this.prisma.nfseDocumento.count({ where }),
       this.prisma.nfseDocumento.findMany({
         where,
@@ -141,17 +142,7 @@ export class NfseService {
         skip,
         take: pageSize,
         include: this.nfseDocumentoInclude()
-      }),
-      shouldValidateNumbering
-        ? this.prisma.nfseDocumento.findMany({
-            where,
-            select: {
-              ambiente: true,
-              serie: true,
-              numeroNfse: true
-            }
-          })
-        : Promise.resolve([])
+      })
     ]);
     const { items: uniqueItems, duplicatesRemoved } = this.deduplicateDocumentosForList(rawItems);
     if (duplicatesRemoved > 0) {
@@ -160,7 +151,7 @@ export class NfseService {
 
     const items = await Promise.all(uniqueItems.map((item) => this.enrichDocumentoSummary(item)));
     const validacaoNumeracao = shouldValidateNumbering
-      ? this.buildNfseNumberingValidation(documentosNumeracao, cnpjConsulta)
+      ? this.buildNfseNumberingValidation(uniqueItems, cnpjConsulta)
       : this.buildSkippedNumberingValidationNotApplied(query, cnpjConsulta);
 
     return {
@@ -259,7 +250,7 @@ export class NfseService {
     delete baseWhere.cnpjTomador;
     delete baseWhere.OR;
 
-    const [emitidas, tomadas, documentosNumeracaoEmitidas] = await Promise.all([
+    const [emitidas, tomadas] = await Promise.all([
       this.prisma.nfseDocumento.findMany({
         where: {
           ...baseWhere,
@@ -277,24 +268,11 @@ export class NfseService {
         orderBy: { dataEmissao: 'desc' },
         take: 500,
         include: this.nfseDocumentoInclude()
-      }),
-      shouldValidateNumbering
-        ? this.prisma.nfseDocumento.findMany({
-            where: {
-              ...baseWhere,
-              cnpjPrestador: cnpjConsulta
-            },
-            select: {
-              ambiente: true,
-              serie: true,
-              numeroNfse: true
-            }
-          })
-        : Promise.resolve([])
+      })
     ]);
 
     const validacaoNumeracaoEmitidas = shouldValidateNumbering
-      ? this.buildNfseNumberingValidation(documentosNumeracaoEmitidas, cnpjConsulta)
+      ? this.buildNfseNumberingValidation(emitidas, cnpjConsulta)
       : this.buildSkippedNumberingValidationNotApplied(query, cnpjConsulta);
 
     return {
@@ -307,6 +285,63 @@ export class NfseService {
       emitidas,
       tomadas
     };
+  }
+
+  async listGapAudits(query: ListNfseGapAuditsQueryDto = {}) {
+    const clients = await this.prisma.cliente.findMany({
+      where: query.clienteId ? { id: query.clienteId } : undefined,
+      select: {
+        id: true,
+        razaoSocial: true,
+        cnpj: true
+      },
+      orderBy: { razaoSocial: 'asc' }
+    });
+
+    if (clients.length === 0) {
+      return [];
+    }
+
+    const documents = await this.prisma.nfseDocumento.findMany({
+      where: {
+        clienteId: { in: clients.map((client) => client.id) },
+        xmlPath: { not: null },
+        numeroNfse: { not: null }
+      },
+      select: {
+        clienteId: true,
+        ambiente: true,
+        serie: true,
+        numeroNfse: true,
+        cnpjPrestador: true
+      }
+    });
+
+    return clients
+      .map((client) => {
+        const cnpjConsulta = this.normalizeCnpj(client.cnpj);
+        const visibleDocuments = documents
+          .filter((document) => document.clienteId === client.id)
+          .filter((document) => !cnpjConsulta || document.cnpjPrestador === cnpjConsulta)
+          .map((document) => ({
+            ambiente: document.ambiente,
+            serie: document.serie,
+            numeroNfse: document.numeroNfse
+          }));
+
+        const validation = this.buildNfseNumberingValidation(visibleDocuments, cnpjConsulta);
+        return {
+          clienteId: client.id,
+          razaoSocial: client.razaoSocial,
+          cnpjConsulta: cnpjConsulta ?? '',
+          totalDocumentosAnalisados: validation.totalDocumentosAnalisados,
+          totalNumerosValidos: validation.totalNumerosValidos,
+          totalFaixasLacuna: validation.totalFaixasLacuna,
+          totalNumerosPulados: validation.totalNumerosPulados,
+          lacunas: validation.lacunas
+        };
+      })
+      .filter((row) => row.totalFaixasLacuna > 0);
   }
 
   private nfseDocumentoInclude(): Prisma.NfseDocumentoInclude {
