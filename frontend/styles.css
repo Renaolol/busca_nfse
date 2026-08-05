@@ -1163,6 +1163,51 @@ tbody tr:hover {
   padding: 0 8px;
 }
 
+.xml-reader30-column-header {
+  position: relative;
+  cursor: grab;
+  user-select: none;
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+
+.xml-reader30-column-header:hover {
+  background: #f2f6ff;
+}
+
+.xml-reader30-column-header.is-dragging {
+  opacity: 0.55;
+  cursor: grabbing;
+}
+
+.xml-reader30-column-header.drop-before::before,
+.xml-reader30-column-header.drop-after::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--accent);
+}
+
+.xml-reader30-column-header.drop-before::before {
+  left: -1px;
+}
+
+.xml-reader30-column-header.drop-after::after {
+  right: -1px;
+}
+
+.xml-reader30-reorderable-table {
+  table-layout: fixed;
+}
+
+.xml-reader30-reorderable-table th,
+.xml-reader30-reorderable-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: top;
+}
+
 .icon-btn {
   border: 1px solid var(--line-strong);
   background: #fff;

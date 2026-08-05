@@ -8,6 +8,17 @@ const DASHBOARD_AUTO_REFRESH_INTERVAL_MS = 60000;
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
 const COMPARE_SPED_HISTORY_LIMIT = 10;
+const XML_READER30_NFE_COLUMN_ORDER_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-order:v1';
+const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
+  'numeroNf',
+  'statusNf',
+  'dataEmissao',
+  'produto',
+  'quantidade',
+  'valorUnitario',
+  'valorTotal',
+  'valorTotalNfXml'
+];
 const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
 let dashboardAutoRefreshTimer = null;
@@ -185,7 +196,9 @@ const state = {
       nfse: 0,
       nfe: 0,
       cte: 0
-    }
+    },
+    nfeColumnOrder: loadXmlReader30NfeColumnOrderStore(),
+    columnDrag: null
   },
   alerts: [],
   serverResolvedAlerts: {},
@@ -491,6 +504,10 @@ function wireGlobalEvents() {
   document.addEventListener('click', onDocumentClick);
   document.addEventListener('submit', onDocumentSubmit);
   document.addEventListener('change', onDocumentChange);
+  document.addEventListener('dragstart', onDocumentDragStart);
+  document.addEventListener('dragover', onDocumentDragOver);
+  document.addEventListener('drop', onDocumentDrop);
+  document.addEventListener('dragend', onDocumentDragEnd);
 }
 
 function onDocumentClick(event) {
@@ -1634,6 +1651,89 @@ function onDocumentChange(event) {
   if (target.id === 'clientsFilterQuery') {
     state.filters.clients.query = target.value;
   }
+}
+
+function onDocumentDragStart(event) {
+  const header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
+  if (!header) {
+    return;
+  }
+
+  const columnKey = header.getAttribute('data-column-key');
+  if (!columnKey) {
+    return;
+  }
+
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', columnKey);
+  state.xmlReader30.columnDrag = {
+    columnKey,
+    targetKey: '',
+    insertAfter: false
+  };
+  header.classList.add('is-dragging');
+}
+
+function onDocumentDragOver(event) {
+  const header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
+  const dragState = state.xmlReader30.columnDrag;
+  if (!header || !dragState?.columnKey) {
+    return;
+  }
+
+  const targetKey = header.getAttribute('data-column-key');
+  if (!targetKey || targetKey === dragState.columnKey) {
+    return;
+  }
+
+  event.preventDefault();
+  const rect = header.getBoundingClientRect();
+  const insertAfter = event.clientX > rect.left + rect.width / 2;
+  dragState.targetKey = targetKey;
+  dragState.insertAfter = insertAfter;
+
+  document.querySelectorAll('[data-action="xml-reader30-column-drag"]').forEach((node) => {
+    node.classList.remove('drop-before', 'drop-after');
+  });
+
+  header.classList.add(insertAfter ? 'drop-after' : 'drop-before');
+}
+
+function onDocumentDrop(event) {
+  const header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
+  const dragState = state.xmlReader30.columnDrag;
+  if (!header || !dragState?.columnKey) {
+    return;
+  }
+
+  event.preventDefault();
+  const targetKey = header.getAttribute('data-column-key');
+  if (!targetKey || targetKey === dragState.columnKey) {
+    clearXmlReader30ColumnDragState();
+    return;
+  }
+
+  const nextOrder = moveXmlReader30NfeColumn(
+    state.xmlReader30.nfeColumnOrder,
+    dragState.columnKey,
+    targetKey,
+    Boolean(dragState.insertAfter)
+  );
+  state.xmlReader30.nfeColumnOrder = nextOrder;
+  saveXmlReader30NfeColumnOrderStore(nextOrder);
+  clearXmlReader30ColumnDragState();
+  render();
+}
+
+function onDocumentDragEnd() {
+  clearXmlReader30ColumnDragState();
+}
+
+function clearXmlReader30ColumnDragState() {
+  state.xmlReader30.columnDrag = null;
+  document.querySelectorAll('[data-action="xml-reader30-column-drag"]').forEach((node) => {
+    node.classList.remove('is-dragging', 'drop-before', 'drop-after');
+  });
 }
 
 function render() {
@@ -4536,7 +4636,7 @@ function renderXmlReader30ResultsTable(results) {
   const sourceRows = Array.isArray(results) ? results : [];
   const currentDocumentType = state.xmlReader30.lastQuery?.documento || 'todos';
   if (currentDocumentType === 'nfe') {
-    return renderXmlReader30NfeResultsTable(sourceRows);
+    return renderXmlReader30NfeResultsTableReorderable(sourceRows);
   }
 
   const selectableRows = sourceRows.filter((row) => getXmlReader30SelectionKey(row));
@@ -4702,6 +4802,167 @@ function renderXmlReader30NfeResultsTable(results) {
       </div>
     </article>
   `;
+}
+
+function renderXmlReader30NfeResultsTableReorderable(results) {
+  const selectableRows = (Array.isArray(results) ? results : []).filter((row) => getXmlReader30SelectionKey(row));
+  const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
+  const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
+  const displayedRows = expandXmlReader30NfeRows(results);
+  const orderedColumns = getXmlReader30NfeOrderedColumns();
+  const minWidth = 360 + orderedColumns.length * 150;
+
+  return `
+    <article class="card" style="margin-top: 2px;">
+      <div class="xml-batch-bar">
+        <div>
+          <h3 class="card-title">XMLs encontrados</h3>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(displayedRows.length))} linha(s) itemizada(s) da NF-e do acervo interno.</p>
+        </div>
+        <div class="stack-mini" style="align-items:flex-end;">
+          ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
+          <span class="row-sub">Arraste os cabecalhos para reorganizar as colunas. Cada produto aparece em uma linha.</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="xml-reader30-table xml-reader30-reorderable-table" style="min-width: ${minWidth}px;">
+          <thead>
+            <tr>
+              <th class="xml-reader30-check">
+                <input type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />
+              </th>
+              ${orderedColumns
+                .map(
+                  (column, index) => `
+                    <th
+                      class="xml-reader30-column-header"
+                      data-action="xml-reader30-column-drag"
+                      data-column-key="${escapeHtml(column.key)}"
+                      data-column-index="${index}"
+                      draggable="true"
+                      title="Arraste para mover esta coluna"
+                    >
+                      ${escapeHtml(column.label)}
+                    </th>
+                  `
+                )
+                .join('')}
+              <th>Acoes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderTableRowsOrState({
+              key: 'xmlReader30',
+              colSpan: 2 + orderedColumns.length + 1,
+              rowsHtml: displayedRows.length
+                ? displayedRows
+                    .map((row) => {
+                      const actions = renderXmlReader30Actions(row);
+                      const selectionKey = getXmlReader30SelectionKey(row);
+                      const statusTone = row.raw?.cancelada ? 'danger' : row.raw?.statusFiscal === 'Autorizada' ? 'success' : row.statusTone || 'info';
+                      return `
+                        <tr>
+                          <td class="xml-reader30-check">
+                            <input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Selecionar NF-e ${escapeHtml(String(row.numeroNf || row.numeroLabel || '-'))}" />
+                          </td>
+                          ${orderedColumns.map((column) => renderXmlReader30NfeColumnCell(column, row, statusTone)).join('')}
+                          <td>
+                            <div class="table-actions">${actions}</div>
+                          </td>
+                        </tr>
+                      `;
+                    })
+                    .join('')
+                : '',
+              emptyMessage: 'Nenhum XML encontrado para os filtros informados.'
+            })}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function getXmlReader30NfeOrderedColumns() {
+  const order = normalizeXmlReader30NfeColumnOrder(state.xmlReader30.nfeColumnOrder);
+  const currentOrder = Array.isArray(state.xmlReader30.nfeColumnOrder) ? state.xmlReader30.nfeColumnOrder : [];
+  if (order.join('|') !== currentOrder.join('|')) {
+    state.xmlReader30.nfeColumnOrder = order;
+  }
+
+  const definitions = getXmlReader30NfeColumnDefinitions();
+  const byKey = new Map(definitions.map((column) => [column.key, column]));
+  return order.map((key) => byKey.get(key)).filter(Boolean);
+}
+
+function getXmlReader30NfeColumnDefinitions() {
+  return [
+    {
+      key: 'numeroNf',
+      label: 'Numero NF',
+      className: 'xml-reader30-number',
+      html: false,
+      render: (row) => row.numeroNf || row.numeroLabel || '-'
+    },
+    {
+      key: 'statusNf',
+      label: 'Status NF-e',
+      className: 'xml-reader30-status',
+      html: true,
+      render: (row, statusTone) => statusBadge(row.statusNf || row.statusLabel || '-', statusTone)
+    },
+    {
+      key: 'dataEmissao',
+      label: 'Data Emissao',
+      className: 'xml-reader30-date',
+      html: false,
+      render: (row) => row.dataEmissaoLabel || formatDate(row.dataEmissao || row.raw?.dataEmissao || '')
+    },
+    {
+      key: 'produto',
+      label: 'Produto',
+      className: 'xml-reader30-doc',
+      html: true,
+      render: (row) => `<span class="row-title">${escapeHtml(row.produto || '-')}</span>`
+    },
+    {
+      key: 'quantidade',
+      label: 'Quantidade',
+      className: 'xml-reader30-quantity',
+      html: false,
+      render: (row) => row.quantidade || '-'
+    },
+    {
+      key: 'valorUnitario',
+      label: 'Valor Unitario',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => row.valorUnitario || '-'
+    },
+    {
+      key: 'valorTotal',
+      label: 'Valor Total',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => row.valorTotal || '-'
+    },
+    {
+      key: 'valorTotalNfXml',
+      label: 'Valor Total NF XML R$',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => row.valorTotalNfXml || '-'
+    }
+  ];
+}
+
+function renderXmlReader30NfeColumnCell(column, row, statusTone) {
+  const value = column.render(row, statusTone);
+  if (column.html) {
+    return `<td class="${escapeHtml(column.className || '')}">${value}</td>`;
+  }
+
+  return `<td class="${escapeHtml(column.className || '')}">${escapeHtml(String(value ?? '-'))}</td>`;
 }
 
 function expandXmlReader30NfeRows(rows) {
@@ -14333,6 +14594,67 @@ function saveResolvedAlertsStore(store) {
   } catch (error) {
     console.warn('Falha ao persistir alertas resolvidos no navegador.', error);
   }
+}
+
+function loadXmlReader30NfeColumnOrderStore() {
+  try {
+    const raw = window.localStorage.getItem(XML_READER30_NFE_COLUMN_ORDER_STORAGE_KEY);
+    if (!raw) {
+      return [...XML_READER30_NFE_DEFAULT_COLUMN_ORDER];
+    }
+
+    const parsed = JSON.parse(raw);
+    return normalizeXmlReader30NfeColumnOrder(Array.isArray(parsed) ? parsed : []);
+  } catch (error) {
+    console.warn('Falha ao carregar a ordem das colunas da NF-e no leitor XML 3.0.', error);
+    return [...XML_READER30_NFE_DEFAULT_COLUMN_ORDER];
+  }
+}
+
+function saveXmlReader30NfeColumnOrderStore(columnOrder) {
+  try {
+    window.localStorage.setItem(
+      XML_READER30_NFE_COLUMN_ORDER_STORAGE_KEY,
+      JSON.stringify(normalizeXmlReader30NfeColumnOrder(columnOrder))
+    );
+  } catch (error) {
+    console.warn('Falha ao persistir a ordem das colunas da NF-e no leitor XML 3.0.', error);
+  }
+}
+
+function normalizeXmlReader30NfeColumnOrder(columnOrder) {
+  const seen = new Set();
+  const normalized = [];
+
+  (Array.isArray(columnOrder) ? columnOrder : []).forEach((key) => {
+    const columnKey = String(key || '').trim();
+    if (!columnKey || seen.has(columnKey) || !XML_READER30_NFE_DEFAULT_COLUMN_ORDER.includes(columnKey)) {
+      return;
+    }
+    seen.add(columnKey);
+    normalized.push(columnKey);
+  });
+
+  XML_READER30_NFE_DEFAULT_COLUMN_ORDER.forEach((key) => {
+    if (!seen.has(key)) {
+      normalized.push(key);
+    }
+  });
+
+  return normalized;
+}
+
+function moveXmlReader30NfeColumn(columnOrder, sourceKey, targetKey, insertAfter) {
+  const normalized = normalizeXmlReader30NfeColumnOrder(columnOrder);
+  const filtered = normalized.filter((key) => key !== sourceKey);
+  const targetIndex = filtered.indexOf(targetKey);
+  if (targetIndex < 0) {
+    return normalized;
+  }
+
+  const nextIndex = insertAfter ? targetIndex + 1 : targetIndex;
+  filtered.splice(nextIndex, 0, sourceKey);
+  return normalizeXmlReader30NfeColumnOrder(filtered);
 }
 
 function loadCompareSpedHistoryStore() {
