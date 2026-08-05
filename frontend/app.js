@@ -5028,7 +5028,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
           <span class="row-sub">Arraste os cabecalhos para reorganizar as colunas. Arraste a tabela para os lados para ver todas as colunas.</span>
         </div>
       </div>
-      <div class="table-wrap xml-reader30-pan-scroll" data-action="xml-reader30-pan-scroll">
+      <div class="table-wrap xml-reader30-pan-scroll">
         <table class="xml-reader30-table xml-reader30-reorderable-table" style="min-width: ${minWidth}px;">
           <thead>
             <tr>
@@ -5270,10 +5270,14 @@ function formatXmlReader30UnitValue(value) {
 }
 
 function formatXmlReader30DecimalValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return '0';
+  }
+
   const normalizedValue = typeof value === 'string' ? value.replace(',', '.').trim() : value;
   const numericValue = Number(normalizedValue);
   if (!Number.isFinite(numericValue)) {
-    return value ? String(value) : '-';
+    return '0';
   }
 
   return numericValue
@@ -5283,10 +5287,14 @@ function formatXmlReader30DecimalValue(value) {
 }
 
 function formatXmlReader30CurrencyValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return '0';
+  }
+
   const normalizedValue = typeof value === 'string' ? value.replace(',', '.').trim() : value;
   const numericValue = Number(normalizedValue);
   if (!Number.isFinite(numericValue)) {
-    return value ? String(value) : '-';
+    return '0';
   }
 
   return formatCurrency(numericValue);
@@ -8131,12 +8139,12 @@ function renderDocumentInsightsSection(documentType, doc) {
       valorUnitario: item.unitValue || '-',
       valorTotal: item.totalValue || '-',
       valorTotalNfXml: formatOptionalCurrency(doc.valor),
-      icmsStRet: item.icmsStRet || '-',
-      cstCsosn: item.cstCsosn || '-',
-      cfop: item.cfop || '-',
-      baseCalculoIcms: item.baseCalculoIcms || '-',
-      aliquotaIcms: item.aliquotaIcms || '-',
-      valorIcms: item.valorIcms || '-'
+      icmsStRet: item.icmsStRet || '0',
+      cstCsosn: item.cstCsosn || '0',
+      cfop: item.cfop || '0',
+      baseCalculoIcms: item.baseCalculoIcms || '0',
+      aliquotaIcms: item.aliquotaIcms || '0',
+      valorIcms: item.valorIcms || '0'
     }));
 
     return renderDocumentInsightsBlock(
@@ -8309,7 +8317,7 @@ function extractNfeLineItemTaxValues(detNode, prodNode) {
     ? Array.from(icmsNode.children || []).find((node) => node && node.nodeType === 1) || null
     : null;
   const icmsSourceNode = icmsGroupNode || icmsNode || null;
-  const cstCsosn = getXmlText(icmsSourceNode, 'CST') || getXmlText(icmsSourceNode, 'CSOSN') || '-';
+  const cstCsosn = getXmlText(icmsSourceNode, 'CST') || getXmlText(icmsSourceNode, 'CSOSN') || '0';
   const icmsStRet = getXmlText(icmsSourceNode, 'vICMSSTRet') || getXmlText(icmsSourceNode, 'vICMSST') || '';
   const baseCalculoIcms = getXmlText(icmsSourceNode, 'vBC') || '';
   const aliquotaIcms = getXmlText(icmsSourceNode, 'pICMS') || '';
@@ -8317,15 +8325,15 @@ function extractNfeLineItemTaxValues(detNode, prodNode) {
 
   return {
     cstCsosn,
-    cfop: getXmlText(prodNode, 'CFOP') || '-',
+    cfop: getXmlText(prodNode, 'CFOP') || '0',
     icmsStRet: formatXmlReader30CurrencyValue(icmsStRet),
-    icmsStRetRaw: icmsStRet || '-',
+    icmsStRetRaw: icmsStRet || '0',
     baseCalculoIcms: formatXmlReader30DecimalValue(baseCalculoIcms),
-    baseCalculoIcmsRaw: baseCalculoIcms || '-',
+    baseCalculoIcmsRaw: baseCalculoIcms || '0',
     aliquotaIcms: formatXmlReader30DecimalValue(aliquotaIcms),
-    aliquotaIcmsRaw: aliquotaIcms || '-',
+    aliquotaIcmsRaw: aliquotaIcms || '0',
     valorIcms: formatXmlReader30DecimalValue(valorIcms),
-    valorIcmsRaw: valorIcms || '-'
+    valorIcmsRaw: valorIcms || '0'
   };
 }
 
