@@ -3676,20 +3676,17 @@ function renderXmlNumberingValidationSummary(query, validation) {
     return `<p class="card-subtitle" style="margin-top:12px;">Numeracao validada sem lacunas para ${escapeHtml(String(validation.totalNumerosValidos || 0))} documento(s) emitido(s) com numero fiscal.</p>`;
   }
 
-  const preview = Array.isArray(validation.lacunas)
-    ? validation.lacunas
-        .slice(0, 5)
-        .map((lacuna) => formatXmlNumberingGap(lacuna))
-        .filter(Boolean)
-        .join('; ')
-    : '';
-  const hiddenCount = Math.max(0, Number(validation.totalFaixasLacuna || 0) - 5);
+  const summaryGaps = summarizeXmlNumberingGaps(validation.lacunas);
+  const preview = summaryGaps.slice(0, 5).map((gap) => formatXmlNumberingRange(gap)).filter(Boolean).join('; ');
+  const hiddenCount = Math.max(0, summaryGaps.length - 5);
   const suffix = hiddenCount > 0 ? ` (+${hiddenCount} faixa(s))` : '';
+  const totalFaixasResumo = summaryGaps.length;
+  const totalNumerosResumo = summaryGaps.reduce((total, gap) => total + gap.quantidade, 0);
 
   return `
     <div style="display:flex; gap:12px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; margin-top:12px;">
       <p class="card-subtitle" style="margin:0; color:#8a5a00;">
-        Atencao: foram encontradas ${escapeHtml(String(validation.totalNumerosPulados || 0))} numeracao(oes) pulada(s) em ${escapeHtml(String(validation.totalFaixasLacuna || 0))} faixa(s). ${escapeHtml(preview)}${escapeHtml(suffix)}
+        Atencao: foram encontradas ${escapeHtml(String(totalNumerosResumo))} numeracao(oes) pulada(s) em ${escapeHtml(String(totalFaixasResumo))} faixa(s). ${escapeHtml(preview)}${escapeHtml(suffix)}
       </p>
       ${
         state.dataSource === 'api'
@@ -3718,6 +3715,65 @@ function formatXmlNumberingGap(gap) {
   const end = Number(gap.numeroFinal || 0);
   const range = start === end ? String(start) : `${start} a ${end}`;
   return `${prefix} (${ambiente}): ${range}`;
+}
+
+function formatXmlNumberingRange(gap) {
+  if (!gap) {
+    return '';
+  }
+
+  const start = Number(gap.numeroInicial || 0);
+  const end = Number(gap.numeroFinal || 0);
+  if (start <= 0 || end < start) {
+    return '';
+  }
+
+  return start === end ? String(start) : `${start} a ${end}`;
+}
+
+function summarizeXmlNumberingGaps(gaps) {
+  const normalized = Array.isArray(gaps)
+    ? gaps
+        .map((gap) => ({
+          numeroInicial: Number(gap?.numeroInicial || 0),
+          numeroFinal: Number(gap?.numeroFinal || 0)
+        }))
+        .filter((gap) => gap.numeroInicial > 0 && gap.numeroFinal >= gap.numeroInicial)
+        .sort((left, right) => {
+          if (left.numeroInicial !== right.numeroInicial) {
+            return left.numeroInicial - right.numeroInicial;
+          }
+
+          return left.numeroFinal - right.numeroFinal;
+        })
+    : [];
+
+  const merged = [];
+  for (const gap of normalized) {
+    const last = merged[merged.length - 1];
+    if (!last) {
+      merged.push({
+        numeroInicial: gap.numeroInicial,
+        numeroFinal: gap.numeroFinal,
+        quantidade: gap.numeroFinal - gap.numeroInicial + 1
+      });
+      continue;
+    }
+
+    if (gap.numeroInicial <= last.numeroFinal + 1) {
+      last.numeroFinal = Math.max(last.numeroFinal, gap.numeroFinal);
+      last.quantidade = last.numeroFinal - last.numeroInicial + 1;
+      continue;
+    }
+
+    merged.push({
+      numeroInicial: gap.numeroInicial,
+      numeroFinal: gap.numeroFinal,
+      quantidade: gap.numeroFinal - gap.numeroInicial + 1
+    });
+  }
+
+  return merged;
 }
 
 function renderXmlsTableCard(xmls) {
