@@ -41,6 +41,8 @@ type ReprocessPastNsusDetail = {
   nsusConsultados: number;
   nsusIgnoradosComDocumento: number;
   documentosSalvos: number;
+  documentosGapResolvidos: number;
+  documentosAdicionaisSalvos: number;
   documentosIgnoradosExistentes: number;
   semDocumento: number;
   falhas: number;
@@ -53,6 +55,8 @@ type ReprocessPastNsusResult = {
   nsusConsultados: number;
   nsusIgnoradosComDocumento: number;
   documentosSalvos: number;
+  documentosGapResolvidos: number;
+  documentosAdicionaisSalvos: number;
   documentosIgnoradosExistentes: number;
   semDocumento: number;
   falhas: number;
@@ -115,6 +119,7 @@ type PlannedPastNsuRange = {
 
 type PreparedPastNsuRecoveryControl = {
   control: NfseSyncControle;
+  gaps: NormalizedGapAuditRange[];
   ranges: PlannedPastNsuRange[];
 };
 
@@ -128,6 +133,8 @@ type PersistDfeDocumentResult = {
   nsu?: bigint;
   kind: 'evento' | 'nfse';
   outcome: 'saved' | 'existing';
+  numeroNfse?: string | null;
+  serie?: string | null;
 };
 
 type NightlySweepConfigFile = {
@@ -716,6 +723,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     for (const controlPlan of controls) {
       const control = controlPlan.control;
+      const controlGaps = controlPlan.gaps;
       const plannedRanges = controlPlan.ranges;
 
       if (this.isRateLimitCooldownActive()) {
@@ -965,6 +973,13 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               maxRecoveredNsu && maxRecoveredNsu > persistedNsu ? maxRecoveredNsu : persistedNsu;
             detail.documentosSalvos += 1;
             result.documentosSalvos += 1;
+            if (this.matchesPersistedDocumentToGap(persisted, controlGaps)) {
+              detail.documentosGapResolvidos += 1;
+              result.documentosGapResolvidos += 1;
+            } else {
+              detail.documentosAdicionaisSalvos += 1;
+              result.documentosAdicionaisSalvos += 1;
+            }
             if (execution) {
               this.updatePastNsuRecoveryExecutionRow(execution, control.id, persistedNsu, {
                 status: 'baixado',
@@ -1022,7 +1037,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         this.syncPastNsuRecoveryExecution(
           execution,
           result,
-          `Controle ${control.cnpjConsulta} finalizado com ${detail.documentosSalvos} documento(s) salvo(s).`
+          plan.mode === 'gap-audit'
+            ? `Controle ${control.cnpjConsulta} finalizado com ${detail.documentosGapResolvidos} lacuna(s) resolvida(s) e ${detail.documentosAdicionaisSalvos} XML(s) adicional(is).`
+            : `Controle ${control.cnpjConsulta} finalizado com ${detail.documentosSalvos} documento(s) salvo(s).`
         );
       }
 
@@ -1032,7 +1049,10 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (!result.ultimaMensagem) {
-      result.ultimaMensagem = `Recuperacao concluida com ${result.documentosSalvos} documento(s) salvo(s)`;
+      result.ultimaMensagem =
+        plan.mode === 'gap-audit'
+          ? `Auditoria concluida com ${result.documentosGapResolvidos} lacuna(s) resolvida(s) e ${result.documentosAdicionaisSalvos} XML(s) adicional(is) salvo(s).`
+          : `Recuperacao concluida com ${result.documentosSalvos} documento(s) salvo(s)`;
     }
 
     if (execution) {
@@ -1586,6 +1606,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       nsusConsultados: 0,
       nsusIgnoradosComDocumento: 0,
       documentosSalvos: 0,
+      documentosGapResolvidos: 0,
+      documentosAdicionaisSalvos: 0,
       documentosIgnoradosExistentes: 0,
       semDocumento: 0,
       falhas: 0,
@@ -1629,6 +1651,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         mode: 'full',
         controls: controls.map((control) => ({
           control,
+          gaps: [],
           ranges:
             control.ultimoNsuConsultado >= 1n
               ? [
@@ -1679,6 +1702,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       if (ranges.length > 0) {
         preparedControls.push({
           control,
+          gaps: controlGaps,
           ranges
         });
       }
@@ -1899,6 +1923,23 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     return `${prefix} (${params.ambiente}): ${range}`;
   }
 
+  private matchesPersistedDocumentToGap(
+    persisted: Pick<PersistDfeDocumentResult, 'kind' | 'numeroNfse' | 'serie'>,
+    gaps: NormalizedGapAuditRange[]
+  ): boolean {
+    if (persisted.kind !== 'nfse') {
+      return false;
+    }
+
+    const numero = this.parseNumeroNfse(persisted.numeroNfse);
+    if (!numero) {
+      return false;
+    }
+
+    const serie = this.normalizeSerie(persisted.serie);
+    return gaps.some((gap) => gap.serie === serie && numero >= gap.numeroInicial && numero <= gap.numeroFinal);
+  }
+
   private createPastNsuRecoveryExecutionRows(
     controls: PreparedPastNsuRecoveryControl[]
   ): PastNsuRecoveryExecutionRow[] {
@@ -2006,6 +2047,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       nsusConsultados: 0,
       nsusIgnoradosComDocumento: 0,
       documentosSalvos: 0,
+      documentosGapResolvidos: 0,
+      documentosAdicionaisSalvos: 0,
       documentosIgnoradosExistentes: 0,
       semDocumento: 0,
       falhas: 0
@@ -2038,7 +2081,10 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     detail: ReprocessPastNsusDetail,
     maxRecoveredNsu: bigint | null
   ): Promise<void> {
-    const message = `Recuperacao de NSUs passados: ${detail.documentosSalvos} documento(s) salvo(s), ${detail.nsusIgnoradosComDocumento + detail.documentosIgnoradosExistentes} ja existente(s), ${detail.semDocumento} sem documento.`;
+    const message =
+      detail.documentosGapResolvidos > 0 || detail.documentosAdicionaisSalvos > 0
+        ? `Auditoria de lacunas por NSU: ${detail.documentosGapResolvidos} lacuna(s) resolvida(s), ${detail.documentosAdicionaisSalvos} XML(s) adicional(is), ${detail.semDocumento} NSU(s) sem documento proprio.`
+        : `Recuperacao de NSUs passados: ${detail.documentosSalvos} documento(s) salvo(s), ${detail.nsusIgnoradosComDocumento + detail.documentosIgnoradosExistentes} ja existente(s), ${detail.semDocumento} sem documento.`;
     const data: Prisma.NfseSyncControleUpdateInput = {
       ultimaExecucao: new Date(),
       ultimaMensagem: message
@@ -2126,7 +2172,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       return {
         nsu: params.document.nsu,
         kind: 'evento',
-        outcome: 'saved'
+        outcome: 'saved',
+        numeroNfse: null,
+        serie: null
       };
     }
 
@@ -2153,7 +2201,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       return {
         nsu: params.document.nsu ?? existingDocument?.nsu ?? undefined,
         kind: 'nfse',
-        outcome: 'existing'
+        outcome: 'existing',
+        numeroNfse: parsedXml?.numeroNfse ?? existingDocument?.numeroNfse ?? null,
+        serie: parsedXml?.serie ?? null
       };
     }
     if (existingDocument?.ambiente && existingDocument.ambiente !== effectiveAmbiente) {
@@ -2274,7 +2324,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     return {
       nsu: params.document.nsu,
       kind: 'nfse',
-      outcome: 'saved'
+      outcome: 'saved',
+      numeroNfse: parsedXml?.numeroNfse ?? null,
+      serie: parsedXml?.serie ?? null
     };
   }
 

@@ -6285,12 +6285,15 @@ function renderPastNsuRecoveryReportModal() {
   const rowMode = state.modal.rowMode || 'controle';
   const currentMessage = String(state.modal.currentMessage || '').trim();
   const clientName = String(state.modal.clientName || 'Cliente selecionado');
+  const executionMode = String(state.modal.executionMode || 'full');
   const title = String(state.modal.title || 'Auditoria do reprocessamento de NSUs');
   const runningLabel = String(state.modal.runningLabel || 'reprocessamento em andamento.');
   const completedLabel = String(state.modal.completedLabel || 'reprocessamento concluido.');
   const processedCount = Number(summary?.controlesProcessados || 0);
   const totalCount = Number(summary?.controlesEncontrados || state.modal.totalCount || 0);
   const documentosSalvos = Number(summary?.documentosSalvos || 0);
+  const documentosGapResolvidos = Number(summary?.documentosGapResolvidos || 0);
+  const documentosAdicionaisSalvos = Number(summary?.documentosAdicionaisSalvos || 0);
   const nsusAvaliados = Number(summary?.nsusAvaliados || 0);
   const nsusConsultados = Number(summary?.nsusConsultados || 0);
   const jaExistentes = Number(summary?.nsusIgnoradosComDocumento || 0) + Number(summary?.documentosIgnoradosExistentes || 0);
@@ -6314,9 +6317,20 @@ function renderPastNsuRecoveryReportModal() {
             ${detailItem('Controles processados', `${processedCount}${totalCount ? ` / ${totalCount}` : ''}`)}
             ${detailItem('NSUs avaliados', String(nsusAvaliados))}
             ${detailItem('NSUs consultados', String(nsusConsultados))}
-            ${detailItem('XMLs salvos', String(documentosSalvos))}
-            ${detailItem('Ja existentes', String(jaExistentes))}
-            ${detailItem('Sem documento', String(semDocumento))}
+            ${
+              executionMode === 'gap-audit'
+                ? `
+                  ${detailItem('Lacunas resolvidas', String(documentosGapResolvidos))}
+                  ${detailItem('XMLs adicionais', String(documentosAdicionaisSalvos))}
+                  ${detailItem('Ja existentes', String(jaExistentes))}
+                  ${detailItem('Sem doc. proprio', String(semDocumento))}
+                `
+                : `
+                  ${detailItem('XMLs salvos', String(documentosSalvos))}
+                  ${detailItem('Ja existentes', String(jaExistentes))}
+                  ${detailItem('Sem documento', String(semDocumento))}
+                `
+            }
             ${detailItem('Falhas', String(falhas))}
           </div>
           ${renderOverlayFailureToolbar({
@@ -9416,6 +9430,7 @@ async function runPastNsuRecovery(clientId = null) {
     );
     if (shouldOpenOverlay) {
       openPastNsuRecoveryReportModal({
+        executionMode: 'full',
         rowMode: 'nsu',
         clientName: selectedClient?.razaoSocial || 'Cliente selecionado',
         totalCount: 0,
@@ -9426,6 +9441,8 @@ async function runPastNsuRecovery(clientId = null) {
           nsusAvaliados: 0,
           nsusConsultados: 0,
           documentosSalvos: 0,
+          documentosGapResolvidos: 0,
+          documentosAdicionaisSalvos: 0,
           nsusIgnoradosComDocumento: 0,
           documentosIgnoradosExistentes: 0,
           semDocumento: 0,
@@ -9454,6 +9471,7 @@ async function runPastNsuRecovery(clientId = null) {
 
       updatePastNsuRecoveryOverlayState({
         running: execution?.status === 'running',
+        executionMode: 'full',
         rowMode: 'nsu',
         totalCount: Number(execution?.summary?.controlesEncontrados || 0),
         currentMessage: String(execution?.currentMessage || 'Execucao iniciada.'),
@@ -9474,6 +9492,7 @@ async function runPastNsuRecovery(clientId = null) {
 
         updatePastNsuRecoveryOverlayState({
           running: latestExecution?.status === 'running',
+          executionMode: 'full',
           rowMode: 'nsu',
           totalCount: Number(latestExecution?.summary?.controlesEncontrados || 0),
           currentMessage: String(latestExecution?.currentMessage || 'Reprocessamento em andamento...'),
@@ -9494,6 +9513,7 @@ async function runPastNsuRecovery(clientId = null) {
     if (shouldOpenOverlay) {
       updatePastNsuRecoveryOverlayState({
         running: false,
+        executionMode: 'full',
         rowMode: state.modal?.rowMode || 'controle',
         totalCount: Number(result?.controlesEncontrados || 0),
         currentMessage: String(result?.ultimaMensagem || 'Reprocessamento manual concluido.'),
@@ -9536,6 +9556,8 @@ async function runPastNsuRecovery(clientId = null) {
           nsusAvaliados: 0,
           nsusConsultados: 0,
           documentosSalvos: 0,
+          documentosGapResolvidos: 0,
+          documentosAdicionaisSalvos: 0,
           nsusIgnoradosComDocumento: 0,
           documentosIgnoradosExistentes: 0,
           semDocumento: 0,
@@ -9576,6 +9598,7 @@ async function runNfseGapAuditFromCurrentSearch() {
       'info'
     );
     openPastNsuRecoveryReportModal({
+      executionMode: 'gap-audit',
       title: 'Auditoria das lacunas por NSU',
       runningLabel: 'auditoria em andamento.',
       completedLabel: 'auditoria concluida.',
@@ -9589,6 +9612,8 @@ async function runNfseGapAuditFromCurrentSearch() {
         nsusAvaliados: 0,
         nsusConsultados: 0,
         documentosSalvos: 0,
+        documentosGapResolvidos: 0,
+        documentosAdicionaisSalvos: 0,
         nsusIgnoradosComDocumento: 0,
         documentosIgnoradosExistentes: 0,
         semDocumento: 0,
@@ -9619,6 +9644,7 @@ async function runNfseGapAuditFromCurrentSearch() {
 
     updatePastNsuRecoveryOverlayState({
       running: execution?.status === 'running',
+      executionMode: 'gap-audit',
       title: 'Auditoria das lacunas por NSU',
       runningLabel: 'auditoria em andamento.',
       completedLabel: 'auditoria concluida.',
@@ -9642,6 +9668,7 @@ async function runNfseGapAuditFromCurrentSearch() {
 
       updatePastNsuRecoveryOverlayState({
         running: latestExecution?.status === 'running',
+        executionMode: 'gap-audit',
         title: 'Auditoria das lacunas por NSU',
         runningLabel: 'auditoria em andamento.',
         completedLabel: 'auditoria concluida.',
@@ -9656,6 +9683,7 @@ async function runNfseGapAuditFromCurrentSearch() {
     const result = latestExecution?.summary || {};
     updatePastNsuRecoveryOverlayState({
       running: false,
+      executionMode: 'gap-audit',
       title: 'Auditoria das lacunas por NSU',
       runningLabel: 'auditoria em andamento.',
       completedLabel: 'auditoria concluida.',
@@ -9668,7 +9696,7 @@ async function runNfseGapAuditFromCurrentSearch() {
 
     state.executionMonitor.total = Number(result?.controlesEncontrados || 1);
     state.executionMonitor.processed = Number(result?.controlesProcessados || 0);
-    state.executionMonitor.successful = Number(result?.documentosSalvos || 0);
+    state.executionMonitor.successful = Number(result?.documentosGapResolvidos || 0);
     state.executionMonitor.failed = Number(result?.falhas || 0);
     state.executionMonitor.message = 'Auditoria concluida. Atualizando painel...';
     state.executionMonitor.updatedAt = new Date().toISOString();
@@ -9680,10 +9708,10 @@ async function runNfseGapAuditFromCurrentSearch() {
     }
 
     finishExecutionMonitor(
-      `Auditoria finalizada. NSUs consultados: ${Number(result?.nsusConsultados || 0)}. XMLs salvos: ${Number(result?.documentosSalvos || 0)}. Sem documento: ${Number(result?.semDocumento || 0)}.`
+      `Auditoria finalizada. Lacunas resolvidas: ${Number(result?.documentosGapResolvidos || 0)}. XMLs adicionais: ${Number(result?.documentosAdicionaisSalvos || 0)}. NSUs sem documento proprio: ${Number(result?.semDocumento || 0)}.`
     );
     pushToast(
-      `Auditoria das lacunas concluida: ${Number(result?.documentosSalvos || 0)} XML(s) salvo(s), ${Number(result?.nsusConsultados || 0)} NSU(s) consultado(s).`,
+      `Auditoria das lacunas concluida: ${Number(result?.documentosGapResolvidos || 0)} lacuna(s) resolvida(s) e ${Number(result?.documentosAdicionaisSalvos || 0)} XML(s) adicional(is).`,
       Number(result?.falhas || 0) > 0 ? 'error' : 'success'
     );
   } catch (error) {
@@ -9698,6 +9726,8 @@ async function runNfseGapAuditFromCurrentSearch() {
         nsusAvaliados: 0,
         nsusConsultados: 0,
         documentosSalvos: 0,
+        documentosGapResolvidos: 0,
+        documentosAdicionaisSalvos: 0,
         nsusIgnoradosComDocumento: 0,
         documentosIgnoradosExistentes: 0,
         semDocumento: 0,
@@ -11132,6 +11162,7 @@ function openPastNsuRecoveryReportModal(params) {
   openModal({
     kind: 'past-nsu-recovery-report',
     running: true,
+    executionMode: params?.executionMode || 'full',
     title: params?.title || 'Auditoria do reprocessamento de NSUs',
     runningLabel: params?.runningLabel || 'reprocessamento em andamento.',
     completedLabel: params?.completedLabel || 'reprocessamento concluido.',
@@ -11229,7 +11260,9 @@ function mapPastNsuRecoveryLiveRowStatusLabel(status) {
     case 'baixado':
       return 'Baixado';
     case 'sem_documento':
-      return 'Sem documento';
+      return state.modal?.kind === 'past-nsu-recovery-report' && state.modal?.executionMode === 'gap-audit'
+        ? 'Sem doc. proprio'
+        : 'Sem documento';
     case 'erro':
       return 'Erro';
     default:
@@ -11547,6 +11580,7 @@ function resolveDownloadByKeyTimeoutMs(pendingCount) {
 
 function buildPastNsuRecoveryAuditRows(summary) {
   const details = Array.isArray(summary?.detalhes) ? summary.detalhes : [];
+  const isGapAudit = Number(summary?.documentosGapResolvidos || 0) > 0 || Number(summary?.documentosAdicionaisSalvos || 0) > 0;
 
   return details.map((detail) => {
     const status = resolvePastNsuRecoveryStatus(detail);
@@ -11555,11 +11589,15 @@ function buildPastNsuRecoveryAuditRows(summary) {
       cnpjConsulta: formatCnpj(detail?.cnpjConsulta || '-') || '-',
       ambienteLabel: mapNfseAmbienteLabel(detail?.ambiente),
       nsuRangeLabel: `${String(detail?.nsuInicial || '1')} ate ${String(detail?.nsuFinal || '0')}`,
-      resultLabel: `${Number(detail?.documentosSalvos || 0)} XML(s) salvo(s)`,
-      detailLabel: `${Number(detail?.nsusConsultados || 0)} NSU(s) consultado(s), ${Number(detail?.documentosIgnoradosExistentes || 0) + Number(detail?.nsusIgnoradosComDocumento || 0)} existente(s), ${Number(detail?.semDocumento || 0)} sem documento`,
+      resultLabel: isGapAudit
+        ? `${Number(detail?.documentosGapResolvidos || 0)} lacuna(s) resolvida(s)`
+        : `${Number(detail?.documentosSalvos || 0)} XML(s) salvo(s)`,
+      detailLabel: isGapAudit
+        ? `${Number(detail?.documentosAdicionaisSalvos || 0)} XML(s) adicional(is), ${Number(detail?.nsusConsultados || 0)} NSU(s) consultado(s), ${Number(detail?.semDocumento || 0)} sem documento proprio`
+        : `${Number(detail?.nsusConsultados || 0)} NSU(s) consultado(s), ${Number(detail?.documentosIgnoradosExistentes || 0) + Number(detail?.nsusIgnoradosComDocumento || 0)} existente(s), ${Number(detail?.semDocumento || 0)} sem documento`,
       statusLabel: mapPastNsuRecoveryStatusLabel(status),
       statusTone: toneFromPastNsuRecoveryStatus(status),
-      message: buildPastNsuRecoveryRowMessage(detail, status)
+      message: buildPastNsuRecoveryRowMessage(detail, status, isGapAudit)
     };
   });
 }
@@ -11603,9 +11641,15 @@ function toneFromPastNsuRecoveryStatus(status) {
   }
 }
 
-function buildPastNsuRecoveryRowMessage(detail, status) {
+function buildPastNsuRecoveryRowMessage(detail, status, isGapAudit = false) {
   if (status === 'falha') {
     return `${Number(detail?.falhas || 0)} falha(s) registrada(s) durante o reprocessamento.`;
+  }
+  if (isGapAudit && Number(detail?.documentosGapResolvidos || 0) > 0) {
+    return `A auditoria confirmou ${Number(detail?.documentosGapResolvidos || 0)} documento(s) da lacuna neste controle.`;
+  }
+  if (isGapAudit && Number(detail?.documentosAdicionaisSalvos || 0) > 0) {
+    return 'Os NSUs consultados trouxeram XMLs adicionais do lote, mas eles nao contam como lacuna resolvida.';
   }
   if (Number(detail?.documentosSalvos || 0) > 0) {
     return 'Foram recuperados XMLs faltantes para este controle.';
