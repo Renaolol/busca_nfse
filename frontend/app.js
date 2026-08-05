@@ -4554,7 +4554,6 @@ function renderXmlReader30ResultsTable(results) {
                           <td>${statusBadge(row.documentLabel, row.documentTone)}</td>
                           <td class="xml-reader30-doc">
                             <span class="row-title">${escapeHtml(row.numeroLabel)}</span>
-                            <span class="row-sub">${escapeHtml(row.chaveLabel)}</span>
                           </td>
                           <td class="xml-reader30-company">
                             <span class="row-title">${escapeHtml(row.cliente)}</span>
@@ -4623,7 +4622,6 @@ function renderXmlReader30ResultsTableLegacyUnusedOld2(results) {
                           <td>${statusBadge(row.documentLabel, row.documentTone)}</td>
                           <td>
                             <span class="row-title">${escapeHtml(row.numeroLabel)}</span>
-                            <span class="row-sub">${escapeHtml(row.chaveLabel)}</span>
                           </td>
                           <td>
                             <span class="row-title">${escapeHtml(row.cliente)}</span>
@@ -5392,7 +5390,6 @@ function renderXmlReader30ResultsTableLegacyUnused(results) {
                           <td>${statusBadge(row.documentLabel, row.documentTone)}</td>
                           <td>
                             <span class="row-title">${escapeHtml(row.numeroLabel)}</span>
-                            <span class="row-sub">${escapeHtml(row.chaveLabel)}</span>
                           </td>
                           <td>${statusBadge(row.statusLabel, row.statusTone)}</td>
                           <td>${statusBadge(row.cancelLabel, row.cancelTone)}</td>
@@ -7144,16 +7141,32 @@ function renderXmlDetailsModalLegacyUnused(xmlId) {
 function renderDocumentInsightsSection(documentType, doc) {
   if (documentType === 'nfe') {
     const items = extractNfeLineItems(doc.conteudoXml || '');
-    return renderDocumentInsightsBlock('Itens da NF-e', items.length ? renderDocumentInsightsTable(items, [
-      { key: 'index', label: '#' },
-      { key: 'code', label: 'Codigo' },
-      { key: 'description', label: 'Produto' },
-      { key: 'quantity', label: 'Quantidade' },
-      { key: 'unit', label: 'Un' },
-      { key: 'unitValue', label: 'Valor unitario' },
-      { key: 'totalValue', label: 'Valor total' },
-      { key: 'cfop', label: 'CFOP' }
-    ]) : renderDocumentInsightsEmpty('Nao encontrei itens detalhados no XML carregado desta NF-e.'));
+    const lineItems = items.map((item) => ({
+      numeroNf: doc.numeroNfe || '-',
+      statusNf: resolveNfeLineItemStatusLabel(doc),
+      dataEmissao: formatDate(doc.dataEmissao),
+      produto: item.description || '-',
+      quantidade: item.quantity || '-',
+      valorUnitario: item.unitValue || '-',
+      valorTotal: item.totalValue || '-',
+      valorTotalNfXml: formatOptionalCurrency(doc.valor)
+    }));
+
+    return renderDocumentInsightsBlock(
+      'Itens da NF-e',
+      lineItems.length
+        ? renderDocumentInsightsTable(lineItems, [
+            { key: 'numeroNf', label: 'Numero NF' },
+            { key: 'statusNf', label: 'Status NF-e' },
+            { key: 'dataEmissao', label: 'Data Emissao' },
+            { key: 'produto', label: 'Produto' },
+            { key: 'quantidade', label: 'Quantidade' },
+            { key: 'valorUnitario', label: 'Valor Unitario' },
+            { key: 'valorTotal', label: 'Valor Total' },
+            { key: 'valorTotalNfXml', label: 'Valor Total NF XML R$' }
+          ])
+        : renderDocumentInsightsEmpty('Nao encontrei itens detalhados no XML carregado desta NF-e.')
+    );
   }
 
   if (documentType === 'cte') {
@@ -7218,6 +7231,18 @@ function renderDocumentInsightsTable(rows, columns) {
       </table>
     </div>
   `;
+}
+
+function resolveNfeLineItemStatusLabel(doc) {
+  if (doc?.cancelada) {
+    return 'Cancelada';
+  }
+
+  if (doc?.statusFiscal === 'Autorizada') {
+    return 'Ativa';
+  }
+
+  return doc?.statusFiscal || '-';
 }
 
 function parseXmlDocumentSafe(xmlString) {
