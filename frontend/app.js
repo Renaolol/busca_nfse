@@ -5274,6 +5274,20 @@ function formatXmlReader30DecimalValue(value) {
     .replace(/(\.\d)0$/, '$1');
 }
 
+function formatXmlReader30QuantityValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return '0.00';
+  }
+
+  const normalizedValue = typeof value === 'string' ? value.replace(',', '.').trim() : value;
+  const numericValue = Number(normalizedValue);
+  if (!Number.isFinite(numericValue)) {
+    return '0.00';
+  }
+
+  return numericValue.toFixed(2);
+}
+
 function formatXmlReader30CurrencyValue(value) {
   if (value === null || value === undefined || value === '') {
     return '0';
@@ -5367,7 +5381,7 @@ function expandXmlReader30NfeRows(rows) {
           statusTone: baseStatusTone,
           dataEmissaoLabel: baseDataEmissao,
           produto: row.productLabel || '-',
-          quantidade: '-',
+          quantidade: '0.00',
           valorUnitario: '-',
           valorTotal: '-',
           valorTotalNfXml: baseValorTotal,
@@ -5393,7 +5407,7 @@ function expandXmlReader30NfeRows(rows) {
       statusTone: baseStatusTone,
       dataEmissaoLabel: baseDataEmissao,
       produto: item.description || '-',
-      quantidade: item.quantity || '-',
+      quantidade: formatXmlReader30QuantityValue(item.quantity),
       valorUnitario: item.unitValueRaw || item.unitValue || '-',
       valorTotal: item.totalValueRaw || item.totalValue || '-',
       valorTotalNfXml: baseValorTotal,
@@ -8143,7 +8157,7 @@ function renderDocumentInsightsSection(documentType, doc) {
       statusNf: resolveNfeLineItemStatusLabel(doc),
       dataEmissao: formatDate(doc.dataEmissao),
       produto: item.description || '-',
-      quantidade: item.quantity || '-',
+      quantidade: formatXmlReader30QuantityValue(item.quantity),
       valorUnitario: item.unitValue || '-',
       valorTotal: item.totalValue || '-',
       valorTotalNfXml: formatOptionalCurrency(doc.valor),

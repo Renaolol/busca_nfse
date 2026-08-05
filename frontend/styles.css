@@ -846,6 +846,10 @@ textarea:focus-visible,
   overflow: hidden;
 }
 
+.compare-reader-card .compare-form {
+  margin-top: 14px;
+}
+
 .compare-form {
   align-items: start;
 }
@@ -1160,7 +1164,14 @@ tbody tr:hover {
 }
 
 .xml-reader30-doc {
-  min-width: 170px;
+  min-width: 320px;
+  white-space: nowrap;
+}
+
+.xml-reader30-quantity {
+  min-width: 96px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .xml-reader30-company {
@@ -1195,8 +1206,9 @@ tbody tr:hover {
 }
 
 .xml-reader30-product {
-  min-width: 220px;
-  max-width: 300px;
+  min-width: 320px;
+  max-width: 420px;
+  white-space: nowrap;
 }
 
 .xml-reader30-table .table-actions {
