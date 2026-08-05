@@ -202,7 +202,9 @@ const state = {
     nfeColumnOrder: loadXmlReader30NfeColumnOrderStore(),
     hiddenNfeColumns: new Set(),
     selectionDrag: null,
+    scrollDrag: null,
     columnMenuOpenKey: null,
+    columnMenuAnchor: null,
     columnDrag: null
   },
   alerts: [],
@@ -510,6 +512,7 @@ function wireGlobalEvents() {
   document.addEventListener('submit', onDocumentSubmit);
   document.addEventListener('change', onDocumentChange);
   document.addEventListener('mousedown', onDocumentMouseDown);
+  document.addEventListener('mousemove', onDocumentMouseMove);
   document.addEventListener('mouseover', onDocumentMouseOver);
   document.addEventListener('mouseup', onDocumentMouseUp);
   document.addEventListener('dragstart', onDocumentDragStart);
@@ -587,7 +590,7 @@ function onDocumentClick(event) {
       if (!columnKey) {
         return;
       }
-      toggleXmlReader30NfeColumnMenu(columnKey);
+      toggleXmlReader30NfeColumnMenu(columnKey, actionNode);
       return;
     }
     case 'xml-reader30-column-menu-hide': {
@@ -1706,6 +1709,19 @@ function onDocumentMouseDown(event) {
     return;
   }
 
+  const panWrap = event.target.closest?.('[data-action="xml-reader30-pan-scroll"]');
+  if (panWrap instanceof HTMLElement && !event.target.closest?.('input, button, a, select, textarea, [data-action="xml-reader30-column-drag"]')) {
+    state.xmlReader30.scrollDrag = {
+      active: true,
+      startX: event.clientX,
+      startScrollLeft: panWrap.scrollLeft,
+      wrap: panWrap
+    };
+    panWrap.classList.add('is-panning');
+    event.preventDefault();
+    return;
+  }
+
   const target = event.target.closest?.('[data-action="xml-reader30-select"]');
   if (!(target instanceof HTMLInputElement) || target.disabled) {
     return;
@@ -1720,6 +1736,28 @@ function onDocumentMouseDown(event) {
     active: true,
     checked: !target.checked
   };
+}
+
+function onDocumentMouseMove(event) {
+  const scrollDrag = state.xmlReader30.scrollDrag;
+  if (!scrollDrag?.active) {
+    return;
+  }
+
+  if (event.buttons !== 1) {
+    stopXmlReader30ScrollDrag();
+    return;
+  }
+
+  const wrap = scrollDrag.wrap;
+  if (!(wrap instanceof HTMLElement)) {
+    stopXmlReader30ScrollDrag();
+    return;
+  }
+
+  const deltaX = event.clientX - scrollDrag.startX;
+  wrap.scrollLeft = scrollDrag.startScrollLeft - deltaX;
+  event.preventDefault();
 }
 
 function onDocumentMouseOver(event) {
@@ -1743,12 +1781,27 @@ function onDocumentMouseOver(event) {
 }
 
 function onDocumentMouseUp() {
+  stopXmlReader30ScrollDrag();
+
   if (!state.xmlReader30.selectionDrag?.active) {
     return;
   }
 
   state.xmlReader30.selectionDrag = null;
   render();
+}
+
+function stopXmlReader30ScrollDrag() {
+  const scrollDrag = state.xmlReader30.scrollDrag;
+  if (!scrollDrag?.active) {
+    return;
+  }
+
+  if (scrollDrag.wrap instanceof HTMLElement) {
+    scrollDrag.wrap.classList.remove('is-panning');
+  }
+
+  state.xmlReader30.scrollDrag = null;
 }
 
 function onDocumentDragStart(event) {
@@ -4939,10 +4992,10 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
         </div>
         <div class="stack-mini" style="align-items:flex-end;">
           ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
-          <span class="row-sub">Arraste os cabecalhos para reorganizar as colunas. Cada produto aparece em uma linha.</span>
+          <span class="row-sub">Arraste os cabecalhos para reorganizar as colunas. Arraste a tabela para os lados para ver todas as colunas.</span>
         </div>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap xml-reader30-pan-scroll" data-action="xml-reader30-pan-scroll">
         <table class="xml-reader30-table xml-reader30-reorderable-table" style="min-width: ${minWidth}px;">
           <thead>
             <tr>
@@ -4961,7 +5014,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                         <span class="xml-reader30-column-title">
                           ${
                             column.key === 'select'
-                              ? `<input type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />`
+                              ? `<span class="xml-reader30-column-title-select">Checkbox <input class="xml-reader30-select-all-checkbox" type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" /></span>`
                               : column.headerHtml || escapeHtml(column.label)
                           }
                         </span>
@@ -4978,7 +5031,12 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                           ${
                             state.xmlReader30.columnMenuOpenKey === column.key
                               ? `
-                                <div class="xml-reader30-column-menu-panel" role="menu" aria-label="Menu da coluna ${escapeHtml(column.label)}">
+                                <div
+                                  class="xml-reader30-column-menu-panel"
+                                  role="menu"
+                                  aria-label="Menu da coluna ${escapeHtml(column.label)}"
+                                  style="top:${escapeHtml(String(state.xmlReader30.columnMenuAnchor?.top ?? 8))}px; left:${escapeHtml(String(state.xmlReader30.columnMenuAnchor?.left ?? 8))}px;"
+                                >
                                   <button
                                     type="button"
                                     class="xml-reader30-column-menu-item"
@@ -5049,7 +5107,7 @@ function getXmlReader30NfeColumnDefinitions() {
   return [
     {
       key: 'select',
-      label: 'Selecionar',
+      label: 'Checkbox',
       headerHtml: '<input type="checkbox" data-action="xml-reader30-toggle-all" aria-label="Selecionar todos os XMLs do leitor" />',
       className: 'xml-reader30-check',
       html: true,
@@ -5216,13 +5274,35 @@ function hideXmlReader30NfeColumn(columnKey) {
   render();
 }
 
-function toggleXmlReader30NfeColumnMenu(columnKey) {
+function toggleXmlReader30NfeColumnMenu(columnKey, anchorNode) {
   const normalizedKey = String(columnKey || '').trim();
   if (!normalizedKey) {
     return;
   }
 
-  state.xmlReader30.columnMenuOpenKey = state.xmlReader30.columnMenuOpenKey === normalizedKey ? null : normalizedKey;
+  if (state.xmlReader30.columnMenuOpenKey === normalizedKey) {
+    closeXmlReader30NfeColumnMenu();
+    render();
+    return;
+  }
+
+  const rect = anchorNode instanceof HTMLElement ? anchorNode.getBoundingClientRect() : null;
+  if (rect) {
+    const estimatedWidth = 164;
+    const left = Math.min(window.innerWidth - estimatedWidth - 8, Math.max(8, rect.right - estimatedWidth));
+    const top = Math.min(window.innerHeight - 12, rect.bottom + 6);
+    state.xmlReader30.columnMenuAnchor = {
+      left,
+      top
+    };
+  } else {
+    state.xmlReader30.columnMenuAnchor = {
+      left: 8,
+      top: 8
+    };
+  }
+
+  state.xmlReader30.columnMenuOpenKey = normalizedKey;
   render();
 }
 
@@ -5232,6 +5312,7 @@ function closeXmlReader30NfeColumnMenu() {
   }
 
   state.xmlReader30.columnMenuOpenKey = null;
+  state.xmlReader30.columnMenuAnchor = null;
 }
 
 function expandXmlReader30NfeRows(rows) {
@@ -5423,7 +5504,9 @@ function resetXmlReader30Search() {
     nfeColumnOrder,
     hiddenNfeColumns,
     selectionDrag: null,
+    scrollDrag: null,
     columnMenuOpenKey: null,
+    columnMenuAnchor: null,
     columnDrag: null
   };
   state.selectedXmlReaderIds = new Set();
@@ -6182,7 +6265,9 @@ function resetXmlReader30SearchLegacyUnused() {
     nfeColumnOrder,
     hiddenNfeColumns,
     selectionDrag: null,
+    scrollDrag: null,
     columnMenuOpenKey: null,
+    columnMenuAnchor: null,
     columnDrag: null
   };
   state.tableState.xmlReader30 = 'data';

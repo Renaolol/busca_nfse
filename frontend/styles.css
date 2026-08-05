@@ -1032,6 +1032,18 @@ textarea:focus-visible,
   overflow-x: auto;
 }
 
+.xml-reader30-pan-scroll {
+  cursor: grab;
+  user-select: none;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+}
+
+.xml-reader30-pan-scroll.is-panning {
+  cursor: grabbing;
+}
+
 .xml-batch-bar {
   display: flex;
   align-items: flex-start;
@@ -1225,6 +1237,13 @@ tbody tr:hover {
   flex: 1 1 auto;
 }
 
+.xml-reader30-column-title-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .xml-reader30-column-menu-wrap {
   position: relative;
   flex: 0 0 auto;
@@ -1248,10 +1267,8 @@ tbody tr:hover {
 }
 
 .xml-reader30-column-menu-panel {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 15;
+  position: fixed;
+  z-index: 999;
   min-width: 150px;
   padding: 6px;
   border: 1px solid var(--line-strong);
@@ -1278,14 +1295,13 @@ tbody tr:hover {
   color: var(--accent);
 }
 
-.xml-reader30-column-title input[data-action="xml-reader30-toggle-all"],
+.xml-reader30-select-all-checkbox,
 .xml-reader30-check > input[data-action="xml-reader30-toggle-all"] {
-  width: 12px;
-  height: 12px;
-  min-width: 12px;
-  min-height: 12px;
-  transform: scale(0.9);
-  transform-origin: center;
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  min-height: 15px;
+  transform: none;
 }
 
 .xml-reader30-column-header.is-dragging {
