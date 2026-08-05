@@ -309,20 +309,34 @@ export class NfseService {
         numeroNfse: { not: null }
       },
       select: {
+        id: true,
         clienteId: true,
         ambiente: true,
-        serie: true,
+        chaveAcesso: true,
+        hashXml: true,
         numeroNfse: true,
-        cnpjPrestador: true
+        serie: true,
+        dataEmissao: true,
+        cnpjPrestador: true,
+        razaoSocialPrestador: true,
+        cnpjTomador: true,
+        razaoSocialTomador: true,
+        valorServico: true,
+        xmlPath: true,
+        danfsePath: true,
+        createdAt: true,
+        updatedAt: true
       }
     });
 
     return clients
       .map((client) => {
         const cnpjConsulta = this.normalizeCnpj(client.cnpj);
-        const visibleDocuments = documents
+        const filteredDocuments = documents
           .filter((document) => document.clienteId === client.id)
-          .filter((document) => !cnpjConsulta || document.cnpjPrestador === cnpjConsulta)
+          .filter((document) => !cnpjConsulta || document.cnpjPrestador === cnpjConsulta);
+        const { items: uniqueDocuments } = this.deduplicateDocumentosForList(filteredDocuments);
+        const visibleDocuments = uniqueDocuments
           .map((document) => ({
             ambiente: document.ambiente,
             serie: document.serie,
@@ -707,21 +721,16 @@ export class NfseService {
   }
 
   private shouldValidateEmitidasNumbering(query: QueryNfseDto, cnpjConsulta?: string): boolean {
-    return Boolean(cnpjConsulta) && (query.tipoRelacao ?? 'ambas') === 'emitidas' && this.hasCompatibleSkippedNumberingFilters(query);
+    return Boolean(cnpjConsulta) && (query.tipoRelacao ?? 'ambas') === 'emitidas';
   }
 
   private buildSkippedNumberingValidationNotApplied(
     query: QueryNfseDto,
     cnpjConsulta?: string
   ): NfseNumeracaoValidation {
-    const motivo =
-      cnpjConsulta && (query.tipoRelacao ?? 'ambas') === 'emitidas' && !this.hasCompatibleSkippedNumberingFilters(query)
-        ? 'filtros_incompativeis'
-        : 'requer_consulta_emitidas';
-
     return {
       aplicada: false,
-      motivo,
+      motivo: 'requer_consulta_emitidas',
       cnpjPrestador: cnpjConsulta ?? null,
       totalDocumentosAnalisados: 0,
       totalNumerosValidos: 0,
@@ -730,22 +739,6 @@ export class NfseService {
       possuiNumeracaoPulada: false,
       lacunas: []
     };
-  }
-
-  private hasCompatibleSkippedNumberingFilters(query: QueryNfseDto): boolean {
-    return !(
-      query.cnpjPrestador ||
-      query.cnpjTomador ||
-      query.status ||
-      query.valorMin !== undefined ||
-      query.valorMax !== undefined ||
-      query.cnpj ||
-      query.numeroNfse ||
-      query.municipio ||
-      query.downloadInicio ||
-      query.downloadFim ||
-      query.statusArmazenamento
-    );
   }
 
   private buildNfseNumberingValidation(

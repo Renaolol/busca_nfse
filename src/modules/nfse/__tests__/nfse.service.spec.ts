@@ -408,32 +408,99 @@ describe('NfseService', () => {
     ]);
     prisma.nfseDocumento.findMany.mockResolvedValue([
       {
+        id: 'doc-cliente-1-55',
         clienteId: 'cliente-1',
         ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000005526019687178145',
+        hashXml: 'hash-55',
         serie: '900',
         numeroNfse: '55',
-        cnpjPrestador: '06960810000176'
+        dataEmissao: new Date('2026-01-31T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Empresa A',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador 1',
+        valorServico: new Prisma.Decimal('10'),
+        xmlPath: 'nfse/a/55.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-08-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-01T00:00:00.000Z')
       },
       {
+        id: 'doc-cliente-1-57',
         clienteId: 'cliente-1',
         ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000005726019687178147',
+        hashXml: 'hash-57',
         serie: '70000',
         numeroNfse: '57',
-        cnpjPrestador: '06960810000176'
+        dataEmissao: new Date('2026-02-01T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Empresa A',
+        cnpjTomador: '22222222000122',
+        razaoSocialTomador: 'Tomador 2',
+        valorServico: new Prisma.Decimal('20'),
+        xmlPath: 'nfse/a/57.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-08-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-01T00:00:00.000Z')
       },
       {
+        id: 'doc-cliente-2-10',
         clienteId: 'cliente-2',
         ambiente: Ambiente.producao,
+        chaveAcesso: '42110092106520540001950000000000001026021306550810',
+        hashXml: 'hash-10',
         serie: '1',
         numeroNfse: '10',
-        cnpjPrestador: '10652054000195'
+        dataEmissao: new Date('2026-02-01T00:00:00.000Z'),
+        cnpjPrestador: '10652054000195',
+        razaoSocialPrestador: 'Empresa B',
+        cnpjTomador: '33333333000133',
+        razaoSocialTomador: 'Tomador 3',
+        valorServico: new Prisma.Decimal('30'),
+        xmlPath: 'nfse/b/10.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-08-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-01T00:00:00.000Z')
       },
       {
+        id: 'doc-cliente-2-11',
         clienteId: 'cliente-2',
         ambiente: Ambiente.producao,
+        chaveAcesso: '42110092106520540001950000000000001126021306550811',
+        hashXml: 'hash-11',
         serie: '2',
         numeroNfse: '11',
-        cnpjPrestador: '10652054000195'
+        dataEmissao: new Date('2026-02-02T00:00:00.000Z'),
+        cnpjPrestador: '10652054000195',
+        razaoSocialPrestador: 'Empresa B',
+        cnpjTomador: '44444444000144',
+        razaoSocialTomador: 'Tomador 4',
+        valorServico: new Prisma.Decimal('40'),
+        xmlPath: 'nfse/b/11.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-08-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-01T00:00:00.000Z')
+      },
+      {
+        id: 'doc-cliente-2-11-dup',
+        clienteId: 'cliente-2',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092106520540001950000000000001126021306550811',
+        hashXml: 'hash-11-dup',
+        serie: '2',
+        numeroNfse: '11',
+        dataEmissao: new Date('2026-02-02T00:00:00.000Z'),
+        cnpjPrestador: '10652054000195',
+        razaoSocialPrestador: 'Empresa B',
+        cnpjTomador: '44444444000144',
+        razaoSocialTomador: 'Tomador 4',
+        valorServico: new Prisma.Decimal('40'),
+        xmlPath: 'nfse/b/11-new.xml',
+        danfsePath: 'nfse/b/11-new.pdf',
+        createdAt: new Date('2026-08-02T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-02T00:00:00.000Z')
       }
     ]);
 
@@ -459,6 +526,69 @@ describe('NfseService', () => {
         ]
       }
     ]);
+  });
+
+  it('valida numeracao emitida mesmo com o filtro padrao de armazenado', async () => {
+    prisma.nfseDocumento.count.mockResolvedValueOnce(2);
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-emitida-83',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '421100921065205400019500900000000000000083426019600070931',
+        numeroNfse: '83',
+        serie: '900',
+        dataEmissao: new Date('2026-07-01T00:00:00.000Z'),
+        cnpjPrestador: '10652054000195',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador 1',
+        xmlPath: 'nfse/producao/10652054000195/2026/07/xml/doc-83.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-08-05T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-05T00:00:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-emitida-84',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '421100921065205400019500900000000000000084426019600070932',
+        numeroNfse: '84',
+        serie: '70000',
+        dataEmissao: new Date('2026-07-02T00:00:00.000Z'),
+        cnpjPrestador: '10652054000195',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '22222222000122',
+        razaoSocialTomador: 'Tomador 2',
+        xmlPath: 'nfse/producao/10652054000195/2026/07/xml/doc-84.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-08-05T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-05T00:00:00.000Z'),
+        eventos: []
+      }
+    ]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '10652054000195',
+      tipoRelacao: 'emitidas',
+      statusArmazenamento: 'Armazenado',
+      all: true
+    });
+
+    expect(result.validacaoNumeracao).toEqual({
+      aplicada: true,
+      cnpjPrestador: '10652054000195',
+      totalDocumentosAnalisados: 2,
+      totalNumerosValidos: 2,
+      totalFaixasLacuna: 0,
+      totalNumerosPulados: 0,
+      possuiNumeracaoPulada: false,
+      lacunas: []
+    });
   });
 
   it('colapsa duplicatas legadas por ambiente e chave_acesso na listagem ampla', async () => {
