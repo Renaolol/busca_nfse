@@ -18,7 +18,13 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'quantidade',
   'valorUnitario',
   'valorTotal',
-  'valorTotalNfXml'
+  'valorTotalNfXml',
+  'icmsStRet',
+  'cstCsosn',
+  'cfop',
+  'baseCalculoIcms',
+  'aliquotaIcms',
+  'valorIcms'
 ];
 const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
@@ -202,7 +208,9 @@ const state = {
     nfeColumnOrder: loadXmlReader30NfeColumnOrderStore(),
     hiddenNfeColumns: new Set(),
     selectionDrag: null,
+    scrollDrag: null,
     columnMenuOpenKey: null,
+    columnMenuAnchor: null,
     columnDrag: null
   },
   alerts: [],
@@ -510,6 +518,7 @@ function wireGlobalEvents() {
   document.addEventListener('submit', onDocumentSubmit);
   document.addEventListener('change', onDocumentChange);
   document.addEventListener('mousedown', onDocumentMouseDown);
+  document.addEventListener('mousemove', onDocumentMouseMove);
   document.addEventListener('mouseover', onDocumentMouseOver);
   document.addEventListener('mouseup', onDocumentMouseUp);
   document.addEventListener('dragstart', onDocumentDragStart);
@@ -538,6 +547,10 @@ function onDocumentClick(event) {
   }
 
   if (action === 'alert-toggle-resolved') {
+    return;
+  }
+
+  if (action === 'xml-reader30-select' || action === 'xml-reader30-toggle-all') {
     return;
   }
 
@@ -587,7 +600,7 @@ function onDocumentClick(event) {
       if (!columnKey) {
         return;
       }
-      toggleXmlReader30NfeColumnMenu(columnKey);
+      toggleXmlReader30NfeColumnMenu(columnKey, actionNode);
       return;
     }
     case 'xml-reader30-column-menu-hide': {
@@ -1684,6 +1697,30 @@ function onDocumentChange(event) {
     return;
   }
 
+  const action = target.getAttribute('data-action');
+  if (action === 'xml-reader30-select') {
+    const selectionKey = target.getAttribute('data-selection-key');
+    if (!selectionKey) {
+      return;
+    }
+    setXmlReader30Selection(selectionKey, target.checked);
+    render();
+    return;
+  }
+
+  if (action === 'xml-reader30-toggle-all') {
+    const checked = target.checked;
+    getXmlReader30SelectionRows().forEach((row) => {
+      const selectionKey = getXmlReader30SelectionKey(row);
+      if (!selectionKey) {
+        return;
+      }
+      setXmlReader30Selection(selectionKey, checked);
+    });
+    render();
+    return;
+  }
+
   if (target.id === 'clientsFilterStatusBusca') {
     state.filters.clients.statusBusca = target.value;
   }
@@ -1706,6 +1743,19 @@ function onDocumentMouseDown(event) {
     return;
   }
 
+  const panWrap = event.target.closest?.('[data-action="xml-reader30-pan-scroll"]');
+  if (panWrap instanceof HTMLElement && !event.target.closest?.('input, button, a, select, textarea, [data-action="xml-reader30-column-drag"]')) {
+    state.xmlReader30.scrollDrag = {
+      active: true,
+      startX: event.clientX,
+      startScrollLeft: panWrap.scrollLeft,
+      wrap: panWrap
+    };
+    panWrap.classList.add('is-panning');
+    event.preventDefault();
+    return;
+  }
+
   const target = event.target.closest?.('[data-action="xml-reader30-select"]');
   if (!(target instanceof HTMLInputElement) || target.disabled) {
     return;
@@ -1720,6 +1770,28 @@ function onDocumentMouseDown(event) {
     active: true,
     checked: !target.checked
   };
+}
+
+function onDocumentMouseMove(event) {
+  const scrollDrag = state.xmlReader30.scrollDrag;
+  if (!scrollDrag?.active) {
+    return;
+  }
+
+  if (event.buttons !== 1) {
+    stopXmlReader30ScrollDrag();
+    return;
+  }
+
+  const wrap = scrollDrag.wrap;
+  if (!(wrap instanceof HTMLElement)) {
+    stopXmlReader30ScrollDrag();
+    return;
+  }
+
+  const deltaX = event.clientX - scrollDrag.startX;
+  wrap.scrollLeft = scrollDrag.startScrollLeft - deltaX;
+  event.preventDefault();
 }
 
 function onDocumentMouseOver(event) {
@@ -1743,12 +1815,26 @@ function onDocumentMouseOver(event) {
 }
 
 function onDocumentMouseUp() {
+  stopXmlReader30ScrollDrag();
+
   if (!state.xmlReader30.selectionDrag?.active) {
     return;
   }
 
   state.xmlReader30.selectionDrag = null;
-  render();
+}
+
+function stopXmlReader30ScrollDrag() {
+  const scrollDrag = state.xmlReader30.scrollDrag;
+  if (!scrollDrag?.active) {
+    return;
+  }
+
+  if (scrollDrag.wrap instanceof HTMLElement) {
+    scrollDrag.wrap.classList.remove('is-panning');
+  }
+
+  state.xmlReader30.scrollDrag = null;
 }
 
 function onDocumentDragStart(event) {
@@ -4644,8 +4730,6 @@ function renderXmlReader30Section() {
   const reader = state.xmlReader30;
   const hasClients = state.clients.length > 0;
   const currentCount = Number(reader.total || reader.results.length || 0);
-  const currentType = reader.lastQuery?.documento || 'todos';
-  const currentTypeLabel = mapXmlReader30TypeLabel(currentType);
   const results = Array.isArray(reader.results) ? reader.results : [];
   const summary = reader.hasSearched && reader.lastQuery ? renderXmlReader30Summary() : '';
 
@@ -4660,20 +4744,11 @@ function renderXmlReader30Section() {
       </div>
 
       <form id="xmlReader30Form" class="form-grid compare-form">
-        <label class="field">
+        <label class="field compare-span-2">
           Empresa
           <select name="cliente" required ${hasClients ? '' : 'disabled'}>
             ${renderOptions(state.clients.map((client) => client.id), reader.lastQuery?.cliente || '', mapClientOptions(), 'Selecione a empresa')}
           </select>
-        </label>
-        <label class="field">
-          Documento
-          <select name="documento">${renderOptions(['todos', 'nfse', 'nfe', 'cte'], currentType, {
-            todos: 'Todos',
-            nfse: 'NFS-e',
-            nfe: 'NF-e',
-            cte: 'CT-e'
-          })}</select>
         </label>
         <label class="field">
           Emissao inicio
@@ -4687,15 +4762,15 @@ function renderXmlReader30Section() {
           Busca livre
           <input name="texto" placeholder="Chave, número, CNPJ, cliente, status..." value="${escapeHtml(reader.lastQuery?.texto || '')}" />
         </label>
-        <label class="field">
+        <label class="field compare-span-2">
           Status
-          <input value="${escapeHtml(reader.hasSearched ? `Pronto para consultar ${currentTypeLabel}` : 'Aguardando busca')}" disabled />
+          <input value="${escapeHtml(reader.hasSearched ? 'Pronto para consultar NF-e' : 'Aguardando busca')}" disabled />
         </label>
-        <div class="compare-upload-hint compare-span-3">
+        <div class="compare-upload-hint compare-span-4">
           <span class="compare-upload-dot"></span>
           <span>O leitor consulta o acervo interno ja carregado pelo Nota Sync e abre o XML bruto no visualizador padrao.</span>
         </div>
-        <div class="stack-actions compare-actions compare-span-3">
+        <div class="stack-actions compare-actions compare-span-4">
           <button class="btn primary" type="submit" ${hasClients ? '' : 'disabled'}>Buscar XML</button>
           <button class="btn secondary" type="button" data-action="xmlReader30-clear" ${reader.hasSearched || reader.lastQuery ? '' : 'disabled'}>Limpar</button>
         </div>
@@ -4728,7 +4803,6 @@ function renderXmlReader30Summary() {
     <article class="card" style="box-shadow:none; border-style:dashed; margin-top: 2px;">
       <div class="progress-meta">
         <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
-        <span>Documento: <strong>${escapeHtml(mapXmlReader30TypeLabel(query.documento || 'todos'))}</strong></span>
         <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
         <span>Resultado: <strong>${escapeHtml(String(state.xmlReader30.total || state.xmlReader30.results.length || 0))} XML(s)</strong></span>
         <span>Acervo lido: <strong>${escapeHtml(formatXmlReader30SourceTotals(state.xmlReader30.sourceTotals))}</strong></span>
@@ -4939,10 +5013,10 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
         </div>
         <div class="stack-mini" style="align-items:flex-end;">
           ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
-          <span class="row-sub">Arraste os cabecalhos para reorganizar as colunas. Cada produto aparece em uma linha.</span>
+          <span class="row-sub">Arraste os cabecalhos para reorganizar as colunas. Arraste a tabela para os lados para ver todas as colunas.</span>
         </div>
       </div>
-      <div class="table-wrap">
+      <div class="table-wrap xml-reader30-pan-scroll">
         <table class="xml-reader30-table xml-reader30-reorderable-table" style="min-width: ${minWidth}px;">
           <thead>
             <tr>
@@ -4950,7 +5024,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                 .map(
                   (column, index) => `
                     <th
-                      class="xml-reader30-column-header"
+                      class="xml-reader30-column-header ${column.key === 'select' ? 'xml-reader30-column-header-select' : ''}"
                       data-action="xml-reader30-column-drag"
                       data-column-key="${escapeHtml(column.key)}"
                       data-column-index="${index}"
@@ -4961,7 +5035,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                         <span class="xml-reader30-column-title">
                           ${
                             column.key === 'select'
-                              ? `<input type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />`
+                              ? `<span class="xml-reader30-column-title-select">Checkbox</span><input class="xml-reader30-select-all-checkbox" type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />`
                               : column.headerHtml || escapeHtml(column.label)
                           }
                         </span>
@@ -4978,7 +5052,12 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                           ${
                             state.xmlReader30.columnMenuOpenKey === column.key
                               ? `
-                                <div class="xml-reader30-column-menu-panel" role="menu" aria-label="Menu da coluna ${escapeHtml(column.label)}">
+                                <div
+                                  class="xml-reader30-column-menu-panel"
+                                  role="menu"
+                                  aria-label="Menu da coluna ${escapeHtml(column.label)}"
+                                  style="top:${escapeHtml(String(state.xmlReader30.columnMenuAnchor?.top ?? 8))}px; left:${escapeHtml(String(state.xmlReader30.columnMenuAnchor?.left ?? 8))}px;"
+                                >
                                   <button
                                     type="button"
                                     class="xml-reader30-column-menu-item"
@@ -5049,7 +5128,7 @@ function getXmlReader30NfeColumnDefinitions() {
   return [
     {
       key: 'select',
-      label: 'Selecionar',
+      label: 'Checkbox',
       headerHtml: '<input type="checkbox" data-action="xml-reader30-toggle-all" aria-label="Selecionar todos os XMLs do leitor" />',
       className: 'xml-reader30-check',
       html: true,
@@ -5179,10 +5258,14 @@ function formatXmlReader30UnitValue(value) {
 }
 
 function formatXmlReader30DecimalValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return '0';
+  }
+
   const normalizedValue = typeof value === 'string' ? value.replace(',', '.').trim() : value;
   const numericValue = Number(normalizedValue);
   if (!Number.isFinite(numericValue)) {
-    return value ? String(value) : '-';
+    return '0';
   }
 
   return numericValue
@@ -5191,11 +5274,29 @@ function formatXmlReader30DecimalValue(value) {
     .replace(/(\.\d)0$/, '$1');
 }
 
-function formatXmlReader30CurrencyValue(value) {
+function formatXmlReader30QuantityValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return '0.00';
+  }
+
   const normalizedValue = typeof value === 'string' ? value.replace(',', '.').trim() : value;
   const numericValue = Number(normalizedValue);
   if (!Number.isFinite(numericValue)) {
-    return value ? String(value) : '-';
+    return '0.00';
+  }
+
+  return numericValue.toFixed(2);
+}
+
+function formatXmlReader30CurrencyValue(value) {
+  if (value === null || value === undefined || value === '') {
+    return '0';
+  }
+
+  const normalizedValue = typeof value === 'string' ? value.replace(',', '.').trim() : value;
+  const numericValue = Number(normalizedValue);
+  if (!Number.isFinite(numericValue)) {
+    return '0';
   }
 
   return formatCurrency(numericValue);
@@ -5216,13 +5317,35 @@ function hideXmlReader30NfeColumn(columnKey) {
   render();
 }
 
-function toggleXmlReader30NfeColumnMenu(columnKey) {
+function toggleXmlReader30NfeColumnMenu(columnKey, anchorNode) {
   const normalizedKey = String(columnKey || '').trim();
   if (!normalizedKey) {
     return;
   }
 
-  state.xmlReader30.columnMenuOpenKey = state.xmlReader30.columnMenuOpenKey === normalizedKey ? null : normalizedKey;
+  if (state.xmlReader30.columnMenuOpenKey === normalizedKey) {
+    closeXmlReader30NfeColumnMenu();
+    render();
+    return;
+  }
+
+  const rect = anchorNode instanceof HTMLElement ? anchorNode.getBoundingClientRect() : null;
+  if (rect) {
+    const estimatedWidth = 164;
+    const left = Math.min(window.innerWidth - estimatedWidth - 8, Math.max(8, rect.right - estimatedWidth));
+    const top = Math.min(window.innerHeight - 12, rect.bottom + 6);
+    state.xmlReader30.columnMenuAnchor = {
+      left,
+      top
+    };
+  } else {
+    state.xmlReader30.columnMenuAnchor = {
+      left: 8,
+      top: 8
+    };
+  }
+
+  state.xmlReader30.columnMenuOpenKey = normalizedKey;
   render();
 }
 
@@ -5232,6 +5355,7 @@ function closeXmlReader30NfeColumnMenu() {
   }
 
   state.xmlReader30.columnMenuOpenKey = null;
+  state.xmlReader30.columnMenuAnchor = null;
 }
 
 function expandXmlReader30NfeRows(rows) {
@@ -5257,10 +5381,20 @@ function expandXmlReader30NfeRows(rows) {
           statusTone: baseStatusTone,
           dataEmissaoLabel: baseDataEmissao,
           produto: row.productLabel || '-',
-          quantidade: '-',
+          quantidade: '0.00',
           valorUnitario: '-',
           valorTotal: '-',
-          valorTotalNfXml: baseValorTotal
+          valorTotalNfXml: baseValorTotal,
+          icmsStRet: '0',
+          icmsStRetRaw: '0',
+          cstCsosn: '0',
+          cfop: '0',
+          baseCalculoIcms: '0',
+          baseCalculoIcmsRaw: '0',
+          aliquotaIcms: '0',
+          aliquotaIcmsRaw: '0',
+          valorIcms: '0',
+          valorIcmsRaw: '0'
         }
       ];
     }
@@ -5273,10 +5407,20 @@ function expandXmlReader30NfeRows(rows) {
       statusTone: baseStatusTone,
       dataEmissaoLabel: baseDataEmissao,
       produto: item.description || '-',
-      quantidade: item.quantity || '-',
+      quantidade: formatXmlReader30QuantityValue(item.quantity),
       valorUnitario: item.unitValueRaw || item.unitValue || '-',
       valorTotal: item.totalValueRaw || item.totalValue || '-',
-      valorTotalNfXml: baseValorTotal
+      valorTotalNfXml: baseValorTotal,
+      icmsStRet: item.icmsStRet || '0',
+      icmsStRetRaw: item.icmsStRetRaw || '0',
+      cstCsosn: item.cstCsosn || '0',
+      cfop: item.cfop || '0',
+      baseCalculoIcms: item.baseCalculoIcms || '0',
+      baseCalculoIcmsRaw: item.baseCalculoIcmsRaw || '0',
+      aliquotaIcms: item.aliquotaIcms || '0',
+      aliquotaIcmsRaw: item.aliquotaIcmsRaw || '0',
+      valorIcms: item.valorIcms || '0',
+      valorIcmsRaw: item.valorIcmsRaw || '0'
     }));
   });
 }
@@ -5423,7 +5567,9 @@ function resetXmlReader30Search() {
     nfeColumnOrder,
     hiddenNfeColumns,
     selectionDrag: null,
+    scrollDrag: null,
     columnMenuOpenKey: null,
+    columnMenuAnchor: null,
     columnDrag: null
   };
   state.selectedXmlReaderIds = new Set();
@@ -5437,7 +5583,7 @@ async function submitXmlReader30Form(form) {
 async function executeXmlReader30Search(form) {
   const data = new FormData(form);
   const cliente = String(data.get('cliente') || '').trim();
-  const documento = String(data.get('documento') || 'todos').trim();
+  const documento = 'nfe';
   const emissaoInicio = String(data.get('emissaoInicio') || '').trim();
   const emissaoFim = String(data.get('emissaoFim') || '').trim();
   const texto = String(data.get('texto') || '').trim();
@@ -6182,7 +6328,9 @@ function resetXmlReader30SearchLegacyUnused() {
     nfeColumnOrder,
     hiddenNfeColumns,
     selectionDrag: null,
+    scrollDrag: null,
     columnMenuOpenKey: null,
+    columnMenuAnchor: null,
     columnDrag: null
   };
   state.tableState.xmlReader30 = 'data';
@@ -8009,16 +8157,16 @@ function renderDocumentInsightsSection(documentType, doc) {
       statusNf: resolveNfeLineItemStatusLabel(doc),
       dataEmissao: formatDate(doc.dataEmissao),
       produto: item.description || '-',
-      quantidade: item.quantity || '-',
+      quantidade: formatXmlReader30QuantityValue(item.quantity),
       valorUnitario: item.unitValue || '-',
       valorTotal: item.totalValue || '-',
       valorTotalNfXml: formatOptionalCurrency(doc.valor),
-      icmsStRet: item.icmsStRet || '-',
-      cstCsosn: item.cstCsosn || '-',
-      cfop: item.cfop || '-',
-      baseCalculoIcms: item.baseCalculoIcms || '-',
-      aliquotaIcms: item.aliquotaIcms || '-',
-      valorIcms: item.valorIcms || '-'
+      icmsStRet: item.icmsStRet || '0',
+      cstCsosn: item.cstCsosn || '0',
+      cfop: item.cfop || '0',
+      baseCalculoIcms: item.baseCalculoIcms || '0',
+      aliquotaIcms: item.aliquotaIcms || '0',
+      valorIcms: item.valorIcms || '0'
     }));
 
     return renderDocumentInsightsBlock(
@@ -8155,6 +8303,22 @@ function getXmlText(parent, localName) {
   return String(node?.textContent || '').trim();
 }
 
+function getFirstXmlText(parents, localNames) {
+  const nodes = (Array.isArray(parents) ? parents : []).filter(Boolean);
+  const tags = Array.isArray(localNames) ? localNames : [];
+
+  for (const parent of nodes) {
+    for (const localName of tags) {
+      const value = getXmlText(parent, localName);
+      if (value) {
+        return value;
+      }
+    }
+  }
+
+  return '';
+}
+
 function extractNfeLineItems(xmlString) {
   const xml = parseXmlDocumentSafe(xmlString);
   if (!xml) {
@@ -8190,24 +8354,24 @@ function extractNfeLineItemTaxValues(detNode, prodNode) {
   const icmsGroupNode = icmsNode
     ? Array.from(icmsNode.children || []).find((node) => node && node.nodeType === 1) || null
     : null;
-  const icmsSourceNode = icmsGroupNode || icmsNode || null;
-  const cstCsosn = getXmlText(icmsSourceNode, 'CST') || getXmlText(icmsSourceNode, 'CSOSN') || '-';
-  const icmsStRet = getXmlText(icmsSourceNode, 'vICMSSTRet') || getXmlText(icmsSourceNode, 'vICMSST') || '';
-  const baseCalculoIcms = getXmlText(icmsSourceNode, 'vBC') || '';
-  const aliquotaIcms = getXmlText(icmsSourceNode, 'pICMS') || '';
-  const valorIcms = getXmlText(icmsSourceNode, 'vICMS') || '';
+  const icmsSourceNodes = [icmsGroupNode, icmsNode, impostoNode, detNode, prodNode].filter(Boolean);
+  const cstCsosn = getFirstXmlText(icmsSourceNodes, ['CST', 'CSOSN']) || '0';
+  const icmsStRet = getFirstXmlText(icmsSourceNodes, ['vICMSSTRet', 'vICMSST', 'vBCSTRet']) || '0';
+  const baseCalculoIcms = getFirstXmlText(icmsSourceNodes, ['vBC', 'vBCST', 'vBCSTRet', 'vBCUFDest']) || '0';
+  const aliquotaIcms = getFirstXmlText(icmsSourceNodes, ['pICMS', 'pST', 'pICMSST', 'pICMSInter', 'pICMSInterPart']) || '0';
+  const valorIcms = getFirstXmlText(icmsSourceNodes, ['vICMS', 'vICMSST', 'vICMSDif', 'vICMSDeson']) || '0';
 
   return {
     cstCsosn,
-    cfop: getXmlText(prodNode, 'CFOP') || '-',
+    cfop: getFirstXmlText([prodNode, icmsGroupNode, icmsNode, impostoNode, detNode], ['CFOP']) || '0',
     icmsStRet: formatXmlReader30CurrencyValue(icmsStRet),
-    icmsStRetRaw: icmsStRet || '-',
+    icmsStRetRaw: icmsStRet || '0',
     baseCalculoIcms: formatXmlReader30DecimalValue(baseCalculoIcms),
-    baseCalculoIcmsRaw: baseCalculoIcms || '-',
+    baseCalculoIcmsRaw: baseCalculoIcms || '0',
     aliquotaIcms: formatXmlReader30DecimalValue(aliquotaIcms),
-    aliquotaIcmsRaw: aliquotaIcms || '-',
+    aliquotaIcmsRaw: aliquotaIcms || '0',
     valorIcms: formatXmlReader30DecimalValue(valorIcms),
-    valorIcmsRaw: valorIcms || '-'
+    valorIcmsRaw: valorIcms || '0'
   };
 }
 

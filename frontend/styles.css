@@ -841,6 +841,15 @@ textarea:focus-visible,
   max-width: 680px;
 }
 
+.compare-reader-card {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.compare-reader-card .compare-form {
+  margin-top: 14px;
+}
+
 .compare-form {
   align-items: start;
 }
@@ -885,6 +894,10 @@ textarea:focus-visible,
 
 .compare-span-3 {
   grid-column: span 3;
+}
+
+.compare-span-4 {
+  grid-column: 1 / -1;
 }
 
 .compare-upload-hint {
@@ -1032,6 +1045,20 @@ textarea:focus-visible,
   overflow-x: auto;
 }
 
+.xml-reader30-pan-scroll {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-behavior: smooth;
+  max-width: 100%;
+  overscroll-behavior-x: contain;
+}
+
+.xml-reader30-pan-scroll.is-panning {
+  cursor: default;
+}
+
 .xml-batch-bar {
   display: flex;
   align-items: flex-start;
@@ -1126,18 +1153,25 @@ tbody tr:hover {
 }
 
 .xml-reader30-check {
-  width: 38px;
+  width: 44px;
   text-align: center;
 }
 
-.xml-reader30-check input {
-  width: 15px;
-  height: 15px;
+.xml-reader30-check input[data-action="xml-reader30-select"] {
+  width: 18px;
+  height: 18px;
   cursor: pointer;
 }
 
 .xml-reader30-doc {
-  min-width: 170px;
+  min-width: 320px;
+  white-space: nowrap;
+}
+
+.xml-reader30-quantity {
+  min-width: 96px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .xml-reader30-company {
@@ -1172,8 +1206,9 @@ tbody tr:hover {
 }
 
 .xml-reader30-product {
-  min-width: 220px;
-  max-width: 300px;
+  min-width: 320px;
+  max-width: 420px;
+  white-space: nowrap;
 }
 
 .xml-reader30-table .table-actions {
@@ -1186,14 +1221,14 @@ tbody tr:hover {
 }
 
 .xml-reader30-check {
-  width: 54px;
-  min-width: 54px;
+  width: 44px;
+  min-width: 44px;
   text-align: center;
 }
 
-.xml-reader30-check input {
-  width: 15px;
-  height: 15px;
+.xml-reader30-check input[data-action="xml-reader30-select"] {
+  width: 18px;
+  height: 18px;
   cursor: pointer;
 }
 
@@ -1218,11 +1253,27 @@ tbody tr:hover {
   min-width: 0;
 }
 
+.xml-reader30-column-header-select {
+  min-width: 110px;
+}
+
+.xml-reader30-column-header-select .xml-reader30-column-header-inner {
+  justify-content: flex-start;
+  gap: 4px;
+}
+
 .xml-reader30-column-title {
   display: inline-flex;
   align-items: center;
   min-width: 0;
   flex: 1 1 auto;
+}
+
+.xml-reader30-column-title-select {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
 .xml-reader30-column-menu-wrap {
@@ -1248,10 +1299,8 @@ tbody tr:hover {
 }
 
 .xml-reader30-column-menu-panel {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 15;
+  position: fixed;
+  z-index: 999;
   min-width: 150px;
   padding: 6px;
   border: 1px solid var(--line-strong);
@@ -1278,14 +1327,13 @@ tbody tr:hover {
   color: var(--accent);
 }
 
-.xml-reader30-column-title input[data-action="xml-reader30-toggle-all"],
+.xml-reader30-select-all-checkbox,
 .xml-reader30-check > input[data-action="xml-reader30-toggle-all"] {
-  width: 12px;
-  height: 12px;
-  min-width: 12px;
-  min-height: 12px;
-  transform: scale(0.9);
-  transform-origin: center;
+  width: 15px;
+  height: 15px;
+  min-width: 15px;
+  min-height: 15px;
+  transform: none;
 }
 
 .xml-reader30-column-header.is-dragging {
@@ -1932,7 +1980,8 @@ textarea {
   }
 
   .compare-span-2,
-  .compare-span-3 {
+  .compare-span-3,
+  .compare-span-4 {
     grid-column: span 2;
   }
 }
