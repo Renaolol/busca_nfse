@@ -1172,14 +1172,15 @@ tbody tr:hover {
 }
 
 .xml-reader30-doc {
-  width: 480px;
-  min-width: 480px;
+  width: 420px;
+  min-width: 420px;
+  max-width: 520px;
   white-space: nowrap;
 }
 
 .xml-reader30-quantity {
-  width: 88px;
-  min-width: 88px;
+  width: 72px;
+  min-width: 72px;
   text-align: center;
   white-space: nowrap;
 }
@@ -1216,9 +1217,9 @@ tbody tr:hover {
 }
 
 .xml-reader30-product {
-  width: 280px;
-  min-width: 280px;
-  max-width: 320px;
+  width: 420px;
+  min-width: 420px;
+  max-width: 520px;
   white-space: nowrap;
 }
 
@@ -1379,7 +1380,16 @@ tbody tr:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   vertical-align: top;
-  padding: 6px 8px;
+  padding: 3px 8px;
+  line-height: 1.15;
+}
+
+.xml-reader30-reorderable-table tbody td {
+  font-weight: 700;
+}
+
+.xml-reader30-reorderable-table tbody td.xml-reader30-date {
+  font-weight: 400;
 }
 
 .xml-reader30-reorderable-table .xml-reader30-doc,
