@@ -5425,7 +5425,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
   const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
   const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
   const visibleColumns = getXmlReader30VisibleNfeColumns();
-  const minWidth = 180 + visibleColumns.length * 95;
+  const minWidth = visibleColumns.reduce((total, column) => total + getXmlReader30NfeColumnMinWidth(column.key), 0);
 
   return `
     <article class="card" style="margin-top: 2px;">
@@ -5458,7 +5458,12 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                         <span class="xml-reader30-column-title">
                           ${
                             column.key === 'select'
-                              ? `<span class="xml-reader30-column-title-select">Checkbox</span><input class="xml-reader30-select-all-checkbox" type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />`
+                              ? `
+                                <span class="xml-reader30-select-header-content">
+                                  <span class="xml-reader30-column-title-select">Checkbox</span>
+                                  <input class="xml-reader30-select-all-checkbox" type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />
+                                </span>
+                              `
                               : column.key === 'numeroNf' || column.key === 'dataEmissao'
                                 ? renderXmlReader30SortHeader(column.key, column.label)
                                 : column.headerHtml || escapeHtml(column.label)
@@ -5581,7 +5586,7 @@ function getXmlReader30NfeColumnDefinitions() {
     {
       key: 'produto',
       label: 'Produto',
-      className: 'xml-reader30-doc',
+      className: 'xml-reader30-product',
       html: true,
       render: (row) => `<span class="row-title">${escapeHtml(row.produto || '-')}</span>`
     },
@@ -5665,6 +5670,43 @@ function renderXmlReader30NfeColumnCell(column, row, statusTone) {
   }
 
   return `<td class="${escapeHtml(column.className || '')}">${escapeHtml(String(value ?? '-'))}</td>`;
+}
+
+function getXmlReader30NfeColumnMinWidth(columnKey) {
+  switch (columnKey) {
+    case 'select':
+      return 44;
+    case 'numeroNf':
+      return 110;
+    case 'statusNf':
+      return 118;
+    case 'dataEmissao':
+      return 125;
+    case 'produto':
+      return 620;
+    case 'quantidade':
+      return 84;
+    case 'valorUnitario':
+      return 118;
+    case 'valorTotal':
+      return 118;
+    case 'valorTotalNfXml':
+      return 148;
+    case 'icmsStRet':
+      return 118;
+    case 'cstCsosn':
+      return 92;
+    case 'cfop':
+      return 84;
+    case 'baseCalculoIcms':
+      return 116;
+    case 'aliquotaIcms':
+      return 108;
+    case 'valorIcms':
+      return 108;
+    default:
+      return 110;
+  }
 }
 
 function formatXmlReader30UnitValue(value) {
