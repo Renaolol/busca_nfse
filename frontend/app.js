@@ -5230,13 +5230,12 @@ function renderXmlReader30Summary() {
   }
 
   const totals = getXmlReader30NfeSummaryTotals(Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : []);
-  // Conta o total de notas/XMLs retornados pela busca, nao as linhas itemizadas da tabela.
-  const totalNotasPeriodo = Number(state.xmlReader30.total || state.xmlReader30.results.length || 0);
+  const totalNotasPeriodo = countXmlReader30NfeNotes(Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : []);
 
   return `
     <article class="card" style="box-shadow:none; border-style:dashed; margin-top: 2px;">
       <div class="xml-reader30-summary-meta">
-        <span>Total de notas no período: <strong>${escapeHtml(String(totalNotasPeriodo))} XML(s)</strong></span>
+        <span>Total de notas no período: <strong>${escapeHtml(String(totalNotasPeriodo))} nota(s)</strong></span>
         <span>Valor Total das notas: <strong>${escapeHtml(formatCurrency(totals.totalNotasValue))}</strong></span>
         <span>Valor Total ICMS: <strong>${escapeHtml(formatCurrency(totals.totalIcmsValue))}</strong></span>
         <span>Valor ICMS Monofasico: <strong>${escapeHtml(formatCurrency(totals.totalIcmsMonofasicoValue))}</strong></span>
@@ -6222,6 +6221,30 @@ function expandXmlReader30NfeRows(rows) {
   });
 }
 
+function countXmlReader30NfeNotes(rows) {
+  const seenKeys = new Set();
+
+  for (const row of expandXmlReader30NfeRows(rows)) {
+    if (!row || row.documentType !== 'nfe') {
+      continue;
+    }
+
+    const raw = row.raw || row;
+    const key =
+      String(raw?.chaveAcesso || raw?.apiNfeId || raw?.id || '')
+        .trim() ||
+      `${String(raw?.numeroNfe || row.numeroNf || '').trim()}|${String(raw?.serie || '').trim()}|${String(raw?.dataEmissao || row.dataEmissao || '').trim()}`;
+
+    if (!key || seenKeys.has(key)) {
+      continue;
+    }
+
+    seenKeys.add(key);
+  }
+
+  return seenKeys.size;
+}
+
 function getXmlReader30NfeSummaryTotals(rows) {
   const sourceRows = Array.isArray(rows) ? rows : [];
   const invoiceRows = sourceRows.filter((row) => row?.documentType === 'nfe');
@@ -6467,7 +6490,7 @@ async function executeXmlReader30Search(form) {
     });
     const filtered = filterXmlReader30Results(sourceResponse.items, texto);
     state.xmlReader30.results = filtered;
-    state.xmlReader30.total = filtered.length;
+    state.xmlReader30.total = countXmlReader30NfeNotes(filtered);
     state.xmlReader30.sourceTotals = sourceResponse.sourceTotals;
     state.xmlReader30.lastSearchedAt = new Date().toISOString();
     state.tableState.xmlReader30 = 'data';
