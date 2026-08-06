@@ -1262,7 +1262,7 @@ textarea:focus-visible,
   inset: 0;
   align-items: stretch;
   justify-content: stretch;
-  background: rgba(8, 9, 12, 0.98);
+  background: rgba(15, 23, 42, 0.22);
   padding: 0;
 }
 
@@ -1275,23 +1275,7 @@ textarea:focus-visible,
   border-radius: 0;
   border: 0;
   box-shadow: none;
-  background: #0f1115;
-}
-
-.xml-reader30-fullscreen-modal .xml-reader30-reorderable-table thead th {
-  background: #171a21;
-  color: #e6e8ef;
-  border-bottom-color: #2a2f3a;
-}
-
-.xml-reader30-fullscreen-modal .xml-reader30-reorderable-table tbody td {
-  background: #0f1115;
-  color: #f3f5f8;
-  border-bottom-color: #242936;
-}
-
-.xml-reader30-fullscreen-modal .xml-reader30-reorderable-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: #ffffff;
 }
 
 .xml-reader30-fullscreen-modal .modal-body {
