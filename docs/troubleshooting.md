@@ -85,7 +85,7 @@ npm run prisma:deploy
 - Esse caso aparece com frequencia quando `CTE_CONSULTA_URL_PRODUCAO` foi fixada para uma UF/autorizador e o lote mistura chaves de outras UFs.
 - O backend passou a refazer automaticamente a consulta no endpoint padrao resolvido pelo `cUF` da chave quando a URL fixa de producao devolve `410`.
 - Alertas de `CT-e` com evento de `desacordo` agora sao lidos do backend via `GET /alertas` e a marcacao de resolvido fica persistida na tabela `cte_desacordo_resolucoes`.
-- Alertas de `NFS-e` tomada com retencao tambem saem de `GET /alertas`; quando o XML indicar `ISS retido` ou retencoes federais (`IRRF`, `INSS`, `CSLL`, `PIS`, `COFINS`), o dashboard passa a exibir aviso com empresa, numero, emissor e resumo das retencoes.
+- Alertas de `NFS-e` tomada com retencao tambem saem de `GET /alertas`; quando o XML indicar `ISS retido` ou retencoes federais (`IRRF`, `INSS`, `CSLL`, `PIS`, `COFINS`), o dashboard passa a exibir aviso com empresa, numero, emissor e resumo das retencoes. Esse recorte considera apenas notas com emissao a partir de `01/07/2026`.
 - As demais resolucoes de alertas operacionais e de auditoria tambem passaram a ser persistidas em banco via `GET /alertas/resolucoes` e `PUT /alertas/resolucoes/:alertId`, na tabela `alert_resolutions`.
 - `cStat 236` com mensagem sobre `Modelo diferente de 57 ou 67 ou 64` indica que a chave enviada ao fluxo de CT-e nao pertence a CT-e. O backend agora bloqueia essa consulta antes de chamar o autorizador.
 

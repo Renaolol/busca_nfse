@@ -108,6 +108,13 @@ const state = {
   mobileSidebarOpen: false,
   dataReady: false,
   dataSource: 'api',
+  pageLoading: {
+    active: false,
+    title: '',
+    description: '',
+    currentTask: '',
+    completedTasks: []
+  },
   modal: null,
   drawer: null,
   toasts: [],
@@ -381,13 +388,14 @@ function boot() {
 }
 
 async function initializeData() {
+  startPageLoading(buildPageLoadingPlan(state.route));
   setGlobalLoading(true);
   render();
 
   await wait(250);
 
   try {
-    await hydrateFromApi();
+    await hydrateFromApi({ onProgress: updatePageLoadingTask });
     state.dataSource = 'api';
   } catch (error) {
     console.error('Falha ao carregar dados reais da API.', error);
@@ -401,12 +409,15 @@ async function initializeData() {
   }
 
   setGlobalLoading(false);
+  await ensureRouteDataLoaded({ silent: true, onProgress: updatePageLoadingTask });
+  stopPageLoading();
   render();
   syncDashboardAutoRefresh();
-  void ensureRouteDataLoaded({ silent: true });
 }
 
-async function hydrateFromApi() {
+async function hydrateFromApi(options = {}) {
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+  onProgress?.('Carregando clientes');
   const apiClientsRaw = await apiRequest('/clientes');
   if (!Array.isArray(apiClientsRaw)) {
     throw new Error('Resposta inesperada em /clientes');
@@ -418,6 +429,7 @@ async function hydrateFromApi() {
   }));
   const clientIds = apiClients.map((client) => client.id);
 
+  onProgress?.('Carregando certificados, controles e documentos');
   const [
     establishmentsByClient,
     certificatesByClient,
@@ -460,6 +472,7 @@ async function hydrateFromApi() {
   const nfeDocsPage = normalizePaginatedResponse(nfeDocs);
   const cteDocsPage = normalizePaginatedResponse(cteDocs);
 
+  onProgress?.('Montando dashboard, listas e alertas');
   const clients = buildClientsFromApi(
     apiClients,
     establishmentsByClient,
@@ -509,9 +522,7 @@ function wireGlobalEvents() {
     state.route = parseRoute(window.location.hash);
     state.mobileSidebarOpen = false;
     render();
-    syncDashboardAutoRefresh();
-    void refreshDashboardRouteData({ silent: true });
-    void ensureRouteDataLoaded({ silent: true });
+    void handleRouteAccess();
   });
 
   document.addEventListener('click', onDocumentClick);
@@ -1937,11 +1948,66 @@ function render() {
       </div>
     </div>
     ${renderSidebarBackdrop()}
+    ${renderPageLoadingOverlay()}
   `;
 
   modalRoot.innerHTML = renderModal();
   drawerRoot.innerHTML = renderDrawer();
   toastRoot.innerHTML = renderToasts();
+}
+
+async function handleRouteAccess() {
+  const plan = buildPageLoadingPlan(state.route);
+  startPageLoading(plan);
+  render();
+
+  try {
+    if (state.dataSource === 'api') {
+      await refreshApiData({
+        silent: true,
+        onProgress: updatePageLoadingTask
+      });
+    } else {
+      await wait(150);
+    }
+  } finally {
+    stopPageLoading();
+    render();
+    syncDashboardAutoRefresh();
+  }
+}
+
+function renderPageLoadingOverlay() {
+  if (!state.pageLoading.active) {
+    return '';
+  }
+
+  const completedTasks = Array.isArray(state.pageLoading.completedTasks) ? state.pageLoading.completedTasks : [];
+  const currentTask = String(state.pageLoading.currentTask || '').trim();
+
+  return `
+    <div class="page-loading-overlay" aria-live="polite" aria-busy="true">
+      <div class="page-loading-card">
+        <div class="page-loading-spinner" aria-hidden="true"></div>
+        <p class="page-loading-eyebrow">Atualizando pagina</p>
+        <h2 class="page-loading-title">${escapeHtml(state.pageLoading.title || 'Carregando pagina')}</h2>
+        <p class="page-loading-description">${escapeHtml(state.pageLoading.description || 'Aguarde enquanto os dados sao carregados.')}</p>
+        <div class="page-loading-status">
+          <strong>Agora:</strong> ${escapeHtml(currentTask || 'Preparando pagina')}
+        </div>
+        ${
+          completedTasks.length
+            ? `<ul class="page-loading-task-list">
+                ${completedTasks
+                  .map((task) => `<li class="page-loading-task page-loading-task-done">${escapeHtml(task)}</li>`)
+                  .join('')}
+                ${currentTask ? `<li class="page-loading-task page-loading-task-active">${escapeHtml(currentTask)}</li>` : ''}
+              </ul>`
+            : ''
+        }
+      </div>
+    </div>
+  `;
 }
 
 function renderSidebar() {
@@ -9081,9 +9147,9 @@ function navigate(path) {
   window.location.hash = `#${path}`;
 }
 
-function resolvePageMeta() {
-  if (state.route.name === 'client-details') {
-    const client = findClientById(state.route.params.id);
+function resolvePageMetaForRoute(route = state.route) {
+  if (route.name === 'client-details') {
+    const client = findClientById(route.params.id);
     if (client) {
       return {
         title: client.razaoSocial,
@@ -9092,7 +9158,11 @@ function resolvePageMeta() {
     }
   }
 
-  return pageMeta[state.route.name] || pageMeta.dashboard;
+  return pageMeta[route.name] || pageMeta.dashboard;
+}
+
+function resolvePageMeta() {
+  return resolvePageMetaForRoute(state.route);
 }
 
 function resolveNavKeyByRoute(routeName) {
@@ -13956,6 +14026,55 @@ function pushToast(message, tone = 'info') {
   }, 3200);
 }
 
+function buildPageLoadingPlan(route = state.route) {
+  const meta = resolvePageMetaForRoute(route);
+  const routeSpecificDescription =
+    route?.name === 'auditoria-lacunas'
+      ? 'Atualizando dados gerais e a auditoria de lacunas desta tela.'
+      : `Atualizando os dados exibidos em ${meta.title}.`;
+
+  return {
+    title: `Carregando ${meta.title}`,
+    description: routeSpecificDescription,
+    initialTask: 'Preparando pagina'
+  };
+}
+
+function startPageLoading(plan = {}) {
+  state.pageLoading = {
+    active: true,
+    title: String(plan.title || 'Carregando pagina'),
+    description: String(plan.description || 'Atualizando dados da pagina atual.'),
+    currentTask: String(plan.initialTask || 'Preparando pagina'),
+    completedTasks: []
+  };
+}
+
+function updatePageLoadingTask(task) {
+  const label = String(task || '').trim();
+  if (!state.pageLoading.active || !label) {
+    return;
+  }
+
+  const current = String(state.pageLoading.currentTask || '').trim();
+  if (current && current !== label) {
+    state.pageLoading.completedTasks = [...state.pageLoading.completedTasks, current].slice(-4);
+  }
+
+  state.pageLoading.currentTask = label;
+  render();
+}
+
+function stopPageLoading() {
+  state.pageLoading = {
+    active: false,
+    title: '',
+    description: '',
+    currentTask: '',
+    completedTasks: []
+  };
+}
+
 function createBrowserId() {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
     return globalThis.crypto.randomUUID();
@@ -13981,9 +14100,11 @@ async function refreshApiData(options = {}) {
     return;
   }
 
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+
   try {
-    await hydrateFromApi();
-    await ensureRouteDataLoaded({ silent: true });
+    await hydrateFromApi({ onProgress });
+    await ensureRouteDataLoaded({ silent: true, onProgress });
   } catch (error) {
     if (!options.silent) {
       pushToast(`Falha ao atualizar dados reais: ${toErrorMessage(error)}`, 'error');
@@ -14021,11 +14142,14 @@ async function refreshDashboardRouteData(options = {}) {
 }
 
 async function ensureRouteDataLoaded(options = {}) {
-  if (!state.dataReady || state.dataSource !== 'api') {
+  if (state.dataSource !== 'api') {
     return;
   }
 
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+
   if (state.route.name === 'auditoria-lacunas') {
+    onProgress?.('Carregando auditoria de lacunas');
     await loadNfseGapAuditOverview(options);
   }
 }

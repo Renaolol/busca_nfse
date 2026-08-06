@@ -26,6 +26,8 @@ type NfseRetencaoAlertRow = Prisma.NfseDocumentoGetPayload<{
   };
 }>;
 
+const NFSE_RETENTION_ALERT_START_DATE = new Date('2026-07-01T00:00:00.000Z');
+
 @Injectable()
 export class AlertsService {
   constructor(
@@ -62,7 +64,8 @@ export class AlertsService {
           ...(query.clienteId ? { clienteId: query.clienteId } : {}),
           xmlPath: { not: null },
           cnpjTomador: { not: null },
-          dataCancelamento: null
+          dataCancelamento: null,
+          dataEmissao: { gte: NFSE_RETENTION_ALERT_START_DATE }
         },
         include: {
           cliente: true,
@@ -216,7 +219,7 @@ export class AlertsService {
   }
 
   private async toNfseRetentionAlertDto(row: NfseRetencaoAlertRow): Promise<AlertResponseDto | null> {
-    if (!this.isNfseTomada(row)) {
+    if (!this.isNfseTomada(row) || !this.isNfseRetentionDateEligible(row.dataEmissao)) {
       return null;
     }
 
@@ -280,6 +283,10 @@ export class AlertsService {
 
   private isNfseTomada(row: Pick<NfseRetencaoAlertRow, 'cnpjTomador' | 'estabelecimento'>): boolean {
     return this.normalizeDigits(row.cnpjTomador) === this.normalizeDigits(row.estabelecimento?.cnpj);
+  }
+
+  private isNfseRetentionDateEligible(value?: Date | null): boolean {
+    return value instanceof Date && !Number.isNaN(value.getTime()) && value >= NFSE_RETENTION_ALERT_START_DATE;
   }
 
   private async applyGenericResolutionState(alerts: AlertResponseDto[]): Promise<void> {

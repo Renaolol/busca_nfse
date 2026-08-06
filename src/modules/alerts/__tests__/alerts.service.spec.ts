@@ -177,6 +177,36 @@ describe('AlertsService', () => {
     expect(result).toEqual([]);
   });
 
+  it('ignora NFS-e tomada anterior a 01/07/2026 mesmo quando ha retencao no XML', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        id: 'nfse-antiga-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        chaveAcesso: '42110092206960810000176000000000000026063000000001',
+        numeroNfse: '99',
+        dataEmissao: new Date('2026-06-30T23:59:59.000Z'),
+        dataCancelamento: null,
+        cnpjTomador: '32973310000189',
+        razaoSocialPrestador: 'Prestador Antigo',
+        xmlPath: 'nfse/producao/32973310000189/2026/06/xml/99.xml',
+        createdAt: new Date('2026-06-30T23:59:59.000Z'),
+        updatedAt: new Date('2026-06-30T23:59:59.000Z'),
+        cliente: {
+          razaoSocial: 'Cliente Teste'
+        },
+        estabelecimento: {
+          cnpj: '32973310000189'
+        }
+      }
+    ]);
+
+    const result = await service.findAll({});
+
+    expect(storage.getObject).not.toHaveBeenCalled();
+    expect(result).toEqual([]);
+  });
+
   it('marca um alerta como resolvido por evento', async () => {
     prisma.nfeEvento.findUnique
       .mockResolvedValueOnce({
