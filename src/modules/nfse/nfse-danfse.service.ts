@@ -223,19 +223,33 @@ export class NfseDanfseService {
 
   extractRetentionAlertData(xml: string): NfseRetentionAlertData {
     const extracted = this.extractFromXml(xml);
-    const includeAbrasfFederalRetention = this.shouldIncludeAbrasfFederalRetention(extracted);
+    const layoutNfse = extracted.layoutNfse ?? this.detectLeituraFiscalLayout(xml);
+    const totalRetencoesFederais = this.computeFederalRetentionTotal(layoutNfse, {
+      valorServico: extracted.valorServico,
+      valorLiquidoNfse: extracted.valorLiquidoNfse,
+      valorTotalRetencoes: extracted.valorTotalRetencoes,
+      valorIssRetido: extracted.valorIssRetido,
+      valorDeducoes: extracted.valorDeducoes,
+      valorDescontoIncondicionado: extracted.valorDescontoIncondicionado,
+      valorDescontoCondicionado: extracted.valorDescontoCondicionado,
+      valorIrrf: extracted.valorIrrf,
+      valorContribuicaoPrevidenciaria: extracted.valorContribuicaoPrevidenciaria,
+      valorContribuicoesSociais: extracted.valorContribuicoesSociais,
+      valorPis: extracted.valorPis,
+      valorCofins: extracted.valorCofins
+    });
     const entries: NfseRetentionAlertEntry[] = [];
-    const issRetido = this.isIssRetido(extracted.retencaoIss, extracted.valorIssRetido, extracted.layoutNfse);
+    const issRetido = this.isIssRetido(extracted.retencaoIss, extracted.valorIssRetido, layoutNfse);
 
     if (issRetido) {
       entries.push({ code: 'iss', label: 'ISS retido' });
     }
 
-    if (extracted.layoutNfse !== 'abrasf' || includeAbrasfFederalRetention) {
+    if (layoutNfse !== 'abrasf' || (totalRetencoesFederais ?? 0) > 0) {
       this.pushRetentionAmountEntry(entries, 'irrf', 'IRRF', extracted.valorIrrf);
       this.pushRetentionAmountEntry(entries, 'inss', 'INSS', extracted.valorContribuicaoPrevidenciaria);
       this.pushRetentionAmountEntry(entries, 'csll', 'CSLL', extracted.valorContribuicoesSociais);
-      if (this.includesPisCofinsInFederalRetention(extracted.layoutNfse)) {
+      if (this.includesPisCofinsInFederalRetention(layoutNfse)) {
         this.pushRetentionAmountEntry(entries, 'pis', 'PIS', extracted.valorPis);
         this.pushRetentionAmountEntry(entries, 'cofins', 'COFINS', extracted.valorCofins);
       } else {
@@ -251,6 +265,7 @@ export class NfseDanfseService {
 
   extractLeituraFiscal(xml: string): NfseLeituraFiscal {
     const extracted = this.extractFromXml(xml);
+    const layoutNfse = extracted.layoutNfse ?? this.detectLeituraFiscalLayout(xml);
     const retencoes = this.extractRetentionAlertData(xml).entries;
     const valorServico = this.toNumber(extracted.valorServico) ?? 0;
     const valorIss = this.toNumber(extracted.valorIss) ?? 0;
@@ -262,7 +277,7 @@ export class NfseDanfseService {
     const pis = this.toNumber(extracted.valorPis) ?? 0;
     const cofins = this.toNumber(extracted.valorCofins) ?? 0;
     const totalRetencoesFederais =
-      this.computeFederalRetentionTotal(extracted.layoutNfse, {
+      this.computeFederalRetentionTotal(layoutNfse, {
         valorServico: extracted.valorServico,
         valorLiquidoNfse: extracted.valorLiquidoNfse,
         valorTotalRetencoes: extracted.valorTotalRetencoes,
@@ -276,8 +291,8 @@ export class NfseDanfseService {
         valorPis: extracted.valorPis,
         valorCofins: extracted.valorCofins
       }) ?? 0;
-    const possuiRetencoesFederais = retencoes.some((entry) => entry.code !== 'iss');
-    const retencaoIss = this.describeRetencaoIss(extracted.retencaoIss, extracted.valorIssRetido, extracted.layoutNfse);
+    const possuiRetencoesFederais = totalRetencoesFederais > 0 || retencoes.some((entry) => entry.code !== 'iss');
+    const retencaoIss = this.describeRetencaoIss(extracted.retencaoIss, extracted.valorIssRetido, layoutNfse);
     const valorIssRetidoReal =
       valorIssRetido ??
       (valorTotalRetencoes !== undefined ? Math.max(valorTotalRetencoes - totalRetencoesFederais, 0) : undefined);
@@ -310,7 +325,7 @@ export class NfseDanfseService {
     }
 
     return {
-      layout: extracted.layoutNfse || this.detectLeituraFiscalLayout(xml),
+      layout: layoutNfse,
       localPrestacao: this.safeValue(extracted.localPrestacao) !== '-' ? extracted.localPrestacao ?? undefined : undefined,
       localIncidenciaIss:
         this.safeValue(extracted.municipioIncidenciaIssqn) !== '-' ? extracted.municipioIncidenciaIssqn ?? undefined : undefined,
@@ -329,7 +344,7 @@ export class NfseDanfseService {
       aliquotaRealIss: this.toFixedRateString(aliquotaRealIss),
       retencaoIss,
       retencaoFederal: possuiRetencoesFederais ? 'Retido' : 'Normal',
-      totalRetencoesFederais: this.formatFederalRetentionTotal(extracted.layoutNfse, {
+      totalRetencoesFederais: this.formatFederalRetentionTotal(layoutNfse, {
         valorServico: extracted.valorServico,
         valorLiquidoNfse: extracted.valorLiquidoNfse,
         valorTotalRetencoes: extracted.valorTotalRetencoes,
@@ -355,6 +370,7 @@ export class NfseDanfseService {
 
   extractDominioExportData(xml: string): NfseDominioExportData {
     const extracted = this.extractFromXml(xml);
+    const layoutNfse = extracted.layoutNfse ?? this.detectLeituraFiscalLayout(xml);
     const leitura = this.extractLeituraFiscal(xml);
     const prestador = this.splitMunicipioUf(extracted.municipioPrestador);
     const tomador = this.splitMunicipioUf(extracted.municipioTomador);
@@ -365,7 +381,7 @@ export class NfseDanfseService {
       valorServico && valorServico > 0 && valorIss !== undefined ? Number(((valorIss / valorServico) * 100).toFixed(2)) : undefined;
 
     return {
-      layout: extracted.layoutNfse || this.detectLeituraFiscalLayout(xml),
+      layout: layoutNfse,
       numeroNfse: extracted.numeroNfse,
       dataEmissao: extracted.dataEmissao,
       prestadorNome: extracted.razaoSocialPrestador,
@@ -392,18 +408,18 @@ export class NfseDanfseService {
       valorCofins: this.toNumber(extracted.valorCofins),
       aliquotaIssInformada: this.toNumber(extracted.aliquotaIss),
       aliquotaIssCalculada,
-      retencaoIss: this.isIssRetido(extracted.retencaoIss, extracted.valorIssRetido, extracted.layoutNfse) ? 'Retido' : 'Nao Retido',
+      retencaoIss: this.isIssRetido(extracted.retencaoIss, extracted.valorIssRetido, layoutNfse) ? 'Retido' : 'Nao Retido',
       pisRetido:
-        extracted.layoutNfse === 'abrasf' && leitura.retencaoFederal !== 'Retido'
+        layoutNfse === 'abrasf' && leitura.retencaoFederal !== 'Retido'
           ? false
-          : this.includesPisCofinsInFederalRetention(extracted.layoutNfse)
-        ? (this.toNumber(extracted.valorPis) ?? 0) > 0
+          : this.includesPisCofinsInFederalRetention(layoutNfse)
+          ? (this.toNumber(extracted.valorPis) ?? 0) > 0
           : this.hasNationalPisCofinsRetention(extracted.descricaoContribuicoesSociais, 'pis'),
       cofinsRetido:
-        extracted.layoutNfse === 'abrasf' && leitura.retencaoFederal !== 'Retido'
+        layoutNfse === 'abrasf' && leitura.retencaoFederal !== 'Retido'
           ? false
-          : this.includesPisCofinsInFederalRetention(extracted.layoutNfse)
-        ? (this.toNumber(extracted.valorCofins) ?? 0) > 0
+          : this.includesPisCofinsInFederalRetention(layoutNfse)
+          ? (this.toNumber(extracted.valorCofins) ?? 0) > 0
           : this.hasNationalPisCofinsRetention(extracted.descricaoContribuicoesSociais, 'cofins'),
       retencaoFederal: leitura.retencaoFederal
     };
@@ -2587,41 +2603,6 @@ export class NfseDanfseService {
 
   private includesPisCofinsInFederalRetention(layout?: DanfseRenderInput['layoutNfse']): boolean {
     return layout !== 'padrao_nacional';
-  }
-
-  private shouldIncludeAbrasfFederalRetention(
-    values: Pick<
-      DanfseRenderInput,
-      | 'valorServico'
-      | 'valorLiquidoNfse'
-      | 'valorTotalRetencoes'
-      | 'valorIssRetido'
-      | 'valorDeducoes'
-      | 'valorDescontoIncondicionado'
-      | 'valorDescontoCondicionado'
-      | 'valorIrrf'
-      | 'valorContribuicaoPrevidenciaria'
-      | 'valorContribuicoesSociais'
-      | 'valorPis'
-      | 'valorCofins'
-      | 'layoutNfse'
-    >
-  ): boolean {
-    if (values.layoutNfse !== 'abrasf') {
-      return true;
-    }
-
-    const declaredTotal = this.computeDeclaredFederalRetentionTotal('abrasf', values);
-    if ((declaredTotal ?? 0) <= 0) {
-      return false;
-    }
-
-    const effectiveTotal = this.computeEffectiveAbrasfFederalRetentionTotal(values, declaredTotal ?? 0);
-    if (effectiveTotal === undefined) {
-      return true;
-    }
-
-    return effectiveTotal > 0;
   }
 
   private computeDeclaredFederalRetentionTotal(
