@@ -2197,7 +2197,17 @@ function render() {
     ${renderPageLoadingOverlay()}
   `;
 
-  modalRoot.innerHTML = renderModal();
+  const modalHtml = renderModal();
+  if (state.modal?.kind === 'xml-reader30-nfe-fullscreen') {
+    const fullscreenBody = modalRoot.querySelector?.('[data-xml-reader30-fullscreen-body]');
+    if (fullscreenBody instanceof HTMLElement) {
+      fullscreenBody.innerHTML = renderXmlReader30NfeFullscreenBody();
+    } else {
+      modalRoot.innerHTML = modalHtml;
+    }
+  } else {
+    modalRoot.innerHTML = modalHtml;
+  }
   drawerRoot.innerHTML = renderDrawer();
   toastRoot.innerHTML = renderToasts();
 }
@@ -5220,12 +5230,13 @@ function renderXmlReader30Summary() {
   }
 
   const totals = getXmlReader30NfeSummaryTotals(Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : []);
-  const totalXmls = Number(state.xmlReader30.total || state.xmlReader30.results.length || 0);
+  // Conta o total de notas/XMLs retornados pela busca, nao as linhas itemizadas da tabela.
+  const totalNotasPeriodo = Number(state.xmlReader30.total || state.xmlReader30.results.length || 0);
 
   return `
     <article class="card" style="box-shadow:none; border-style:dashed; margin-top: 2px;">
       <div class="xml-reader30-summary-meta">
-        <span>Resultado: <strong>${escapeHtml(String(totalXmls))} XML(s)</strong></span>
+        <span>Total de notas no período: <strong>${escapeHtml(String(totalNotasPeriodo))} XML(s)</strong></span>
         <span>Valor Total das notas: <strong>${escapeHtml(formatCurrency(totals.totalNotasValue))}</strong></span>
         <span>Valor Total ICMS: <strong>${escapeHtml(formatCurrency(totals.totalIcmsValue))}</strong></span>
         <span>Valor ICMS Monofasico: <strong>${escapeHtml(formatCurrency(totals.totalIcmsMonofasicoValue))}</strong></span>
@@ -5585,9 +5596,12 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
   `;
 }
 
-function renderXmlReader30NfeFullscreenModal() {
+function renderXmlReader30NfeFullscreenBody() {
   const results = Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : [];
-  const tableHtml = renderXmlReader30NfeResultsTableReorderable(results, { fullscreen: true });
+  return renderXmlReader30NfeResultsTableReorderable(results, { fullscreen: true });
+}
+
+function renderXmlReader30NfeFullscreenModal() {
   return `
     <div class="overlay xml-reader30-fullscreen-overlay" data-action="overlay-close">
       <div class="modal xml-reader30-fullscreen-modal" role="dialog" aria-modal="true">
@@ -5600,8 +5614,8 @@ function renderXmlReader30NfeFullscreenModal() {
             <button class="btn secondary" type="button" data-action="close-modal">Fechar</button>
           </div>
         </div>
-        <div class="modal-body xml-reader30-fullscreen-body">
-          ${tableHtml}
+        <div class="modal-body xml-reader30-fullscreen-body" data-xml-reader30-fullscreen-body>
+          ${renderXmlReader30NfeFullscreenBody()}
         </div>
       </div>
     </div>
