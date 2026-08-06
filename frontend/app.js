@@ -660,6 +660,10 @@ function onDocumentClick(event) {
       openModal({ kind: 'cte-disagreement-alerts' });
       return;
     }
+    case 'dashboard-open-nfse-retention-alerts': {
+      openModal({ kind: 'nfse-retention-alerts' });
+      return;
+    }
     case 'open-new-client-modal': {
       openModal({ kind: 'client-form', mode: 'create' });
       return;
@@ -2080,6 +2084,7 @@ function renderDashboardPage() {
   const cteStats = getCteDashboardStats();
   const certsExpiring = state.certificates.filter((cert) => cert.status === 'A vencer').length;
   const openCteDisagreementAlerts = getOpenCteDisagreementAlerts();
+  const openNfseRetentionAlerts = getOpenNfseRetentionAlerts();
   const latestSearchRows = [...state.clients]
     .sort((a, b) => Date.parse(b.ultimaBusca || 0) - Date.parse(a.ultimaBusca || 0))
     .slice(0, 8);
@@ -2101,6 +2106,19 @@ function renderDashboardPage() {
                   <span class="dashboard-alert-button-copy">
                     <strong>${escapeHtml(String(openCteDisagreementAlerts.length))}</strong>
                     <span>CT-e em desacordo</span>
+                  </span>
+                </button>
+              `
+              : ''
+          }
+          ${
+            openNfseRetentionAlerts.length
+              ? `
+                <button class="dashboard-alert-button" type="button" data-action="dashboard-open-nfse-retention-alerts" aria-label="Abrir alertas de NFS-e com retencao">
+                  <span class="dashboard-alert-button-icon">${icon('alert')}</span>
+                  <span class="dashboard-alert-button-copy">
+                    <strong>${escapeHtml(String(openNfseRetentionAlerts.length))}</strong>
+                    <span>NFS-e com retencao</span>
                   </span>
                 </button>
               `
@@ -4406,7 +4424,7 @@ function renderAlertsPage() {
             </label>
             <label class="field">
               Tipo
-              <select name="tipo">${renderOptions(['Todos', 'Certificado', 'Prefeitura', 'XML', 'Cliente', 'Servidor', 'Busca', 'CT-e'], state.filters.alerts.tipo)}</select>
+              <select name="tipo">${renderOptions(['Todos', 'Certificado', 'Prefeitura', 'XML', 'Cliente', 'Servidor', 'Busca', 'CT-e', 'NFS-e'], state.filters.alerts.tipo)}</select>
             </label>
             <label class="field">
               Status
@@ -4466,10 +4484,12 @@ function renderAlertCards(alerts) {
           </div>
           <p class="alert-row-sub">${escapeHtml(alert.descricao)}</p>
           <p class="alert-row-sub">Cliente: ${escapeHtml(alert.cliente)} • ${escapeHtml(formatDateTime(alert.dataHora))} • ${statusBadge(alert.status, toneFromAlertStatus(alert.status))}</p>
-          ${alert.tipo === 'CT-e' ? `<p class="alert-row-sub">CT-e: ${escapeHtml(renderAlertDocumentLine(alert))}</p>` : ''}
+          ${hasAlertDocumentAction(alert) ? `<p class="alert-row-sub">${escapeHtml(renderAlertDocumentLine(alert))}</p>` : ''}
+          ${alert.emissor ? `<p class="alert-row-sub">Emissor: ${escapeHtml(alert.emissor)}</p>` : ''}
+          ${alert.retencoes?.length ? `<p class="alert-row-sub">Retencoes: ${escapeHtml(alert.retencoes.join(' • '))}</p>` : ''}
           <div class="table-actions">
             <button class="icon-btn" type="button" data-action="alert-details" data-alert-id="${alert.id}">Ver detalhes</button>
-            ${alert.tipo === 'CT-e' ? `<button class="icon-btn" type="button" data-action="alert-open-document" data-alert-id="${alert.id}">Ver CT-e</button>` : ''}
+            ${hasAlertDocumentAction(alert) ? `<button class="icon-btn" type="button" data-action="alert-open-document" data-alert-id="${alert.id}">${renderAlertOpenDocumentLabel(alert)}</button>` : ''}
             ${
               alert.status === 'Resolvido'
                 ? '<button class="icon-btn" type="button" data-action="alert-unresolve" data-alert-id="' + alert.id + '">Reabrir alerta</button>'
@@ -6762,6 +6782,8 @@ function renderModal() {
       return renderDominioImportReportModal();
     case 'cte-disagreement-alerts':
       return renderCteDisagreementAlertsModal();
+    case 'nfse-retention-alerts':
+      return renderNfseRetentionAlertsModal();
     case 'dominio-nfe-view':
       return renderDominioNfeViewerModal();
     case 'compare-sped-report':
@@ -8480,7 +8502,7 @@ function renderCteDisagreementAlertsModal() {
                                 <span><strong>Data:</strong> ${escapeHtml(formatDateTime(alert.dataHora))}</span>
                               </div>
                               <div class="dashboard-alert-overlay-meta">
-                                <span><strong>CT-e:</strong> ${escapeHtml(renderAlertDocumentLine(alert))}</span>
+                                <span><strong>CT-e:</strong> ${escapeHtml(alert.numeroDocumento || alert.chaveAcesso || '-')}</span>
                                 <span><strong>Chave:</strong> ${escapeHtml(alert.chaveAcesso || '-')}</span>
                               </div>
                               <div class="table-actions" style="margin-top:12px;">
@@ -8500,6 +8522,83 @@ function renderCteDisagreementAlertsModal() {
                     .join('')}
                 </div>`
               : '<div class="table-state">Nenhum alerta de desacordo de CT-e encontrado.</div>'
+          }
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="close-modal">Fechar</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderNfseRetentionAlertsModal() {
+  const alerts = getNfseRetentionAlerts();
+  const openAlerts = alerts.filter((alert) => alert.status !== 'Resolvido');
+  const resolvedAlerts = alerts.filter((alert) => alert.status === 'Resolvido');
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(1100px, calc(100vw - 24px));">
+        <div class="modal-header">
+          <h3 class="modal-title">Alertas de NFS-e com retencao</h3>
+          <p class="modal-subtitle">Acompanhe NFS-es tomadas com retencoes detectadas no XML e marque como resolvido quando a conferencia fiscal for concluida.</p>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid four" style="margin-bottom:18px;">
+            ${detailItem('Total', String(alerts.length))}
+            ${detailItem('Em aberto', String(openAlerts.length))}
+            ${detailItem('Resolvidos', String(resolvedAlerts.length))}
+            ${detailItem('Empresas afetadas', String(new Set(openAlerts.map((alert) => alert.clientId).filter(Boolean)).size))}
+          </div>
+          ${
+            alerts.length
+              ? `<div style="display:grid; gap:14px;">
+                  ${alerts
+                    .map(
+                      (alert) => `
+                        <article class="dashboard-alert-overlay-card ${alert.status === 'Resolvido' ? 'resolved' : 'open'}">
+                          <div class="dashboard-alert-overlay-main">
+                            <div class="dashboard-alert-overlay-icon">${icon('alert')}</div>
+                            <div style="min-width:0;">
+                              <div class="dashboard-alert-overlay-header">
+                                <div>
+                                  <h4 class="dashboard-alert-overlay-title">${escapeHtml(alert.titulo)}</h4>
+                                  <p class="dashboard-alert-overlay-subtitle">${escapeHtml(alert.descricao)}</p>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
+                                  ${statusBadge(alert.status, toneFromAlertStatus(alert.status))}
+                                  ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
+                                </div>
+                              </div>
+                              <div class="dashboard-alert-overlay-meta">
+                                <span><strong>Cliente:</strong> ${escapeHtml(alert.cliente)}</span>
+                                <span><strong>Data:</strong> ${escapeHtml(formatDateTime(alert.dataHora))}</span>
+                              </div>
+                              <div class="dashboard-alert-overlay-meta">
+                                <span><strong>NFS-e:</strong> ${escapeHtml(alert.numeroDocumento || alert.chaveAcesso || '-')}</span>
+                                <span><strong>Emissor:</strong> ${escapeHtml(alert.emissor || '-')}</span>
+                              </div>
+                              <div class="dashboard-alert-overlay-meta">
+                                <span><strong>Retencoes:</strong> ${escapeHtml(alert.retencoes?.length ? alert.retencoes.join(' • ') : '-')}</span>
+                              </div>
+                              <div class="table-actions" style="margin-top:12px;">
+                                <button class="btn secondary" type="button" data-action="alert-details" data-alert-id="${escapeHtml(alert.id)}">Ver detalhes</button>
+                                <button class="btn secondary" type="button" data-action="alert-open-document" data-alert-id="${escapeHtml(alert.id)}">Ver NFS-e</button>
+                                ${
+                                  alert.status === 'Resolvido'
+                                    ? `<button class="btn primary" type="button" data-action="alert-unresolve" data-alert-id="${escapeHtml(alert.id)}">Reabrir alerta</button>`
+                                    : `<button class="btn primary" type="button" data-action="alert-resolve" data-alert-id="${escapeHtml(alert.id)}">Marcar como resolvido</button>`
+                                }
+                              </div>
+                            </div>
+                          </div>
+                        </article>
+                      `
+                    )
+                    .join('')}
+                </div>`
+              : '<div class="table-state">Nenhum alerta de NFS-e com retencao encontrado.</div>'
           }
         </div>
         <div class="modal-footer">
@@ -8634,6 +8733,8 @@ function renderDrawer() {
                 ${detailItem('Origem', alert.origem)}
                 ${detailItem('Status', alert.status)}
                 ${detailItem('Documento', renderAlertDocumentLine(alert))}
+                ${detailItem('Emissor', alert.emissor || '-')}
+                ${detailItem('Retencoes', alert.retencoes?.length ? alert.retencoes.join(' • ') : '-')}
                 <div style="grid-column: span 2;">${detailItem('Mensagem tecnica', alert.mensagemTecnica)}</div>
                 <div style="grid-column: span 2;">${detailItem('Sugestao de acao', alert.sugestaoAcao)}</div>
               </div>
@@ -8644,7 +8745,7 @@ function renderDrawer() {
                 ${alert.historicoTentativas.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}
               </ul>
               <div class="table-actions" style="margin-top:10px;">
-                ${alert.tipo === 'CT-e' ? `<button class="btn secondary" type="button" data-action="alert-open-document" data-alert-id="${alert.id}">Ver CT-e</button>` : ''}
+                ${hasAlertDocumentAction(alert) ? `<button class="btn secondary" type="button" data-action="alert-open-document" data-alert-id="${alert.id}">${renderAlertOpenDocumentLabel(alert)}</button>` : ''}
                 ${
                   alert.status === 'Resolvido'
                     ? `<button class="btn secondary" type="button" data-action="alert-unresolve" data-alert-id="${alert.id}">Reabrir alerta</button>`
@@ -12577,35 +12678,63 @@ async function openAlertDocument(alertId) {
     return;
   }
 
-  if (alert.tipo !== 'CT-e') {
-    pushToast('Este alerta nao possui um CT-e vinculado para visualizacao.', 'info');
-    return;
-  }
+  if (alert.tipo === 'CT-e') {
+    let doc = findCteForAlert(alert);
 
-  let doc = findCteForAlert(alert);
-
-  if (!doc && state.dataSource === 'api' && alert.documentoId && alert.clientId) {
-    try {
-      const raw = await apiRequest(`/cte/${encodeURIComponent(alert.documentoId)}?clienteId=${encodeURIComponent(alert.clientId)}`);
-      const mapped = buildCteDocumentsFromApi([raw], state.clients)[0] || null;
-      if (mapped) {
-        state.cteDocuments = mergeCteDocumentsById(state.cteDocuments, [mapped]);
-        doc = mapped;
+    if (!doc && state.dataSource === 'api' && alert.documentoId && alert.clientId) {
+      try {
+        const raw = await apiRequest(`/cte/${encodeURIComponent(alert.documentoId)}?clienteId=${encodeURIComponent(alert.clientId)}`);
+        const mapped = buildCteDocumentsFromApi([raw], state.clients)[0] || null;
+        if (mapped) {
+          state.cteDocuments = mergeCteDocumentsById(state.cteDocuments, [mapped]);
+          doc = mapped;
+        }
+      } catch (error) {
+        pushToast(`Falha ao carregar CT-e do alerta: ${toErrorMessage(error)}`, 'error');
+        return;
       }
-    } catch (error) {
-      pushToast(`Falha ao carregar CT-e do alerta: ${toErrorMessage(error)}`, 'error');
+    }
+
+    if (!doc) {
+      pushToast('Nao foi possivel localizar o CT-e vinculado a este alerta.', 'error');
       return;
     }
-  }
 
-  if (!doc) {
-    pushToast('Nao foi possivel localizar o CT-e vinculado a este alerta.', 'error');
+    state.drawer = null;
+    state.modal = null;
+    await openCteDetails(doc.id);
     return;
   }
 
-  state.drawer = null;
-  state.modal = null;
-  await openCteDetails(doc.id);
+  if (alert.tipo === 'NFS-e') {
+    let doc = findNfseForAlert(alert);
+
+    if (!doc && state.dataSource === 'api' && alert.documentoId && alert.clientId) {
+      try {
+        const raw = await apiRequest(`/nfse/${encodeURIComponent(alert.documentoId)}?clienteId=${encodeURIComponent(alert.clientId)}`);
+        const mapped = buildXmlFilesFromApi([raw], state.clients)[0] || null;
+        if (mapped) {
+          state.xmlFiles = mergeXmlFilesById(state.xmlFiles, [mapped]);
+          doc = mapped;
+        }
+      } catch (error) {
+        pushToast(`Falha ao carregar NFS-e do alerta: ${toErrorMessage(error)}`, 'error');
+        return;
+      }
+    }
+
+    if (!doc) {
+      pushToast('Nao foi possivel localizar a NFS-e vinculada a este alerta.', 'error');
+      return;
+    }
+
+    state.drawer = null;
+    state.modal = null;
+    await openXmlDetails(doc.id);
+    return;
+  }
+
+  pushToast('Este alerta nao possui documento vinculado para visualizacao.', 'info');
 }
 
 async function executeConfirmAction(payload) {
@@ -12871,6 +13000,20 @@ function getCteDisagreementAlerts() {
 
 function getOpenCteDisagreementAlerts() {
   return getCteDisagreementAlerts().filter((alert) => alert.status !== 'Resolvido');
+}
+
+function getNfseRetentionAlerts() {
+  return [...state.alerts]
+    .filter((alert) => alert.origem === 'nfse-retencao-entrada' || (alert.tipo === 'NFS-e' && Array.isArray(alert.retencoes) && alert.retencoes.length > 0))
+    .sort((a, b) => {
+      const leftResolved = a.status === 'Resolvido' ? 1 : 0;
+      const rightResolved = b.status === 'Resolvido' ? 1 : 0;
+      return leftResolved - rightResolved || Date.parse(b.dataHora || 0) - Date.parse(a.dataHora || 0);
+    });
+}
+
+function getOpenNfseRetentionAlerts() {
+  return getNfseRetentionAlerts().filter((alert) => alert.status !== 'Resolvido');
 }
 
 function openModal(modal) {
@@ -15135,7 +15278,9 @@ function buildPersistentAlertsFromApi(alertsRaw) {
     numeroDocumento: String(alert?.numeroDocumento || ''),
     eventoTipo: String(alert?.eventoTipo || ''),
     eventoDescricao: String(alert?.eventoDescricao || ''),
-    resolvedAt: alert?.resolvedAt ? String(alert.resolvedAt) : null
+    resolvedAt: alert?.resolvedAt ? String(alert.resolvedAt) : null,
+    emissor: String(alert?.emissor || ''),
+    retencoes: Array.isArray(alert?.retencoes) ? alert.retencoes.map((entry) => String(entry || '')) : []
   }));
 }
 
@@ -15293,13 +15438,28 @@ function renderAlertResolvedCheckbox(alert, options = {}) {
 function renderAlertDocumentLine(alert) {
   const numero = String(alert?.numeroDocumento || '').trim();
   const chave = String(alert?.chaveAcesso || '').trim();
+  const documentType = String(alert?.tipo || '').trim() || 'Documento';
   if (numero) {
-    return `CT-e ${numero}`;
+    return `${documentType} ${numero}`;
   }
   if (chave) {
-    return `CT-e ${chave}`;
+    return `${documentType} ${chave}`;
   }
   return '-';
+}
+
+function hasAlertDocumentAction(alert) {
+  return alert?.tipo === 'CT-e' || alert?.tipo === 'NFS-e';
+}
+
+function renderAlertOpenDocumentLabel(alert) {
+  if (alert?.tipo === 'NFS-e') {
+    return 'Ver NFS-e';
+  }
+  if (alert?.tipo === 'CT-e') {
+    return 'Ver CT-e';
+  }
+  return 'Ver documento';
 }
 
 function buildAlertPriorityMeta(alert) {
@@ -15924,6 +16084,33 @@ function findCteForAlert(alert) {
     state.cteSearch.results.find((doc) => doc.apiCteId === alert.documentoId) ||
     state.cteDocuments.find((doc) => doc.apiCteId === alert.documentoId) ||
     findCteByChaveAcesso(alert.chaveAcesso) ||
+    null
+  );
+}
+
+function findNfseByChaveAcesso(chaveAcesso) {
+  const chaveNormalizada = normalizeDigits(chaveAcesso || '');
+  if (!chaveNormalizada) {
+    return null;
+  }
+
+  return (
+    state.xmlSearch.results.find((doc) => normalizeDigits(doc?.chaveAcesso || '') === chaveNormalizada) ||
+    state.xmlFiles.find((doc) => normalizeDigits(doc?.chaveAcesso || '') === chaveNormalizada) ||
+    null
+  );
+}
+
+function findNfseForAlert(alert) {
+  if (!alert || alert.tipo !== 'NFS-e') {
+    return null;
+  }
+
+  return (
+    findXmlById(alert.documentoId) ||
+    state.xmlSearch.results.find((doc) => doc.apiNfseId === alert.documentoId) ||
+    state.xmlFiles.find((doc) => doc.apiNfseId === alert.documentoId) ||
+    findNfseByChaveAcesso(alert.chaveAcesso) ||
     null
   );
 }

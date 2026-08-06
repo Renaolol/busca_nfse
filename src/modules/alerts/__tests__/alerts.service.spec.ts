@@ -7,6 +7,9 @@ describe('AlertsService', () => {
       findMany: jest.fn(),
       findUnique: jest.fn()
     },
+    nfseDocumento: {
+      findMany: jest.fn()
+    },
     alertResolution: {
       findMany: jest.fn(),
       upsert: jest.fn(),
@@ -17,12 +20,21 @@ describe('AlertsService', () => {
       deleteMany: jest.fn()
     }
   } as any;
+  const storage = {
+    getObject: jest.fn()
+  } as any;
+  const nfseDanfse = {
+    extractRetentionAlertData: jest.fn()
+  } as any;
 
   let service: AlertsService;
 
   beforeEach(() => {
     jest.resetAllMocks();
-    service = new AlertsService(prisma);
+    prisma.nfeEvento.findMany.mockResolvedValue([]);
+    prisma.nfseDocumento.findMany.mockResolvedValue([]);
+    prisma.alertResolution.findMany.mockResolvedValue([]);
+    service = new AlertsService(prisma, storage, nfseDanfse);
   });
 
   it('lista alertas de desacordo de CT-e com status resolvido quando houver resolucao', async () => {
@@ -64,6 +76,105 @@ describe('AlertsService', () => {
         canToggleResolved: true
       })
     ]);
+  });
+
+  it('lista alerta de NFS-e tomada com retencao e aplica resolucao generica quando o fingerprint coincide', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        id: 'nfse-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        chaveAcesso: '42110092206960810000176000000000042526078195939549',
+        numeroNfse: '425',
+        dataEmissao: new Date('2026-07-24T13:35:20.000Z'),
+        dataCancelamento: null,
+        cnpjTomador: '32973310000189',
+        razaoSocialPrestador: 'MULTISAT NOX GERENCIAMENTO E MONITORAMENTO DE RISCO LTDA',
+        xmlPath: 'nfse/producao/32973310000189/2026/07/xml/425.xml',
+        createdAt: new Date('2026-07-24T13:35:20.000Z'),
+        updatedAt: new Date('2026-07-24T13:35:20.000Z'),
+        cliente: {
+          razaoSocial: 'H.M. Rother Transportes Ltda'
+        },
+        estabelecimento: {
+          cnpj: '32973310000189'
+        }
+      }
+    ]);
+    storage.getObject.mockResolvedValue(Buffer.from('<xml />'));
+    nfseDanfse.extractRetentionAlertData.mockReturnValue({
+      hasRetention: true,
+      entries: [
+        { code: 'iss', label: 'ISS retido' },
+        { code: 'irrf', label: 'IRRF', amount: 'R$ 5,25' }
+      ]
+    });
+    prisma.alertResolution.findMany.mockResolvedValue([
+      {
+        id: 'res-1',
+        alertId: 'nfse-retencao-nfse-1',
+        fingerprint: JSON.stringify([
+          'nfse-retencao-nfse-1',
+          'nfse-retencao-entrada',
+          '2026-07-24T13:35:20.000Z',
+          'NFS-e de entrada com retencao',
+          'A NFS-e 425 de entrada possui retencoes: ISS retido, IRRF: R$ 5,25.',
+          'Prestador MULTISAT NOX GERENCIAMENTO E MONITORAMENTO DE RISCO LTDA; chave 42110092206960810000176000000000042526078195939549.'
+        ]),
+        clienteId: 'cliente-1',
+        origem: 'nfse-retencao-entrada',
+        titulo: 'NFS-e de entrada com retencao',
+        resolvedAt: new Date('2026-07-25T12:00:00.000Z'),
+        createdAt: new Date('2026-07-25T12:00:00.000Z'),
+        updatedAt: new Date('2026-07-25T12:00:00.000Z')
+      }
+    ]);
+
+    const result = await service.findAll({});
+
+    expect(storage.getObject).toHaveBeenCalledWith('nfse/producao/32973310000189/2026/07/xml/425.xml');
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'nfse-retencao-nfse-1',
+        tipo: 'NFS-e',
+        numeroDocumento: '425',
+        emissor: 'MULTISAT NOX GERENCIAMENTO E MONITORAMENTO DE RISCO LTDA',
+        retencoes: ['ISS retido', 'IRRF: R$ 5,25'],
+        status: 'Resolvido',
+        persistence: 'client',
+        canToggleResolved: true
+      })
+    ]);
+  });
+
+  it('ignora NFS-e emitida mesmo quando ha retencao no XML', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        id: 'nfse-emitida-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        chaveAcesso: '42110092206960810000176000000000000126019687178145',
+        numeroNfse: '1',
+        dataEmissao: new Date('2026-07-24T13:35:20.000Z'),
+        dataCancelamento: null,
+        cnpjTomador: '11111111000111',
+        razaoSocialPrestador: 'Prestador Teste',
+        xmlPath: 'nfse/producao/06960810000176/2026/07/xml/1.xml',
+        createdAt: new Date('2026-07-24T13:35:20.000Z'),
+        updatedAt: new Date('2026-07-24T13:35:20.000Z'),
+        cliente: {
+          razaoSocial: 'Cliente Teste'
+        },
+        estabelecimento: {
+          cnpj: '06960810000176'
+        }
+      }
+    ]);
+
+    const result = await service.findAll({});
+
+    expect(storage.getObject).not.toHaveBeenCalled();
+    expect(result).toEqual([]);
   });
 
   it('marca um alerta como resolvido por evento', async () => {

@@ -1,6 +1,8 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { AlertResolution, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NfseDanfseService } from '../nfse/nfse-danfse.service';
+import { LocalStorageService } from '../storage/storage.service';
 import { AlertResponseDto } from './dto/alert-response.dto';
 import { AlertResolutionResponseDto } from './dto/alert-resolution-response.dto';
 import { QueryAlertsDto } from './dto/query-alerts.dto';
@@ -17,39 +19,68 @@ type CteDesacordoAlertRow = Prisma.NfeEventoGetPayload<{
   };
 }>;
 
+type NfseRetencaoAlertRow = Prisma.NfseDocumentoGetPayload<{
+  include: {
+    cliente: true;
+    estabelecimento: true;
+  };
+}>;
+
 @Injectable()
 export class AlertsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storage: LocalStorageService,
+    private readonly nfseDanfse: NfseDanfseService
+  ) {}
 
   async findAll(query: QueryAlertsDto = {}): Promise<AlertResponseDto[]> {
-    const rows = await this.prisma.nfeEvento.findMany({
-      where: {
-        nfeDocumento: {
-          modelo: '57',
-          ...(query.clienteId ? { clienteId: query.clienteId } : {})
-        },
-        descricao: {
-          contains: 'desacordo',
-          mode: 'insensitive'
-        },
-        ...(query.status === 'Aberto'
-          ? { cteDesacordoResolucao: { is: null } }
-          : query.status === 'Resolvido'
-            ? { cteDesacordoResolucao: { isNot: null } }
-            : {})
-      },
-      include: {
-        cteDesacordoResolucao: true,
-        nfeDocumento: {
-          include: {
-            cliente: true
+    const [cteRows, nfseRows] = await Promise.all([
+      this.prisma.nfeEvento.findMany({
+        where: {
+          nfeDocumento: {
+            modelo: '57',
+            ...(query.clienteId ? { clienteId: query.clienteId } : {})
+          },
+          descricao: {
+            contains: 'desacordo',
+            mode: 'insensitive'
           }
-        }
-      },
-      orderBy: [{ dataEvento: 'desc' }, { createdAt: 'desc' }]
-    });
+        },
+        include: {
+          cteDesacordoResolucao: true,
+          nfeDocumento: {
+            include: {
+              cliente: true
+            }
+          }
+        },
+        orderBy: [{ dataEvento: 'desc' }, { createdAt: 'desc' }]
+      }),
+      this.prisma.nfseDocumento.findMany({
+        where: {
+          ...(query.clienteId ? { clienteId: query.clienteId } : {}),
+          xmlPath: { not: null },
+          cnpjTomador: { not: null },
+          dataCancelamento: null
+        },
+        include: {
+          cliente: true,
+          estabelecimento: true
+        },
+        orderBy: [{ dataEmissao: 'desc' }, { updatedAt: 'desc' }]
+      })
+    ]);
 
-    return rows.filter((row) => this.isDesacordoEvent(row)).map((row) => this.toAlertDto(row));
+    const cteAlerts = cteRows.filter((row) => this.isDesacordoEvent(row)).map((row) => this.toCteAlertDto(row));
+    const nfseAlertsRaw = await Promise.all(nfseRows.map((row) => this.toNfseRetentionAlertDto(row)));
+    const alerts = [...cteAlerts, ...nfseAlertsRaw.filter((row): row is AlertResponseDto => Boolean(row))];
+
+    await this.applyGenericResolutionState(alerts);
+
+    return alerts
+      .filter((alert) => this.matchesStatusFilter(alert, query.status))
+      .sort((left, right) => Date.parse(right.dataHora || 0) - Date.parse(left.dataHora || 0));
   }
 
   async updateCteDesacordoResolution(eventId: string, resolved: boolean): Promise<AlertResponseDto> {
@@ -100,7 +131,7 @@ export class AlertsService {
       throw new NotFoundException('Alerta de desacordo de CT-e nao encontrado');
     }
 
-    return this.toAlertDto(refreshed);
+    return this.toCteAlertDto(refreshed);
   }
 
   async listResolutions(query: QueryAlertsDto = {}): Promise<AlertResolutionResponseDto[]> {
@@ -151,7 +182,7 @@ export class AlertsService {
     return this.toResolutionDto(resolution);
   }
 
-  private toAlertDto(row: CteDesacordoAlertRow): AlertResponseDto {
+  private toCteAlertDto(row: CteDesacordoAlertRow): AlertResponseDto {
     const numeroDocumento = String(row.nfeDocumento.numeroNfe || '').trim() || row.chaveAcesso;
     const eventoDescricao = String(row.descricao || 'Evento de desacordo').trim() || 'Evento de desacordo';
 
@@ -178,8 +209,67 @@ export class AlertsService {
       numeroDocumento,
       eventoTipo: row.tipoEvento || '',
       eventoDescricao,
-      resolvedAt: row.cteDesacordoResolucao?.resolvidoEm.toISOString() ?? null
+      resolvedAt: row.cteDesacordoResolucao?.resolvidoEm.toISOString() ?? null,
+      emissor: row.nfeDocumento.cliente?.razaoSocial || 'Emissor nao identificado',
+      retencoes: []
     };
+  }
+
+  private async toNfseRetentionAlertDto(row: NfseRetencaoAlertRow): Promise<AlertResponseDto | null> {
+    if (!this.isNfseTomada(row)) {
+      return null;
+    }
+
+    const xmlPath = String(row.xmlPath || '').trim();
+    if (!xmlPath) {
+      return null;
+    }
+
+    try {
+      const xml = (await this.storage.getObject(xmlPath)).toString('utf8');
+      const retentionData = this.nfseDanfse.extractRetentionAlertData(xml);
+      if (!retentionData.hasRetention) {
+        return null;
+      }
+
+      const numeroDocumento = String(row.numeroNfse || '').trim() || row.chaveAcesso;
+      const emissor = String(row.razaoSocialPrestador || '').trim() || 'Emissor nao identificado';
+      const retencoes = retentionData.entries.map((entry) => (entry.amount ? `${entry.label}: ${entry.amount}` : entry.label));
+      const descricao =
+        retencoes.length > 0
+          ? `A NFS-e ${numeroDocumento} de entrada possui retencoes: ${retencoes.join(', ')}.`
+          : `A NFS-e ${numeroDocumento} de entrada possui retencoes.`;
+
+      return {
+        id: `nfse-retencao-${row.id}`,
+        eventId: row.id,
+        severity: 'Atencao',
+        tipo: 'NFS-e',
+        titulo: 'NFS-e de entrada com retencao',
+        descricao,
+        clientId: row.clienteId,
+        cliente: row.cliente?.razaoSocial || 'Cliente nao identificado',
+        dataHora: (row.dataEmissao ?? row.updatedAt ?? row.createdAt).toISOString(),
+        status: 'Aberto',
+        origem: 'nfse-retencao-entrada',
+        mensagemTecnica: `Prestador ${emissor}; chave ${row.chaveAcesso}.`,
+        sugestaoAcao: 'Conferir as retencoes da NFS-e com a empresa e validar o tratamento fiscal e operacional.',
+        historicoTentativas: [],
+        allowsReprocess: false,
+        persistence: 'client',
+        canToggleResolved: true,
+        documentoId: row.id,
+        chaveAcesso: row.chaveAcesso,
+        numeroDocumento,
+        eventoTipo: '',
+        eventoDescricao: '',
+        resolvedAt: null,
+        emissor,
+        retencoes
+      };
+    } catch {
+      return null;
+    }
   }
 
   private isDesacordoEvent(row: Pick<CteDesacordoAlertRow, 'descricao' | 'tipoEvento'>): boolean {
@@ -188,12 +278,70 @@ export class AlertsService {
     return description.includes('desacordo') || eventType.includes('desacordo');
   }
 
+  private isNfseTomada(row: Pick<NfseRetencaoAlertRow, 'cnpjTomador' | 'estabelecimento'>): boolean {
+    return this.normalizeDigits(row.cnpjTomador) === this.normalizeDigits(row.estabelecimento?.cnpj);
+  }
+
+  private async applyGenericResolutionState(alerts: AlertResponseDto[]): Promise<void> {
+    const genericAlerts = alerts.filter((alert) => String(alert.persistence || '').toLowerCase() !== 'server');
+    const alertIds = genericAlerts.map((alert) => alert.id).filter(Boolean);
+    if (!alertIds.length) {
+      return;
+    }
+
+    const resolutions = await this.prisma.alertResolution.findMany({
+      where: {
+        alertId: {
+          in: alertIds
+        }
+      }
+    });
+    const resolutionById = new Map(resolutions.map((resolution) => [resolution.alertId, resolution]));
+
+    genericAlerts.forEach((alert) => {
+      const resolution = resolutionById.get(alert.id);
+      if (!resolution) {
+        return;
+      }
+
+      const fingerprint = this.buildGenericAlertFingerprint(alert);
+      if (resolution.fingerprint !== fingerprint) {
+        return;
+      }
+
+      alert.status = 'Resolvido';
+      alert.resolvedAt = resolution.resolvedAt?.toISOString() ?? resolution.updatedAt.toISOString();
+    });
+  }
+
+  private matchesStatusFilter(alert: AlertResponseDto, status?: QueryAlertsDto['status']): boolean {
+    if (!status || status === 'Todos') {
+      return true;
+    }
+    return alert.status === status;
+  }
+
+  private buildGenericAlertFingerprint(alert: AlertResponseDto): string {
+    return JSON.stringify([
+      alert.id,
+      alert.origem || '',
+      alert.dataHora || '',
+      alert.titulo || '',
+      alert.descricao || '',
+      alert.mensagemTecnica || ''
+    ]);
+  }
+
   private normalizeSearchText(value?: string | null): string {
     return String(value || '')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()
       .trim();
+  }
+
+  private normalizeDigits(value?: string | null): string {
+    return String(value || '').replace(/\D/g, '');
   }
 
   private toResolutionDto(row: AlertResolution): AlertResolutionResponseDto {

@@ -69,4 +69,10 @@ export class AlertResponseDto {
 
   @ApiProperty()
   resolvedAt!: string | null;
+
+  @ApiProperty()
+  emissor!: string;
+
+  @ApiProperty({ type: [String] })
+  retencoes!: string[];
 }

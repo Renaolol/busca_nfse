@@ -114,6 +114,17 @@ export interface DanfseRenderInput {
   totaisAproximadosTributos?: string | null;
 }
 
+export interface NfseRetentionAlertEntry {
+  code: 'iss' | 'irrf' | 'inss' | 'csll' | 'pis' | 'cofins';
+  label: string;
+  amount?: string;
+}
+
+export interface NfseRetentionAlertData {
+  hasRetention: boolean;
+  entries: NfseRetentionAlertEntry[];
+}
+
 type PdfFont = '/F1' | '/F2';
 
 interface PdfField {
@@ -146,6 +157,27 @@ export class NfseDanfseService {
     const merged = this.normalizeMunicipioDisplayFields(this.mergeDefined(extracted, fallback));
 
     return this.generatePdf({ ...merged, chaveAcesso: this.normalizeChaveAcesso(fallback.chaveAcesso) });
+  }
+
+  extractRetentionAlertData(xml: string): NfseRetentionAlertData {
+    const extracted = this.extractFromXml(xml);
+    const entries: NfseRetentionAlertEntry[] = [];
+    const issRetido = this.describeRetencaoIss(extracted.retencaoIss) === 'Retido';
+
+    if (issRetido) {
+      entries.push({ code: 'iss', label: 'ISS retido' });
+    }
+
+    this.pushRetentionAmountEntry(entries, 'irrf', 'IRRF', extracted.valorIrrf);
+    this.pushRetentionAmountEntry(entries, 'inss', 'INSS', extracted.valorContribuicaoPrevidenciaria);
+    this.pushRetentionAmountEntry(entries, 'csll', 'CSLL', extracted.valorContribuicoesSociais);
+    this.pushRetentionAmountEntry(entries, 'pis', 'PIS', extracted.valorPis);
+    this.pushRetentionAmountEntry(entries, 'cofins', 'COFINS', extracted.valorCofins);
+
+    return {
+      hasRetention: entries.length > 0,
+      entries
+    };
   }
 
   generatePdf(input: DanfseRenderInput): Buffer {
@@ -2241,6 +2273,20 @@ export class NfseDanfseService {
       return undefined;
     }
     return total.toFixed(2);
+  }
+
+  private pushRetentionAmountEntry(
+    entries: NfseRetentionAlertEntry[],
+    code: NfseRetentionAlertEntry['code'],
+    label: string,
+    rawValue?: string | null
+  ): void {
+    const amount = this.formatMoney(rawValue);
+    if (!amount) {
+      return;
+    }
+
+    entries.push({ code, label, amount });
   }
 
   private formatCpfCnpj(value?: string | null): string | undefined {
