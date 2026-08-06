@@ -8733,8 +8733,8 @@ function renderDocumentInsightsSection(documentType, doc) {
       statusNf: resolveNfeLineItemStatusLabel(doc),
       dataEmissao: formatDate(doc.dataEmissao),
       produto: item.description || '-',
-      quantidade: formatXmlReader30QuantityValue(item.quantity),
-      valorUnitario: item.unitValue || '-',
+      quantidadeLabel: formatXmlReader30QuantityValue(item.quantity),
+      valorUnitarioLabel: formatXmlReader30UnitValue(item.unitValueRaw || item.unitValue),
       valorTotal: item.totalValue || '-',
       valorTotalNfXml: formatOptionalCurrency(doc.valor),
       icmsStRet: item.icmsStRet || '0',
@@ -8745,27 +8745,7 @@ function renderDocumentInsightsSection(documentType, doc) {
       valorIcms: item.valorIcms || '0'
     }));
 
-    return renderDocumentInsightsBlock(
-      'Itens da NF-e',
-      lineItems.length
-        ? renderDocumentInsightsTable(lineItems, [
-            { key: 'numeroNf', label: 'Numero NF' },
-            { key: 'statusNf', label: 'Status NF-e' },
-            { key: 'dataEmissao', label: 'Data Emissao' },
-            { key: 'produto', label: 'Produto' },
-            { key: 'quantidade', label: 'Quantidade' },
-            { key: 'valorUnitario', label: 'Valor Unitario' },
-            { key: 'valorTotal', label: 'Valor Total' },
-            { key: 'valorTotalNfXml', label: 'Valor Total NF XML R$' },
-            { key: 'icmsStRet', label: 'ICMS ST RET R$' },
-            { key: 'cstCsosn', label: 'CST/CSOSN' },
-            { key: 'cfop', label: 'CFOP' },
-            { key: 'baseCalculoIcms', label: 'Base de Cálculo ICMS' },
-            { key: 'aliquotaIcms', label: 'Alíquota ICMS (%)' },
-            { key: 'valorIcms', label: 'Valor ICMS' }
-          ])
-        : renderDocumentInsightsEmpty('Nao encontrei itens detalhados no XML carregado desta NF-e.')
-    );
+    return renderDocumentInsightsBlock('Itens da NF-e', renderDocumentInsightsProductsTable(lineItems));
   }
 
   if (documentType === 'cte') {
@@ -8850,6 +8830,63 @@ function renderDocumentInsightsBlock(title, content) {
 
 function renderDocumentInsightsEmpty(message) {
   return `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">${escapeHtml(message)}</div>`;
+}
+
+function renderDocumentInsightsProductsTable(rows) {
+  const normalizedRows = Array.isArray(rows) ? rows : [];
+
+  if (!normalizedRows.length) {
+    return renderDocumentInsightsEmpty('Nao encontrei itens detalhados no XML carregado desta NF-e.');
+  }
+
+  return `
+    <div class="document-products-shell">
+      <div class="document-products-toolbar" aria-hidden="true">
+        <span class="document-products-toolbar-icon">${icon('filter')}</span>
+      </div>
+      <div class="table-wrap document-products-scroll">
+        <table class="document-products-table">
+          <thead>
+            <tr>
+              <th class="document-products-col-product">
+                <div class="document-products-header-cell">
+                  <span>Produto</span>
+                  <span class="document-products-column-menu">${icon('more')}</span>
+                </div>
+              </th>
+              <th class="document-products-col-quantity">
+                <div class="document-products-header-cell">
+                  <span>Quantidade</span>
+                  <span class="document-products-column-menu">${icon('more')}</span>
+                </div>
+              </th>
+              <th class="document-products-col-unit">
+                <div class="document-products-header-cell">
+                  <span>Valor Unitario</span>
+                  <span class="document-products-column-menu">${icon('more')}</span>
+                </div>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            ${normalizedRows
+              .map(
+                (row) => `
+                  <tr>
+                    <td class="document-products-product">
+                      <span class="row-title">${escapeHtml(row.produto || '-')}</span>
+                    </td>
+                    <td class="document-products-quantity">${escapeHtml(row.quantidadeLabel || row.quantidade || '-')}</td>
+                    <td class="document-products-money">${escapeHtml(row.valorUnitarioLabel || row.valorUnitario || '-')}</td>
+                  </tr>
+                `
+              )
+              .join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
 }
 
 function renderDocumentInsightsTable(rows, columns) {
@@ -21240,6 +21277,10 @@ function icon(name) {
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 4v16"></path><path d="M4 8l4-4 4 4"></path><path d="M16 20V4"></path><path d="M12 16l4 4 4-4"></path></svg>',
     menu:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18"></path><path d="M3 12h18"></path><path d="M3 18h18"></path></svg>',
+    more:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="5" r="1.4"></circle><circle cx="12" cy="12" r="1.4"></circle><circle cx="12" cy="19" r="1.4"></circle></svg>',
+    filter:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16l-6 7v5l-4 2v-7L4 5z"></path></svg>',
     'arrow-left':
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M19 12H5"></path><path d="M12 19l-7-7 7-7"></path></svg>',
     folder:
@@ -21553,3 +21594,4 @@ document.addEventListener('click', (event) => {
   }
   pushToast('Conexao com servidor validada com sucesso (mock).', 'success');
 });
+
