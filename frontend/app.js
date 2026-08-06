@@ -705,9 +705,7 @@ function onDocumentClick(event) {
       return;
     }
     case 'xml-reader30-open-fullscreen': {
-      openModal({
-        kind: 'xml-reader30-nfe-fullscreen'
-      });
+      void openXmlReader30Fullscreen();
       return;
     }
     case 'nfse-fiscal-column-menu-toggle': {
@@ -14560,10 +14558,37 @@ function openModal(modal) {
   render();
 }
 
+async function openXmlReader30Fullscreen() {
+  openModal({
+    kind: 'xml-reader30-nfe-fullscreen'
+  });
+
+  await wait(0);
+
+  const fullscreenTarget =
+    modalRoot?.querySelector?.('.xml-reader30-fullscreen-modal') ||
+    modalRoot;
+
+  if (fullscreenTarget instanceof HTMLElement && typeof fullscreenTarget.requestFullscreen === 'function' && !document.fullscreenElement) {
+    try {
+      await fullscreenTarget.requestFullscreen({ navigationUI: 'hide' });
+    } catch (error) {
+      console.warn('Nao foi possivel abrir o leitor NF-e em fullscreen nativo.', error);
+    }
+  }
+}
+
 function closeModal() {
   if (!state.modal) {
     return;
   }
+
+  if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+    void document.exitFullscreen().catch((error) => {
+      console.warn('Nao foi possivel sair do fullscreen nativo.', error);
+    });
+  }
+
   state.modal = state.modal.returnTo ? cloneModalState(state.modal.returnTo) : null;
   render();
 }
