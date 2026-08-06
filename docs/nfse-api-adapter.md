@@ -32,3 +32,9 @@ As integracoes oficiais devem ser encapsuladas em adapters separados:
 - `NFSE_EMISSOR_PUBLICO_PATH_PREFIX` (padrao: `SefinNacional`)
 - `NFSE_ADN_TIMEOUT_MS` (padrao: `30000`)
 - `NFSE_ADN_REJECT_UNAUTHORIZED` (padrao: `true`)
+
+## Exportacao fiscal para Dominio
+
+- O leitor fiscal de NFS-e expõe `POST /nfse/leitura-fiscal/exportar-dominio` para gerar o TXT no layout padrao do LeitorXML.
+- O endpoint reutiliza a leitura fiscal do DANFSE e aplica a logica fiscal corrigida do projeto para ISS e retencoes federais.
+- Quando a exportacao for enviada com `contas=PorFornecedor`, o backend consulta o banco Dominio via ODBC usando `DOMINIO_ODBC_CONNECTION_STRING` e o script `scripts/dominio_nfse_fornecedor_contas.py`.

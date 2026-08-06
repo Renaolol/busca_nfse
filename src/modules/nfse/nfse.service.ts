@@ -1,7 +1,10 @@
+import { spawn } from 'node:child_process';
+import { join } from 'node:path';
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Ambiente, DocumentoOrigem, NfseDocumento, Prisma } from '@prisma/client';
 import JSZip from 'jszip';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
+import { resolveDominioPythonBin } from '../../integrations/dominio-nfe/python-bin';
 import {
   NFSE_EMISSOR_PUBLICO_CLIENT,
   NfseEmissorPublicoClient
@@ -12,7 +15,8 @@ import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardStatsQueryDto } from './dto/dashboard-stats.dto';
 import { DownloadLoteDto } from './dto/download-lote.dto';
-import { DanfseRenderInput, NfseDanfseService, NfseLeituraFiscal } from './nfse-danfse.service';
+import { ExportarLeituraFiscalDominioDto } from './dto/exportar-leitura-fiscal-dominio.dto';
+import { DanfseRenderInput, NfseDanfseService, NfseDominioExportData, NfseLeituraFiscal } from './nfse-danfse.service';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { ListNfseGapAuditsQueryDto } from './dto/list-gap-audits.dto';
 import {
@@ -77,9 +81,22 @@ type DocumentoRecoveryNeighbor = Pick<
   'ambiente' | 'serie' | 'numeroNfse' | 'chaveAcesso' | 'cnpjPrestador' | 'municipioPrestacaoCodigo' | 'xmlPath'
 >;
 
+type DominioFornecedorContaRecord = {
+  cnpj_fornecedor: string;
+  codi_cta: string | number;
+};
+
+type NfseDominioExportSource = {
+  documento: NfseDocumento;
+  exportData: NfseDominioExportData;
+};
+
 @Injectable()
 export class NfseService {
   private readonly logger = new Logger(NfseService.name);
+  private readonly dominioPythonBin = resolveDominioPythonBin();
+  private readonly dominioFornecedorContaScriptPath = join(process.cwd(), 'scripts', 'dominio_nfse_fornecedor_contas.py');
+  private readonly dominioConnectionString = process.env.DOMINIO_ODBC_CONNECTION_STRING || '';
   private readonly eventRequestIntervalMs = process.env.NODE_ENV === 'test' ? 0 : this.readPositiveNumberEnv('NFSE_EVENTOS_REQUEST_INTERVAL_MS', 5000);
   private readonly eventRateLimitRetryCount =
     process.env.NODE_ENV === 'test' ? 0 : this.readBoundedIntegerEnv('NFSE_EVENTOS_RATE_LIMIT_RETRY_COUNT', 2, 0, 5);
@@ -248,29 +265,7 @@ export class NfseService {
   }
 
   async getLeituraFiscal(query: QueryNfseDto) {
-    const where = this.buildBaseWhere(query);
-    const cnpjConsulta = this.normalizeCnpj(query.cnpjConsulta);
-
-    if (cnpjConsulta) {
-      const tipoRelacao = query.tipoRelacao ?? 'ambas';
-
-      if (tipoRelacao === 'emitidas') {
-        where.cnpjPrestador = cnpjConsulta;
-      } else if (tipoRelacao === 'tomadas') {
-        where.cnpjTomador = cnpjConsulta;
-      } else {
-        where.OR = [{ cnpjPrestador: cnpjConsulta }, { cnpjTomador: cnpjConsulta }];
-      }
-    }
-
-    const rawItems = await this.prisma.nfseDocumento.findMany({
-      where,
-      orderBy: [{ dataEmissao: 'desc' }, { updatedAt: 'desc' }, { createdAt: 'desc' }]
-    });
-    const { items: uniqueItems, duplicatesRemoved } = this.deduplicateDocumentosForList(rawItems);
-    if (duplicatesRemoved > 0) {
-      this.logger.warn(`Leitura fiscal de NFS-e ocultou ${duplicatesRemoved} duplicata(s) legada(s) por ambiente + chave_acesso.`);
-    }
+    const uniqueItems = await this.findLeituraFiscalDocumentos(query);
 
     const rows: Array<Record<string, unknown>> = [];
     let totalDocumentosSemXml = 0;
@@ -363,6 +358,80 @@ export class NfseService {
     };
   }
 
+  async exportarLeituraFiscalDominio(dto: ExportarLeituraFiscalDominioDto) {
+    const tipoRegistro = dto.tipoRegistro === 'Servico' ? 'Servico' : 'Entrada';
+    const contas = dto.contas === 'PorFornecedor' ? 'PorFornecedor' : 'Padrao';
+    const produtoPadrao = dto.produtoPadrao ?? 557;
+
+    if (contas === 'PorFornecedor' && tipoRegistro !== 'Entrada') {
+      throw new BadRequestException('O modo Por Fornecedor so pode ser usado na exportacao de Entrada.');
+    }
+
+    if (contas === 'PorFornecedor' && dto.codigoEmpresa <= 0) {
+      throw new BadRequestException('Informe um codigo de empresa Dominio valido para exportar por fornecedor.');
+    }
+    if (contas === 'PorFornecedor' && !this.dominioConnectionString) {
+      throw new BadRequestException('DOMINIO_ODBC_CONNECTION_STRING nao configurada para exportacao Por Fornecedor.');
+    }
+
+    const documentos = await this.findLeituraFiscalDocumentos(dto);
+    const sources: NfseDominioExportSource[] = [];
+
+    for (const doc of documentos) {
+      if (!doc.xmlPath) {
+        continue;
+      }
+
+      try {
+        const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
+        sources.push({
+          documento: doc,
+          exportData: this.danfse.extractDominioExportData(xml)
+        });
+      } catch (error) {
+        this.logger.warn(`Falha ao preparar NFS-e ${doc.id} para exportacao Dominio: ${this.toErrorMessage(error)}`);
+      }
+    }
+
+    if (!sources.length) {
+      throw new BadRequestException('Nenhuma NFS-e com XML valido foi encontrada para exportacao no layout Dominio.');
+    }
+
+    const contaFornecedorByCnpj =
+      contas === 'PorFornecedor'
+        ? await this.lookupDominioSupplierAccounts(
+            dto.codigoEmpresa,
+            sources.map((item) => item.exportData.prestadorCnpj).filter((value): value is string => Boolean(value))
+          )
+        : new Map<string, string>();
+
+    const headerCnpj = this.resolveDominioHeaderCnpj(dto, sources, tipoRegistro);
+    const lines = [`|0000|${headerCnpj}|`];
+
+    for (const source of sources) {
+      lines.push(
+        ...this.buildDominioExportLinesForSource({
+          source,
+          tipoRegistro,
+          produtoPadrao,
+          contaFornecedorByCnpj
+        })
+      );
+    }
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `DOMINIO-NFSE-${tipoRegistro.toUpperCase()}-${timestamp}.txt`;
+    const content = `${lines.join('\n')}\n`;
+
+    return {
+      id: `dominio-nfse-${timestamp}`,
+      chaveAcesso: sources[0]?.documento.chaveAcesso ?? '',
+      fileName,
+      contentType: 'text/plain; charset=utf-8',
+      contentBase64: Buffer.from(content, 'utf8').toString('base64')
+    };
+  }
+
   async findSeparated(query: QueryNfseDto) {
     const cnpjConsulta = this.normalizeCnpj(query.cnpjConsulta);
     if (!cnpjConsulta) {
@@ -410,6 +479,439 @@ export class NfseService {
       emitidas,
       tomadas
     };
+  }
+
+  private async findLeituraFiscalDocumentos(query: QueryNfseDto): Promise<NfseDocumento[]> {
+    const where = this.buildLeituraFiscalWhere(query);
+    const rawItems = await this.prisma.nfseDocumento.findMany({
+      where,
+      orderBy: [{ dataEmissao: 'desc' }, { updatedAt: 'desc' }, { createdAt: 'desc' }]
+    });
+    const { items: uniqueItems, duplicatesRemoved } = this.deduplicateDocumentosForList(rawItems);
+    if (duplicatesRemoved > 0) {
+      this.logger.warn(`Leitura fiscal de NFS-e ocultou ${duplicatesRemoved} duplicata(s) legada(s) por ambiente + chave_acesso.`);
+    }
+
+    return uniqueItems;
+  }
+
+  private buildLeituraFiscalWhere(query: QueryNfseDto): Prisma.NfseDocumentoWhereInput {
+    const where = this.buildBaseWhere(query);
+    const cnpjConsulta = this.normalizeCnpj(query.cnpjConsulta);
+
+    if (!cnpjConsulta) {
+      return where;
+    }
+
+    const tipoRelacao = query.tipoRelacao ?? 'ambas';
+
+    if (tipoRelacao === 'emitidas') {
+      where.cnpjPrestador = cnpjConsulta;
+    } else if (tipoRelacao === 'tomadas') {
+      where.cnpjTomador = cnpjConsulta;
+    } else {
+      where.OR = [{ cnpjPrestador: cnpjConsulta }, { cnpjTomador: cnpjConsulta }];
+    }
+
+    return where;
+  }
+
+  private buildDominioExportLinesForSource(params: {
+    source: NfseDominioExportSource;
+    tipoRegistro: 'Entrada' | 'Servico';
+    produtoPadrao: number;
+    contaFornecedorByCnpj: Map<string, string>;
+  }): string[] {
+    const { source, tipoRegistro, produtoPadrao, contaFornecedorByCnpj } = params;
+    const data = source.exportData;
+    const valorServico = this.roundTo2(data.valorServico ?? 0);
+    const valorLiquido = this.roundTo2(data.valorLiquidoNfse ?? 0);
+    const valorIss = this.roundTo2(data.valorIss ?? 0);
+    const valorIssRetidoReal = this.roundTo2(Math.max(data.valorIssRetidoReal ?? 0, 0));
+    const valorIrrf = this.roundTo2(data.valorIrrf ?? 0);
+    const valorInss = this.roundTo2(data.valorInss ?? 0);
+    const valorCsll = this.roundTo2(data.valorCsll ?? 0);
+    const valorPisRetido = this.roundTo2(data.pisRetido ? data.valorPis ?? 0 : 0);
+    const valorCofinsRetido = this.roundTo2(data.cofinsRetido ? data.valorCofins ?? 0 : 0);
+    const valorCrf = this.roundTo2(valorCsll + valorPisRetido + valorCofinsRetido);
+    const aliquotaIss = this.calculateDominioAliquota(valorIss, valorServico);
+    const aliquotaIssDestaque = (data.aliquotaIssInformada ?? 0) > 0 ? this.roundTo2(data.aliquotaIssInformada ?? 0) : aliquotaIss;
+    const numeroNfse = String(data.numeroNfse || source.documento.numeroNfse || '').trim();
+    const dataEmissao = this.formatDominioDate(data.dataEmissao ?? source.documento.dataEmissao ?? null);
+    const prestadorCnpj = this.normalizeCnpj(data.prestadorCnpj) ?? '';
+    const tomadorCnpj = this.normalizeCnpj(data.tomadorCnpj) ?? '';
+    const destinatarioCnpj = this.normalizeCnpj(data.destinatarioCnpj) ?? '';
+    const nomeDescricao = this.sanitizeDominioText(
+      tipoRegistro === 'Servico' ? data.tomadorNome || data.destinatarioNome || data.prestadorNome || '' : data.prestadorNome || ''
+    );
+    const acumulador = tipoRegistro === 'Servico' ? '900' : data.retencaoIss === 'Retido' ? '804' : '801';
+    const prestadorUf = this.sanitizeDominioText(data.prestadorUf || '');
+    const contaFornecedor =
+      params.tipoRegistro === 'Entrada'
+        ? contaFornecedorByCnpj.get(prestadorCnpj) || '506'
+        : '506';
+    const classEfd = valorInss > 0 ? '100000003' : '';
+    const codEfd = valorInss > 0 ? '0' : '';
+    const linhas: string[] = [];
+
+    if (tipoRegistro === 'Entrada') {
+      linhas.push(this.createDominioRegistro1000(prestadorCnpj, numeroNfse, dataEmissao, valorServico, valorLiquido, prestadorUf, acumulador, classEfd, codEfd));
+    } else {
+      const cnpjClienteServico = destinatarioCnpj || tomadorCnpj || prestadorCnpj;
+      const cfps = this.resolveDominioCfopsServico(data);
+      linhas.push(
+        this.createDominioRegistro3000(
+          cnpjClienteServico,
+          numeroNfse,
+          dataEmissao,
+          valorServico,
+          valorLiquido,
+          prestadorUf,
+          acumulador,
+          classEfd,
+          codEfd,
+          cfps
+        )
+      );
+    }
+
+    if (valorCrf > 0) {
+      linhas.push(this.createDominioRegistroImposto(tipoRegistro, valorServico, this.calculateDominioAliquota(valorCrf, valorServico), valorCrf, '25', ''));
+    }
+    if (valorIrrf > 0) {
+      linhas.push(this.createDominioRegistroImposto(tipoRegistro, valorServico, this.calculateDominioAliquota(valorIrrf, valorServico), valorIrrf, '16', ''));
+    }
+    if (valorInss > 0) {
+      linhas.push(this.createDominioRegistroImposto(tipoRegistro, valorServico, this.calculateDominioAliquota(valorInss, valorServico), valorInss, '26', '2631'));
+    }
+
+    const geraIssDestaque = valorIss > 0 && (tipoRegistro === 'Servico' || (tipoRegistro === 'Entrada' && data.retencaoIss === 'Retido'));
+    if (geraIssDestaque) {
+      linhas.push(this.createDominioRegistroImposto(tipoRegistro, valorServico, aliquotaIssDestaque, valorIss, '3', ''));
+    }
+    if (data.retencaoIss === 'Retido') {
+      linhas.push(this.createDominioRegistroImposto(tipoRegistro, valorServico, aliquotaIss, valorIss, '18', ''));
+    }
+
+    if (tipoRegistro === 'Entrada') {
+      linhas.push(this.createDominioRegistro1030(valorServico, dataEmissao, aliquotaIss, valorIss, prestadorUf, produtoPadrao));
+      const totalRetencoesLancto = this.roundTo2(valorCrf + valorIrrf + valorInss + valorIssRetidoReal);
+      if (totalRetencoesLancto === 0) {
+        linhas.push(this.createDominioRegistro1300(dataEmissao, '467', contaFornecedor, valorServico, numeroNfse, nomeDescricao, ''));
+      } else {
+        linhas.push(this.createDominioRegistro1300(dataEmissao, '467', '0', valorServico, numeroNfse, nomeDescricao, ''));
+        linhas.push(
+          this.createDominioRegistro1300(
+            dataEmissao,
+            '0',
+            contaFornecedor,
+            this.roundTo2(Math.max(valorServico - totalRetencoesLancto, 0)),
+            numeroNfse,
+            nomeDescricao,
+            ''
+          )
+        );
+      }
+      if (valorCrf > 0) {
+        linhas.push(this.createDominioRegistro1300(dataEmissao, '0', '487', valorCrf, numeroNfse, nomeDescricao, 'CRF RETIDO SOBRE'));
+      }
+      if (valorInss > 0) {
+        linhas.push(this.createDominioRegistro1300(dataEmissao, '0', '184', valorInss, numeroNfse, nomeDescricao, 'INSS RETIDO SOBRE'));
+      }
+      if (valorIrrf > 0) {
+        linhas.push(this.createDominioRegistro1300(dataEmissao, '0', '178', valorIrrf, numeroNfse, nomeDescricao, 'IRRF RETIDO SOBRE'));
+      }
+      if (valorIssRetidoReal > 0) {
+        linhas.push(this.createDominioRegistro1300(dataEmissao, '0', '183', valorIssRetidoReal, numeroNfse, nomeDescricao, 'ISS RETIDO SOBRE'));
+      }
+      return linhas;
+    }
+
+    const totalRetencoesLancto = this.roundTo2(valorIrrf + valorPisRetido + valorCofinsRetido + valorCsll);
+    linhas.push(this.createDominioRegistro3030(valorServico, dataEmissao, aliquotaIss, valorIss, this.resolveDominioCfopsServico(data), produtoPadrao));
+    linhas.push(this.createDominioRegistro3300(dataEmissao, '0', '412', valorServico, numeroNfse, nomeDescricao, ''));
+
+    const debitoConta5 = this.roundTo2(Math.max(valorServico - totalRetencoesLancto, 0));
+    if (debitoConta5 > 0) {
+      linhas.push(this.createDominioRegistro3300(dataEmissao, '5', '0', debitoConta5, numeroNfse, nomeDescricao, ''));
+    }
+    if (valorIrrf > 0) {
+      linhas.push(this.createDominioRegistro3300(dataEmissao, '31', '0', valorIrrf, numeroNfse, nomeDescricao, 'IRRF RETIDO SOBRE'));
+    }
+    if (valorPisRetido > 0) {
+      linhas.push(this.createDominioRegistro3300(dataEmissao, '41', '0', valorPisRetido, numeroNfse, nomeDescricao, 'PIS RETIDO SOBRE'));
+    }
+    if (valorCofinsRetido > 0) {
+      linhas.push(this.createDominioRegistro3300(dataEmissao, '40', '0', valorCofinsRetido, numeroNfse, nomeDescricao, 'COFINS RETIDO SOBRE'));
+    }
+    if (valorCsll > 0) {
+      linhas.push(this.createDominioRegistro3300(dataEmissao, '724', '0', valorCsll, numeroNfse, nomeDescricao, 'CSOC RETIDO SOBRE'));
+    }
+
+    return linhas;
+  }
+
+  private resolveDominioHeaderCnpj(
+    dto: ExportarLeituraFiscalDominioDto,
+    sources: NfseDominioExportSource[],
+    tipoRegistro: 'Entrada' | 'Servico'
+  ): string {
+    const explicitCnpj = this.normalizeCnpj(dto.cnpjConsulta) ?? this.normalizeCnpj(dto.cnpj);
+    if (explicitCnpj) {
+      return explicitCnpj;
+    }
+
+    for (const source of sources) {
+      const cnpj =
+        tipoRegistro === 'Entrada'
+          ? this.normalizeCnpj(source.exportData.tomadorCnpj) ?? this.normalizeCnpj(source.documento.cnpjTomador)
+          : this.normalizeCnpj(source.exportData.prestadorCnpj) ?? this.normalizeCnpj(source.documento.cnpjPrestador);
+      if (cnpj) {
+        return cnpj;
+      }
+    }
+
+    return '';
+  }
+
+  private resolveDominioCfopsServico(data: NfseDominioExportData): string {
+    const municipioEmitente = this.normalizeMunicipioComparisonValue(data.prestadorMunicipio);
+    const estadoEmitente = this.normalizeMunicipioComparisonValue(data.prestadorUf);
+    const municipioDestino = this.normalizeMunicipioComparisonValue(data.destinatarioMunicipio || data.tomadorMunicipio);
+    const estadoDestino = this.normalizeMunicipioComparisonValue(data.destinatarioUf || data.tomadorUf);
+
+    if (municipioEmitente && municipioDestino && municipioEmitente === municipioDestino) {
+      return '9101';
+    }
+    if (estadoEmitente && estadoDestino && estadoEmitente === estadoDestino) {
+      return '9102';
+    }
+    return '9103';
+  }
+
+  private normalizeMunicipioComparisonValue(value?: string | null): string {
+    return String(value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toUpperCase();
+  }
+
+  private calculateDominioAliquota(valor: number, base: number): number {
+    if (base <= 0) {
+      return 0;
+    }
+
+    return this.roundTo2((valor / base) * 100);
+  }
+
+  private formatDominioDate(value?: Date | null): string {
+    if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+      return '';
+    }
+
+    const day = String(value.getDate()).padStart(2, '0');
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const year = String(value.getFullYear());
+    return `${day}/${month}/${year}`;
+  }
+
+  private formatDominioNumber(value?: number): string {
+    return this.roundTo2(value ?? 0).toFixed(2).replace('.', ',');
+  }
+
+  private sanitizeDominioText(value?: string | null): string {
+    return String(value || '')
+      .replace(/[|\r\n]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  private createDominioRegistro1000(
+    cnpj: string,
+    numeroDocumento: string,
+    dataEmissao: string,
+    valorServico: number,
+    _valorContabil: number,
+    estadoEmitente: string,
+    acumulador: string,
+    classEfd: string,
+    codEfd: string
+  ): string {
+    const cfop = estadoEmitente === 'SC' ? '1933' : '2933';
+    return `|1000|39|${cnpj}||${acumulador}|${cfop}||${numeroDocumento}|U||${dataEmissao}|${dataEmissao}|${this.formatDominioNumber(valorServico)}|||S|||||||||||||||||||||||${this.formatDominioNumber(valorServico)}|0|||||||||||||||||||||||||||||||||||||||||||||||||||${codEfd}|${classEfd}|||||||`;
+  }
+
+  private createDominioRegistro3000(
+    cnpj: string,
+    numeroDocumento: string,
+    dataEmissao: string,
+    valorServico: number,
+    valorContabil: number,
+    estadoEmitente: string,
+    acumulador: string,
+    classEfd: string,
+    codEfd: string,
+    cfps: string
+  ): string {
+    const campos = [
+      '3000',
+      '39',
+      cnpj,
+      estadoEmitente,
+      acumulador,
+      '',
+      numeroDocumento,
+      'U',
+      '',
+      dataEmissao,
+      dataEmissao,
+      this.formatDominioNumber(valorContabil),
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      cfps,
+      '',
+      '',
+      '',
+      '',
+      '',
+      classEfd,
+      codEfd,
+      this.formatDominioNumber(valorServico),
+      '',
+      '',
+      ''
+    ];
+
+    return `|${campos.join('|')}|`;
+  }
+
+  private createDominioRegistroImposto(
+    tipoRegistro: 'Entrada' | 'Servico',
+    baseCalculo: number,
+    aliquota: number,
+    valor: number,
+    codigoImposto: string,
+    codigoRecolhimento: string
+  ): string {
+    const campos =
+      tipoRegistro === 'Entrada'
+        ? ['1020', codigoImposto, '', this.formatDominioNumber(baseCalculo), this.formatDominioNumber(aliquota), this.formatDominioNumber(valor), '', '', '', '', '', codigoRecolhimento, '', '', '', '', '', '', '', '']
+        : ['3020', codigoImposto, '', this.formatDominioNumber(baseCalculo), this.formatDominioNumber(aliquota), this.formatDominioNumber(valor), '', '', '', codigoRecolhimento, ''];
+
+    return `|${campos.join('|')}|`;
+  }
+
+  private createDominioRegistro1030(
+    valorUnitario: number,
+    dataEmissao: string,
+    aliquota: number,
+    valorIss: number,
+    estadoEmitente: string,
+    produtoPadrao: number
+  ): string {
+    const cfop = estadoEmitente === 'SC' ? '1933' : '2933';
+    return `|1030|${produtoPadrao}|1|${this.formatDominioNumber(valorUnitario)}|||1|${dataEmissao}||00|${this.formatDominioNumber(valorUnitario)}||||||||||||||||||||||||${this.formatDominioNumber(aliquota)}|${this.formatDominioNumber(valorIss)}|${cfop}|||||||||||||||||||||||||||||||||03|||||||||||||||||||||||||||||||||||||||||||||||`;
+  }
+
+  private createDominioRegistro3030(
+    valorUnitario: number,
+    dataEmissao: string,
+    aliquota: number,
+    valorIss: number,
+    cfps: string,
+    produtoPadrao: number
+  ): string {
+    return `|3030|${produtoPadrao}|1|${this.formatDominioNumber(valorUnitario)}|||1|${dataEmissao}||00|${this.formatDominioNumber(valorUnitario)}||||||||||||||||||||||||${this.formatDominioNumber(aliquota)}|${this.formatDominioNumber(valorIss)}|${cfps}|||||||||||||||||||||||||||||||||03|||||||||||||||||||||||||||||||||||||||||||||||`;
+  }
+
+  private createDominioRegistro1300(
+    dataEmissao: string,
+    contaDebito: string,
+    contaCredito: string,
+    valor: number,
+    numeroDocumento: string,
+    emissor: string,
+    imposto: string
+  ): string {
+    return `|1300|${dataEmissao}|${contaDebito}|${contaCredito}|${this.formatDominioNumber(valor)}||${imposto} NFS-E N ${numeroDocumento} ${emissor}|||`;
+  }
+
+  private createDominioRegistro3300(
+    dataEmissao: string,
+    contaDebito: string,
+    contaCredito: string,
+    valor: number,
+    numeroDocumento: string,
+    emissor: string,
+    imposto: string
+  ): string {
+    return `|3300|${dataEmissao}|${contaDebito}|${contaCredito}|${this.formatDominioNumber(valor)}||${imposto} NFS-E N ${numeroDocumento} ${emissor}|||`;
+  }
+
+  private async lookupDominioSupplierAccounts(codigoEmpresa: number, cnpjs: string[]): Promise<Map<string, string>> {
+    if (!this.dominioConnectionString) {
+      throw new BadRequestException('DOMINIO_ODBC_CONNECTION_STRING nao configurada para exportacao Por Fornecedor.');
+    }
+
+    const normalizedCnpjs = [...new Set(cnpjs.map((value) => this.normalizeCnpj(value)).filter((value): value is string => Boolean(value)))];
+    if (!normalizedCnpjs.length) {
+      return new Map();
+    }
+
+    const payload = JSON.stringify({
+      connectionString: this.dominioConnectionString,
+      codigoEmpresa,
+      cnpjs: normalizedCnpjs
+    });
+
+    const records = await new Promise<DominioFornecedorContaRecord[]>((resolve, reject) => {
+      const processRef = spawn(this.dominioPythonBin, [this.dominioFornecedorContaScriptPath], {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      processRef.stdout.setEncoding('utf8');
+      processRef.stderr.setEncoding('utf8');
+      processRef.stdout.on('data', (chunk: string) => {
+        stdout += chunk;
+      });
+      processRef.stderr.on('data', (chunk: string) => {
+        stderr += chunk;
+      });
+      processRef.on('error', (error) => reject(error));
+      processRef.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(stderr.trim() || `Falha ao consultar fornecedores na Dominio. Exit code ${code}.`));
+          return;
+        }
+
+        const parsed = stdout
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as DominioFornecedorContaRecord);
+        resolve(parsed);
+      });
+
+      processRef.stdin.write(payload);
+      processRef.stdin.end();
+    });
+
+    return new Map(
+      records
+        .map((record) => [this.normalizeCnpj(record.cnpj_fornecedor) ?? '', String(record.codi_cta || '').trim()] as const)
+        .filter(([cnpj, conta]) => Boolean(cnpj) && Boolean(conta))
+    );
   }
 
   async listGapAudits(query: ListNfseGapAuditsQueryDto = {}) {
