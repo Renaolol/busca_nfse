@@ -197,6 +197,12 @@ const state = {
     total: 0,
     totalPages: 0
   },
+  nfseFiscalReader: {
+    rows: [],
+    summary: null,
+    lastQuery: null,
+    lastLoadedAt: null
+  },
   nfseGapAuditOverview: {
     rows: [],
     lastLoadedAt: null
@@ -352,6 +358,7 @@ const state = {
     runs: 'loading',
     nfeSync: 'loading',
     xmls: 'loading',
+    nfseFiscalReader: 'loading',
     nfseGapAudit: 'loading',
     nfeDocs: 'loading',
     cteDocs: 'loading',
@@ -4085,7 +4092,7 @@ function renderXmlsPage() {
 
       ${
         xmlSearchCanShowTable
-          ? `${xmlSearchSummary}${renderXmlsTableCard(xmls)}`
+          ? `${xmlSearchSummary}${renderXmlsTableCard(xmls)}${renderNfseFiscalReaderCard()}`
           : renderXmlSearchEmptyState()
       }
     </section>
@@ -8713,6 +8720,118 @@ function renderCteDisagreementAlertsModal() {
   `;
 }
 
+function renderNfseFiscalReaderCard() {
+  if (!state.xmlSearch.hasSearched) {
+    return '';
+  }
+
+  const summary = state.nfseFiscalReader.summary;
+  const rows = Array.isArray(state.nfseFiscalReader.rows) ? state.nfseFiscalReader.rows : [];
+  const summaryCards = summary
+    ? `
+      <div class="form-grid six" style="margin-bottom:18px;">
+        ${detailItem('Filtradas', String(summary.totalDocumentosFiltrados || 0))}
+        ${detailItem('Lidas', String(summary.totalDocumentosLidos || 0))}
+        ${detailItem('Com erro', String(summary.totalDocumentosComErro || 0))}
+        ${detailItem('Sem XML', String(summary.totalDocumentosSemXml || 0))}
+        ${detailItem('Valor servico', formatOptionalCurrency(summary.valorServicoTotal))}
+        ${detailItem('ISS retido real', formatOptionalCurrency(summary.valorIssRetidoRealTotal))}
+      </div>
+      <div class="form-grid four" style="margin-bottom:18px;">
+        ${detailItem('Valor liquido', formatOptionalCurrency(summary.valorLiquidoTotal))}
+        ${detailItem('Valor retido', formatOptionalCurrency(summary.valorRetidoTotal))}
+        ${detailItem('ISS total', formatOptionalCurrency(summary.valorIssTotal))}
+        ${detailItem('Retencoes federais', formatOptionalCurrency(summary.totalRetencoesFederais))}
+      </div>
+    `
+    : '';
+
+  return `
+    <article class="card">
+      <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+        <div>
+          <h3 class="card-title">Leitura fiscal das NFS-e filtradas</h3>
+          <p class="card-subtitle">Tabela consolidada no estilo do LeitorXML, usando exatamente as NFS-e retornadas pelos filtros atuais.</p>
+        </div>
+        <div class="progress-meta">
+          <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.nfseFiscalReader.lastLoadedAt || new Date().toISOString()))}</strong></span>
+          <span>Linhas: <strong>${escapeHtml(String(rows.length))}</strong></span>
+        </div>
+      </div>
+      ${summaryCards}
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Numero</th>
+              <th>Local prestacao</th>
+              <th>Local ISS</th>
+              <th>Prestador</th>
+              <th>CNPJ prestador</th>
+              <th>Tomador</th>
+              <th>CNPJ tomador</th>
+              <th>Valor liquido</th>
+              <th>Valor retido</th>
+              <th>Valor servico</th>
+              <th>ISS</th>
+              <th>PIS</th>
+              <th>COFINS</th>
+              <th>INSS</th>
+              <th>IRRF</th>
+              <th>CSLL</th>
+              <th>Data emissao</th>
+              <th>ISS RET</th>
+              <th>Federal RET</th>
+              <th>Aliq ISS</th>
+              <th>ISS retido real</th>
+              <th>Aliq real ISS</th>
+              <th>Status</th>
+              <th>Erro</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${renderTableRowsOrState({
+              key: 'nfseFiscalReader',
+              colSpan: 24,
+              rowsHtml: rows
+                .map(
+                  (row) => `<tr>
+                    <td>${escapeHtml(row.numeroNfse || '-')}</td>
+                    <td>${escapeHtml(row.localPrestacao || '-')}</td>
+                    <td>${escapeHtml(row.localIncidenciaIss || '-')}</td>
+                    <td>${escapeHtml(row.prestador || '-')}</td>
+                    <td>${escapeHtml(formatCnpj(row.cnpjPrestador || ''))}</td>
+                    <td>${escapeHtml(row.tomador || '-')}</td>
+                    <td>${escapeHtml(formatCnpj(row.cnpjTomador || ''))}</td>
+                    <td>${escapeHtml(formatOptionalCurrency(row.valorLiquidoNfse))}</td>
+                    <td>${escapeHtml(formatOptionalCurrency(row.valorTotalRetencoes))}</td>
+                    <td>${escapeHtml(formatOptionalCurrency(row.valorServico))}</td>
+                    <td>${escapeHtml(formatOptionalCurrency(row.valorIss))}</td>
+                    <td>${escapeHtml(formatOptionalCurrency(row.valorPis))}</td>
+                    <td>${escapeHtml(formatOptionalCurrency(row.valorCofins))}</td>
+                    <td>${escapeHtml(formatOptionalCurrency(row.valorInss))}</td>
+                    <td>${escapeHtml(formatOptionalCurrency(row.valorIrrf))}</td>
+                    <td>${escapeHtml(formatOptionalCurrency(row.valorCsll))}</td>
+                    <td>${escapeHtml(formatDate(row.dataEmissao))}</td>
+                    <td>${escapeHtml(row.retencaoIss || '-')}</td>
+                    <td>${escapeHtml(row.retencaoFederal || '-')}</td>
+                    <td>${escapeHtml(formatOptionalPercentage(row.aliquotaIss))}</td>
+                    <td>${escapeHtml(formatOptionalCurrency(row.valorIssRetidoReal))}</td>
+                    <td>${escapeHtml(formatOptionalPercentage(row.aliquotaRealIss))}</td>
+                    <td>${statusBadge(row.statusProcessamento || '-', row.statusProcessamento === 'OK' ? 'success' : 'warning')}</td>
+                    <td>${escapeHtml(row.erroProcessamento || '-')}</td>
+                  </tr>`
+                )
+                .join(''),
+              emptyMessage: 'Nenhuma NFS-e armazenada foi processada para a leitura fiscal com os filtros atuais.'
+            })}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
 function renderNfseRetentionAlertsModal() {
   const companyId = state.modal?.kind === 'nfse-retention-alerts' ? String(state.modal.empresaId || '') : '';
   const alerts = getFilteredNfseRetentionAlerts(companyId);
@@ -11634,10 +11753,15 @@ async function applyXmlFilters(form) {
     state.xmlSearch.lastQuery = null;
     state.xmlSearch.numberingValidation = null;
     state.xmlSearch.informativeRows = 0;
+    state.nfseFiscalReader.rows = [];
+    state.nfseFiscalReader.summary = null;
+    state.nfseFiscalReader.lastQuery = null;
+    state.nfseFiscalReader.lastLoadedAt = null;
     state.xmlSearch.total = 0;
     state.xmlSearch.totalPages = 0;
     state.xmlSearch.page = 1;
     state.tableState.xmls = 'data';
+    state.tableState.nfseFiscalReader = 'data';
     pushToast('Selecione uma empresa para buscar XMLs.', 'error');
     render();
     return;
@@ -11653,10 +11777,15 @@ async function applyXmlFilters(form) {
     state.xmlSearch.lastQuery = null;
     state.xmlSearch.numberingValidation = null;
     state.xmlSearch.informativeRows = 0;
+    state.nfseFiscalReader.rows = [];
+    state.nfseFiscalReader.summary = null;
+    state.nfseFiscalReader.lastQuery = null;
+    state.nfseFiscalReader.lastLoadedAt = null;
     state.xmlSearch.total = 0;
     state.xmlSearch.totalPages = 0;
     state.xmlSearch.page = 1;
     state.tableState.xmls = 'data';
+    state.tableState.nfseFiscalReader = 'data';
     pushToast('A data inicial nao pode ser maior que a data final.', 'error');
     render();
     return;
@@ -12257,6 +12386,11 @@ function resetXmlSearch() {
   state.xmlSearch.total = 0;
   state.xmlSearch.totalPages = 0;
   state.tableState.xmls = 'data';
+  state.nfseFiscalReader.rows = [];
+  state.nfseFiscalReader.summary = null;
+  state.nfseFiscalReader.lastQuery = null;
+  state.nfseFiscalReader.lastLoadedAt = null;
+  state.tableState.nfseFiscalReader = 'data';
 }
 
 function resetNfeSyncFilters() {
@@ -12343,11 +12477,22 @@ async function executeXmlSearch() {
   state.xmlSearch.hasSearched = true;
   state.xmlSearch.results = [];
   state.tableState.xmls = 'loading';
+  state.tableState.nfseFiscalReader = 'loading';
+  state.nfseFiscalReader.rows = [];
+  state.nfseFiscalReader.summary = null;
+  state.nfseFiscalReader.lastQuery = { ...state.filters.xmls };
   render();
 
   try {
     const query = buildXmlSearchQuery(state.filters.xmls, 1, SEARCH_PAGE_SIZE, true);
-    const payload = normalizePaginatedResponse(await apiRequest(`/nfse?${query.toString()}`));
+    const [payloadRaw, fiscalReaderRaw] = await Promise.allSettled([
+      apiRequest(`/nfse?${query.toString()}`),
+      apiRequest(`/nfse/leitura-fiscal?${query.toString()}`)
+    ]);
+    if (payloadRaw.status !== 'fulfilled') {
+      throw payloadRaw.reason;
+    }
+    const payload = normalizePaginatedResponse(payloadRaw.value);
     const xmls = buildXmlFilesFromApi(payload.items, state.clients);
     state.xmlFiles = mergeXmlFilesById(state.xmlFiles, xmls);
     const filteredXmls = getFilteredXmlsFromSource(xmls);
@@ -12361,6 +12506,19 @@ async function executeXmlSearch() {
     state.xmlSearch.total = payload.total;
     state.xmlSearch.totalPages = payload.totalPages;
     state.tableState.xmls = 'data';
+    if (fiscalReaderRaw.status === 'fulfilled') {
+      const normalizedFiscalReader = normalizeNfseFiscalReaderResponse(fiscalReaderRaw.value);
+      state.nfseFiscalReader.rows = normalizedFiscalReader.items;
+      state.nfseFiscalReader.summary = normalizedFiscalReader.summary;
+      state.nfseFiscalReader.lastLoadedAt = new Date().toISOString();
+      state.tableState.nfseFiscalReader = 'data';
+    } else {
+      state.nfseFiscalReader.rows = [];
+      state.nfseFiscalReader.summary = null;
+      state.nfseFiscalReader.lastLoadedAt = null;
+      state.tableState.nfseFiscalReader = 'error';
+      pushToast(`Falha ao montar a leitura fiscal das NFS-e: ${toErrorMessage(fiscalReaderRaw.reason)}`, 'error');
+    }
     reportIfListingCapped('nota(s)', payload);
   } catch (error) {
     state.xmlSearch.results = [];
@@ -12369,6 +12527,10 @@ async function executeXmlSearch() {
     state.xmlSearch.total = 0;
     state.xmlSearch.totalPages = 0;
     state.tableState.xmls = 'error';
+    state.nfseFiscalReader.rows = [];
+    state.nfseFiscalReader.summary = null;
+    state.nfseFiscalReader.lastLoadedAt = null;
+    state.tableState.nfseFiscalReader = 'error';
     pushToast(`Falha ao buscar XMLs: ${toErrorMessage(error)}`, 'error');
   }
 
@@ -13612,6 +13774,11 @@ async function openXmlSearchForGapContext(context) {
   state.xmlSearch.total = 0;
   state.xmlSearch.totalPages = 0;
   state.selectedXmlIds = new Set();
+  state.nfseFiscalReader.rows = [];
+  state.nfseFiscalReader.summary = null;
+  state.nfseFiscalReader.lastQuery = null;
+  state.nfseFiscalReader.lastLoadedAt = null;
+  state.tableState.nfseFiscalReader = 'data';
 
   navigate('/xmls');
   await wait(0);
@@ -14222,6 +14389,70 @@ function buildPageLoadingPlan(route = state.route) {
     title: `Carregando ${meta.title}`,
     description: routeSpecificDescription,
     initialTask: 'Preparando pagina'
+  };
+}
+
+function normalizeNfseFiscalReaderResponse(payload) {
+  const items = Array.isArray(payload?.items)
+    ? payload.items.map((row) => ({
+        id: String(row?.id || '').trim(),
+        clienteId: String(row?.clienteId || '').trim(),
+        estabelecimentoId: String(row?.estabelecimentoId || '').trim(),
+        numeroNfse: row?.numeroNfse == null ? '' : String(row.numeroNfse),
+        chaveAcesso: String(row?.chaveAcesso || '').trim(),
+        dataEmissao: row?.dataEmissao ? String(row.dataEmissao) : '',
+        prestador: String(row?.prestador || '').trim(),
+        cnpjPrestador: normalizeDigits(String(row?.cnpjPrestador || '')),
+        tomador: String(row?.tomador || '').trim(),
+        cnpjTomador: normalizeDigits(String(row?.cnpjTomador || '')),
+        municipio: String(row?.municipio || '').trim(),
+        codigoServicoPrestado: String(row?.codigoServicoPrestado || '').trim(),
+        descricaoServico: String(row?.descricaoServico || '').trim(),
+        layout: String(row?.layout || '').trim(),
+        localPrestacao: String(row?.localPrestacao || '').trim(),
+        localIncidenciaIss: String(row?.localIncidenciaIss || '').trim(),
+        valorServico: row?.valorServico ?? '',
+        valorLiquidoNfse: row?.valorLiquidoNfse ?? '',
+        valorTotalRetencoes: row?.valorTotalRetencoes ?? '',
+        valorIss: row?.valorIss ?? '',
+        valorIssRetido: row?.valorIssRetido ?? '',
+        valorIssRetidoReal: row?.valorIssRetidoReal ?? '',
+        valorIrrf: row?.valorIrrf ?? '',
+        valorInss: row?.valorInss ?? '',
+        valorCsll: row?.valorCsll ?? '',
+        valorPis: row?.valorPis ?? '',
+        valorCofins: row?.valorCofins ?? '',
+        aliquotaIss: row?.aliquotaIss ?? '',
+        aliquotaRealIss: row?.aliquotaRealIss ?? '',
+        retencaoIss: String(row?.retencaoIss || '').trim(),
+        retencaoFederal: String(row?.retencaoFederal || '').trim(),
+        totalRetencoesFederais: row?.totalRetencoesFederais ?? '',
+        statusProcessamento: String(row?.statusProcessamento || '').trim(),
+        erroProcessamento: String(row?.erroProcessamento || '').trim(),
+        camposComProblema: Array.isArray(row?.camposComProblema)
+          ? row.camposComProblema.map((item) => String(item || '').trim()).filter(Boolean)
+          : []
+      }))
+    : [];
+  const summary = payload?.summary
+    ? {
+        totalDocumentosFiltrados: Number(payload.summary.totalDocumentosFiltrados || 0),
+        totalDocumentosLidos: Number(payload.summary.totalDocumentosLidos || 0),
+        totalDocumentosComErro: Number(payload.summary.totalDocumentosComErro || 0),
+        totalDocumentosSemXml: Number(payload.summary.totalDocumentosSemXml || 0),
+        valorServicoTotal: Number(payload.summary.valorServicoTotal || 0),
+        valorLiquidoTotal: Number(payload.summary.valorLiquidoTotal || 0),
+        valorRetidoTotal: Number(payload.summary.valorRetidoTotal || 0),
+        valorIssTotal: Number(payload.summary.valorIssTotal || 0),
+        valorIssRetidoRealTotal: Number(payload.summary.valorIssRetidoRealTotal || 0),
+        totalRetencoesFederais: Number(payload.summary.totalRetencoesFederais || 0)
+      }
+    : null;
+
+  return {
+    items,
+    total: Number(payload?.total || items.length || 0),
+    summary
   };
 }
 

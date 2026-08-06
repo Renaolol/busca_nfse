@@ -136,6 +136,11 @@ export interface NfseLeituraFiscal {
   valorIss?: string;
   valorIssRetido?: string;
   valorIssRetidoReal?: string;
+  valorIrrf?: string;
+  valorInss?: string;
+  valorCsll?: string;
+  valorPis?: string;
+  valorCofins?: string;
   aliquotaIss?: string;
   aliquotaRealIss?: string;
   retencaoIss?: string;
@@ -258,6 +263,11 @@ export class NfseDanfseService {
       valorIss: this.toFixedCurrencyString(valorIss),
       valorIssRetido: this.toFixedCurrencyString(valorIssRetido),
       valorIssRetidoReal: this.toFixedCurrencyString(valorIssRetidoReal),
+      valorIrrf: this.toFixedCurrencyString(irrf),
+      valorInss: this.toFixedCurrencyString(inss),
+      valorCsll: this.toFixedCurrencyString(csll),
+      valorPis: this.toFixedCurrencyString(pis),
+      valorCofins: this.toFixedCurrencyString(cofins),
       aliquotaIss: this.toFixedRateString(this.toNumber(extracted.aliquotaIss)),
       aliquotaRealIss: this.toFixedRateString(aliquotaRealIss),
       retencaoIss,
