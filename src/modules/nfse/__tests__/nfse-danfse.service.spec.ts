@@ -236,12 +236,12 @@ describe('NfseDanfseService', () => {
     expect(content).toContain('R$ 5,25');
     expect(content).toContain('Contribuicoes Sociais - Retidas');
     expect(content).toContain('R$ 16,28');
-    expect(content).toContain('PIS - Debito Apuracao Propria');
+    expect(content).toContain('PIS Retido');
     expect(content).toContain('R$ 2,28');
-    expect(content).toContain('COFINS - Debito Apuracao Propria');
+    expect(content).toContain('COFINS Retido');
     expect(content).toContain('R$ 10,50');
     expect(content).toContain('Total das Retencoes Federais');
-    expect(content).toContain('R$ 21,53');
+    expect(content).toContain('R$ 34,31');
   });
 
   it('extrai leitura fiscal consolidada do layout nacional', () => {
@@ -289,9 +289,102 @@ describe('NfseDanfseService', () => {
     expect(leitura.aliquotaRealIss).toBe('5.00');
     expect(leitura.retencaoIss).toBe('Retido');
     expect(leitura.retencaoFederal).toBe('Retido');
-    expect(leitura.totalRetencoesFederais).toBe('9.00');
+    expect(leitura.totalRetencoesFederais).toBe('6.50');
     expect(leitura.statusProcessamento).toBe('OK');
     expect(leitura.camposComProblema).toEqual([]);
+  });
+
+  it('usa tpRetPisCofins do layout nacional como indicativo de retencao sem somar vPis/vCofins nas retencoes federais', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42076502246555046000178000000000042626088527978389">
+    <nNFSe>426</nNFSe>
+    <valores>
+      <vServ>2000.00</vServ>
+      <vLiq>1934.00</vLiq>
+      <vISSQN>100.00</vISSQN>
+      <trib>
+        <tribFed>
+          <piscofins>
+            <vPis>13.00</vPis>
+            <vCofins>53.00</vCofins>
+            <tpRetPisCofins>1</tpRetPisCofins>
+          </piscofins>
+        </tribFed>
+        <tribMun>
+          <tpRetISSQN>1</tpRetISSQN>
+        </tribMun>
+      </trib>
+    </valores>
+  </infNFSe>
+</NFSe>`;
+
+    const leitura = service.extractLeituraFiscal(xml);
+    const retencoes = service.extractRetentionAlertData(xml);
+    const pdf = service.generateFromXml(xml, {
+      chaveAcesso: '42076502246555046000178000000000042626088527978389'
+    });
+    const content = pdf.toString('latin1');
+
+    expect(leitura.layout).toBe('padrao_nacional');
+    expect(leitura.retencaoFederal).toBe('Retido');
+    expect(leitura.totalRetencoesFederais).toBeUndefined();
+    expect(retencoes.entries).toEqual([
+      { code: 'pis', label: 'PIS retido' },
+      { code: 'cofins', label: 'COFINS retido' }
+    ]);
+    expect(content).toContain('Tipo de Retencao PIS/COFINS/CSLL');
+    expect(content).toContain('PIS/COFINS retidos');
+    expect(content).toContain('PIS - Debito Apuracao Propria');
+    expect(content).toContain('COFINS - Debito Apuracao Propria');
+  });
+
+  it('interpreta tpRetISSQN=1 do layout nacional como nao retido quando nao houver valor de ISS retido', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42076502246555046000178000000000042626080527978389">
+    <xLocPrestacao>Iporã do Oeste</xLocPrestacao>
+    <xLocIncid>Iporã do Oeste</xLocIncid>
+    <nNFSe>426</nNFSe>
+    <valores>
+      <vLiq>2000.00</vLiq>
+      <vISSQN>100.00</vISSQN>
+      <trib>
+        <tribMun>
+          <tpRetISSQN>1</tpRetISSQN>
+        </tribMun>
+      </trib>
+    </valores>
+    <DPS>
+      <infDPS>
+        <prest>
+          <regTrib>
+            <opSimpNac>3</opSimpNac>
+          </regTrib>
+        </prest>
+        <valores>
+          <vServPrest>
+            <vServ>2000.00</vServ>
+          </vServPrest>
+        </valores>
+      </infDPS>
+    </DPS>
+  </infNFSe>
+</NFSe>`;
+
+    const leitura = service.extractLeituraFiscal(xml);
+    const retencoes = service.extractRetentionAlertData(xml);
+    const pdf = service.generateFromXml(xml, {
+      chaveAcesso: '42076502246555046000178000000000042626080527978389'
+    });
+    const content = pdf.toString('latin1');
+
+    expect(leitura.layout).toBe('padrao_nacional');
+    expect(leitura.retencaoIss).toBe('Nao Retido');
+    expect(retencoes.hasRetention).toBe(false);
+    expect(retencoes.entries).toEqual([]);
+    expect(content).toContain('Optante - ME/EPP');
+    expect(content).toContain('Nao Retido');
   });
 
   it('sinaliza erro de leitura quando ha retencoes com valor de servico zerado', () => {

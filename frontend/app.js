@@ -9662,14 +9662,14 @@ function getNfseFiscalReaderColumnDefinitions() {
       label: 'Local prestacao',
       className: 'nfse-fiscal-reader-place',
       html: false,
-      render: (row) => row.localPrestacao || '-'
+      render: (row) => resolveNfseFiscalReaderMunicipioLabel(row.localPrestacao, row.municipio)
     },
     {
       key: 'localIncidenciaIss',
       label: 'Local ISS',
       className: 'nfse-fiscal-reader-place',
       html: false,
-      render: (row) => row.localIncidenciaIss || '-'
+      render: (row) => resolveNfseFiscalReaderMunicipioLabel(row.localIncidenciaIss, row.municipio)
     },
     {
       key: 'prestador',
@@ -15601,6 +15601,23 @@ function normalizeNfseFiscalReaderResponse(payload) {
     total: Number(payload?.total || items.length || 0),
     summary
   };
+}
+
+function resolveNfseFiscalReaderMunicipioLabel(rawValue, municipioNome) {
+  const value = String(rawValue || '').trim();
+  const municipio = String(municipioNome || '').trim();
+
+  if (!value) {
+    return municipio || '-';
+  }
+
+  const ibgeMatch = value.match(/^(\d{7})(\s*\/\s*[A-Z]{2})?$/);
+  if (!ibgeMatch || !municipio) {
+    return value;
+  }
+
+  const suffix = ibgeMatch[2] || '';
+  return `${municipio}${suffix}`;
 }
 
 function startPageLoading(plan = {}) {

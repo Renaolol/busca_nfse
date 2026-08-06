@@ -1245,7 +1245,7 @@ describe('NfseService', () => {
       valorRetidoTotal: 18,
       valorIssTotal: 9,
       valorIssRetidoRealTotal: 9,
-      totalRetencoesFederais: 9
+      totalRetencoesFederais: 6.5
     });
     expect(result.items).toHaveLength(1);
     expect(result.items[0]).toMatchObject({
