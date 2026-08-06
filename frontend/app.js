@@ -9,6 +9,7 @@ const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
 const COMPARE_SPED_HISTORY_LIMIT = 10;
 const XML_READER30_NFE_COLUMN_ORDER_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-order:v1';
+const XML_READER30_SCROLL_SELECTORS = ['.xml-reader30-top-scroll', '.xml-reader30-pan-scroll'];
 const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'select',
   'numeroNf',
@@ -63,6 +64,7 @@ const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:0
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
 let dashboardAutoRefreshTimer = null;
 let dashboardAutoRefreshRunning = false;
+let xmlReader30ScrollSyncing = false;
 
 const navItems = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', route: '/dashboard' },
@@ -585,6 +587,7 @@ function wireGlobalEvents() {
   document.addEventListener('click', onDocumentClick);
   document.addEventListener('submit', onDocumentSubmit);
   document.addEventListener('change', onDocumentChange);
+  document.addEventListener('scroll', onDocumentScroll, true);
   document.addEventListener('mousedown', onDocumentMouseDown);
   document.addEventListener('mousemove', onDocumentMouseMove);
   document.addEventListener('mouseover', onDocumentMouseOver);
@@ -608,7 +611,7 @@ function onDocumentClick(event) {
       shouldRender = true;
     }
     if (shouldRender) {
-      renderPreservingScroll(['.xml-reader30-pan-scroll', '.nfse-fiscal-reader-scroll']);
+      renderPreservingScroll([...XML_READER30_SCROLL_SELECTORS, '.nfse-fiscal-reader-scroll']);
     }
     return;
   }
@@ -706,6 +709,10 @@ function onDocumentClick(event) {
         return;
       }
       hideXmlReader30NfeColumn(columnKey);
+      return;
+    }
+    case 'xml-reader30-open-fullscreen': {
+      void openXmlReader30Fullscreen();
       return;
     }
     case 'nfse-fiscal-column-menu-toggle': {
@@ -1467,7 +1474,7 @@ function onDocumentClick(event) {
         return;
       }
       setXmlReader30Selection(selectionKey, actionNode.checked);
-      renderPreservingScroll(['.xml-reader30-pan-scroll']);
+      renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
       return;
     }
     case 'xml-reader30-batch-download': {
@@ -1834,7 +1841,7 @@ function onDocumentChange(event) {
       return;
     }
     setXmlReader30Selection(selectionKey, target.checked);
-    renderPreservingScroll(['.xml-reader30-pan-scroll']);
+    renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
     return;
   }
 
@@ -2069,7 +2076,7 @@ function onDocumentDrop(event) {
     state.xmlReader30.nfeColumnOrder = nextOrder;
     saveXmlReader30NfeColumnOrderStore(nextOrder);
     clearXmlReader30ColumnDragState();
-    renderPreservingScroll(['.xml-reader30-pan-scroll']);
+    renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
     return;
   }
 
@@ -5441,7 +5448,21 @@ function renderXmlReader30NfeResultsTable(results) {
   `;
 }
 
-function renderXmlReader30NfeResultsTableReorderable(results) {
+function renderXmlReader30NfeFullscreenIcon() {
+  return `
+    <span aria-hidden="true" style="display:inline-flex; width:14px; height:14px;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M8 3H3v5"></path>
+        <path d="M16 3h5v5"></path>
+        <path d="M21 16v5h-5"></path>
+        <path d="M8 21H3v-5"></path>
+      </svg>
+    </span>
+  `;
+}
+
+function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
+  const fullscreen = Boolean(options.fullscreen);
   const sortedRows = sortXmlReader30Results(results, { documentType: 'nfe' });
   const displayedRows = expandXmlReader30NfeRows(sortedRows);
   const selectableRows = displayedRows.filter((row) => getXmlReader30SelectionKey(row));
@@ -5449,21 +5470,47 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
   const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
   const visibleColumns = getXmlReader30VisibleNfeColumns();
   const minWidth = visibleColumns.reduce((total, column) => total + getXmlReader30NfeColumnMinWidth(column.key), 0);
+  const compactMaxHeight = fullscreen ? 'none' : 'min(62vh, 620px)';
+  const shellClassName = fullscreen ? 'xml-reader30-results-shell fullscreen' : 'xml-reader30-results-shell compact';
+  const viewportClassName = fullscreen ? 'xml-reader30-results-viewport fullscreen' : 'xml-reader30-results-viewport compact';
+  const tableWrapClassName = fullscreen ? 'table-wrap xml-reader30-pan-scroll xml-reader30-pan-scroll-fullscreen' : 'table-wrap xml-reader30-pan-scroll xml-reader30-pan-scroll-compact';
 
   return `
-    <article class="card" style="margin-top: 2px;">
+    <article class="card ${shellClassName}" style="margin-top: 2px;">
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">XMLs encontrados</h3>
           <p class="card-subtitle">Mostrando ${escapeHtml(String(displayedRows.length))} linha(s) itemizada(s) da NF-e do acervo interno.</p>
         </div>
         <div class="stack-mini" style="align-items:flex-end;">
-          ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
-          <span class="row-sub">Arraste os cabecalhos para reorganizar as colunas. Arraste a tabela para os lados para ver todas as colunas.</span>
+          <div style="display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap;">
+            ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
+            ${
+              fullscreen
+                ? ''
+                : `
+                  <button
+                    class="btn secondary"
+                    type="button"
+                    data-action="xml-reader30-open-fullscreen"
+                    aria-label="Abrir tabela da NF-e em tela cheia"
+                    title="Tela cheia"
+                    style="height:32px; padding:0 10px; display:inline-flex; align-items:center; gap:6px;"
+                  >
+                    ${renderXmlReader30NfeFullscreenIcon()}
+                  </button>
+                `
+            }
+          </div>
+          <span class="row-sub">${fullscreen ? 'Use a barra de rolagem da janela para consultar a tabela inteira.' : 'A tabela esta compactada para consulta rapida. Use o botao de tela cheia para ampliar.'}</span>
         </div>
       </div>
-      <div class="table-wrap xml-reader30-pan-scroll">
-        <table class="xml-reader30-table xml-reader30-reorderable-table xml-reader30-nfe-reorderable-table" style="min-width: ${minWidth}px;">
+      <div class="${viewportClassName}" style="max-height:${compactMaxHeight};">
+        <div class="xml-reader30-top-scroll" aria-hidden="true">
+          <div class="xml-reader30-top-scroll-spacer" style="min-width:${minWidth}px;"></div>
+        </div>
+        <div class="${tableWrapClassName}">
+          <table class="xml-reader30-table xml-reader30-reorderable-table xml-reader30-nfe-reorderable-table" style="min-width: ${minWidth}px;">
           <thead>
             <tr>
               ${visibleColumns
@@ -5538,9 +5585,33 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
               emptyMessage: 'Nenhum XML encontrado para os filtros informados.'
             })}
           </tbody>
-        </table>
+          </table>
+        </div>
       </div>
     </article>
+  `;
+}
+
+function renderXmlReader30NfeFullscreenModal() {
+  const results = Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : [];
+  const tableHtml = renderXmlReader30NfeResultsTableReorderable(results, { fullscreen: true });
+  return `
+    <div class="overlay xml-reader30-fullscreen-overlay" data-action="overlay-close">
+      <div class="modal xml-reader30-fullscreen-modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <div>
+            <h3 class="modal-title">Leitor NF-e em tela cheia</h3>
+            <p class="modal-subtitle">A visualizacao abre a mesma tabela completa do leitor, com mais espaco para consulta.</p>
+          </div>
+          <div class="modal-header-actions">
+            <button class="btn secondary" type="button" data-action="close-modal">Fechar</button>
+          </div>
+        </div>
+        <div class="modal-body xml-reader30-fullscreen-body">
+          ${tableHtml}
+        </div>
+      </div>
+    </div>
   `;
 }
 
@@ -5784,6 +5855,42 @@ function getXmlReader30NfeColumnMinWidth(columnKey) {
   }
 }
 
+function onDocumentScroll(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (!target.classList.contains('xml-reader30-top-scroll') && !target.classList.contains('xml-reader30-pan-scroll')) {
+    return;
+  }
+
+  if (xmlReader30ScrollSyncing) {
+    return;
+  }
+
+  const card = target.closest('.card');
+  if (!(card instanceof HTMLElement)) {
+    return;
+  }
+
+  const topScroll = card.querySelector('.xml-reader30-top-scroll');
+  const panScroll = card.querySelector('.xml-reader30-pan-scroll');
+  const left = target.scrollLeft;
+
+  xmlReader30ScrollSyncing = true;
+  try {
+    if (topScroll instanceof HTMLElement && topScroll !== target) {
+      topScroll.scrollLeft = left;
+    }
+    if (panScroll instanceof HTMLElement && panScroll !== target) {
+      panScroll.scrollLeft = left;
+    }
+  } finally {
+    xmlReader30ScrollSyncing = false;
+  }
+}
+
 function formatXmlReader30UnitValue(value) {
   const normalizedValue = typeof value === 'string' ? value.replace(',', '.').trim() : value;
   const numericValue = Number(normalizedValue);
@@ -5974,7 +6081,7 @@ function hideXmlReader30NfeColumn(columnKey) {
   nextHidden.add(normalizedKey);
   state.xmlReader30.hiddenNfeColumns = nextHidden;
   closeXmlReader30NfeColumnMenu();
-  renderPreservingScroll(['.xml-reader30-pan-scroll']);
+  renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
 }
 
 function toggleXmlReader30NfeColumnMenu(columnKey, anchorNode) {
@@ -5985,7 +6092,7 @@ function toggleXmlReader30NfeColumnMenu(columnKey, anchorNode) {
 
   if (state.xmlReader30.columnMenuOpenKey === normalizedKey) {
     closeXmlReader30NfeColumnMenu();
-    renderPreservingScroll(['.xml-reader30-pan-scroll']);
+    renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
     return;
   }
 
@@ -6006,7 +6113,7 @@ function toggleXmlReader30NfeColumnMenu(columnKey, anchorNode) {
   }
 
   state.xmlReader30.columnMenuOpenKey = normalizedKey;
-  renderPreservingScroll(['.xml-reader30-pan-scroll']);
+  renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
 }
 
 function closeXmlReader30NfeColumnMenu() {
@@ -7465,6 +7572,8 @@ function renderModal() {
       return renderXmlDetailsModal(state.modal.xmlId);
     case 'xml-view':
       return renderXmlViewerModal(state.modal.xmlId);
+    case 'xml-reader30-nfe-fullscreen':
+      return renderXmlReader30NfeFullscreenModal();
     default:
       return '';
   }
@@ -14602,10 +14711,37 @@ function openModal(modal) {
   render();
 }
 
+async function openXmlReader30Fullscreen() {
+  openModal({
+    kind: 'xml-reader30-nfe-fullscreen'
+  });
+
+  await wait(0);
+
+  const fullscreenTarget =
+    modalRoot?.querySelector?.('.xml-reader30-fullscreen-modal') ||
+    modalRoot;
+
+  if (fullscreenTarget instanceof HTMLElement && typeof fullscreenTarget.requestFullscreen === 'function' && !document.fullscreenElement) {
+    try {
+      await fullscreenTarget.requestFullscreen({ navigationUI: 'hide' });
+    } catch (error) {
+      console.warn('Nao foi possivel abrir o leitor NF-e em fullscreen nativo.', error);
+    }
+  }
+}
+
 function closeModal() {
   if (!state.modal) {
     return;
   }
+
+  if (document.fullscreenElement && typeof document.exitFullscreen === 'function') {
+    void document.exitFullscreen().catch((error) => {
+      console.warn('Nao foi possivel sair do fullscreen nativo.', error);
+    });
+  }
+
   state.modal = state.modal.returnTo ? cloneModalState(state.modal.returnTo) : null;
   render();
 }

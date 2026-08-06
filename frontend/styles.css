@@ -1187,15 +1187,116 @@ textarea:focus-visible,
 .xml-reader30-pan-scroll {
   display: block;
   width: 100%;
-  overflow-x: auto;
+  overflow-x: scroll;
   overflow-y: hidden;
   scroll-behavior: smooth;
   max-width: 100%;
   overscroll-behavior-x: contain;
+  scrollbar-gutter: stable;
+}
+
+.xml-reader30-results-viewport {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  min-width: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.xml-reader30-results-viewport.compact {
+  height: min(62vh, 620px);
+}
+
+.xml-reader30-results-viewport.fullscreen {
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+}
+
+.xml-reader30-top-scroll {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: scroll;
+  overflow-y: hidden;
+  scrollbar-gutter: stable;
+  margin: 0 0 6px;
+}
+
+.xml-reader30-top-scroll-spacer {
+  height: 1px;
+}
+
+.xml-reader30-pan-scroll-compact,
+.xml-reader30-pan-scroll-fullscreen {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
 }
 
 .xml-reader30-pan-scroll.is-panning {
   cursor: default;
+}
+
+.xml-reader30-results-shell.compact {
+  max-width: 100%;
+}
+
+.xml-reader30-results-shell.fullscreen {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.xml-reader30-results-shell.fullscreen .xml-reader30-results-viewport {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.xml-reader30-fullscreen-overlay {
+  position: fixed;
+  inset: 0;
+  align-items: stretch;
+  justify-content: stretch;
+  background: rgba(15, 23, 42, 0.22);
+  padding: 0;
+}
+
+.xml-reader30-fullscreen-modal {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+  background: #ffffff;
+}
+
+.xml-reader30-fullscreen-modal .modal-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  padding: 0;
+}
+
+.xml-reader30-fullscreen-body {
+  width: 100%;
+  min-height: 0;
+  display: flex;
+  padding: 0;
+}
+
+.xml-reader30-fullscreen-modal .xml-reader30-results-shell.fullscreen {
+  width: 100%;
+  height: 100%;
+  margin: 0;
 }
 
 .nfse-fiscal-reader-scroll {
@@ -1599,6 +1700,13 @@ tbody tr:hover {
   vertical-align: top;
   padding: 2px 6px;
   line-height: 1.1;
+}
+
+.xml-reader30-reorderable-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #fbfbfc;
 }
 
 .xml-reader30-reorderable-table tbody td {
