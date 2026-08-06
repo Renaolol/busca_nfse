@@ -590,7 +590,7 @@ function onDocumentClick(event) {
       shouldRender = true;
     }
     if (shouldRender) {
-      render();
+      renderPreservingScroll(['.xml-reader30-pan-scroll', '.nfse-fiscal-reader-scroll']);
     }
     return;
   }
@@ -2055,7 +2055,7 @@ function onDocumentDrop(event) {
     state.xmlReader30.nfeColumnOrder = nextOrder;
     saveXmlReader30NfeColumnOrderStore(nextOrder);
     clearXmlReader30ColumnDragState();
-    render();
+    renderPreservingScroll(['.xml-reader30-pan-scroll']);
     return;
   }
 
@@ -2079,7 +2079,7 @@ function onDocumentDrop(event) {
     Boolean(nfseFiscalDragState.insertAfter)
   );
   clearNfseFiscalReaderColumnDragState();
-  render();
+  renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
 }
 
 function onDocumentDragEnd() {
@@ -2099,6 +2099,65 @@ function clearNfseFiscalReaderColumnDragState() {
   document.querySelectorAll('[data-action="nfse-fiscal-column-drag"]').forEach((node) => {
     node.classList.remove('is-dragging', 'drop-before', 'drop-after');
   });
+}
+
+function captureScrollState(selectors = []) {
+  const contentNode = appRoot.querySelector('.content');
+  const extras = (Array.isArray(selectors) ? selectors : [])
+    .map((selector) => String(selector || '').trim())
+    .filter(Boolean)
+    .map((selector) => {
+      const node = document.querySelector(selector);
+      if (!(node instanceof HTMLElement)) {
+        return null;
+      }
+
+      return {
+        selector,
+        top: node.scrollTop,
+        left: node.scrollLeft
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    contentTop: contentNode instanceof HTMLElement ? contentNode.scrollTop : 0,
+    contentLeft: contentNode instanceof HTMLElement ? contentNode.scrollLeft : 0,
+    extras
+  };
+}
+
+function restoreScrollState(scrollState) {
+  if (!scrollState || typeof scrollState !== 'object') {
+    return;
+  }
+
+  const contentNode = appRoot.querySelector('.content');
+  if (contentNode instanceof HTMLElement) {
+    contentNode.scrollTop = Number(scrollState.contentTop || 0);
+    contentNode.scrollLeft = Number(scrollState.contentLeft || 0);
+  }
+
+  (Array.isArray(scrollState.extras) ? scrollState.extras : []).forEach((entry) => {
+    const selector = String(entry?.selector || '').trim();
+    if (!selector) {
+      return;
+    }
+
+    const node = document.querySelector(selector);
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+
+    node.scrollTop = Number(entry.top || 0);
+    node.scrollLeft = Number(entry.left || 0);
+  });
+}
+
+function renderPreservingScroll(selectors = []) {
+  const scrollState = captureScrollState(selectors);
+  render();
+  restoreScrollState(scrollState);
 }
 
 function render() {
@@ -5658,7 +5717,7 @@ function hideXmlReader30NfeColumn(columnKey) {
   nextHidden.add(normalizedKey);
   state.xmlReader30.hiddenNfeColumns = nextHidden;
   closeXmlReader30NfeColumnMenu();
-  render();
+  renderPreservingScroll(['.xml-reader30-pan-scroll']);
 }
 
 function toggleXmlReader30NfeColumnMenu(columnKey, anchorNode) {
@@ -5669,7 +5728,7 @@ function toggleXmlReader30NfeColumnMenu(columnKey, anchorNode) {
 
   if (state.xmlReader30.columnMenuOpenKey === normalizedKey) {
     closeXmlReader30NfeColumnMenu();
-    render();
+    renderPreservingScroll(['.xml-reader30-pan-scroll']);
     return;
   }
 
@@ -5690,7 +5749,7 @@ function toggleXmlReader30NfeColumnMenu(columnKey, anchorNode) {
   }
 
   state.xmlReader30.columnMenuOpenKey = normalizedKey;
-  render();
+  renderPreservingScroll(['.xml-reader30-pan-scroll']);
 }
 
 function closeXmlReader30NfeColumnMenu() {
@@ -9287,7 +9346,7 @@ function hideNfseFiscalReaderColumn(columnKey) {
   const normalizedKey = String(columnKey || '').trim();
   if (!normalizedKey || getNfseFiscalReaderVisibleColumns().length <= 1) {
     closeNfseFiscalReaderColumnMenu();
-    render();
+    renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
     return;
   }
 
@@ -9297,13 +9356,13 @@ function hideNfseFiscalReaderColumn(columnKey) {
   nextHidden.add(normalizedKey);
   state.nfseFiscalReader.hiddenColumns = nextHidden;
   closeNfseFiscalReaderColumnMenu();
-  render();
+  renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
 }
 
 function restoreAllNfseFiscalReaderColumns() {
   state.nfseFiscalReader.hiddenColumns = new Set();
   closeNfseFiscalReaderColumnMenu();
-  render();
+  renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
 }
 
 function toggleNfseFiscalReaderColumnMenu(columnKey, anchorNode) {
@@ -9314,7 +9373,7 @@ function toggleNfseFiscalReaderColumnMenu(columnKey, anchorNode) {
 
   if (state.nfseFiscalReader.columnMenuOpenKey === normalizedKey) {
     closeNfseFiscalReaderColumnMenu();
-    render();
+    renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
     return;
   }
 
@@ -9335,7 +9394,7 @@ function toggleNfseFiscalReaderColumnMenu(columnKey, anchorNode) {
   }
 
   state.nfseFiscalReader.columnMenuOpenKey = normalizedKey;
-  render();
+  renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
 }
 
 function closeNfseFiscalReaderColumnMenu() {
