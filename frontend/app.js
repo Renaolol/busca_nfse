@@ -26,6 +26,32 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'aliquotaIcms',
   'valorIcms'
 ];
+const NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER = [
+  'numeroNfse',
+  'localPrestacao',
+  'localIncidenciaIss',
+  'prestador',
+  'cnpjPrestador',
+  'tomador',
+  'cnpjTomador',
+  'valorLiquidoNfse',
+  'valorTotalRetencoes',
+  'valorServico',
+  'valorIss',
+  'valorPis',
+  'valorCofins',
+  'valorInss',
+  'valorIrrf',
+  'valorCsll',
+  'dataEmissao',
+  'retencaoIss',
+  'retencaoFederal',
+  'aliquotaIss',
+  'valorIssRetidoReal',
+  'aliquotaRealIss',
+  'statusProcessamento',
+  'erroProcessamento'
+];
 const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
 let dashboardAutoRefreshTimer = null;
@@ -201,7 +227,12 @@ const state = {
     rows: [],
     summary: null,
     lastQuery: null,
-    lastLoadedAt: null
+    lastLoadedAt: null,
+    columnOrder: [...NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER],
+    hiddenColumns: new Set(),
+    columnMenuOpenKey: null,
+    columnMenuAnchor: null,
+    columnDrag: null
   },
   nfseGapAuditOverview: {
     rows: [],
@@ -548,8 +579,16 @@ function wireGlobalEvents() {
 function onDocumentClick(event) {
   const actionNode = event.target.closest('[data-action]');
   if (!actionNode) {
+    let shouldRender = false;
     if (state.xmlReader30.columnMenuOpenKey) {
       closeXmlReader30NfeColumnMenu();
+      shouldRender = true;
+    }
+    if (state.nfseFiscalReader.columnMenuOpenKey) {
+      closeNfseFiscalReaderColumnMenu();
+      shouldRender = true;
+    }
+    if (shouldRender) {
       render();
     }
     return;
@@ -572,9 +611,13 @@ function onDocumentClick(event) {
     return;
   }
 
-  const isColumnMenuAction = action === 'xml-reader30-column-menu-toggle' || action === 'xml-reader30-column-menu-hide';
-  if (state.xmlReader30.columnMenuOpenKey && !isColumnMenuAction && !event.target.closest('[data-xml-reader30-column-menu-wrap]')) {
+  const isXmlReader30ColumnMenuAction = action === 'xml-reader30-column-menu-toggle' || action === 'xml-reader30-column-menu-hide';
+  if (state.xmlReader30.columnMenuOpenKey && !isXmlReader30ColumnMenuAction && !event.target.closest('[data-xml-reader30-column-menu-wrap]')) {
     closeXmlReader30NfeColumnMenu();
+  }
+  const isNfseFiscalColumnMenuAction = action === 'nfse-fiscal-column-menu-toggle' || action === 'nfse-fiscal-column-menu-hide';
+  if (state.nfseFiscalReader.columnMenuOpenKey && !isNfseFiscalColumnMenuAction && !event.target.closest('[data-nfse-fiscal-column-menu-wrap]')) {
+    closeNfseFiscalReaderColumnMenu();
   }
 
   event.preventDefault();
@@ -627,6 +670,26 @@ function onDocumentClick(event) {
         return;
       }
       hideXmlReader30NfeColumn(columnKey);
+      return;
+    }
+    case 'nfse-fiscal-column-menu-toggle': {
+      const columnKey = actionNode.getAttribute('data-column-key');
+      if (!columnKey) {
+        return;
+      }
+      toggleNfseFiscalReaderColumnMenu(columnKey, actionNode);
+      return;
+    }
+    case 'nfse-fiscal-column-menu-hide': {
+      const columnKey = actionNode.getAttribute('data-column-key');
+      if (!columnKey) {
+        return;
+      }
+      hideNfseFiscalReaderColumn(columnKey);
+      return;
+    }
+    case 'nfse-fiscal-show-all-columns': {
+      restoreAllNfseFiscalReaderColumns();
       return;
     }
     case 'toggle-sidebar': {
@@ -1877,84 +1940,153 @@ function stopXmlReader30ScrollDrag() {
 }
 
 function onDocumentDragStart(event) {
-  const header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
-  if (!header) {
+  const xmlReader30Header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
+  if (xmlReader30Header) {
+    const columnKey = xmlReader30Header.getAttribute('data-column-key');
+    if (!columnKey) {
+      return;
+    }
+
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', columnKey);
+    state.xmlReader30.columnDrag = {
+      columnKey,
+      targetKey: '',
+      insertAfter: false
+    };
+    xmlReader30Header.classList.add('is-dragging');
     return;
   }
 
-  const columnKey = header.getAttribute('data-column-key');
+  const nfseFiscalHeader = event.target.closest?.('[data-action="nfse-fiscal-column-drag"]');
+  if (!nfseFiscalHeader) {
+    return;
+  }
+
+  const columnKey = nfseFiscalHeader.getAttribute('data-column-key');
   if (!columnKey) {
     return;
   }
 
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/plain', columnKey);
-  state.xmlReader30.columnDrag = {
+  state.nfseFiscalReader.columnDrag = {
     columnKey,
     targetKey: '',
     insertAfter: false
   };
-  header.classList.add('is-dragging');
+  nfseFiscalHeader.classList.add('is-dragging');
 }
 
 function onDocumentDragOver(event) {
-  const header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
-  const dragState = state.xmlReader30.columnDrag;
-  if (!header || !dragState?.columnKey) {
+  const xmlReader30Header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
+  const xmlReader30DragState = state.xmlReader30.columnDrag;
+  if (xmlReader30Header && xmlReader30DragState?.columnKey) {
+    const targetKey = xmlReader30Header.getAttribute('data-column-key');
+    if (!targetKey || targetKey === xmlReader30DragState.columnKey) {
+      return;
+    }
+
+    event.preventDefault();
+    const rect = xmlReader30Header.getBoundingClientRect();
+    const insertAfter = event.clientX > rect.left + rect.width / 2;
+    xmlReader30DragState.targetKey = targetKey;
+    xmlReader30DragState.insertAfter = insertAfter;
+
+    document.querySelectorAll('[data-action="xml-reader30-column-drag"]').forEach((node) => {
+      node.classList.remove('drop-before', 'drop-after');
+    });
+
+    xmlReader30Header.classList.add(insertAfter ? 'drop-after' : 'drop-before');
     return;
   }
 
-  const targetKey = header.getAttribute('data-column-key');
-  if (!targetKey || targetKey === dragState.columnKey) {
+  const nfseFiscalHeader = event.target.closest?.('[data-action="nfse-fiscal-column-drag"]');
+  const nfseFiscalDragState = state.nfseFiscalReader.columnDrag;
+  if (!nfseFiscalHeader || !nfseFiscalDragState?.columnKey) {
+    return;
+  }
+
+  const targetKey = nfseFiscalHeader.getAttribute('data-column-key');
+  if (!targetKey || targetKey === nfseFiscalDragState.columnKey) {
     return;
   }
 
   event.preventDefault();
-  const rect = header.getBoundingClientRect();
+  const rect = nfseFiscalHeader.getBoundingClientRect();
   const insertAfter = event.clientX > rect.left + rect.width / 2;
-  dragState.targetKey = targetKey;
-  dragState.insertAfter = insertAfter;
+  nfseFiscalDragState.targetKey = targetKey;
+  nfseFiscalDragState.insertAfter = insertAfter;
 
-  document.querySelectorAll('[data-action="xml-reader30-column-drag"]').forEach((node) => {
+  document.querySelectorAll('[data-action="nfse-fiscal-column-drag"]').forEach((node) => {
     node.classList.remove('drop-before', 'drop-after');
   });
 
-  header.classList.add(insertAfter ? 'drop-after' : 'drop-before');
+  nfseFiscalHeader.classList.add(insertAfter ? 'drop-after' : 'drop-before');
 }
 
 function onDocumentDrop(event) {
-  const header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
-  const dragState = state.xmlReader30.columnDrag;
-  if (!header || !dragState?.columnKey) {
+  const xmlReader30Header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
+  const xmlReader30DragState = state.xmlReader30.columnDrag;
+  if (xmlReader30Header && xmlReader30DragState?.columnKey) {
+    event.preventDefault();
+    const targetKey = xmlReader30Header.getAttribute('data-column-key');
+    if (!targetKey || targetKey === xmlReader30DragState.columnKey) {
+      clearXmlReader30ColumnDragState();
+      return;
+    }
+
+    const nextOrder = moveXmlReader30NfeColumn(
+      state.xmlReader30.nfeColumnOrder,
+      xmlReader30DragState.columnKey,
+      targetKey,
+      Boolean(xmlReader30DragState.insertAfter)
+    );
+    state.xmlReader30.nfeColumnOrder = nextOrder;
+    saveXmlReader30NfeColumnOrderStore(nextOrder);
+    clearXmlReader30ColumnDragState();
+    render();
+    return;
+  }
+
+  const nfseFiscalHeader = event.target.closest?.('[data-action="nfse-fiscal-column-drag"]');
+  const nfseFiscalDragState = state.nfseFiscalReader.columnDrag;
+  if (!nfseFiscalHeader || !nfseFiscalDragState?.columnKey) {
     return;
   }
 
   event.preventDefault();
-  const targetKey = header.getAttribute('data-column-key');
-  if (!targetKey || targetKey === dragState.columnKey) {
-    clearXmlReader30ColumnDragState();
+  const targetKey = nfseFiscalHeader.getAttribute('data-column-key');
+  if (!targetKey || targetKey === nfseFiscalDragState.columnKey) {
+    clearNfseFiscalReaderColumnDragState();
     return;
   }
 
-  const nextOrder = moveXmlReader30NfeColumn(
-    state.xmlReader30.nfeColumnOrder,
-    dragState.columnKey,
+  state.nfseFiscalReader.columnOrder = moveNfseFiscalReaderColumn(
+    state.nfseFiscalReader.columnOrder,
+    nfseFiscalDragState.columnKey,
     targetKey,
-    Boolean(dragState.insertAfter)
+    Boolean(nfseFiscalDragState.insertAfter)
   );
-  state.xmlReader30.nfeColumnOrder = nextOrder;
-  saveXmlReader30NfeColumnOrderStore(nextOrder);
-  clearXmlReader30ColumnDragState();
+  clearNfseFiscalReaderColumnDragState();
   render();
 }
 
 function onDocumentDragEnd() {
   clearXmlReader30ColumnDragState();
+  clearNfseFiscalReaderColumnDragState();
 }
 
 function clearXmlReader30ColumnDragState() {
   state.xmlReader30.columnDrag = null;
   document.querySelectorAll('[data-action="xml-reader30-column-drag"]').forEach((node) => {
+    node.classList.remove('is-dragging', 'drop-before', 'drop-after');
+  });
+}
+
+function clearNfseFiscalReaderColumnDragState() {
+  state.nfseFiscalReader.columnDrag = null;
+  document.querySelectorAll('[data-action="nfse-fiscal-column-drag"]').forEach((node) => {
     node.classList.remove('is-dragging', 'drop-before', 'drop-after');
   });
 }
@@ -8727,6 +8859,10 @@ function renderNfseFiscalReaderCard() {
 
   const summary = state.nfseFiscalReader.summary;
   const rows = Array.isArray(state.nfseFiscalReader.rows) ? state.nfseFiscalReader.rows : [];
+  const visibleColumns = getNfseFiscalReaderVisibleColumns();
+  const hiddenColumns = state.nfseFiscalReader.hiddenColumns instanceof Set ? state.nfseFiscalReader.hiddenColumns : new Set();
+  const hiddenCount = hiddenColumns.size;
+  const minWidth = Math.max(1480, visibleColumns.length * 138);
   const summaryCards = summary
     ? `
       <div class="form-grid six" style="margin-bottom:18px;">
@@ -8751,77 +8887,84 @@ function renderNfseFiscalReaderCard() {
       <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;">
         <div>
           <h3 class="card-title">Leitura fiscal das NFS-e filtradas</h3>
-          <p class="card-subtitle">Tabela consolidada no estilo do LeitorXML, usando exatamente as NFS-e retornadas pelos filtros atuais.</p>
+          <p class="card-subtitle">Tabela consolidada no estilo do LeitorXML, usando exatamente as NFS-e retornadas pelos filtros atuais. Arraste os cabecalhos para reorganizar e oculte colunas quando precisar focar na conferencia.</p>
         </div>
-        <div class="progress-meta">
-          <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.nfseFiscalReader.lastLoadedAt || new Date().toISOString()))}</strong></span>
-          <span>Linhas: <strong>${escapeHtml(String(rows.length))}</strong></span>
+        <div class="stack-mini" style="align-items:flex-end;">
+          <div class="progress-meta">
+            <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.nfseFiscalReader.lastLoadedAt || new Date().toISOString()))}</strong></span>
+            <span>Linhas: <strong>${escapeHtml(String(rows.length))}</strong></span>
+            <span>Colunas visiveis: <strong>${escapeHtml(String(visibleColumns.length))}</strong></span>
+          </div>
+          <div class="table-actions" style="justify-content:flex-end;">
+            <button class="btn secondary" type="button" data-action="nfse-fiscal-show-all-columns" ${hiddenCount ? '' : 'disabled'}>
+              Restaurar colunas${hiddenCount ? ` (${escapeHtml(String(hiddenCount))})` : ''}
+            </button>
+          </div>
         </div>
       </div>
       ${summaryCards}
-      <div class="table-wrap">
-        <table>
+      <div class="table-wrap nfse-fiscal-reader-scroll">
+        <table class="xml-reader30-table xml-reader30-reorderable-table nfse-fiscal-reader-table" style="min-width:${minWidth}px;">
           <thead>
             <tr>
-              <th>Numero</th>
-              <th>Local prestacao</th>
-              <th>Local ISS</th>
-              <th>Prestador</th>
-              <th>CNPJ prestador</th>
-              <th>Tomador</th>
-              <th>CNPJ tomador</th>
-              <th>Valor liquido</th>
-              <th>Valor retido</th>
-              <th>Valor servico</th>
-              <th>ISS</th>
-              <th>PIS</th>
-              <th>COFINS</th>
-              <th>INSS</th>
-              <th>IRRF</th>
-              <th>CSLL</th>
-              <th>Data emissao</th>
-              <th>ISS RET</th>
-              <th>Federal RET</th>
-              <th>Aliq ISS</th>
-              <th>ISS retido real</th>
-              <th>Aliq real ISS</th>
-              <th>Status</th>
-              <th>Erro</th>
+              ${visibleColumns
+                .map(
+                  (column, index) => `
+                    <th
+                      class="xml-reader30-column-header"
+                      data-action="nfse-fiscal-column-drag"
+                      data-column-key="${escapeHtml(column.key)}"
+                      data-column-index="${index}"
+                      draggable="true"
+                      title="Arraste para mover esta coluna"
+                    >
+                      <div class="xml-reader30-column-header-inner">
+                        <span class="xml-reader30-column-title">${escapeHtml(column.label)}</span>
+                        <div class="xml-reader30-column-menu-wrap" data-nfse-fiscal-column-menu-wrap>
+                          <button
+                            class="xml-reader30-column-menu"
+                            type="button"
+                            data-action="nfse-fiscal-column-menu-toggle"
+                            data-column-key="${escapeHtml(column.key)}"
+                            aria-expanded="${state.nfseFiscalReader.columnMenuOpenKey === column.key ? 'true' : 'false'}"
+                            aria-label="Abrir menu da coluna ${escapeHtml(column.label)}"
+                            title="Abrir menu"
+                          >&#8942;</button>
+                          ${
+                            state.nfseFiscalReader.columnMenuOpenKey === column.key
+                              ? `
+                                <div
+                                  class="xml-reader30-column-menu-panel"
+                                  role="menu"
+                                  aria-label="Menu da coluna ${escapeHtml(column.label)}"
+                                  style="top:${escapeHtml(String(state.nfseFiscalReader.columnMenuAnchor?.top ?? 8))}px; left:${escapeHtml(String(state.nfseFiscalReader.columnMenuAnchor?.left ?? 8))}px;"
+                                >
+                                  <button
+                                    type="button"
+                                    class="xml-reader30-column-menu-item"
+                                    data-action="nfse-fiscal-column-menu-hide"
+                                    data-column-key="${escapeHtml(column.key)}"
+                                    role="menuitem"
+                                    ${visibleColumns.length <= 1 ? 'disabled' : ''}
+                                  >Ocultar coluna</button>
+                                </div>
+                              `
+                              : ''
+                          }
+                        </div>
+                      </div>
+                    </th>
+                  `
+                )
+                .join('')}
             </tr>
           </thead>
           <tbody>
             ${renderTableRowsOrState({
               key: 'nfseFiscalReader',
-              colSpan: 24,
+              colSpan: visibleColumns.length,
               rowsHtml: rows
-                .map(
-                  (row) => `<tr>
-                    <td>${escapeHtml(row.numeroNfse || '-')}</td>
-                    <td>${escapeHtml(row.localPrestacao || '-')}</td>
-                    <td>${escapeHtml(row.localIncidenciaIss || '-')}</td>
-                    <td>${escapeHtml(row.prestador || '-')}</td>
-                    <td>${escapeHtml(formatCnpj(row.cnpjPrestador || ''))}</td>
-                    <td>${escapeHtml(row.tomador || '-')}</td>
-                    <td>${escapeHtml(formatCnpj(row.cnpjTomador || ''))}</td>
-                    <td>${escapeHtml(formatOptionalCurrency(row.valorLiquidoNfse))}</td>
-                    <td>${escapeHtml(formatOptionalCurrency(row.valorTotalRetencoes))}</td>
-                    <td>${escapeHtml(formatOptionalCurrency(row.valorServico))}</td>
-                    <td>${escapeHtml(formatOptionalCurrency(row.valorIss))}</td>
-                    <td>${escapeHtml(formatOptionalCurrency(row.valorPis))}</td>
-                    <td>${escapeHtml(formatOptionalCurrency(row.valorCofins))}</td>
-                    <td>${escapeHtml(formatOptionalCurrency(row.valorInss))}</td>
-                    <td>${escapeHtml(formatOptionalCurrency(row.valorIrrf))}</td>
-                    <td>${escapeHtml(formatOptionalCurrency(row.valorCsll))}</td>
-                    <td>${escapeHtml(formatDate(row.dataEmissao))}</td>
-                    <td>${escapeHtml(row.retencaoIss || '-')}</td>
-                    <td>${escapeHtml(row.retencaoFederal || '-')}</td>
-                    <td>${escapeHtml(formatOptionalPercentage(row.aliquotaIss))}</td>
-                    <td>${escapeHtml(formatOptionalCurrency(row.valorIssRetidoReal))}</td>
-                    <td>${escapeHtml(formatOptionalPercentage(row.aliquotaRealIss))}</td>
-                    <td>${statusBadge(row.statusProcessamento || '-', row.statusProcessamento === 'OK' ? 'success' : 'warning')}</td>
-                    <td>${escapeHtml(row.erroProcessamento || '-')}</td>
-                  </tr>`
-                )
+                .map((row) => `<tr>${visibleColumns.map((column) => renderNfseFiscalReaderColumnCell(column, row)).join('')}</tr>`)
                 .join(''),
               emptyMessage: 'Nenhuma NFS-e armazenada foi processada para a leitura fiscal com os filtros atuais.'
             })}
@@ -8830,6 +8973,311 @@ function renderNfseFiscalReaderCard() {
       </div>
     </article>
   `;
+}
+
+function getNfseFiscalReaderOrderedColumns() {
+  const order = normalizeNfseFiscalReaderColumnOrder(state.nfseFiscalReader.columnOrder);
+  const currentOrder = Array.isArray(state.nfseFiscalReader.columnOrder) ? state.nfseFiscalReader.columnOrder : [];
+  if (order.join('|') !== currentOrder.join('|')) {
+    state.nfseFiscalReader.columnOrder = order;
+  }
+
+  const definitions = getNfseFiscalReaderColumnDefinitions();
+  const byKey = new Map(definitions.map((column) => [column.key, column]));
+  return order.map((key) => byKey.get(key)).filter(Boolean);
+}
+
+function getNfseFiscalReaderVisibleColumns() {
+  const hiddenColumns = state.nfseFiscalReader.hiddenColumns instanceof Set ? state.nfseFiscalReader.hiddenColumns : new Set();
+  return getNfseFiscalReaderOrderedColumns().filter((column) => !hiddenColumns.has(column.key));
+}
+
+function getNfseFiscalReaderColumnDefinitions() {
+  return [
+    {
+      key: 'numeroNfse',
+      label: 'Numero',
+      className: 'nfse-fiscal-reader-number',
+      html: false,
+      render: (row) => row.numeroNfse || '-'
+    },
+    {
+      key: 'localPrestacao',
+      label: 'Local prestacao',
+      className: 'nfse-fiscal-reader-place',
+      html: false,
+      render: (row) => row.localPrestacao || '-'
+    },
+    {
+      key: 'localIncidenciaIss',
+      label: 'Local ISS',
+      className: 'nfse-fiscal-reader-place',
+      html: false,
+      render: (row) => row.localIncidenciaIss || '-'
+    },
+    {
+      key: 'prestador',
+      label: 'Prestador',
+      className: 'nfse-fiscal-reader-party',
+      html: false,
+      render: (row) => row.prestador || '-'
+    },
+    {
+      key: 'cnpjPrestador',
+      label: 'CNPJ prestador',
+      className: 'nfse-fiscal-reader-cnpj',
+      html: false,
+      render: (row) => formatCnpj(row.cnpjPrestador || '') || '-'
+    },
+    {
+      key: 'tomador',
+      label: 'Tomador',
+      className: 'nfse-fiscal-reader-party',
+      html: false,
+      render: (row) => row.tomador || '-'
+    },
+    {
+      key: 'cnpjTomador',
+      label: 'CNPJ tomador',
+      className: 'nfse-fiscal-reader-cnpj',
+      html: false,
+      render: (row) => formatCnpj(row.cnpjTomador || '') || '-'
+    },
+    {
+      key: 'valorLiquidoNfse',
+      label: 'Valor liquido',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorLiquidoNfse)
+    },
+    {
+      key: 'valorTotalRetencoes',
+      label: 'Valor retido',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorTotalRetencoes)
+    },
+    {
+      key: 'valorServico',
+      label: 'Valor servico',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorServico)
+    },
+    {
+      key: 'valorIss',
+      label: 'ISS',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorIss)
+    },
+    {
+      key: 'valorPis',
+      label: 'PIS',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorPis)
+    },
+    {
+      key: 'valorCofins',
+      label: 'COFINS',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorCofins)
+    },
+    {
+      key: 'valorInss',
+      label: 'INSS',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorInss)
+    },
+    {
+      key: 'valorIrrf',
+      label: 'IRRF',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorIrrf)
+    },
+    {
+      key: 'valorCsll',
+      label: 'CSLL',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorCsll)
+    },
+    {
+      key: 'dataEmissao',
+      label: 'Data emissao',
+      className: 'xml-reader30-date nfse-fiscal-reader-date',
+      html: false,
+      render: (row) => formatDate(row.dataEmissao)
+    },
+    {
+      key: 'retencaoIss',
+      label: 'ISS RET',
+      className: 'nfse-fiscal-reader-flag',
+      html: false,
+      render: (row) => row.retencaoIss || '-'
+    },
+    {
+      key: 'retencaoFederal',
+      label: 'Federal RET',
+      className: 'nfse-fiscal-reader-flag',
+      html: false,
+      render: (row) => row.retencaoFederal || '-'
+    },
+    {
+      key: 'aliquotaIss',
+      label: 'Aliq ISS',
+      className: 'nfse-fiscal-reader-rate',
+      html: false,
+      render: (row) => formatOptionalPercentage(row.aliquotaIss)
+    },
+    {
+      key: 'valorIssRetidoReal',
+      label: 'ISS retido real',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorIssRetidoReal)
+    },
+    {
+      key: 'aliquotaRealIss',
+      label: 'Aliq real ISS',
+      className: 'nfse-fiscal-reader-rate',
+      html: false,
+      render: (row) => formatOptionalPercentage(row.aliquotaRealIss)
+    },
+    {
+      key: 'statusProcessamento',
+      label: 'Status',
+      className: 'nfse-fiscal-reader-status',
+      html: true,
+      render: (row) => statusBadge(
+        row.statusProcessamento || '-',
+        row.statusProcessamento === 'OK'
+          ? 'success'
+          : row.statusProcessamento === 'ERRO'
+            ? 'danger'
+            : 'warning'
+      )
+    },
+    {
+      key: 'erroProcessamento',
+      label: 'Erro',
+      className: 'nfse-fiscal-reader-error',
+      html: false,
+      render: (row) => row.erroProcessamento || (Array.isArray(row.camposComProblema) && row.camposComProblema.length ? row.camposComProblema.join(', ') : '-') || '-'
+    }
+  ];
+}
+
+function renderNfseFiscalReaderColumnCell(column, row) {
+  const value = column.render(row);
+  if (column.html) {
+    return `<td class="${escapeHtml(column.className || '')}">${value}</td>`;
+  }
+
+  return `<td class="${escapeHtml(column.className || '')}">${escapeHtml(String(value ?? '-'))}</td>`;
+}
+
+function hideNfseFiscalReaderColumn(columnKey) {
+  const normalizedKey = String(columnKey || '').trim();
+  if (!normalizedKey || getNfseFiscalReaderVisibleColumns().length <= 1) {
+    closeNfseFiscalReaderColumnMenu();
+    render();
+    return;
+  }
+
+  const nextHidden = state.nfseFiscalReader.hiddenColumns instanceof Set
+    ? new Set(state.nfseFiscalReader.hiddenColumns)
+    : new Set();
+  nextHidden.add(normalizedKey);
+  state.nfseFiscalReader.hiddenColumns = nextHidden;
+  closeNfseFiscalReaderColumnMenu();
+  render();
+}
+
+function restoreAllNfseFiscalReaderColumns() {
+  state.nfseFiscalReader.hiddenColumns = new Set();
+  closeNfseFiscalReaderColumnMenu();
+  render();
+}
+
+function toggleNfseFiscalReaderColumnMenu(columnKey, anchorNode) {
+  const normalizedKey = String(columnKey || '').trim();
+  if (!normalizedKey) {
+    return;
+  }
+
+  if (state.nfseFiscalReader.columnMenuOpenKey === normalizedKey) {
+    closeNfseFiscalReaderColumnMenu();
+    render();
+    return;
+  }
+
+  const rect = anchorNode instanceof HTMLElement ? anchorNode.getBoundingClientRect() : null;
+  if (rect) {
+    const estimatedWidth = 164;
+    const left = Math.min(window.innerWidth - estimatedWidth - 8, Math.max(8, rect.right - estimatedWidth));
+    const top = Math.min(window.innerHeight - 12, rect.bottom + 6);
+    state.nfseFiscalReader.columnMenuAnchor = {
+      left,
+      top
+    };
+  } else {
+    state.nfseFiscalReader.columnMenuAnchor = {
+      left: 8,
+      top: 8
+    };
+  }
+
+  state.nfseFiscalReader.columnMenuOpenKey = normalizedKey;
+  render();
+}
+
+function closeNfseFiscalReaderColumnMenu() {
+  if (!state.nfseFiscalReader.columnMenuOpenKey) {
+    return;
+  }
+
+  state.nfseFiscalReader.columnMenuOpenKey = null;
+  state.nfseFiscalReader.columnMenuAnchor = null;
+}
+
+function normalizeNfseFiscalReaderColumnOrder(columnOrder) {
+  const seen = new Set();
+  const normalized = [];
+
+  (Array.isArray(columnOrder) ? columnOrder : []).forEach((key) => {
+    const columnKey = String(key || '').trim();
+    if (!columnKey || seen.has(columnKey) || !NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER.includes(columnKey)) {
+      return;
+    }
+    seen.add(columnKey);
+    normalized.push(columnKey);
+  });
+
+  NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER.forEach((key) => {
+    if (!seen.has(key)) {
+      normalized.push(key);
+    }
+  });
+
+  return normalized;
+}
+
+function moveNfseFiscalReaderColumn(columnOrder, sourceKey, targetKey, insertAfter) {
+  const normalized = normalizeNfseFiscalReaderColumnOrder(columnOrder);
+  const filtered = normalized.filter((key) => key !== sourceKey);
+  const targetIndex = filtered.indexOf(targetKey);
+  if (targetIndex < 0) {
+    return normalized;
+  }
+
+  const nextIndex = insertAfter ? targetIndex + 1 : targetIndex;
+  filtered.splice(nextIndex, 0, sourceKey);
+  return normalizeNfseFiscalReaderColumnOrder(filtered);
 }
 
 function renderNfseRetentionAlertsModal() {

@@ -1178,6 +1178,71 @@ textarea:focus-visible,
   cursor: default;
 }
 
+.nfse-fiscal-reader-scroll {
+  max-height: min(68vh, 760px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.nfse-fiscal-reader-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fbfbfc;
+}
+
+.nfse-fiscal-reader-table {
+  min-width: 1480px;
+}
+
+.nfse-fiscal-reader-number,
+.nfse-fiscal-reader-date,
+.nfse-fiscal-reader-flag,
+.nfse-fiscal-reader-rate,
+.nfse-fiscal-reader-status,
+.nfse-fiscal-reader-cnpj {
+  white-space: nowrap;
+}
+
+.nfse-fiscal-reader-number {
+  min-width: 92px;
+}
+
+.nfse-fiscal-reader-place {
+  min-width: 140px;
+  white-space: nowrap;
+}
+
+.nfse-fiscal-reader-party {
+  min-width: 220px;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nfse-fiscal-reader-cnpj {
+  min-width: 138px;
+}
+
+.nfse-fiscal-reader-rate,
+.nfse-fiscal-reader-flag {
+  min-width: 88px;
+  text-align: center;
+}
+
+.nfse-fiscal-reader-status {
+  min-width: 110px;
+}
+
+.nfse-fiscal-reader-error {
+  min-width: 260px;
+  max-width: 340px;
+}
+
 .xml-batch-bar {
   display: flex;
   align-items: flex-start;
