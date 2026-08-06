@@ -1365,7 +1365,7 @@ tbody tr:hover {
 }
 
 .xml-reader30-check {
-  width: 44px;
+  width: 92px;
   text-align: center;
 }
 
@@ -1429,6 +1429,14 @@ tbody tr:hover {
   overflow-wrap: anywhere;
   word-break: break-word;
   line-height: 1.35;
+}
+
+.xml-reader30-product-label {
+  display: block;
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .xml-reader30-table .table-actions {
@@ -1617,12 +1625,28 @@ tbody tr:hover {
 }
 
 .xml-reader30-nfe-reorderable-table .xml-reader30-product {
-  width: auto;
-  min-width: 180px;
-  max-width: none;
+  width: 320px;
+  min-width: 320px;
+  max-width: 420px;
   white-space: nowrap;
+  overflow: hidden;
   overflow-wrap: normal;
   word-break: normal;
+  text-overflow: ellipsis;
+}
+
+.xml-reader30-event {
+  min-width: 220px;
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.xml-reader30-flag {
+  min-width: 108px;
+  text-align: center;
+  white-space: nowrap;
 }
 
 .document-products-shell {

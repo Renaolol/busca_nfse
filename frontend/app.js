@@ -13,6 +13,7 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'select',
   'numeroNf',
   'statusNf',
+  'nfCancelada',
   'dataEmissao',
   'produto',
   'quantidade',
@@ -24,7 +25,13 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'cfop',
   'baseCalculoIcms',
   'aliquotaIcms',
-  'valorIcms'
+  'valorIcms',
+  'qBCMonoRet',
+  'adRemICMSRet',
+  'vICMSMonoRet',
+  'aliqVigente',
+  'valorCorreto',
+  'evento'
 ];
 const NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER = [
   'numeroNfse',
@@ -5321,7 +5328,6 @@ function renderXmlReader30NfeResultsTable(results) {
   const sortedRows = sortXmlReader30Results(results, { documentType: 'nfe' });
   const selectableRows = sortedRows.filter((row) => getXmlReader30SelectionKey(row));
   const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
-  const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
   const displayedRows = expandXmlReader30NfeRows(sortedRows);
 
   return `
@@ -5333,29 +5339,42 @@ function renderXmlReader30NfeResultsTable(results) {
         </div>
         <div class="stack-mini" style="align-items:flex-end;">
           ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
-          <span class="row-sub">Cada produto aparece em uma linha para facilitar a conferência.</span>
+          <span class="row-sub">Cada produto aparece em uma linha para facilitar a conferencia.</span>
         </div>
       </div>
       <div class="table-wrap">
         <table class="xml-reader30-table" style="min-width: 1380px;">
           <thead>
             <tr>
-              <th class="xml-reader30-check">Selecao</th>
-              ${renderXmlReader30SortHeader('numeroNf', 'Número NF')}
+              <th class="xml-reader30-check">Conferido</th>
+              ${renderXmlReader30SortHeader('numeroNf', 'Numero NF')}
               <th>Status NF-e</th>
-              ${renderXmlReader30SortHeader('dataEmissao', 'Data Emissão')}
+              <th>NF Cancelada?</th>
+              ${renderXmlReader30SortHeader('dataEmissao', 'Data Emissao')}
               <th>Produto</th>
               <th>Quantidade</th>
-              <th>Valor Unitário</th>
+              <th>Valor Unitario</th>
               <th>Valor Total</th>
               <th>Valor Total NF XML R$</th>
-              <th>Ações</th>
+              <th>ICMS ST RET R$</th>
+              <th>CST/CSOSN</th>
+              <th>CFOP</th>
+              <th>Base de Calculo ICMS</th>
+              <th>Aliquota ICMS (%)</th>
+              <th>Valor ICMS</th>
+              <th>qBCMonoRet</th>
+              <th>adRemICMSRet</th>
+              <th>vICMSMonoRet</th>
+              <th>Aliq Vigente</th>
+              <th>Valor Correto R$</th>
+              <th>Evento</th>
+              <th>Acoes</th>
             </tr>
           </thead>
           <tbody>
             ${renderTableRowsOrState({
               key: 'xmlReader30',
-              colSpan: 10,
+              colSpan: 22,
               rowsHtml: displayedRows.length
                 ? displayedRows
                     .map((row) => {
@@ -5366,20 +5385,33 @@ function renderXmlReader30NfeResultsTable(results) {
                       return `
                         <tr>
                           <td class="xml-reader30-check">
-                            <input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Selecionar NF-e ${escapeHtml(String(numberLabel))}" />
+                            <input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Marcar NF-e como conferida ${escapeHtml(String(numberLabel))}" />
                           </td>
                           <td>
                             <span class="row-title">${escapeHtml(String(numberLabel))}</span>
                           </td>
                           <td>${statusBadge(row.statusNf || row.statusLabel || '-', statusTone)}</td>
+                          <td>${escapeHtml(row.nfCancelada || (row.raw?.cancelada ? 'Sim' : 'Nao'))}</td>
                           <td>${escapeHtml(row.dataEmissaoLabel || formatDate(row.dataEmissao || row.raw?.dataEmissao || ''))}</td>
                           <td class="xml-reader30-doc">
-                            <span class="row-title">${escapeHtml(row.produto || '-')}</span>
+                            ${renderXmlReader30ProductLabel(row.produto || '-')}
                           </td>
                           <td>${escapeHtml(row.quantidade || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorUnitario || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorTotal || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorTotalNfXml || '-')}</td>
+                          <td class="xml-reader30-money">${escapeHtml(row.icmsStRet || '-')}</td>
+                          <td>${escapeHtml(row.cstCsosn || '-')}</td>
+                          <td>${escapeHtml(row.cfop || '-')}</td>
+                          <td>${escapeHtml(row.baseCalculoIcms || '-')}</td>
+                          <td>${escapeHtml(row.aliquotaIcms || '-')}</td>
+                          <td>${escapeHtml(row.valorIcms || '-')}</td>
+                          <td>${escapeHtml(row.qBCMonoRet || '-')}</td>
+                          <td>${escapeHtml(row.adRemICMSRet || '-')}</td>
+                          <td>${escapeHtml(row.vICMSMonoRet || '-')}</td>
+                          <td>${escapeHtml(row.aliqVigente || '-')}</td>
+                          <td class="xml-reader30-money">${escapeHtml(row.valorCorreto || '-')}</td>
+                          <td>${escapeHtml(row.evento || '-')}</td>
                           <td>
                             <div class="table-actions">${actions}</div>
                           </td>
@@ -5435,7 +5467,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                     >
                       <div class="xml-reader30-column-header-inner">
                         <span class="xml-reader30-column-title">
-                          ${column.key === 'select' ? `<span class="xml-reader30-column-title-select">Selecao</span>` : column.key === 'numeroNf' || column.key === 'dataEmissao' ? renderXmlReader30SortHeader(column.key, column.label) : column.headerHtml || escapeHtml(column.label)}
+                          ${column.key === 'select' ? `<span class="xml-reader30-column-title-select">Conferido</span>` : column.key === 'numeroNf' || column.key === 'dataEmissao' ? renderXmlReader30SortHeader(column.key, column.label) : column.headerHtml || escapeHtml(column.label)}
                         </span>
                         <div class="xml-reader30-column-menu-wrap" data-xml-reader30-column-menu-wrap>
                           <button
@@ -5522,12 +5554,12 @@ function getXmlReader30NfeColumnDefinitions() {
     {
       key: 'select',
       label: 'Checkbox',
-      headerHtml: 'Selecao',
+      headerHtml: 'Conferido',
       className: 'xml-reader30-check',
       html: true,
       render: (row) => {
         const selectionKey = getXmlReader30SelectionKey(row);
-        return `<input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Selecionar NF-e ${escapeHtml(String(row.numeroNf || row.numeroLabel || '-'))}" />`;
+        return `<input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Marcar NF-e como conferida ${escapeHtml(String(row.numeroNf || row.numeroLabel || '-'))}" />`;
       }
     },
     {
@@ -5545,6 +5577,13 @@ function getXmlReader30NfeColumnDefinitions() {
       render: (row, statusTone) => statusBadge(row.statusNf || row.statusLabel || '-', statusTone)
     },
     {
+      key: 'nfCancelada',
+      label: 'NF Cancelada?',
+      className: 'xml-reader30-flag',
+      html: false,
+      render: (row) => (row.raw?.cancelada ? 'Sim' : 'Nao')
+    },
+    {
       key: 'dataEmissao',
       label: 'Data Emissao',
       className: 'xml-reader30-date',
@@ -5556,7 +5595,7 @@ function getXmlReader30NfeColumnDefinitions() {
       label: 'Produto',
       className: 'xml-reader30-product',
       html: true,
-      render: (row) => `<span class="row-title">${escapeHtml(normalizeXmlReader30InlineText(row.produto))}</span>`
+      render: (row) => renderXmlReader30ProductLabel(row.produto)
     },
     {
       key: 'quantidade',
@@ -5627,6 +5666,48 @@ function getXmlReader30NfeColumnDefinitions() {
       className: 'xml-reader30-icms-number',
       html: false,
       render: (row) => row.valorIcms || '-'
+    },
+    {
+      key: 'qBCMonoRet',
+      label: 'qBCMonoRet',
+      className: 'xml-reader30-icms-number',
+      html: false,
+      render: (row) => row.qBCMonoRet || '-'
+    },
+    {
+      key: 'adRemICMSRet',
+      label: 'adRemICMSRet',
+      className: 'xml-reader30-icms-number',
+      html: false,
+      render: (row) => row.adRemICMSRet || '-'
+    },
+    {
+      key: 'vICMSMonoRet',
+      label: 'vICMSMonoRet',
+      className: 'xml-reader30-icms-number',
+      html: false,
+      render: (row) => row.vICMSMonoRet || '-'
+    },
+    {
+      key: 'aliqVigente',
+      label: 'Aliq Vigente',
+      className: 'xml-reader30-icms-number',
+      html: false,
+      render: (row) => row.aliqVigente || '-'
+    },
+    {
+      key: 'valorCorreto',
+      label: 'Valor Correto R$',
+      className: 'xml-reader30-money xml-reader30-icms-currency',
+      html: false,
+      render: (row) => row.valorCorreto || '-'
+    },
+    {
+      key: 'evento',
+      label: 'Evento',
+      className: 'xml-reader30-event',
+      html: false,
+      render: (row) => row.evento || '-'
     }
   ];
 }
@@ -5643,15 +5724,17 @@ function renderXmlReader30NfeColumnCell(column, row, statusTone) {
 function getXmlReader30NfeColumnMinWidth(columnKey) {
   switch (columnKey) {
     case 'select':
-      return 44;
+      return 92;
     case 'numeroNf':
       return 110;
     case 'statusNf':
       return 118;
+    case 'nfCancelada':
+      return 108;
     case 'dataEmissao':
       return 125;
     case 'produto':
-      return 180;
+      return 320;
     case 'quantidade':
       return 84;
     case 'valorUnitario':
@@ -5672,6 +5755,18 @@ function getXmlReader30NfeColumnMinWidth(columnKey) {
       return 108;
     case 'valorIcms':
       return 108;
+    case 'qBCMonoRet':
+      return 110;
+    case 'adRemICMSRet':
+      return 118;
+    case 'vICMSMonoRet':
+      return 118;
+    case 'aliqVigente':
+      return 100;
+    case 'valorCorreto':
+      return 132;
+    case 'evento':
+      return 220;
     default:
       return 110;
   }
@@ -5693,6 +5788,39 @@ function normalizeXmlReader30InlineText(value) {
     .trim();
 
   return normalized || '-';
+}
+
+function renderXmlReader30ProductLabel(value) {
+  const normalized = normalizeXmlReader30InlineText(value);
+  const displayValue = truncateText(normalized, 30);
+  return `<span class="row-title xml-reader30-product-label" title="${escapeHtml(normalized)}">${escapeHtml(displayValue)}</span>`;
+}
+
+function resolveXmlReader30AliqVigente(dataEmissao, cstCsosn) {
+  if (String(cstCsosn || '').trim() !== '61') {
+    return 0;
+  }
+
+  const emissionTimestamp = Date.parse(dataEmissao || '');
+  const cutoffTimestamp = Date.parse('2026-02-05T23:59:59');
+  if (Number.isFinite(emissionTimestamp) && emissionTimestamp > cutoffTimestamp) {
+    return 1.17;
+  }
+
+  return 1.12;
+}
+
+function computeXmlReader30MonofasicValues(dataEmissao, cstCsosn, qBCMonoRet) {
+  const aliqVigente = resolveXmlReader30AliqVigente(dataEmissao, cstCsosn);
+  const baseValue = Number(String(qBCMonoRet || 0).replace(',', '.'));
+  const valorCorreto = Number.isFinite(baseValue) ? baseValue * aliqVigente : 0;
+
+  return {
+    aliqVigente: formatXmlReader30DecimalValue(aliqVigente),
+    aliqVigenteRaw: aliqVigente.toFixed(2),
+    valorCorreto: formatXmlReader30CurrencyValue(valorCorreto),
+    valorCorretoRaw: valorCorreto.toFixed(2)
+  };
 }
 
 function renderXmlReader30SortHeader(key, label) {
@@ -5890,8 +6018,10 @@ function expandXmlReader30NfeRows(rows) {
     const baseDataEmissao = formatDate(row.raw?.dataEmissao || row.dataEmissao || '');
     const baseNumero = row.numeroLabel || '-';
     const baseValorTotal = row.valorLabel || formatOptionalCurrency(row.raw?.valor) || '-';
+    const baseEvento = normalizeXmlReader30InlineText(row.raw?.eventosResumo || '-');
 
     if (!items.length) {
+      const monofasicValues = computeXmlReader30MonofasicValues(row.raw?.dataEmissao || row.dataEmissao || '', '0', '0');
       return [
         {
           ...row,
@@ -5899,6 +6029,7 @@ function expandXmlReader30NfeRows(rows) {
           numeroNf: baseNumero,
           statusNf: baseStatusLabel,
           statusTone: baseStatusTone,
+          nfCancelada: row.raw?.cancelada ? 'Sim' : 'Nao',
           dataEmissaoLabel: baseDataEmissao,
           produto: normalizeXmlReader30InlineText(row.productLabel),
           quantidade: '0.00',
@@ -5914,7 +6045,18 @@ function expandXmlReader30NfeRows(rows) {
           aliquotaIcms: '0',
           aliquotaIcmsRaw: '0',
           valorIcms: '0',
-          valorIcmsRaw: '0'
+          valorIcmsRaw: '0',
+          qBCMonoRet: '0',
+          qBCMonoRetRaw: '0',
+          adRemICMSRet: '0',
+          adRemICMSRetRaw: '0',
+          vICMSMonoRet: '0',
+          vICMSMonoRetRaw: '0',
+          aliqVigente: monofasicValues.aliqVigente,
+          aliqVigenteRaw: monofasicValues.aliqVigenteRaw,
+          valorCorreto: monofasicValues.valorCorreto,
+          valorCorretoRaw: monofasicValues.valorCorretoRaw,
+          evento: baseEvento
         }
       ];
     }
@@ -5925,6 +6067,7 @@ function expandXmlReader30NfeRows(rows) {
       numeroNf: baseNumero,
       statusNf: baseStatusLabel,
       statusTone: baseStatusTone,
+      nfCancelada: row.raw?.cancelada ? 'Sim' : 'Nao',
       dataEmissaoLabel: baseDataEmissao,
       produto: normalizeXmlReader30InlineText(item.description),
       quantidade: formatXmlReader30QuantityValue(item.quantity),
@@ -5940,7 +6083,15 @@ function expandXmlReader30NfeRows(rows) {
       aliquotaIcms: item.aliquotaIcms || '0',
       aliquotaIcmsRaw: item.aliquotaIcmsRaw || '0',
       valorIcms: item.valorIcms || '0',
-      valorIcmsRaw: item.valorIcmsRaw || '0'
+      valorIcmsRaw: item.valorIcmsRaw || '0',
+      qBCMonoRet: item.qBCMonoRet || '0',
+      qBCMonoRetRaw: item.qBCMonoRetRaw || '0',
+      adRemICMSRet: item.adRemICMSRet || '0',
+      adRemICMSRetRaw: item.adRemICMSRetRaw || '0',
+      vICMSMonoRet: item.vICMSMonoRet || '0',
+      vICMSMonoRetRaw: item.vICMSMonoRetRaw || '0',
+      ...computeXmlReader30MonofasicValues(row.raw?.dataEmissao || row.dataEmissao || '', item.cstCsosn || '0', item.qBCMonoRetRaw || item.qBCMonoRet || '0'),
+      evento: baseEvento
     }));
   });
 }
@@ -6551,6 +6702,7 @@ function mapXmlReader30Item(documentType, doc) {
         nfe.statusFiscal,
         nfe.schemaDoc,
         nfe.eventosResumo,
+        nfe.cancelada ? 'cancelada' : 'ativa',
         nfe.tipo,
         productSummary.label,
         productSummary.secondary,
@@ -6564,7 +6716,12 @@ function mapXmlReader30Item(documentType, doc) {
         ...nfeItems.map((item) => item.baseCalculoIcmsRaw || item.baseCalculoIcms || ''),
         ...nfeItems.map((item) => item.aliquotaIcmsRaw || item.aliquotaIcms || ''),
         ...nfeItems.map((item) => item.valorIcmsRaw || item.valorIcms || ''),
-        ...nfeItems.map((item) => item.icmsStRetRaw || item.icmsStRet || '')
+        ...nfeItems.map((item) => item.icmsStRetRaw || item.icmsStRet || ''),
+        ...nfeItems.map((item) => item.qBCMonoRetRaw || item.qBCMonoRet || ''),
+        ...nfeItems.map((item) => item.adRemICMSRetRaw || item.adRemICMSRet || ''),
+        ...nfeItems.map((item) => item.vICMSMonoRetRaw || item.vICMSMonoRet || ''),
+        ...nfeItems.map((item) => computeXmlReader30MonofasicValues(nfe.dataEmissao || nfe.dataAutorizacao || '', item.cstCsosn || '0', item.qBCMonoRetRaw || item.qBCMonoRet || '0').aliqVigenteRaw),
+        ...nfeItems.map((item) => computeXmlReader30MonofasicValues(nfe.dataEmissao || nfe.dataAutorizacao || '', item.cstCsosn || '0', item.qBCMonoRetRaw || item.qBCMonoRet || '0').valorCorretoRaw)
       ]),
       raw: nfe
     };
@@ -9053,6 +9210,9 @@ function extractNfeLineItemTaxValues(detNode, prodNode) {
   const icmsSourceNodes = [icmsGroupNode, icmsNode, impostoNode, detNode, prodNode].filter(Boolean);
   const cstCsosn = getFirstXmlText(icmsSourceNodes, ['CST', 'CSOSN']) || '0';
   const icmsStRet = getFirstXmlText(icmsSourceNodes, ['vICMSSTRet', 'vICMSST', 'vBCSTRet']) || '0';
+  const qBCMonoRet = getFirstXmlText(icmsSourceNodes, ['qBCMonoRet']) || '0';
+  const adRemICMSRet = getFirstXmlText(icmsSourceNodes, ['adRemICMSRet']) || '0';
+  const vICMSMonoRet = getFirstXmlText(icmsSourceNodes, ['vICMSMonoRet']) || '0';
   const baseCalculoIcms = getFirstXmlText(icmsSourceNodes, ['vBC', 'vBCST', 'vBCSTRet', 'vBCUFDest']) || '0';
   const aliquotaIcms = getFirstXmlText(icmsSourceNodes, ['pICMS', 'pST', 'pICMSST', 'pICMSInter', 'pICMSInterPart']) || '0';
   const valorIcms = getFirstXmlText(icmsSourceNodes, ['vICMS', 'vICMSST', 'vICMSDif', 'vICMSDeson']) || '0';
@@ -9062,6 +9222,12 @@ function extractNfeLineItemTaxValues(detNode, prodNode) {
     cfop: getFirstXmlText([prodNode, icmsGroupNode, icmsNode, impostoNode, detNode], ['CFOP']) || '0',
     icmsStRet: formatXmlReader30CurrencyValue(icmsStRet),
     icmsStRetRaw: icmsStRet || '0',
+    qBCMonoRet: formatXmlReader30DecimalValue(qBCMonoRet),
+    qBCMonoRetRaw: qBCMonoRet || '0',
+    adRemICMSRet: formatXmlReader30DecimalValue(adRemICMSRet),
+    adRemICMSRetRaw: adRemICMSRet || '0',
+    vICMSMonoRet: formatXmlReader30CurrencyValue(vICMSMonoRet),
+    vICMSMonoRetRaw: vICMSMonoRet || '0',
     baseCalculoIcms: formatXmlReader30DecimalValue(baseCalculoIcms),
     baseCalculoIcmsRaw: baseCalculoIcms || '0',
     aliquotaIcms: formatXmlReader30DecimalValue(aliquotaIcms),
