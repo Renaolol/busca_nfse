@@ -1464,6 +1464,14 @@ function onDocumentClick(event) {
       void markSelectedAlertsResolved();
       return;
     }
+    case 'nfse-retention-resolve-company': {
+      const companyId = actionNode.getAttribute('data-company-id');
+      if (!companyId) {
+        return;
+      }
+      void markNfseRetentionAlertsResolvedByCompany(companyId);
+      return;
+    }
     case 'alert-select': {
       const alertId = actionNode.getAttribute('data-alert-id');
       if (!alertId) {
@@ -8634,6 +8642,23 @@ function renderNfseRetentionAlertsModal() {
               </select>
             </label>
           </div>
+          ${
+            companyId
+              ? `
+                <div class="table-actions" style="margin:0 0 18px;">
+                  <button
+                    class="btn secondary"
+                    type="button"
+                    data-action="nfse-retention-resolve-company"
+                    data-company-id="${escapeHtml(companyId)}"
+                    ${openAlerts.length ? '' : 'disabled'}
+                  >
+                    Marcar todas da empresa como resolvido
+                  </button>
+                </div>
+              `
+              : ''
+          }
           <div class="form-grid four" style="margin-bottom:18px;">
             ${detailItem('Total', String(alerts.length))}
             ${detailItem('Em aberto', String(openAlerts.length))}
@@ -12729,6 +12754,40 @@ function markSelectedAlertsResolved() {
     state.selectedAlertIds = new Set();
     render();
   })();
+}
+
+async function markNfseRetentionAlertsResolvedByCompany(companyId) {
+  const normalizedCompanyId = String(companyId || '').trim();
+  if (!normalizedCompanyId) {
+    pushToast('Selecione uma empresa para marcar os alertas como resolvidos.', 'error');
+    return;
+  }
+
+  const alerts = getFilteredNfseRetentionAlerts(normalizedCompanyId).filter((alert) => alert.status !== 'Resolvido');
+  if (!alerts.length) {
+    pushToast('Nao ha alertas em aberto para a empresa selecionada.', 'info');
+    return;
+  }
+
+  let resolvedCount = 0;
+
+  for (const alert of alerts) {
+    try {
+      await setAlertResolved(alert, true);
+      resolvedCount += 1;
+    } catch (error) {
+      pushToast(`Falha ao resolver a NFS-e ${alert.numeroDocumento || alert.chaveAcesso || alert.id}: ${toErrorMessage(error)}`, 'error');
+    }
+  }
+
+  if (resolvedCount > 0) {
+    pushToast(
+      `${resolvedCount} alerta(s) da empresa ${alerts[0]?.cliente || 'selecionada'} marcado(s) como resolvido(s).`,
+      'success'
+    );
+  }
+
+  render();
 }
 
 function resolveAlert(alertId) {
