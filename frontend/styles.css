@@ -51,7 +51,8 @@ a {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  overflow-x: hidden;
 }
 
 .page-loading-overlay {
@@ -383,11 +384,14 @@ a {
 
 .content {
   padding: 28px;
+  min-width: 0;
+  overflow-x: hidden;
 }
 
 .page-section {
   display: grid;
   gap: 20px;
+  min-width: 0;
 }
 
 .page-header {
@@ -511,6 +515,8 @@ textarea:focus-visible,
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-soft);
   padding: 18px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .card-title {
@@ -1160,7 +1166,9 @@ textarea:focus-visible,
 }
 
 .table-wrap {
+  display: block;
   width: 100%;
+  max-width: 100%;
   overflow-x: auto;
 }
 
@@ -1179,6 +1187,9 @@ textarea:focus-visible,
 }
 
 .nfse-fiscal-reader-scroll {
+  display: block;
+  width: 100%;
+  max-width: 100%;
   max-height: min(68vh, 760px);
   overflow: auto;
   overscroll-behavior: contain;
