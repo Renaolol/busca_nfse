@@ -5448,7 +5448,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
         </div>
       </div>
       <div class="table-wrap xml-reader30-pan-scroll">
-        <table class="xml-reader30-table xml-reader30-reorderable-table" style="min-width: ${minWidth}px;">
+        <table class="xml-reader30-table xml-reader30-reorderable-table xml-reader30-nfe-reorderable-table" style="min-width: ${minWidth}px;">
           <thead>
             <tr>
               ${visibleColumns
@@ -5596,7 +5596,7 @@ function getXmlReader30NfeColumnDefinitions() {
       label: 'Produto',
       className: 'xml-reader30-product',
       html: true,
-      render: (row) => `<span class="row-title">${escapeHtml(row.produto || '-')}</span>`
+      render: (row) => `<span class="row-title">${escapeHtml(normalizeXmlReader30InlineText(row.produto))}</span>`
     },
     {
       key: 'quantidade',
@@ -5691,7 +5691,7 @@ function getXmlReader30NfeColumnMinWidth(columnKey) {
     case 'dataEmissao':
       return 125;
     case 'produto':
-      return 620;
+      return 180;
     case 'quantidade':
       return 84;
     case 'valorUnitario':
@@ -5725,6 +5725,14 @@ function formatXmlReader30UnitValue(value) {
   }
 
   return value ? String(value) : '-';
+}
+
+function normalizeXmlReader30InlineText(value) {
+  const normalized = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return normalized || '-';
 }
 
 function renderXmlReader30SortHeader(key, label) {
@@ -5932,7 +5940,7 @@ function expandXmlReader30NfeRows(rows) {
           statusNf: baseStatusLabel,
           statusTone: baseStatusTone,
           dataEmissaoLabel: baseDataEmissao,
-          produto: row.productLabel || '-',
+          produto: normalizeXmlReader30InlineText(row.productLabel),
           quantidade: '0.00',
           valorUnitario: '-',
           valorTotal: '-',
@@ -5958,7 +5966,7 @@ function expandXmlReader30NfeRows(rows) {
       statusNf: baseStatusLabel,
       statusTone: baseStatusTone,
       dataEmissaoLabel: baseDataEmissao,
-      produto: item.description || '-',
+      produto: normalizeXmlReader30InlineText(item.description),
       quantidade: formatXmlReader30QuantityValue(item.quantity),
       valorUnitario: item.unitValueRaw || item.unitValue || '-',
       valorTotal: item.totalValueRaw || item.totalValue || '-',
