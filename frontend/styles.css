@@ -2196,6 +2196,21 @@ textarea {
   flex-wrap: wrap;
 }
 
+.xml-reader30-summary-meta {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 18px;
+  flex-wrap: wrap;
+  line-height: 1.35;
+}
+
+.xml-reader30-summary-meta span {
+  white-space: nowrap;
+}
+
 .layout-with-side {
   display: grid;
   grid-template-columns: 280px 1fr;
