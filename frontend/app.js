@@ -661,25 +661,21 @@ function onDocumentClick(event) {
       render();
       return;
     }
-case 'xml-reader30-sort': {
-  const key = actionNode.getAttribute('data-sort-key');
-  if (!key) {
-    return;
-  }
-  updateXmlReader30Sort(key);
-  render();
-  return;
-}
-case 'xml-reader30-switch-tab': {
-  const tab = actionNode.getAttribute('data-tab');
-  if (!tab) {
-    return;
-  }
-  state.xmlReader30.activeTab = tab === 'nfse-fiscal' ? 'nfse-fiscal' : 'nfe';
-  render();
-  return;
-}
-
+    case 'xml-reader30-sort': {
+      const key = actionNode.getAttribute('data-sort-key');
+      if (!key) {
+        return;
+      }
+      updateXmlReader30Sort(key);
+      return;
+    }
+    case 'xml-reader30-switch-tab': {
+      const tab = actionNode.getAttribute('data-tab');
+      if (!tab) {
+        return;
+      }
+      state.xmlReader30.activeTab = tab === 'nfse-fiscal' ? 'nfse-fiscal' : 'nfe';
+      render();
       return;
     }
     case 'xml-reader30-column-menu-toggle': {
