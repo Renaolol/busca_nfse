@@ -547,11 +547,23 @@ function onDocumentInput(event) {
 
   const action = target.getAttribute('data-action');
   if (action === 'nfse-retention-company-filter' && state.modal?.kind === 'nfse-retention-alerts') {
+    const selectionStart = typeof target.selectionStart === 'number' ? target.selectionStart : null;
+    const selectionEnd = typeof target.selectionEnd === 'number' ? target.selectionEnd : null;
     state.modal = {
       ...state.modal,
       empresaQuery: String(target.value || '')
     };
     render();
+    window.requestAnimationFrame(() => {
+      const nextInput = document.querySelector('[data-action="nfse-retention-company-filter"]');
+      if (!(nextInput instanceof HTMLInputElement)) {
+        return;
+      }
+      nextInput.focus();
+      if (selectionStart !== null && selectionEnd !== null) {
+        nextInput.setSelectionRange(selectionStart, selectionEnd);
+      }
+    });
   }
 }
 
