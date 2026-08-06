@@ -420,6 +420,50 @@ describe('NfseDanfseService', () => {
     expect(leitura.camposComProblema).toEqual(['Valor Servico', 'ISS Retido Real', 'ISS']);
   });
 
+  it('nao marca retencao federal em ABRASF quando o liquido reflete somente o ISS retido', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse versao="1.00">
+    <InfNfse>
+      <Numero>899</Numero>
+      <DataEmissao>2026-07-28T08:14:45-03:00</DataEmissao>
+      <ValoresNfse>
+        <BaseCalculo>10800.00</BaseCalculo>
+        <Aliquota>3.00</Aliquota>
+        <ValorIss>324.00</ValorIss>
+        <ValorLiquidoNfse>10476.00</ValorLiquidoNfse>
+      </ValoresNfse>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <Servico>
+            <Valores>
+              <ValorServicos>10800.00</ValorServicos>
+              <ValorIssRetido>324.00</ValorIssRetido>
+              <ValorPis>178.20</ValorPis>
+              <ValorCofins>820.80</ValorCofins>
+              <OutrasRetencoes>324.00</OutrasRetencoes>
+              <ValorIss>324.00</ValorIss>
+            </Valores>
+            <IssRetido>1</IssRetido>
+          </Servico>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`;
+
+    const leitura = service.extractLeituraFiscal(xml);
+    const retencoes = service.extractRetentionAlertData(xml);
+
+    expect(leitura.layout).toBe('abrasf');
+    expect(leitura.valorTotalRetencoes).toBe('324.00');
+    expect(leitura.valorIssRetidoReal).toBe('324.00');
+    expect(leitura.retencaoIss).toBe('Retido');
+    expect(leitura.retencaoFederal).toBe('Normal');
+    expect(leitura.totalRetencoesFederais).toBe('0.00');
+    expect(retencoes.entries).toEqual([{ code: 'iss', label: 'ISS retido' }]);
+  });
+
   it('substitui codigo do municipio pelo nome quando o nome estiver disponivel no fallback', () => {
     const pdf = service.generatePdf({
       chaveAcesso: '42110092206960810000176000000000000126019687178145',
