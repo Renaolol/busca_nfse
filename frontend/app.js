@@ -526,6 +526,7 @@ function wireGlobalEvents() {
   });
 
   document.addEventListener('click', onDocumentClick);
+  document.addEventListener('input', onDocumentInput);
   document.addEventListener('submit', onDocumentSubmit);
   document.addEventListener('change', onDocumentChange);
   document.addEventListener('mousedown', onDocumentMouseDown);
@@ -536,6 +537,22 @@ function wireGlobalEvents() {
   document.addEventListener('dragover', onDocumentDragOver);
   document.addEventListener('drop', onDocumentDrop);
   document.addEventListener('dragend', onDocumentDragEnd);
+}
+
+function onDocumentInput(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
+    return;
+  }
+
+  const action = target.getAttribute('data-action');
+  if (action === 'nfse-retention-company-filter' && state.modal?.kind === 'nfse-retention-alerts') {
+    state.modal = {
+      ...state.modal,
+      empresaQuery: String(target.value || '')
+    };
+    render();
+  }
 }
 
 function onDocumentClick(event) {
@@ -672,7 +689,7 @@ function onDocumentClick(event) {
       return;
     }
     case 'dashboard-open-nfse-retention-alerts': {
-      openModal({ kind: 'nfse-retention-alerts' });
+      openModal({ kind: 'nfse-retention-alerts', empresaQuery: '' });
       return;
     }
     case 'open-new-client-modal': {
@@ -8599,7 +8616,8 @@ function renderCteDisagreementAlertsModal() {
 }
 
 function renderNfseRetentionAlertsModal() {
-  const alerts = getNfseRetentionAlerts();
+  const companyQuery = state.modal?.kind === 'nfse-retention-alerts' ? String(state.modal.empresaQuery || '') : '';
+  const alerts = getFilteredNfseRetentionAlerts(companyQuery);
   const openAlerts = alerts.filter((alert) => alert.status !== 'Resolvido');
   const resolvedAlerts = alerts.filter((alert) => alert.status === 'Resolvido');
 
@@ -8611,6 +8629,17 @@ function renderNfseRetentionAlertsModal() {
           <p class="modal-subtitle">Acompanhe NFS-es tomadas com retencoes detectadas no XML e marque como resolvido quando a conferencia fiscal for concluida.</p>
         </div>
         <div class="modal-body">
+          <div class="form-grid" style="margin-bottom:18px;">
+            <label class="field">
+              Empresa
+              <input
+                type="text"
+                data-action="nfse-retention-company-filter"
+                value="${escapeHtml(companyQuery)}"
+                placeholder="Digite a empresa para filtrar as notas"
+              />
+            </label>
+          </div>
           <div class="form-grid four" style="margin-bottom:18px;">
             ${detailItem('Total', String(alerts.length))}
             ${detailItem('Em aberto', String(openAlerts.length))}
@@ -8664,7 +8693,7 @@ function renderNfseRetentionAlertsModal() {
                     )
                     .join('')}
                 </div>`
-              : '<div class="table-state">Nenhum alerta de NFS-e com retencao encontrado.</div>'
+              : '<div class="table-state">Nenhuma NFS-e com retencao encontrada para a empresa informada.</div>'
           }
         </div>
         <div class="modal-footer">
@@ -13084,6 +13113,19 @@ function getNfseRetentionAlerts() {
 
 function getOpenNfseRetentionAlerts() {
   return getNfseRetentionAlerts().filter((alert) => alert.status !== 'Resolvido');
+}
+
+function getFilteredNfseRetentionAlerts(companyQuery = '') {
+  const normalizedQuery = normalizeSearchText(companyQuery);
+  if (!normalizedQuery) {
+    return getNfseRetentionAlerts();
+  }
+
+  return getNfseRetentionAlerts().filter((alert) => {
+    const cliente = normalizeSearchText(alert?.cliente || '');
+    const emissor = normalizeSearchText(alert?.emissor || '');
+    return cliente.includes(normalizedQuery) || emissor.includes(normalizedQuery);
+  });
 }
 
 function openModal(modal) {
