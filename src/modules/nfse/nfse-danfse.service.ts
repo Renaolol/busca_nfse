@@ -2427,7 +2427,7 @@ export class NfseDanfseService {
     >
   ): number | undefined {
     const includePisCofins = this.includesPisCofinsInFederalRetention(layout);
-    const numericValues = [
+    const numericValues: Array<number | undefined> = [
       this.toNumber(values.valorIrrf),
       this.toNumber(values.valorContribuicaoPrevidenciaria),
       this.toNumber(values.valorContribuicoesSociais),
@@ -2439,7 +2439,7 @@ export class NfseDanfseService {
       return undefined;
     }
 
-    return numericValues.reduce((total, value) => total + (value ?? 0), 0);
+    return numericValues.reduce<number>((total, value) => total + (value ?? 0), 0);
   }
 
   private includesPisCofinsInFederalRetention(layout?: DanfseRenderInput['layoutNfse']): boolean {
