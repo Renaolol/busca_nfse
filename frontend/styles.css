@@ -1662,7 +1662,8 @@ tbody tr:hover {
 }
 
 .document-products-table {
-  min-width: 760px;
+  width: 100%;
+  min-width: 1220px;
   table-layout: fixed;
 }
 
@@ -1674,6 +1675,7 @@ tbody tr:hover {
   letter-spacing: 0;
   padding: 16px 22px;
   border-bottom: 1px solid #dfe3e8;
+  white-space: nowrap;
 }
 
 .document-products-header-cell {
@@ -1695,6 +1697,7 @@ tbody tr:hover {
   font-size: 1rem;
   font-weight: 700;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .document-products-table tbody tr:hover {
@@ -1702,20 +1705,31 @@ tbody tr:hover {
 }
 
 .document-products-product {
-  width: 62%;
+  width: 76%;
   min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .document-products-quantity,
 .document-products-money {
-  width: 19%;
+  width: 12%;
   text-align: center;
   white-space: nowrap;
 }
 
 .document-products-product .row-title {
+  display: inline-block;
   font-size: 1.03rem;
   letter-spacing: 0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .document-products-quantity,
