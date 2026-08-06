@@ -1662,8 +1662,8 @@ tbody tr:hover {
 }
 
 .document-products-table {
-  width: max-content;
-  min-width: 100%;
+  width: 100%;
+  min-width: 1220px;
   table-layout: fixed;
 }
 
@@ -1705,16 +1705,18 @@ tbody tr:hover {
 }
 
 .document-products-product {
-  width: 84%;
+  width: 76%;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .document-products-quantity,
 .document-products-money {
-  width: 8%;
+  width: 12%;
   text-align: center;
   white-space: nowrap;
 }
@@ -1726,6 +1728,8 @@ tbody tr:hover {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .document-products-quantity,

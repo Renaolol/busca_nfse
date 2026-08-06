@@ -8842,12 +8842,11 @@ function renderDocumentInsightsProductsTable(rows) {
   const rowsHtml = normalizedRows
     .map((row) => {
       const fullProductLabel = String(row.produto || '-');
-      const shortProductLabel = truncateText(fullProductLabel, 30);
 
       return `
         <tr>
           <td class="document-products-product" title="${escapeHtml(fullProductLabel)}">
-            <span class="row-title" title="${escapeHtml(fullProductLabel)}">${escapeHtml(shortProductLabel)}</span>
+            <span class="row-title" title="${escapeHtml(fullProductLabel)}">${escapeHtml(fullProductLabel)}</span>
           </td>
           <td class="document-products-quantity">${escapeHtml(row.quantidadeLabel || row.quantidade || '-')}</td>
           <td class="document-products-money">${escapeHtml(row.valorUnitarioLabel || row.valorUnitario || '-')}</td>
