@@ -1108,6 +1108,11 @@ thead th {
   cursor: pointer;
 }
 
+.xml-reader30-sort-header {
+  width: 100%;
+  justify-content: space-between;
+}
+
 .sort-header:hover,
 .sort-header.active {
   color: var(--accent-strong);
@@ -1218,10 +1223,13 @@ tbody tr:hover {
 }
 
 .xml-reader30-product {
-  width: 260px;
-  min-width: 260px;
-  max-width: 320px;
-  white-space: nowrap;
+  width: 420px;
+  min-width: 420px;
+  max-width: 560px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  line-height: 1.35;
 }
 
 .xml-reader30-table .table-actions {
@@ -1395,8 +1403,12 @@ tbody tr:hover {
 
 .xml-reader30-reorderable-table .xml-reader30-doc,
 .xml-reader30-reorderable-table .xml-reader30-product {
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
+  text-overflow: clip;
+}
+
+.xml-reader30-reorderable-table .xml-reader30-product {
+  white-space: normal;
 }
 
 .icon-btn {

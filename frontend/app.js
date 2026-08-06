@@ -356,6 +356,10 @@ const state = {
       key: 'dataDownload',
       direction: 'desc'
     },
+    xmlReader30: {
+      key: 'dataEmissao',
+      direction: 'desc'
+    },
     nfeDocs: {
       key: 'dataEmissao',
       direction: 'desc'
@@ -593,6 +597,14 @@ function onDocumentClick(event) {
     case 'xmlReader30-clear': {
       resetXmlReader30Search();
       render();
+      return;
+    }
+    case 'xml-reader30-sort': {
+      const key = actionNode.getAttribute('data-sort-key');
+      if (!key) {
+        return;
+      }
+      updateXmlReader30Sort(key);
       return;
     }
     case 'xml-reader30-column-menu-toggle': {
@@ -4837,6 +4849,7 @@ function renderXmlReader30ResultsTable(results) {
   const selectableRows = sourceRows.filter((row) => getXmlReader30SelectionKey(row));
   const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
   const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
+  const sortedRows = sortXmlReader30Results(sourceRows, { documentType: currentDocumentType });
 
   return `
     <article class="card" style="margin-top: 2px;">
@@ -4858,9 +4871,9 @@ function renderXmlReader30ResultsTable(results) {
                 <input type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />
               </th>
               <th>Tipo</th>
-              <th>Documento</th>
+              ${renderXmlReader30SortHeader('numeroNf', 'Documento')}
               <th>Empresa</th>
-              <th>Emissao</th>
+              ${renderXmlReader30SortHeader('dataEmissao', 'Emissao')}
               <th>Valor</th>
               <th>Produtos</th>
               <th>Situacao</th>
@@ -4871,8 +4884,8 @@ function renderXmlReader30ResultsTable(results) {
             ${renderTableRowsOrState({
               key: 'xmlReader30',
               colSpan: 9,
-              rowsHtml: sourceRows.length
-                ? sourceRows
+              rowsHtml: sortedRows.length
+                ? sortedRows
                     .map((row) => {
                       const actions = renderXmlReader30Actions(row);
                       const selectionKey = getXmlReader30SelectionKey(row);
@@ -4919,10 +4932,11 @@ function renderXmlReader30ResultsTable(results) {
 }
 
 function renderXmlReader30NfeResultsTable(results) {
-  const selectableRows = (Array.isArray(results) ? results : []).filter((row) => getXmlReader30SelectionKey(row));
+  const sortedRows = sortXmlReader30Results(results, { documentType: 'nfe' });
+  const selectableRows = sortedRows.filter((row) => getXmlReader30SelectionKey(row));
   const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
   const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
-  const displayedRows = expandXmlReader30NfeRows(results);
+  const displayedRows = expandXmlReader30NfeRows(sortedRows);
 
   return `
     <article class="card" style="margin-top: 2px;">
@@ -4943,9 +4957,9 @@ function renderXmlReader30NfeResultsTable(results) {
               <th class="xml-reader30-check">
                 <input type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />
               </th>
-              <th>Número NF</th>
+              ${renderXmlReader30SortHeader('numeroNf', 'Número NF')}
               <th>Status NF-e</th>
-              <th>Data Emissão</th>
+              ${renderXmlReader30SortHeader('dataEmissao', 'Data Emissão')}
               <th>Produto</th>
               <th>Quantidade</th>
               <th>Valor Unitário</th>
@@ -5000,7 +5014,8 @@ function renderXmlReader30NfeResultsTable(results) {
 }
 
 function renderXmlReader30NfeResultsTableReorderable(results) {
-  const displayedRows = expandXmlReader30NfeRows(results);
+  const sortedRows = sortXmlReader30Results(results, { documentType: 'nfe' });
+  const displayedRows = expandXmlReader30NfeRows(sortedRows);
   const selectableRows = displayedRows.filter((row) => getXmlReader30SelectionKey(row));
   const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
   const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
@@ -5039,7 +5054,9 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                           ${
                             column.key === 'select'
                               ? `<span class="xml-reader30-column-title-select">Checkbox</span><input class="xml-reader30-select-all-checkbox" type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />`
-                              : column.headerHtml || escapeHtml(column.label)
+                              : column.key === 'numeroNf' || column.key === 'dataEmissao'
+                                ? renderXmlReader30SortHeader(column.key, column.label)
+                                : column.headerHtml || escapeHtml(column.label)
                           }
                         </span>
                         <div class="xml-reader30-column-menu-wrap" data-xml-reader30-column-menu-wrap>
@@ -5253,6 +5270,88 @@ function formatXmlReader30UnitValue(value) {
   }
 
   return value ? String(value) : '-';
+}
+
+function renderXmlReader30SortHeader(key, label) {
+  const isActive = state.sort.xmlReader30.key === key;
+  const direction = isActive ? state.sort.xmlReader30.direction : 'none';
+  const sortLabel =
+    direction === 'asc'
+      ? `${label}, ordenado crescente`
+      : direction === 'desc'
+        ? `${label}, ordenado decrescente`
+        : `${label}, ordenar`;
+
+  return `
+    <button class="sort-header xml-reader30-sort-header ${isActive ? 'active' : ''}" type="button" data-action="xml-reader30-sort" data-sort-key="${escapeHtml(key)}" aria-label="${escapeHtml(sortLabel)}">
+      <span>${escapeHtml(label)}</span>
+      <span class="sort-indicator" aria-hidden="true">${direction === 'asc' ? '▲' : direction === 'desc' ? '▼' : '↕'}</span>
+    </button>
+  `;
+}
+
+function updateXmlReader30Sort(key) {
+  const normalizedKey = String(key || '').trim();
+  if (!normalizedKey) {
+    return;
+  }
+
+  const current = state.sort.xmlReader30;
+  state.sort.xmlReader30 = {
+    key: normalizedKey,
+    direction: current.key === normalizedKey && current.direction === 'asc' ? 'desc' : 'asc'
+  };
+  render();
+}
+
+function sortXmlReader30Results(rows) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const sort = state.sort.xmlReader30;
+  const directionMultiplier = sort.direction === 'asc' ? 1 : -1;
+  return [...sourceRows].sort((left, right) => {
+    const comparison = compareXmlSortValues(getXmlReader30SortValue(left, sort.key), getXmlReader30SortValue(right, sort.key));
+    if (comparison !== 0) {
+      return comparison * directionMultiplier;
+    }
+
+    if (sort.key !== 'numeroNf') {
+      const numeroComparison = compareXmlSortValues(getXmlReader30SortValue(left, 'numeroNf'), getXmlReader30SortValue(right, 'numeroNf'));
+      if (numeroComparison !== 0) {
+        return numeroComparison;
+      }
+    }
+
+    if (sort.key !== 'dataEmissao') {
+      const dataComparison = compareXmlSortValues(getXmlReader30SortValue(left, 'dataEmissao'), getXmlReader30SortValue(right, 'dataEmissao'));
+      if (dataComparison !== 0) {
+        return dataComparison;
+      }
+    }
+
+    return compareXmlSortValues(String(left?.rowId || ''), String(right?.rowId || ''));
+  });
+}
+
+function getXmlReader30SortValue(row, key) {
+  if (!row) {
+    return '';
+  }
+
+  switch (key) {
+    case 'numero':
+    case 'numeroNf':
+      return toSortableNumber(row.numeroNf || row.numeroLabel || row.raw?.numeroNfe || row.raw?.numeroNfse || row.raw?.numeroCte);
+    case 'dataEmissao':
+      return toSortableDate(row.dataEmissao || row.dataEmissaoLabel || row.raw?.dataEmissao || row.raw?.dataAutorizacao || row.raw?.dataDownload);
+    case 'tipo':
+      return row.documentLabel || '';
+    case 'empresa':
+      return row.cliente || '';
+    case 'valor':
+      return Number(String(row.valorLabel || row.valorTotal || row.valorTotalNfXml || row.raw?.valor || 0).replace(/[^\d.-]/g, '')) || 0;
+    default:
+      return row[key] || row.raw?.[key] || '';
+  }
 }
 
 function formatXmlReader30DecimalValue(value) {
