@@ -153,6 +153,40 @@ export interface NfseLeituraFiscal {
   retencoes: NfseRetentionAlertEntry[];
 }
 
+export interface NfseDominioExportData {
+  layout: 'padrao_nacional' | 'abrasf' | 'desconhecido';
+  numeroNfse?: string | null;
+  dataEmissao?: Date | null;
+  prestadorNome?: string | null;
+  prestadorCnpj?: string | null;
+  prestadorMunicipio?: string | null;
+  prestadorUf?: string | null;
+  tomadorNome?: string | null;
+  tomadorCnpj?: string | null;
+  tomadorMunicipio?: string | null;
+  tomadorUf?: string | null;
+  destinatarioNome?: string | null;
+  destinatarioCnpj?: string | null;
+  destinatarioMunicipio?: string | null;
+  destinatarioUf?: string | null;
+  valorServico?: number;
+  valorLiquidoNfse?: number;
+  valorTotalRetencoes?: number;
+  valorIss?: number;
+  valorIssRetidoReal?: number;
+  valorIrrf?: number;
+  valorInss?: number;
+  valorCsll?: number;
+  valorPis?: number;
+  valorCofins?: number;
+  aliquotaIssInformada?: number;
+  aliquotaIssCalculada?: number;
+  retencaoIss?: 'Retido' | 'Nao Retido';
+  pisRetido?: boolean;
+  cofinsRetido?: boolean;
+  retencaoFederal?: 'Retido' | 'Normal';
+}
+
 type PdfFont = '/F1' | '/F2';
 
 interface PdfField {
@@ -299,6 +333,56 @@ export class NfseDanfseService {
           : undefined,
       camposComProblema: Array.from(new Set(camposComProblema)),
       retencoes
+    };
+  }
+
+  extractDominioExportData(xml: string): NfseDominioExportData {
+    const extracted = this.extractFromXml(xml);
+    const leitura = this.extractLeituraFiscal(xml);
+    const prestador = this.splitMunicipioUf(extracted.municipioPrestador);
+    const tomador = this.splitMunicipioUf(extracted.municipioTomador);
+    const destinatario = this.splitMunicipioUf(extracted.municipioDestinatario);
+    const valorServico = this.toNumber(extracted.valorServico);
+    const valorIss = this.toNumber(extracted.valorIss);
+    const aliquotaIssCalculada =
+      valorServico && valorServico > 0 && valorIss !== undefined ? Number(((valorIss / valorServico) * 100).toFixed(2)) : undefined;
+
+    return {
+      layout: extracted.layoutNfse || this.detectLeituraFiscalLayout(xml),
+      numeroNfse: extracted.numeroNfse,
+      dataEmissao: extracted.dataEmissao,
+      prestadorNome: extracted.razaoSocialPrestador,
+      prestadorCnpj: extracted.cnpjPrestador,
+      prestadorMunicipio: prestador.municipio,
+      prestadorUf: prestador.uf,
+      tomadorNome: extracted.razaoSocialTomador,
+      tomadorCnpj: extracted.cnpjTomador,
+      tomadorMunicipio: tomador.municipio,
+      tomadorUf: tomador.uf,
+      destinatarioNome: extracted.razaoSocialDestinatario,
+      destinatarioCnpj: extracted.cnpjDestinatario,
+      destinatarioMunicipio: destinatario.municipio,
+      destinatarioUf: destinatario.uf,
+      valorServico,
+      valorLiquidoNfse: this.toNumber(extracted.valorLiquidoNfse),
+      valorTotalRetencoes: this.toNumber(extracted.valorTotalRetencoes),
+      valorIss,
+      valorIssRetidoReal: this.toNumber(leitura.valorIssRetidoReal),
+      valorIrrf: this.toNumber(extracted.valorIrrf),
+      valorInss: this.toNumber(extracted.valorContribuicaoPrevidenciaria),
+      valorCsll: this.toNumber(extracted.valorContribuicoesSociais),
+      valorPis: this.toNumber(extracted.valorPis),
+      valorCofins: this.toNumber(extracted.valorCofins),
+      aliquotaIssInformada: this.toNumber(extracted.aliquotaIss),
+      aliquotaIssCalculada,
+      retencaoIss: this.isIssRetido(extracted.retencaoIss, extracted.valorIssRetido, extracted.layoutNfse) ? 'Retido' : 'Nao Retido',
+      pisRetido: this.includesPisCofinsInFederalRetention(extracted.layoutNfse)
+        ? (this.toNumber(extracted.valorPis) ?? 0) > 0
+        : this.hasNationalPisCofinsRetention(extracted.descricaoContribuicoesSociais, 'pis'),
+      cofinsRetido: this.includesPisCofinsInFederalRetention(extracted.layoutNfse)
+        ? (this.toNumber(extracted.valorCofins) ?? 0) > 0
+        : this.hasNationalPisCofinsRetention(extracted.descricaoContribuicoesSociais, 'cofins'),
+      retencaoFederal: leitura.retencaoFederal
     };
   }
 
@@ -2355,6 +2439,22 @@ export class NfseDanfseService {
     }
 
     return undefined;
+  }
+
+  private splitMunicipioUf(value?: string | null): { municipio?: string; uf?: string } {
+    const normalized = this.safeValue(value);
+    if (normalized === '-') {
+      return {};
+    }
+
+    const match = normalized.match(/^(.*?)(?:\s*\/\s*([A-Z]{2}))?$/);
+    if (!match) {
+      return { municipio: normalized };
+    }
+
+    const municipio = match[1]?.trim() || undefined;
+    const uf = match[2]?.trim() || undefined;
+    return { municipio, uf };
   }
 
   private composeIbgeCep(codigoIbge?: string, cep?: string): string | undefined {

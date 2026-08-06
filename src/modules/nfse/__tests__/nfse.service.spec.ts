@@ -1268,6 +1268,130 @@ describe('NfseService', () => {
     });
   });
 
+  it('exporta a leitura fiscal de NFS-e no layout Dominio para entrada', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-export-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000033326071005552016',
+        numeroNfse: '333',
+        dataEmissao: new Date('2026-07-10T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Exportacao',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador Exportacao',
+        municipioPrestacaoNome: 'Mondai',
+        codigoServicoNacional: '170101',
+        itemListaServico: '1701',
+        descricaoServico: 'Servico de consultoria',
+        xmlPath: 'nfse/producao/06960810000176/2026/07/xml/doc-export-1.xml',
+        createdAt: new Date('2026-07-10T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-10T00:00:00.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <DPS>
+    <infDPS>
+      <dhEmi>2026-07-10T00:00:00-03:00</dhEmi>
+      <prest>
+        <CNPJ>06960810000176</CNPJ>
+        <xNome>Prestador Exportacao</xNome>
+        <end>
+          <endNac>
+            <xMun>Chapeco</xMun>
+            <UF>SC</UF>
+          </endNac>
+        </end>
+      </prest>
+      <toma>
+        <CNPJ>11111111000111</CNPJ>
+        <xNome>Tomador Exportacao</xNome>
+        <end>
+          <endNac>
+            <xMun>Mondai</xMun>
+            <UF>SC</UF>
+          </endNac>
+        </end>
+      </toma>
+      <valores>
+        <vServPrest>
+          <vServ>180.00</vServ>
+        </vServPrest>
+        <trib>
+          <tribFed>
+            <vRetIRRF>3.00</vRetIRRF>
+            <vRetCP>2.00</vRetCP>
+            <vRetCSLL>1.50</vRetCSLL>
+            <piscofins>
+              <vPis>1.00</vPis>
+              <vCofins>1.50</vCofins>
+              <tpRetPisCofins>3</tpRetPisCofins>
+            </piscofins>
+          </tribFed>
+          <tribMun>
+            <tpRetISSQN>2</tpRetISSQN>
+          </tribMun>
+        </trib>
+      </valores>
+    </infDPS>
+  </DPS>
+  <infNFSe Id="NFS42110092206960810000176000000000033326071005552016">
+    <nNFSe>333</nNFSe>
+    <xLocPrestacao>Mondai</xLocPrestacao>
+    <xLocIncid>Mondai</xLocIncid>
+    <valores>
+      <vLiq>162.00</vLiq>
+      <vTotalRet>18.00</vTotalRet>
+      <vISSQN>9.00</vISSQN>
+      <vISSRet>9.00</vISSRet>
+      <pAliqAplic>5.00</pAliqAplic>
+    </valores>
+  </infNFSe>
+</NFSe>`,
+        'utf8'
+      )
+    );
+
+    const result = await service.exportarLeituraFiscalDominio({
+      clienteId: 'cliente-1',
+      all: true,
+      codigoEmpresa: 10105,
+      tipoRegistro: 'Entrada',
+      contas: 'Padrao',
+      produtoPadrao: 557
+    });
+
+    const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
+    expect(result.fileName).toContain('DOMINIO-NFSE-ENTRADA-');
+    expect(content).toContain('|0000|11111111000111|');
+    expect(content).toContain('|1000|39|06960810000176||804|1933||333|U||10/07/2026|10/07/2026|180,00');
+    expect(content).toContain('|1020|25||180,00|2,22|4,00');
+    expect(content).toContain('|1020|16||180,00|1,67|3,00');
+    expect(content).toContain('|1020|26||180,00|1,11|2,00');
+    expect(content).toContain('|1020|3||180,00|5,00|9,00');
+    expect(content).toContain('|1020|18||180,00|5,00|9,00');
+    expect(content).toContain('|1030|557|1|180,00');
+    expect(content).toContain('|1300|10/07/2026|0|183|9,00||ISS RETIDO SOBRE NFS-E N 333 Prestador Exportacao|||');
+  });
+
+  it('rejeita exportacao por fornecedor sem configuracao ODBC da Dominio', async () => {
+    await expect(
+      service.exportarLeituraFiscalDominio({
+        clienteId: 'cliente-1',
+        all: true,
+        codigoEmpresa: 10105,
+        tipoRegistro: 'Entrada',
+        contas: 'PorFornecedor',
+        produtoPadrao: 557
+      })
+    ).rejects.toThrow('DOMINIO_ODBC_CONNECTION_STRING nao configurada para exportacao Por Fornecedor.');
+  });
+
   it('retorna XML com metadados de download', async () => {
     prisma.nfseDocumento.findUnique.mockResolvedValue({
       id: 'doc-1',

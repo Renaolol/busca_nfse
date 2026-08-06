@@ -237,6 +237,13 @@ const state = {
     summary: null,
     lastQuery: null,
     lastLoadedAt: null,
+    exportConfig: {
+      codigoEmpresa: '',
+      tipoRegistro: 'Entrada',
+      contas: 'Padrao',
+      produtoPadrao: '557',
+      exporting: false
+    },
     columnOrder: [...NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER],
     hiddenColumns: new Set(),
     columnMenuOpenKey: null,
@@ -1741,6 +1748,11 @@ function onDocumentSubmit(event) {
     case 'xmlsFilterForm': {
       event.preventDefault();
       void applyXmlFilters(target);
+      return;
+    }
+    case 'nfseFiscalDominioExportForm': {
+      event.preventDefault();
+      void submitNfseFiscalDominioExportForm(target);
       return;
     }
     case 'nfseRecoverByDpsForm': {
@@ -9523,10 +9535,18 @@ function renderNfseFiscalReaderCard() {
 
   const summary = state.nfseFiscalReader.summary;
   const rows = Array.isArray(state.nfseFiscalReader.rows) ? state.nfseFiscalReader.rows : [];
+  const exportConfig = state.nfseFiscalReader.exportConfig || {};
   const visibleColumns = getNfseFiscalReaderVisibleColumns();
   const hiddenColumns = state.nfseFiscalReader.hiddenColumns instanceof Set ? state.nfseFiscalReader.hiddenColumns : new Set();
   const hiddenCount = hiddenColumns.size;
   const minWidth = Math.max(1480, visibleColumns.length * 138);
+  const tipoRegistro = String(exportConfig.tipoRegistro || 'Entrada') === 'Servico' ? 'Servico' : 'Entrada';
+  const contas = String(exportConfig.contas || 'Padrao') === 'PorFornecedor' ? 'PorFornecedor' : 'Padrao';
+  const exportDisabled =
+    !rows.length ||
+    state.tableState.nfseFiscalReader === 'loading' ||
+    state.tableState.nfseFiscalReader === 'error' ||
+    exportConfig.exporting;
   const summaryCards = summary
     ? `
       <div class="form-grid six" style="margin-bottom:18px;">
@@ -9545,6 +9565,42 @@ function renderNfseFiscalReaderCard() {
       </div>
     `
     : '';
+  const exportForm = `
+    <form id="nfseFiscalDominioExportForm" class="form-grid four" style="margin:0 0 18px;">
+      <label class="field">
+        Codigo empresa Dominio
+        <input
+          name="codigoEmpresa"
+          type="number"
+          min="0"
+          step="1"
+          value="${escapeHtml(String(exportConfig.codigoEmpresa || ''))}"
+          placeholder="Ex.: 10105"
+          required
+        />
+      </label>
+      <label class="field">
+        Tipo de registro
+        <select name="tipoRegistro">${renderOptions(['Entrada', 'Servico'], tipoRegistro, { Entrada: 'Entrada', Servico: 'Serviço' })}</select>
+      </label>
+      <label class="field">
+        Contas
+        <select name="contas" ${tipoRegistro !== 'Entrada' ? 'disabled' : ''}>${renderOptions(['Padrao', 'PorFornecedor'], contas, { Padrao: 'Padrao', PorFornecedor: 'Por Fornecedor' })}</select>
+      </label>
+      <label class="field">
+        Produto padrao
+        <input name="produtoPadrao" type="number" min="1" step="1" value="${escapeHtml(String(exportConfig.produtoPadrao || '557'))}" required />
+      </label>
+      <div class="stack-actions" style="grid-column:1 / -1; justify-content:flex-start; align-items:flex-end;">
+        <button class="btn primary" type="submit" ${exportDisabled ? 'disabled' : ''}>
+          ${exportConfig.exporting ? 'Exportando layout Dominio...' : 'Exportar layout Dominio'}
+        </button>
+        <span style="color:#606062; font-size:13px;">
+          ${rows.length ? 'O arquivo segue o padrao do LeitorXML para NFS-e.' : 'Busque NFS-e com XML valido para habilitar a exportacao.'}
+        </span>
+      </div>
+    </form>
+  `;
 
   return `
     <article class="card">
@@ -9567,6 +9623,7 @@ function renderNfseFiscalReaderCard() {
         </div>
       </div>
       ${summaryCards}
+      ${exportForm}
       <div class="table-wrap nfse-fiscal-reader-scroll">
         <table class="xml-reader30-table xml-reader30-reorderable-table nfse-fiscal-reader-table" style="min-width:${minWidth}px;">
           <thead>
@@ -13503,6 +13560,10 @@ function resetXmlSearch() {
   state.nfseFiscalReader.summary = null;
   state.nfseFiscalReader.lastQuery = null;
   state.nfseFiscalReader.lastLoadedAt = null;
+  state.nfseFiscalReader.exportConfig = {
+    ...(state.nfseFiscalReader.exportConfig || {}),
+    exporting: false
+  };
   state.tableState.nfseFiscalReader = 'data';
 }
 
@@ -13594,6 +13655,10 @@ async function executeXmlSearch() {
   state.nfseFiscalReader.rows = [];
   state.nfseFiscalReader.summary = null;
   state.nfseFiscalReader.lastQuery = { ...state.filters.xmls };
+  state.nfseFiscalReader.exportConfig = {
+    ...(state.nfseFiscalReader.exportConfig || {}),
+    exporting: false
+  };
   render();
 
   try {
@@ -13648,6 +13713,94 @@ async function executeXmlSearch() {
   }
 
   render();
+}
+
+async function submitNfseFiscalDominioExportForm(form) {
+  if (state.dataSource !== 'api') {
+    pushToast('A exportacao Dominio do leitor NFS-e depende da API real.', 'error');
+    return;
+  }
+
+  if (!state.filters.xmls.cliente) {
+    pushToast('Selecione uma empresa e rode a busca antes de exportar.', 'error');
+    return;
+  }
+
+  if (!Array.isArray(state.nfseFiscalReader.rows) || !state.nfseFiscalReader.rows.length) {
+    pushToast('Nenhuma linha fiscal foi carregada para exportacao.', 'error');
+    return;
+  }
+
+  const data = new FormData(form);
+  const codigoEmpresa = String(data.get('codigoEmpresa') || '').trim();
+  const tipoRegistro = String(data.get('tipoRegistro') || 'Entrada').trim() === 'Servico' ? 'Servico' : 'Entrada';
+  const contas = tipoRegistro === 'Entrada' && String(data.get('contas') || '').trim() === 'PorFornecedor' ? 'PorFornecedor' : 'Padrao';
+  const produtoPadrao = String(data.get('produtoPadrao') || '557').trim();
+
+  if (!codigoEmpresa || Number(codigoEmpresa) < 0) {
+    pushToast('Informe um codigo de empresa Dominio valido.', 'error');
+    return;
+  }
+
+  if (!produtoPadrao || Number(produtoPadrao) <= 0) {
+    pushToast('Informe um produto padrao valido.', 'error');
+    return;
+  }
+
+  state.nfseFiscalReader.exportConfig = {
+    codigoEmpresa,
+    tipoRegistro,
+    contas,
+    produtoPadrao,
+    exporting: true
+  };
+  render();
+
+  try {
+    const payload = await apiRequest('/nfse/leitura-fiscal/exportar-dominio', {
+      method: 'POST',
+      body: {
+        clienteId: state.filters.xmls.cliente,
+        cnpj: state.filters.xmls.cnpj || undefined,
+        numeroNfse: state.filters.xmls.numero || undefined,
+        dataInicio: state.filters.xmls.emissaoInicio || undefined,
+        dataFim: state.filters.xmls.emissaoFim || undefined,
+        downloadInicio: state.filters.xmls.downloadInicio || undefined,
+        downloadFim: state.filters.xmls.downloadFim || undefined,
+        municipio: state.filters.xmls.municipio && state.filters.xmls.municipio !== 'Todos' ? state.filters.xmls.municipio : undefined,
+        tipoRelacao:
+          state.filters.xmls.tipo === 'Emitida'
+            ? 'emitidas'
+            : state.filters.xmls.tipo === 'Tomada'
+              ? 'tomadas'
+              : 'ambas',
+        statusArmazenamento:
+          state.filters.xmls.status === 'Armazenado' || state.filters.xmls.status === 'Pendente' || state.filters.xmls.status === 'Erro'
+            ? state.filters.xmls.status
+            : undefined,
+        all: true,
+        codigoEmpresa: Number(codigoEmpresa),
+        tipoRegistro,
+        contas,
+        produtoPadrao: Number(produtoPadrao)
+      },
+      timeoutMs: 2 * 60 * 1000
+    });
+
+    downloadFromPayload(payload, 'DOMINIO-NFSE.txt');
+    pushToast(`Exportacao Dominio do leitor NFS-e gerada com ${state.nfseFiscalReader.rows.length} linha(s).`, 'success');
+  } catch (error) {
+    pushToast(`Falha ao exportar layout Dominio da leitura fiscal: ${toErrorMessage(error)}`, 'error');
+  } finally {
+    state.nfseFiscalReader.exportConfig = {
+      codigoEmpresa,
+      tipoRegistro,
+      contas,
+      produtoPadrao,
+      exporting: false
+    };
+    render();
+  }
 }
 
 async function loadNfseGapAuditOverview(options = {}) {
