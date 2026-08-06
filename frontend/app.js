@@ -239,6 +239,7 @@ const state = {
     lastLoadedAt: null
   },
   xmlReader30: {
+    activeTab: 'nfe',
     hasSearched: false,
     results: [],
     lastQuery: null,
@@ -653,6 +654,15 @@ function onDocumentClick(event) {
     }
     case 'xmlReader30-clear': {
       resetXmlReader30Search();
+      render();
+      return;
+    }
+    case 'xml-reader30-switch-tab': {
+      const tab = actionNode.getAttribute('data-tab');
+      if (!tab) {
+        return;
+      }
+      state.xmlReader30.activeTab = tab === 'nfse-fiscal' ? 'nfse-fiscal' : 'nfe';
       render();
       return;
     }
@@ -4224,7 +4234,7 @@ function renderXmlsPage() {
 
       ${
         xmlSearchCanShowTable
-          ? `${xmlSearchSummary}${renderXmlsTableCard(xmls)}${renderNfseFiscalReaderCard()}`
+          ? `${xmlSearchSummary}${renderXmlsTableCard(xmls)}`
           : renderXmlSearchEmptyState()
       }
     </section>
@@ -4967,12 +4977,29 @@ function renderXmlReader30Page() {
         actions: []
       })}
 
+      ${renderXmlReader30Tabs()}
       ${renderXmlReader30Section()}
     </section>
   `;
 }
 
+function renderXmlReader30Tabs() {
+  const activeTab = state.xmlReader30.activeTab === 'nfse-fiscal' ? 'nfse-fiscal' : 'nfe';
+  return `
+    <article class="card" style="padding-bottom:14px;">
+      <div class="tabs" style="margin-bottom:0;">
+        <button class="tab-btn ${activeTab === 'nfe' ? 'active' : ''}" type="button" data-action="xml-reader30-switch-tab" data-tab="nfe">NF-e</button>
+        <button class="tab-btn ${activeTab === 'nfse-fiscal' ? 'active' : ''}" type="button" data-action="xml-reader30-switch-tab" data-tab="nfse-fiscal">NFS-e fiscal</button>
+      </div>
+    </article>
+  `;
+}
+
 function renderXmlReader30Section() {
+  if (state.xmlReader30.activeTab === 'nfse-fiscal') {
+    return renderXmlReader30NfseFiscalSection();
+  }
+
   const reader = state.xmlReader30;
   const hasClients = state.clients.length > 0;
   const currentCount = Number(reader.total || reader.results.length || 0);
@@ -5029,6 +5056,79 @@ function renderXmlReader30Section() {
       }
 
       ${reader.hasSearched ? renderXmlReader30ResultsTable(results) : ''}
+    </article>
+  `;
+}
+
+function renderXmlReader30NfseFiscalSection() {
+  const selectedClientId = state.filters.xmls.cliente && state.filters.xmls.cliente !== 'Todos' ? state.filters.xmls.cliente : '';
+  const canShowTable =
+    state.xmlSearch.hasSearched || state.tableState.xmls === 'loading' || state.tableState.xmls === 'error';
+  const summary =
+    state.xmlSearch.hasSearched && state.tableState.xmls !== 'loading' ? renderXmlSearchSummary() : '';
+
+  return `
+    <article class="card compare-reader-card">
+      <div class="compare-card-header">
+        <div>
+          <h3 class="card-title">Leitura fiscal de NFS-e</h3>
+          <p class="card-subtitle">Consulte as NFS-e armazenadas e monte a tabela fiscal consolidada em uma tela dedicada do leitor.</p>
+        </div>
+        ${statusBadge(
+          `${escapeHtml(String((state.nfseFiscalReader.rows || []).length))} linha(s)`,
+          state.nfseFiscalReader.rows?.length ? 'success' : 'neutral'
+        )}
+      </div>
+
+      <form id="xmlsFilterForm" class="form-grid">
+        <label class="field">
+          Empresa
+          <select name="cliente" required>${renderOptions(state.clients.map((client) => client.id), state.filters.xmls.cliente === 'Todos' ? '' : state.filters.xmls.cliente, mapClientOptions(), 'Selecione uma empresa')}</select>
+        </label>
+        <label class="field">
+          Emissao inicio
+          <input name="emissaoInicio" type="date" value="${escapeHtml(state.filters.xmls.emissaoInicio)}" />
+        </label>
+        <label class="field">
+          Emissao fim
+          <input name="emissaoFim" type="date" value="${escapeHtml(state.filters.xmls.emissaoFim)}" />
+        </label>
+        <label class="field">
+          Tipo
+          <select name="tipo">${renderOptions(['Todos', 'Emitida', 'Tomada'], state.filters.xmls.tipo)}</select>
+        </label>
+        <label class="field">
+          CNPJ
+          <input name="cnpj" value="${escapeHtml(state.filters.xmls.cnpj)}" />
+        </label>
+        <label class="field">
+          Numero da NFS-e
+          <input name="numero" value="${escapeHtml(state.filters.xmls.numero)}" />
+        </label>
+        <label class="field">
+          Municipio
+          <select name="municipio">${renderOptions(['Todos', ...uniqueValues(state.xmlFiles.map((xml) => xml.municipio))], state.filters.xmls.municipio)}</select>
+        </label>
+        <label class="field">
+          Download inicio
+          <input name="downloadInicio" type="date" value="${escapeHtml(state.filters.xmls.downloadInicio)}" />
+        </label>
+        <label class="field">
+          Download fim
+          <input name="downloadFim" type="date" value="${escapeHtml(state.filters.xmls.downloadFim)}" />
+        </label>
+        <label class="field">
+          Status do armazenamento
+          <select name="status">${renderOptions(['Todos', 'Armazenado', 'Pendente', 'Erro'], state.filters.xmls.status)}</select>
+        </label>
+        <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
+          <button class="btn primary" type="submit">Buscar NFS-e fiscal</button>
+          <button class="btn secondary" type="button" data-action="xmls-clear-filters">Limpar</button>
+          <button class="btn secondary" type="button" data-action="xmls-recover-past-nsus" ${selectedClientId ? '' : 'disabled'}>Reprocessar NSUs do cliente</button>
+        </div>
+      </form>
+
+      ${canShowTable ? `${summary}${renderNfseFiscalReaderCard()}` : renderXmlSearchEmptyState()}
     </article>
   `;
 }
@@ -5824,7 +5924,9 @@ function resetXmlReader30Search() {
   const nfeColumnOrder = Array.isArray(state.xmlReader30.nfeColumnOrder)
     ? [...state.xmlReader30.nfeColumnOrder]
     : [...XML_READER30_NFE_DEFAULT_COLUMN_ORDER];
+  const activeTab = state.xmlReader30.activeTab === 'nfse-fiscal' ? 'nfse-fiscal' : 'nfe';
   state.xmlReader30 = {
+    activeTab,
     hasSearched: false,
     results: [],
     lastQuery: null,
