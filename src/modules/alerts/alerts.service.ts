@@ -80,7 +80,7 @@ export class AlertsService {
 
     return alerts
       .filter((alert) => this.matchesStatusFilter(alert, query.status))
-      .sort((left, right) => Date.parse(right.dataHora || 0) - Date.parse(left.dataHora || 0));
+      .sort((left, right) => Date.parse(right.dataHora || '') - Date.parse(left.dataHora || ''));
   }
 
   async updateCteDesacordoResolution(eventId: string, resolved: boolean): Promise<AlertResponseDto> {
