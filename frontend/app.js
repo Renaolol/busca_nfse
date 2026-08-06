@@ -8839,6 +8839,23 @@ function renderDocumentInsightsProductsTable(rows) {
     return renderDocumentInsightsEmpty('Nao encontrei itens detalhados no XML carregado desta NF-e.');
   }
 
+  const rowsHtml = normalizedRows
+    .map((row) => {
+      const fullProductLabel = String(row.produto || '-');
+      const shortProductLabel = truncateText(fullProductLabel, 30);
+
+      return `
+        <tr>
+          <td class="document-products-product" title="${escapeHtml(fullProductLabel)}">
+            <span class="row-title" title="${escapeHtml(fullProductLabel)}">${escapeHtml(shortProductLabel)}</span>
+          </td>
+          <td class="document-products-quantity">${escapeHtml(row.quantidadeLabel || row.quantidade || '-')}</td>
+          <td class="document-products-money">${escapeHtml(row.valorUnitarioLabel || row.valorUnitario || '-')}</td>
+        </tr>
+      `;
+    })
+    .join('');
+
   return `
     <div class="document-products-shell">
       <div class="document-products-toolbar" aria-hidden="true">
@@ -8868,21 +8885,7 @@ function renderDocumentInsightsProductsTable(rows) {
               </th>
             </tr>
           </thead>
-          <tbody>
-            ${normalizedRows
-              .map(
-                (row) => `
-                  <tr>
-                    <td class="document-products-product">
-                      <span class="row-title">${escapeHtml(row.produto || '-')}</span>
-                    </td>
-                    <td class="document-products-quantity">${escapeHtml(row.quantidadeLabel || row.quantidade || '-')}</td>
-                    <td class="document-products-money">${escapeHtml(row.valorUnitarioLabel || row.valorUnitario || '-')}</td>
-                  </tr>
-                `
-              )
-              .join('')}
-          </tbody>
+          <tbody>${rowsHtml}</tbody>
         </table>
       </div>
     </div>

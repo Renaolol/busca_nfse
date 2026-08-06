@@ -1705,7 +1705,7 @@ tbody tr:hover {
 }
 
 .document-products-product {
-  width: 78%;
+  width: 84%;
   min-width: 0;
   white-space: nowrap;
   overflow: hidden;
@@ -1714,7 +1714,7 @@ tbody tr:hover {
 
 .document-products-quantity,
 .document-products-money {
-  width: 11%;
+  width: 8%;
   text-align: center;
   white-space: nowrap;
 }
