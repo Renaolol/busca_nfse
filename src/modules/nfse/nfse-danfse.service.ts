@@ -223,21 +223,38 @@ export class NfseDanfseService {
 
   extractRetentionAlertData(xml: string): NfseRetentionAlertData {
     const extracted = this.extractFromXml(xml);
+    const layoutNfse = extracted.layoutNfse ?? this.detectLeituraFiscalLayout(xml);
+    const totalRetencoesFederais = this.computeFederalRetentionTotal(layoutNfse, {
+      valorServico: extracted.valorServico,
+      valorLiquidoNfse: extracted.valorLiquidoNfse,
+      valorTotalRetencoes: extracted.valorTotalRetencoes,
+      valorIssRetido: extracted.valorIssRetido,
+      valorDeducoes: extracted.valorDeducoes,
+      valorDescontoIncondicionado: extracted.valorDescontoIncondicionado,
+      valorDescontoCondicionado: extracted.valorDescontoCondicionado,
+      valorIrrf: extracted.valorIrrf,
+      valorContribuicaoPrevidenciaria: extracted.valorContribuicaoPrevidenciaria,
+      valorContribuicoesSociais: extracted.valorContribuicoesSociais,
+      valorPis: extracted.valorPis,
+      valorCofins: extracted.valorCofins
+    });
     const entries: NfseRetentionAlertEntry[] = [];
-    const issRetido = this.isIssRetido(extracted.retencaoIss, extracted.valorIssRetido, extracted.layoutNfse);
+    const issRetido = this.isIssRetido(extracted.retencaoIss, extracted.valorIssRetido, layoutNfse);
 
     if (issRetido) {
       entries.push({ code: 'iss', label: 'ISS retido' });
     }
 
-    this.pushRetentionAmountEntry(entries, 'irrf', 'IRRF', extracted.valorIrrf);
-    this.pushRetentionAmountEntry(entries, 'inss', 'INSS', extracted.valorContribuicaoPrevidenciaria);
-    this.pushRetentionAmountEntry(entries, 'csll', 'CSLL', extracted.valorContribuicoesSociais);
-    if (this.includesPisCofinsInFederalRetention(extracted.layoutNfse)) {
-      this.pushRetentionAmountEntry(entries, 'pis', 'PIS', extracted.valorPis);
-      this.pushRetentionAmountEntry(entries, 'cofins', 'COFINS', extracted.valorCofins);
-    } else {
-      this.pushNationalPisCofinsRetentionEntries(entries, extracted.descricaoContribuicoesSociais);
+    if (layoutNfse !== 'abrasf' || (totalRetencoesFederais ?? 0) > 0) {
+      this.pushRetentionAmountEntry(entries, 'irrf', 'IRRF', extracted.valorIrrf);
+      this.pushRetentionAmountEntry(entries, 'inss', 'INSS', extracted.valorContribuicaoPrevidenciaria);
+      this.pushRetentionAmountEntry(entries, 'csll', 'CSLL', extracted.valorContribuicoesSociais);
+      if (this.includesPisCofinsInFederalRetention(layoutNfse)) {
+        this.pushRetentionAmountEntry(entries, 'pis', 'PIS', extracted.valorPis);
+        this.pushRetentionAmountEntry(entries, 'cofins', 'COFINS', extracted.valorCofins);
+      } else {
+        this.pushNationalPisCofinsRetentionEntries(entries, extracted.descricaoContribuicoesSociais);
+      }
     }
 
     return {
@@ -248,6 +265,7 @@ export class NfseDanfseService {
 
   extractLeituraFiscal(xml: string): NfseLeituraFiscal {
     const extracted = this.extractFromXml(xml);
+    const layoutNfse = extracted.layoutNfse ?? this.detectLeituraFiscalLayout(xml);
     const retencoes = this.extractRetentionAlertData(xml).entries;
     const valorServico = this.toNumber(extracted.valorServico) ?? 0;
     const valorIss = this.toNumber(extracted.valorIss) ?? 0;
@@ -259,15 +277,22 @@ export class NfseDanfseService {
     const pis = this.toNumber(extracted.valorPis) ?? 0;
     const cofins = this.toNumber(extracted.valorCofins) ?? 0;
     const totalRetencoesFederais =
-      this.computeFederalRetentionTotal(extracted.layoutNfse, {
+      this.computeFederalRetentionTotal(layoutNfse, {
+        valorServico: extracted.valorServico,
+        valorLiquidoNfse: extracted.valorLiquidoNfse,
+        valorTotalRetencoes: extracted.valorTotalRetencoes,
+        valorIssRetido: extracted.valorIssRetido,
+        valorDeducoes: extracted.valorDeducoes,
+        valorDescontoIncondicionado: extracted.valorDescontoIncondicionado,
+        valorDescontoCondicionado: extracted.valorDescontoCondicionado,
         valorIrrf: extracted.valorIrrf,
         valorContribuicaoPrevidenciaria: extracted.valorContribuicaoPrevidenciaria,
         valorContribuicoesSociais: extracted.valorContribuicoesSociais,
         valorPis: extracted.valorPis,
         valorCofins: extracted.valorCofins
       }) ?? 0;
-    const possuiRetencoesFederais = retencoes.some((entry) => entry.code !== 'iss');
-    const retencaoIss = this.describeRetencaoIss(extracted.retencaoIss, extracted.valorIssRetido, extracted.layoutNfse);
+    const possuiRetencoesFederais = totalRetencoesFederais > 0 || retencoes.some((entry) => entry.code !== 'iss');
+    const retencaoIss = this.describeRetencaoIss(extracted.retencaoIss, extracted.valorIssRetido, layoutNfse);
     const valorIssRetidoReal =
       valorIssRetido ??
       (valorTotalRetencoes !== undefined ? Math.max(valorTotalRetencoes - totalRetencoesFederais, 0) : undefined);
@@ -300,7 +325,7 @@ export class NfseDanfseService {
     }
 
     return {
-      layout: extracted.layoutNfse || this.detectLeituraFiscalLayout(xml),
+      layout: layoutNfse,
       localPrestacao: this.safeValue(extracted.localPrestacao) !== '-' ? extracted.localPrestacao ?? undefined : undefined,
       localIncidenciaIss:
         this.safeValue(extracted.municipioIncidenciaIssqn) !== '-' ? extracted.municipioIncidenciaIssqn ?? undefined : undefined,
@@ -319,7 +344,14 @@ export class NfseDanfseService {
       aliquotaRealIss: this.toFixedRateString(aliquotaRealIss),
       retencaoIss,
       retencaoFederal: possuiRetencoesFederais ? 'Retido' : 'Normal',
-      totalRetencoesFederais: this.formatFederalRetentionTotal(extracted.layoutNfse, {
+      totalRetencoesFederais: this.formatFederalRetentionTotal(layoutNfse, {
+        valorServico: extracted.valorServico,
+        valorLiquidoNfse: extracted.valorLiquidoNfse,
+        valorTotalRetencoes: extracted.valorTotalRetencoes,
+        valorIssRetido: extracted.valorIssRetido,
+        valorDeducoes: extracted.valorDeducoes,
+        valorDescontoIncondicionado: extracted.valorDescontoIncondicionado,
+        valorDescontoCondicionado: extracted.valorDescontoCondicionado,
         valorIrrf: extracted.valorIrrf,
         valorContribuicaoPrevidenciaria: extracted.valorContribuicaoPrevidenciaria,
         valorContribuicoesSociais: extracted.valorContribuicoesSociais,
@@ -338,6 +370,7 @@ export class NfseDanfseService {
 
   extractDominioExportData(xml: string): NfseDominioExportData {
     const extracted = this.extractFromXml(xml);
+    const layoutNfse = extracted.layoutNfse ?? this.detectLeituraFiscalLayout(xml);
     const leitura = this.extractLeituraFiscal(xml);
     const prestador = this.splitMunicipioUf(extracted.municipioPrestador);
     const tomador = this.splitMunicipioUf(extracted.municipioTomador);
@@ -348,7 +381,7 @@ export class NfseDanfseService {
       valorServico && valorServico > 0 && valorIss !== undefined ? Number(((valorIss / valorServico) * 100).toFixed(2)) : undefined;
 
     return {
-      layout: extracted.layoutNfse || this.detectLeituraFiscalLayout(xml),
+      layout: layoutNfse,
       numeroNfse: extracted.numeroNfse,
       dataEmissao: extracted.dataEmissao,
       prestadorNome: extracted.razaoSocialPrestador,
@@ -375,13 +408,19 @@ export class NfseDanfseService {
       valorCofins: this.toNumber(extracted.valorCofins),
       aliquotaIssInformada: this.toNumber(extracted.aliquotaIss),
       aliquotaIssCalculada,
-      retencaoIss: this.isIssRetido(extracted.retencaoIss, extracted.valorIssRetido, extracted.layoutNfse) ? 'Retido' : 'Nao Retido',
-      pisRetido: this.includesPisCofinsInFederalRetention(extracted.layoutNfse)
-        ? (this.toNumber(extracted.valorPis) ?? 0) > 0
-        : this.hasNationalPisCofinsRetention(extracted.descricaoContribuicoesSociais, 'pis'),
-      cofinsRetido: this.includesPisCofinsInFederalRetention(extracted.layoutNfse)
-        ? (this.toNumber(extracted.valorCofins) ?? 0) > 0
-        : this.hasNationalPisCofinsRetention(extracted.descricaoContribuicoesSociais, 'cofins'),
+      retencaoIss: this.isIssRetido(extracted.retencaoIss, extracted.valorIssRetido, layoutNfse) ? 'Retido' : 'Nao Retido',
+      pisRetido:
+        layoutNfse === 'abrasf' && leitura.retencaoFederal !== 'Retido'
+          ? false
+          : this.includesPisCofinsInFederalRetention(layoutNfse)
+          ? (this.toNumber(extracted.valorPis) ?? 0) > 0
+          : this.hasNationalPisCofinsRetention(extracted.descricaoContribuicoesSociais, 'pis'),
+      cofinsRetido:
+        layoutNfse === 'abrasf' && leitura.retencaoFederal !== 'Retido'
+          ? false
+          : this.includesPisCofinsInFederalRetention(layoutNfse)
+          ? (this.toNumber(extracted.valorCofins) ?? 0) > 0
+          : this.hasNationalPisCofinsRetention(extracted.descricaoContribuicoesSociais, 'cofins'),
       retencaoFederal: leitura.retencaoFederal
     };
   }
@@ -1563,7 +1602,9 @@ export class NfseDanfseService {
       valorTotalRetencoes: this.extractFromPaths(xml, [
         ['infNFSe', 'valores', 'vTotalRet'],
         ['valores', 'vTotalRet'],
-        ['InfNfse', 'ValoresNfse', 'ValorTotalRetencoes']
+        ['InfNfse', 'ValoresNfse', 'ValorTotalRetencoes'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'OutrasRetencoes'],
+        ['InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'OutrasRetencoes']
       ]),
       valorLiquidoNfse: this.extractFromPaths(xml, [
         ['infNFSe', 'valores', 'vLiq'],
@@ -2509,7 +2550,18 @@ export class NfseDanfseService {
     layout: DanfseRenderInput['layoutNfse'],
     values: Pick<
       DanfseRenderInput,
-      'valorIrrf' | 'valorContribuicaoPrevidenciaria' | 'valorContribuicoesSociais' | 'valorPis' | 'valorCofins'
+      | 'valorServico'
+      | 'valorLiquidoNfse'
+      | 'valorTotalRetencoes'
+      | 'valorIssRetido'
+      | 'valorDeducoes'
+      | 'valorDescontoIncondicionado'
+      | 'valorDescontoCondicionado'
+      | 'valorIrrf'
+      | 'valorContribuicaoPrevidenciaria'
+      | 'valorContribuicoesSociais'
+      | 'valorPis'
+      | 'valorCofins'
     >
   ): string | undefined {
     const total = this.computeFederalRetentionTotal(layout, values);
@@ -2523,7 +2575,45 @@ export class NfseDanfseService {
     layout: DanfseRenderInput['layoutNfse'],
     values: Pick<
       DanfseRenderInput,
-      'valorIrrf' | 'valorContribuicaoPrevidenciaria' | 'valorContribuicoesSociais' | 'valorPis' | 'valorCofins'
+      | 'valorServico'
+      | 'valorLiquidoNfse'
+      | 'valorTotalRetencoes'
+      | 'valorIssRetido'
+      | 'valorDeducoes'
+      | 'valorDescontoIncondicionado'
+      | 'valorDescontoCondicionado'
+      | 'valorIrrf'
+      | 'valorContribuicaoPrevidenciaria'
+      | 'valorContribuicoesSociais'
+      | 'valorPis'
+      | 'valorCofins'
+    >
+  ): number | undefined {
+    const declaredTotal = this.computeDeclaredFederalRetentionTotal(layout, values);
+    if (declaredTotal === undefined) {
+      return undefined;
+    }
+    if (layout !== 'abrasf') {
+      return declaredTotal;
+    }
+
+    const effectiveAbrasfTotal = this.computeEffectiveAbrasfFederalRetentionTotal(values, declaredTotal);
+    return effectiveAbrasfTotal ?? declaredTotal;
+  }
+
+  private includesPisCofinsInFederalRetention(layout?: DanfseRenderInput['layoutNfse']): boolean {
+    return layout !== 'padrao_nacional';
+  }
+
+  private computeDeclaredFederalRetentionTotal(
+    layout: DanfseRenderInput['layoutNfse'],
+    values: Pick<
+      DanfseRenderInput,
+      | 'valorIrrf'
+      | 'valorContribuicaoPrevidenciaria'
+      | 'valorContribuicoesSociais'
+      | 'valorPis'
+      | 'valorCofins'
     >
   ): number | undefined {
     const includePisCofins = this.includesPisCofinsInFederalRetention(layout);
@@ -2542,8 +2632,73 @@ export class NfseDanfseService {
     return numericValues.reduce<number>((total, value) => total + (value ?? 0), 0);
   }
 
-  private includesPisCofinsInFederalRetention(layout?: DanfseRenderInput['layoutNfse']): boolean {
-    return layout !== 'padrao_nacional';
+  private computeEffectiveAbrasfFederalRetentionTotal(
+    values: Pick<
+      DanfseRenderInput,
+      | 'valorServico'
+      | 'valorLiquidoNfse'
+      | 'valorTotalRetencoes'
+      | 'valorIssRetido'
+      | 'valorDeducoes'
+      | 'valorDescontoIncondicionado'
+      | 'valorDescontoCondicionado'
+      | 'valorIrrf'
+      | 'valorContribuicaoPrevidenciaria'
+      | 'valorContribuicoesSociais'
+      | 'valorPis'
+      | 'valorCofins'
+    >,
+    declaredTotal: number
+  ): number | undefined {
+    if (declaredTotal <= 0) {
+      return undefined;
+    }
+
+    const observedTotal = this.computeObservedRetentionTotal(values);
+    if (observedTotal === undefined) {
+      return undefined;
+    }
+
+    const issRetido = this.toNumber(values.valorIssRetido) ?? 0;
+    const effectiveFederalTotal = Math.max(observedTotal - issRetido, 0);
+    if (effectiveFederalTotal <= 0) {
+      return 0;
+    }
+
+    return Number(Math.min(declaredTotal, effectiveFederalTotal).toFixed(2));
+  }
+
+  private computeObservedRetentionTotal(
+    values: Pick<
+      DanfseRenderInput,
+      | 'valorServico'
+      | 'valorLiquidoNfse'
+      | 'valorTotalRetencoes'
+      | 'valorDeducoes'
+      | 'valorDescontoIncondicionado'
+      | 'valorDescontoCondicionado'
+    >
+  ): number | undefined {
+    const observedFromTag = this.toNumber(values.valorTotalRetencoes);
+    const valorServico = this.toNumber(values.valorServico);
+    const valorLiquido = this.toNumber(values.valorLiquidoNfse);
+    const totalReducoes =
+      (this.toNumber(values.valorDeducoes) ?? 0) +
+      (this.toNumber(values.valorDescontoIncondicionado) ?? 0) +
+      (this.toNumber(values.valorDescontoCondicionado) ?? 0);
+    const observedFromLiquid =
+      valorServico !== undefined && valorLiquido !== undefined
+        ? Number(Math.max(valorServico - totalReducoes - valorLiquido, 0).toFixed(2))
+        : undefined;
+    const candidates = [observedFromTag, observedFromLiquid].filter(
+      (value): value is number => value !== undefined && Number.isFinite(value)
+    );
+
+    if (!candidates.length) {
+      return undefined;
+    }
+
+    return Math.max(...candidates);
   }
 
   private pushNationalPisCofinsRetentionEntries(

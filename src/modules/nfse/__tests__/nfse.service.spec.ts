@@ -1268,6 +1268,100 @@ describe('NfseService', () => {
     });
   });
 
+  it('nao soma retencoes federais em ABRASF quando o liquido reflete apenas ISS retido', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-fiscal-abrasf-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42134012219893422000161000000000089926070269374160',
+        numeroNfse: '899',
+        dataEmissao: new Date('2026-07-28T00:00:00.000Z'),
+        cnpjPrestador: '19893422000161',
+        razaoSocialPrestador: 'CUBMIX CONCRETO USINADO LTDA',
+        cnpjTomador: '20714171000190',
+        razaoSocialTomador: 'P2 PRE FABRICADOS LTDA',
+        municipioPrestacaoNome: 'Faxinal dos Guedes',
+        codigoServicoNacional: null,
+        itemListaServico: '0702',
+        descricaoServico: 'Usinagem de Concreto',
+        xmlPath: 'nfse/producao/19893422000161/2026/07/xml/doc-fiscal-abrasf-1.xml',
+        createdAt: new Date('2026-07-28T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-28T00:00:00.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse versao="1.00">
+    <InfNfse>
+      <Numero>899</Numero>
+      <DataEmissao>2026-07-28T08:14:45-03:00</DataEmissao>
+      <ValoresNfse>
+        <BaseCalculo>10800.00</BaseCalculo>
+        <Aliquota>3.00</Aliquota>
+        <ValorIss>324.00</ValorIss>
+        <ValorLiquidoNfse>10476.00</ValorLiquidoNfse>
+      </ValoresNfse>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <Servico>
+            <Valores>
+              <ValorServicos>10800.00</ValorServicos>
+              <ValorIssRetido>324.00</ValorIssRetido>
+              <ValorPis>178.20</ValorPis>
+              <ValorCofins>820.80</ValorCofins>
+              <OutrasRetencoes>324.00</OutrasRetencoes>
+              <ValorIss>324.00</ValorIss>
+            </Valores>
+            <IssRetido>1</IssRetido>
+            <ItemListaServico>0702</ItemListaServico>
+          </Servico>
+          <Prestador>
+            <CpfCnpj>
+              <Cnpj>19893422000161</Cnpj>
+            </CpfCnpj>
+          </Prestador>
+          <Tomador>
+            <IdentificacaoTomador>
+              <CpfCnpj>
+                <Cnpj>20714171000190</Cnpj>
+              </CpfCnpj>
+            </IdentificacaoTomador>
+          </Tomador>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`,
+        'utf8'
+      )
+    );
+
+    const result = await service.getLeituraFiscal({
+      clienteId: 'cliente-1',
+      numeroNfse: '899',
+      all: true
+    });
+
+    expect(result.summary).toMatchObject({
+      totalDocumentosFiltrados: 1,
+      totalDocumentosLidos: 1,
+      totalRetencoesFederais: 0,
+      valorRetidoTotal: 324,
+      valorIssRetidoRealTotal: 324
+    });
+    expect(result.items[0]).toMatchObject({
+      numeroNfse: '899',
+      valorTotalRetencoes: '324.00',
+      valorIssRetidoReal: '324.00',
+      retencaoFederal: 'Normal',
+      totalRetencoesFederais: '0.00'
+    });
+  });
+
   it('exporta a leitura fiscal de NFS-e no layout Dominio para entrada', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
       {
