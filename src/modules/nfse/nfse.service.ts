@@ -12,7 +12,7 @@ import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardStatsQueryDto } from './dto/dashboard-stats.dto';
 import { DownloadLoteDto } from './dto/download-lote.dto';
-import { DanfseRenderInput, NfseDanfseService } from './nfse-danfse.service';
+import { DanfseRenderInput, NfseDanfseService, NfseLeituraFiscal } from './nfse-danfse.service';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { ListNfseGapAuditsQueryDto } from './dto/list-gap-audits.dto';
 import {
@@ -244,6 +244,122 @@ export class NfseService {
           right.storedXmls - left.storedXmls ||
           left.clienteId.localeCompare(right.clienteId)
       )
+    };
+  }
+
+  async getLeituraFiscal(query: QueryNfseDto) {
+    const where = this.buildBaseWhere(query);
+    const cnpjConsulta = this.normalizeCnpj(query.cnpjConsulta);
+
+    if (cnpjConsulta) {
+      const tipoRelacao = query.tipoRelacao ?? 'ambas';
+
+      if (tipoRelacao === 'emitidas') {
+        where.cnpjPrestador = cnpjConsulta;
+      } else if (tipoRelacao === 'tomadas') {
+        where.cnpjTomador = cnpjConsulta;
+      } else {
+        where.OR = [{ cnpjPrestador: cnpjConsulta }, { cnpjTomador: cnpjConsulta }];
+      }
+    }
+
+    const rawItems = await this.prisma.nfseDocumento.findMany({
+      where,
+      orderBy: [{ dataEmissao: 'desc' }, { updatedAt: 'desc' }, { createdAt: 'desc' }]
+    });
+    const { items: uniqueItems, duplicatesRemoved } = this.deduplicateDocumentosForList(rawItems);
+    if (duplicatesRemoved > 0) {
+      this.logger.warn(`Leitura fiscal de NFS-e ocultou ${duplicatesRemoved} duplicata(s) legada(s) por ambiente + chave_acesso.`);
+    }
+
+    const rows: Array<Record<string, unknown>> = [];
+    let totalDocumentosSemXml = 0;
+    let totalDocumentosComErro = 0;
+    let valorServicoTotal = 0;
+    let valorLiquidoTotal = 0;
+    let valorRetidoTotal = 0;
+    let valorIssTotal = 0;
+    let valorIssRetidoRealTotal = 0;
+    let totalRetencoesFederais = 0;
+
+    for (const doc of uniqueItems) {
+      if (!doc.xmlPath) {
+        totalDocumentosSemXml += 1;
+        continue;
+      }
+
+      try {
+        const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
+        const leitura = this.danfse.extractLeituraFiscal(xml);
+        const codigoServicoPrestado = [doc.codigoServicoNacional, doc.itemListaServico].filter(Boolean).join(' / ') || null;
+
+        rows.push({
+          id: doc.id,
+          clienteId: doc.clienteId,
+          estabelecimentoId: doc.estabelecimentoId,
+          numeroNfse: doc.numeroNfse ?? null,
+          chaveAcesso: doc.chaveAcesso,
+          dataEmissao: doc.dataEmissao ?? null,
+          prestador: doc.razaoSocialPrestador ?? null,
+          cnpjPrestador: doc.cnpjPrestador ?? null,
+          tomador: doc.razaoSocialTomador ?? null,
+          cnpjTomador: doc.cnpjTomador ?? null,
+          municipio: doc.municipioPrestacaoNome ?? null,
+          codigoServicoPrestado,
+          descricaoServico: doc.descricaoServico ?? null,
+          ...leitura
+        });
+
+        if (leitura.statusProcessamento === 'OK') {
+          valorServicoTotal += this.toNumber(leitura.valorServico) ?? 0;
+          valorLiquidoTotal += this.toNumber(leitura.valorLiquidoNfse) ?? 0;
+          valorRetidoTotal += this.toNumber(leitura.valorTotalRetencoes) ?? 0;
+          valorIssTotal += this.toNumber(leitura.valorIss) ?? 0;
+          valorIssRetidoRealTotal += this.toNumber(leitura.valorIssRetidoReal) ?? 0;
+          totalRetencoesFederais += this.toNumber(leitura.totalRetencoesFederais) ?? 0;
+        } else {
+          totalDocumentosComErro += 1;
+        }
+      } catch (error) {
+        totalDocumentosComErro += 1;
+        rows.push({
+          id: doc.id,
+          clienteId: doc.clienteId,
+          estabelecimentoId: doc.estabelecimentoId,
+          numeroNfse: doc.numeroNfse ?? null,
+          chaveAcesso: doc.chaveAcesso,
+          dataEmissao: doc.dataEmissao ?? null,
+          prestador: doc.razaoSocialPrestador ?? null,
+          cnpjPrestador: doc.cnpjPrestador ?? null,
+          tomador: doc.razaoSocialTomador ?? null,
+          cnpjTomador: doc.cnpjTomador ?? null,
+          municipio: doc.municipioPrestacaoNome ?? null,
+          codigoServicoPrestado: [doc.codigoServicoNacional, doc.itemListaServico].filter(Boolean).join(' / ') || null,
+          descricaoServico: doc.descricaoServico ?? null,
+          layout: 'desconhecido',
+          statusProcessamento: 'Erro',
+          erroProcessamento: this.toErrorMessage(error),
+          camposComProblema: ['XML indisponivel ou invalido'],
+          retencoes: []
+        });
+      }
+    }
+
+    return {
+      items: rows,
+      total: rows.length,
+      summary: {
+        totalDocumentosFiltrados: uniqueItems.length,
+        totalDocumentosLidos: rows.length,
+        totalDocumentosComErro,
+        totalDocumentosSemXml,
+        valorServicoTotal: this.roundTo2(valorServicoTotal),
+        valorLiquidoTotal: this.roundTo2(valorLiquidoTotal),
+        valorRetidoTotal: this.roundTo2(valorRetidoTotal),
+        valorIssTotal: this.roundTo2(valorIssTotal),
+        valorIssRetidoRealTotal: this.roundTo2(valorIssRetidoRealTotal),
+        totalRetencoesFederais: this.roundTo2(totalRetencoesFederais)
+      }
     };
   }
 
@@ -1144,6 +1260,7 @@ export class NfseService {
     NfseDocumento & {
       eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
       retencaoIss?: string | null;
+      leituraFiscal?: NfseLeituraFiscal | null;
     }
   > {
     if (!doc.xmlPath) {
@@ -1173,7 +1290,8 @@ export class NfseService {
         razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
         razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
         municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome ?? null,
-        retencaoIss: parsed.retencaoIss ?? null
+        retencaoIss: parsed.retencaoIss ?? null,
+        leituraFiscal: this.danfse.extractLeituraFiscal(xml)
       };
     } catch (error) {
       this.logger.warn(`Falha ao enriquecer detalhes da NFS-e ${doc.id}: ${this.toErrorMessage(error)}`);
@@ -2613,6 +2731,24 @@ export class NfseService {
     }
 
     return new Prisma.Decimal(sanitized);
+  }
+
+  private toNumber(value?: string | null): number | undefined {
+    if (!value) {
+      return undefined;
+    }
+
+    const normalized = value.trim();
+    const sanitized =
+      normalized.includes(',') && normalized.includes('.')
+        ? normalized.replace(/\./g, '').replace(',', '.')
+        : normalized.replace(',', '.');
+    const parsed = Number(sanitized);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+
+  private roundTo2(value: number): number {
+    return Number(value.toFixed(2));
   }
 
   private normalizeStatus(value?: string): string | undefined {

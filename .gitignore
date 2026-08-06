@@ -188,6 +188,9 @@ coverage/
 # Build and runtime artifacts
 /storage/
 .tmp/
+/releases/
+/backups/
+/logs/
 
 # Local env files
 .env.local

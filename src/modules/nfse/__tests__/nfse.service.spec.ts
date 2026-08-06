@@ -1144,6 +1144,130 @@ describe('NfseService', () => {
     });
   });
 
+  it('retorna leitura fiscal consolidada das NFS-e filtradas', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-fiscal-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000033326062205552016',
+        numeroNfse: '333',
+        dataEmissao: new Date('2026-06-22T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador Teste',
+        municipioPrestacaoNome: 'Mondai',
+        codigoServicoNacional: '170101',
+        itemListaServico: '1701',
+        descricaoServico: 'Servico de consultoria',
+        xmlPath: 'nfse/producao/06960810000176/2026/06/xml/doc-fiscal-1.xml',
+        createdAt: new Date('2026-06-22T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-22T00:00:00.000Z')
+      },
+      {
+        id: 'doc-fiscal-2',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000033426062205552017',
+        numeroNfse: '334',
+        dataEmissao: new Date('2026-06-22T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Sem XML',
+        cnpjTomador: '22222222000122',
+        razaoSocialTomador: 'Tomador Sem XML',
+        municipioPrestacaoNome: 'Mondai',
+        codigoServicoNacional: '170101',
+        itemListaServico: '1701',
+        descricaoServico: 'Servico sem XML',
+        xmlPath: null,
+        createdAt: new Date('2026-06-22T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-22T00:00:00.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42110092206960810000176000000000033326062205552016">
+    <xLocPrestacao>Mondai</xLocPrestacao>
+    <xLocIncid>Mondai</xLocIncid>
+    <nNFSe>333</nNFSe>
+    <valores>
+      <vServ>180.00</vServ>
+      <vLiq>162.00</vLiq>
+      <vTotalRet>18.00</vTotalRet>
+      <vISSQN>9.00</vISSQN>
+      <vISSRet>9.00</vISSRet>
+      <pAliqAplic>5.00</pAliqAplic>
+      <trib>
+        <tribFed>
+          <vRetIRRF>3.00</vRetIRRF>
+          <vRetCP>2.00</vRetCP>
+          <vRetCSLL>1.50</vRetCSLL>
+          <piscofins>
+            <vPis>1.00</vPis>
+            <vCofins>1.50</vCofins>
+          </piscofins>
+        </tribFed>
+        <tribMun>
+          <tpRetISSQN>1</tpRetISSQN>
+        </tribMun>
+      </trib>
+    </valores>
+  </infNFSe>
+</NFSe>`,
+        'utf8'
+      )
+    );
+
+    const result = await service.getLeituraFiscal({
+      clienteId: 'cliente-1',
+      all: true
+    });
+
+    expect(prisma.nfseDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([{ clienteId: 'cliente-1' }])
+        })
+      })
+    );
+    expect(result.summary).toEqual({
+      totalDocumentosFiltrados: 2,
+      totalDocumentosLidos: 1,
+      totalDocumentosComErro: 0,
+      totalDocumentosSemXml: 1,
+      valorServicoTotal: 180,
+      valorLiquidoTotal: 162,
+      valorRetidoTotal: 18,
+      valorIssTotal: 9,
+      valorIssRetidoRealTotal: 9,
+      totalRetencoesFederais: 9
+    });
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: 'doc-fiscal-1',
+      numeroNfse: '333',
+      municipio: 'Mondai',
+      codigoServicoPrestado: '170101 / 1701',
+      valorServico: '180.00',
+      valorLiquidoNfse: '162.00',
+      valorTotalRetencoes: '18.00',
+      valorIssRetidoReal: '9.00',
+      valorIrrf: '3.00',
+      valorInss: '2.00',
+      valorCsll: '1.50',
+      valorPis: '1.00',
+      valorCofins: '1.50',
+      retencaoIss: 'Retido',
+      retencaoFederal: 'Retido',
+      statusProcessamento: 'OK'
+    });
+  });
+
   it('retorna XML com metadados de download', async () => {
     prisma.nfseDocumento.findUnique.mockResolvedValue({
       id: 'doc-1',

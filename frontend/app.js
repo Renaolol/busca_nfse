@@ -26,6 +26,32 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'aliquotaIcms',
   'valorIcms'
 ];
+const NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER = [
+  'numeroNfse',
+  'localPrestacao',
+  'localIncidenciaIss',
+  'prestador',
+  'cnpjPrestador',
+  'tomador',
+  'cnpjTomador',
+  'valorLiquidoNfse',
+  'valorTotalRetencoes',
+  'valorServico',
+  'valorIss',
+  'valorPis',
+  'valorCofins',
+  'valorInss',
+  'valorIrrf',
+  'valorCsll',
+  'dataEmissao',
+  'retencaoIss',
+  'retencaoFederal',
+  'aliquotaIss',
+  'valorIssRetidoReal',
+  'aliquotaRealIss',
+  'statusProcessamento',
+  'erroProcessamento'
+];
 const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
 let dashboardAutoRefreshTimer = null;
@@ -108,6 +134,13 @@ const state = {
   mobileSidebarOpen: false,
   dataReady: false,
   dataSource: 'api',
+  pageLoading: {
+    active: false,
+    title: '',
+    description: '',
+    currentTask: '',
+    completedTasks: []
+  },
   modal: null,
   drawer: null,
   toasts: [],
@@ -190,11 +223,23 @@ const state = {
     total: 0,
     totalPages: 0
   },
+  nfseFiscalReader: {
+    rows: [],
+    summary: null,
+    lastQuery: null,
+    lastLoadedAt: null,
+    columnOrder: [...NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER],
+    hiddenColumns: new Set(),
+    columnMenuOpenKey: null,
+    columnMenuAnchor: null,
+    columnDrag: null
+  },
   nfseGapAuditOverview: {
     rows: [],
     lastLoadedAt: null
   },
   xmlReader30: {
+    activeTab: 'nfe',
     hasSearched: false,
     results: [],
     lastQuery: null,
@@ -345,6 +390,7 @@ const state = {
     runs: 'loading',
     nfeSync: 'loading',
     xmls: 'loading',
+    nfseFiscalReader: 'loading',
     nfseGapAudit: 'loading',
     nfeDocs: 'loading',
     cteDocs: 'loading',
@@ -385,13 +431,14 @@ function boot() {
 }
 
 async function initializeData() {
+  startPageLoading(buildPageLoadingPlan(state.route));
   setGlobalLoading(true);
   render();
 
   await wait(250);
 
   try {
-    await hydrateFromApi();
+    await hydrateFromApi({ onProgress: updatePageLoadingTask });
     state.dataSource = 'api';
   } catch (error) {
     console.error('Falha ao carregar dados reais da API.', error);
@@ -405,12 +452,15 @@ async function initializeData() {
   }
 
   setGlobalLoading(false);
+  await ensureRouteDataLoaded({ silent: true, onProgress: updatePageLoadingTask });
+  stopPageLoading();
   render();
   syncDashboardAutoRefresh();
-  void ensureRouteDataLoaded({ silent: true });
 }
 
-async function hydrateFromApi() {
+async function hydrateFromApi(options = {}) {
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+  onProgress?.('Carregando clientes');
   const apiClientsRaw = await apiRequest('/clientes');
   if (!Array.isArray(apiClientsRaw)) {
     throw new Error('Resposta inesperada em /clientes');
@@ -422,6 +472,7 @@ async function hydrateFromApi() {
   }));
   const clientIds = apiClients.map((client) => client.id);
 
+  onProgress?.('Carregando certificados, controles e documentos');
   const [
     establishmentsByClient,
     certificatesByClient,
@@ -464,6 +515,7 @@ async function hydrateFromApi() {
   const nfeDocsPage = normalizePaginatedResponse(nfeDocs);
   const cteDocsPage = normalizePaginatedResponse(cteDocs);
 
+  onProgress?.('Montando dashboard, listas e alertas');
   const clients = buildClientsFromApi(
     apiClients,
     establishmentsByClient,
@@ -513,9 +565,7 @@ function wireGlobalEvents() {
     state.route = parseRoute(window.location.hash);
     state.mobileSidebarOpen = false;
     render();
-    syncDashboardAutoRefresh();
-    void refreshDashboardRouteData({ silent: true });
-    void ensureRouteDataLoaded({ silent: true });
+    void handleRouteAccess();
   });
 
   document.addEventListener('click', onDocumentClick);
@@ -534,9 +584,17 @@ function wireGlobalEvents() {
 function onDocumentClick(event) {
   const actionNode = event.target.closest('[data-action]');
   if (!actionNode) {
+    let shouldRender = false;
     if (state.xmlReader30.columnMenuOpenKey) {
       closeXmlReader30NfeColumnMenu();
-      render();
+      shouldRender = true;
+    }
+    if (state.nfseFiscalReader.columnMenuOpenKey) {
+      closeNfseFiscalReaderColumnMenu();
+      shouldRender = true;
+    }
+    if (shouldRender) {
+      renderPreservingScroll(['.xml-reader30-pan-scroll', '.nfse-fiscal-reader-scroll']);
     }
     return;
   }
@@ -558,9 +616,13 @@ function onDocumentClick(event) {
     return;
   }
 
-  const isColumnMenuAction = action === 'xml-reader30-column-menu-toggle' || action === 'xml-reader30-column-menu-hide';
-  if (state.xmlReader30.columnMenuOpenKey && !isColumnMenuAction && !event.target.closest('[data-xml-reader30-column-menu-wrap]')) {
+  const isXmlReader30ColumnMenuAction = action === 'xml-reader30-column-menu-toggle' || action === 'xml-reader30-column-menu-hide';
+  if (state.xmlReader30.columnMenuOpenKey && !isXmlReader30ColumnMenuAction && !event.target.closest('[data-xml-reader30-column-menu-wrap]')) {
     closeXmlReader30NfeColumnMenu();
+  }
+  const isNfseFiscalColumnMenuAction = action === 'nfse-fiscal-column-menu-toggle' || action === 'nfse-fiscal-column-menu-hide';
+  if (state.nfseFiscalReader.columnMenuOpenKey && !isNfseFiscalColumnMenuAction && !event.target.closest('[data-nfse-fiscal-column-menu-wrap]')) {
+    closeNfseFiscalReaderColumnMenu();
   }
 
   event.preventDefault();
@@ -599,12 +661,25 @@ function onDocumentClick(event) {
       render();
       return;
     }
-    case 'xml-reader30-sort': {
-      const key = actionNode.getAttribute('data-sort-key');
-      if (!key) {
-        return;
-      }
-      updateXmlReader30Sort(key);
+case 'xml-reader30-sort': {
+  const key = actionNode.getAttribute('data-sort-key');
+  if (!key) {
+    return;
+  }
+  updateXmlReader30Sort(key);
+  render();
+  return;
+}
+case 'xml-reader30-switch-tab': {
+  const tab = actionNode.getAttribute('data-tab');
+  if (!tab) {
+    return;
+  }
+  state.xmlReader30.activeTab = tab === 'nfse-fiscal' ? 'nfse-fiscal' : 'nfe';
+  render();
+  return;
+}
+
       return;
     }
     case 'xml-reader30-column-menu-toggle': {
@@ -621,6 +696,26 @@ function onDocumentClick(event) {
         return;
       }
       hideXmlReader30NfeColumn(columnKey);
+      return;
+    }
+    case 'nfse-fiscal-column-menu-toggle': {
+      const columnKey = actionNode.getAttribute('data-column-key');
+      if (!columnKey) {
+        return;
+      }
+      toggleNfseFiscalReaderColumnMenu(columnKey, actionNode);
+      return;
+    }
+    case 'nfse-fiscal-column-menu-hide': {
+      const columnKey = actionNode.getAttribute('data-column-key');
+      if (!columnKey) {
+        return;
+      }
+      hideNfseFiscalReaderColumn(columnKey);
+      return;
+    }
+    case 'nfse-fiscal-show-all-columns': {
+      restoreAllNfseFiscalReaderColumns();
       return;
     }
     case 'toggle-sidebar': {
@@ -670,6 +765,10 @@ function onDocumentClick(event) {
     }
     case 'dashboard-open-cte-disagreement-alerts': {
       openModal({ kind: 'cte-disagreement-alerts' });
+      return;
+    }
+    case 'dashboard-open-nfse-retention-alerts': {
+      openModal({ kind: 'nfse-retention-alerts', empresaId: '' });
       return;
     }
     case 'open-new-client-modal': {
@@ -1461,6 +1560,14 @@ function onDocumentClick(event) {
       void markSelectedAlertsResolved();
       return;
     }
+    case 'nfse-retention-resolve-company': {
+      const companyId = actionNode.getAttribute('data-company-id');
+      if (!companyId) {
+        return;
+      }
+      void markNfseRetentionAlertsResolvedByCompany(companyId);
+      return;
+    }
     case 'alert-select': {
       const alertId = actionNode.getAttribute('data-alert-id');
       if (!alertId) {
@@ -1733,6 +1840,15 @@ function onDocumentChange(event) {
     return;
   }
 
+  if (action === 'nfse-retention-company-filter' && state.modal?.kind === 'nfse-retention-alerts') {
+    state.modal = {
+      ...state.modal,
+      empresaId: String(target.value || '')
+    };
+    render();
+    return;
+  }
+
   if (target.id === 'clientsFilterStatusBusca') {
     state.filters.clients.statusBusca = target.value;
   }
@@ -1850,79 +1966,141 @@ function stopXmlReader30ScrollDrag() {
 }
 
 function onDocumentDragStart(event) {
-  const header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
-  if (!header) {
+  const xmlReader30Header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
+  if (xmlReader30Header) {
+    const columnKey = xmlReader30Header.getAttribute('data-column-key');
+    if (!columnKey) {
+      return;
+    }
+
+    event.dataTransfer.effectAllowed = 'move';
+    event.dataTransfer.setData('text/plain', columnKey);
+    state.xmlReader30.columnDrag = {
+      columnKey,
+      targetKey: '',
+      insertAfter: false
+    };
+    xmlReader30Header.classList.add('is-dragging');
     return;
   }
 
-  const columnKey = header.getAttribute('data-column-key');
+  const nfseFiscalHeader = event.target.closest?.('[data-action="nfse-fiscal-column-drag"]');
+  if (!nfseFiscalHeader) {
+    return;
+  }
+
+  const columnKey = nfseFiscalHeader.getAttribute('data-column-key');
   if (!columnKey) {
     return;
   }
 
   event.dataTransfer.effectAllowed = 'move';
   event.dataTransfer.setData('text/plain', columnKey);
-  state.xmlReader30.columnDrag = {
+  state.nfseFiscalReader.columnDrag = {
     columnKey,
     targetKey: '',
     insertAfter: false
   };
-  header.classList.add('is-dragging');
+  nfseFiscalHeader.classList.add('is-dragging');
 }
 
 function onDocumentDragOver(event) {
-  const header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
-  const dragState = state.xmlReader30.columnDrag;
-  if (!header || !dragState?.columnKey) {
+  const xmlReader30Header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
+  const xmlReader30DragState = state.xmlReader30.columnDrag;
+  if (xmlReader30Header && xmlReader30DragState?.columnKey) {
+    const targetKey = xmlReader30Header.getAttribute('data-column-key');
+    if (!targetKey || targetKey === xmlReader30DragState.columnKey) {
+      return;
+    }
+
+    event.preventDefault();
+    const rect = xmlReader30Header.getBoundingClientRect();
+    const insertAfter = event.clientX > rect.left + rect.width / 2;
+    xmlReader30DragState.targetKey = targetKey;
+    xmlReader30DragState.insertAfter = insertAfter;
+
+    document.querySelectorAll('[data-action="xml-reader30-column-drag"]').forEach((node) => {
+      node.classList.remove('drop-before', 'drop-after');
+    });
+
+    xmlReader30Header.classList.add(insertAfter ? 'drop-after' : 'drop-before');
     return;
   }
 
-  const targetKey = header.getAttribute('data-column-key');
-  if (!targetKey || targetKey === dragState.columnKey) {
+  const nfseFiscalHeader = event.target.closest?.('[data-action="nfse-fiscal-column-drag"]');
+  const nfseFiscalDragState = state.nfseFiscalReader.columnDrag;
+  if (!nfseFiscalHeader || !nfseFiscalDragState?.columnKey) {
+    return;
+  }
+
+  const targetKey = nfseFiscalHeader.getAttribute('data-column-key');
+  if (!targetKey || targetKey === nfseFiscalDragState.columnKey) {
     return;
   }
 
   event.preventDefault();
-  const rect = header.getBoundingClientRect();
+  const rect = nfseFiscalHeader.getBoundingClientRect();
   const insertAfter = event.clientX > rect.left + rect.width / 2;
-  dragState.targetKey = targetKey;
-  dragState.insertAfter = insertAfter;
+  nfseFiscalDragState.targetKey = targetKey;
+  nfseFiscalDragState.insertAfter = insertAfter;
 
-  document.querySelectorAll('[data-action="xml-reader30-column-drag"]').forEach((node) => {
+  document.querySelectorAll('[data-action="nfse-fiscal-column-drag"]').forEach((node) => {
     node.classList.remove('drop-before', 'drop-after');
   });
 
-  header.classList.add(insertAfter ? 'drop-after' : 'drop-before');
+  nfseFiscalHeader.classList.add(insertAfter ? 'drop-after' : 'drop-before');
 }
 
 function onDocumentDrop(event) {
-  const header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
-  const dragState = state.xmlReader30.columnDrag;
-  if (!header || !dragState?.columnKey) {
+  const xmlReader30Header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
+  const xmlReader30DragState = state.xmlReader30.columnDrag;
+  if (xmlReader30Header && xmlReader30DragState?.columnKey) {
+    event.preventDefault();
+    const targetKey = xmlReader30Header.getAttribute('data-column-key');
+    if (!targetKey || targetKey === xmlReader30DragState.columnKey) {
+      clearXmlReader30ColumnDragState();
+      return;
+    }
+
+    const nextOrder = moveXmlReader30NfeColumn(
+      state.xmlReader30.nfeColumnOrder,
+      xmlReader30DragState.columnKey,
+      targetKey,
+      Boolean(xmlReader30DragState.insertAfter)
+    );
+    state.xmlReader30.nfeColumnOrder = nextOrder;
+    saveXmlReader30NfeColumnOrderStore(nextOrder);
+    clearXmlReader30ColumnDragState();
+    renderPreservingScroll(['.xml-reader30-pan-scroll']);
+    return;
+  }
+
+  const nfseFiscalHeader = event.target.closest?.('[data-action="nfse-fiscal-column-drag"]');
+  const nfseFiscalDragState = state.nfseFiscalReader.columnDrag;
+  if (!nfseFiscalHeader || !nfseFiscalDragState?.columnKey) {
     return;
   }
 
   event.preventDefault();
-  const targetKey = header.getAttribute('data-column-key');
-  if (!targetKey || targetKey === dragState.columnKey) {
-    clearXmlReader30ColumnDragState();
+  const targetKey = nfseFiscalHeader.getAttribute('data-column-key');
+  if (!targetKey || targetKey === nfseFiscalDragState.columnKey) {
+    clearNfseFiscalReaderColumnDragState();
     return;
   }
 
-  const nextOrder = moveXmlReader30NfeColumn(
-    state.xmlReader30.nfeColumnOrder,
-    dragState.columnKey,
+  state.nfseFiscalReader.columnOrder = moveNfseFiscalReaderColumn(
+    state.nfseFiscalReader.columnOrder,
+    nfseFiscalDragState.columnKey,
     targetKey,
-    Boolean(dragState.insertAfter)
+    Boolean(nfseFiscalDragState.insertAfter)
   );
-  state.xmlReader30.nfeColumnOrder = nextOrder;
-  saveXmlReader30NfeColumnOrderStore(nextOrder);
-  clearXmlReader30ColumnDragState();
-  render();
+  clearNfseFiscalReaderColumnDragState();
+  renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
 }
 
 function onDocumentDragEnd() {
   clearXmlReader30ColumnDragState();
+  clearNfseFiscalReaderColumnDragState();
 }
 
 function clearXmlReader30ColumnDragState() {
@@ -1930,6 +2108,72 @@ function clearXmlReader30ColumnDragState() {
   document.querySelectorAll('[data-action="xml-reader30-column-drag"]').forEach((node) => {
     node.classList.remove('is-dragging', 'drop-before', 'drop-after');
   });
+}
+
+function clearNfseFiscalReaderColumnDragState() {
+  state.nfseFiscalReader.columnDrag = null;
+  document.querySelectorAll('[data-action="nfse-fiscal-column-drag"]').forEach((node) => {
+    node.classList.remove('is-dragging', 'drop-before', 'drop-after');
+  });
+}
+
+function captureScrollState(selectors = []) {
+  const contentNode = appRoot.querySelector('.content');
+  const extras = (Array.isArray(selectors) ? selectors : [])
+    .map((selector) => String(selector || '').trim())
+    .filter(Boolean)
+    .map((selector) => {
+      const node = document.querySelector(selector);
+      if (!(node instanceof HTMLElement)) {
+        return null;
+      }
+
+      return {
+        selector,
+        top: node.scrollTop,
+        left: node.scrollLeft
+      };
+    })
+    .filter(Boolean);
+
+  return {
+    contentTop: contentNode instanceof HTMLElement ? contentNode.scrollTop : 0,
+    contentLeft: contentNode instanceof HTMLElement ? contentNode.scrollLeft : 0,
+    extras
+  };
+}
+
+function restoreScrollState(scrollState) {
+  if (!scrollState || typeof scrollState !== 'object') {
+    return;
+  }
+
+  const contentNode = appRoot.querySelector('.content');
+  if (contentNode instanceof HTMLElement) {
+    contentNode.scrollTop = Number(scrollState.contentTop || 0);
+    contentNode.scrollLeft = Number(scrollState.contentLeft || 0);
+  }
+
+  (Array.isArray(scrollState.extras) ? scrollState.extras : []).forEach((entry) => {
+    const selector = String(entry?.selector || '').trim();
+    if (!selector) {
+      return;
+    }
+
+    const node = document.querySelector(selector);
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+
+    node.scrollTop = Number(entry.top || 0);
+    node.scrollLeft = Number(entry.left || 0);
+  });
+}
+
+function renderPreservingScroll(selectors = []) {
+  const scrollState = captureScrollState(selectors);
+  render();
+  restoreScrollState(scrollState);
 }
 
 function render() {
@@ -1945,11 +2189,70 @@ function render() {
       </div>
     </div>
     ${renderSidebarBackdrop()}
+    ${renderPageLoadingOverlay()}
   `;
 
   modalRoot.innerHTML = renderModal();
   drawerRoot.innerHTML = renderDrawer();
   toastRoot.innerHTML = renderToasts();
+}
+
+async function handleRouteAccess() {
+  const needsRouteLoad = shouldLoadRouteData(state.route);
+  if (!needsRouteLoad) {
+    stopPageLoading();
+    render();
+    syncDashboardAutoRefresh();
+    return;
+  }
+
+  const plan = buildPageLoadingPlan(state.route);
+  startPageLoading(plan);
+  render();
+
+  try {
+    await ensureRouteDataLoaded({
+      silent: true,
+      onProgress: updatePageLoadingTask
+    });
+  } finally {
+    stopPageLoading();
+    render();
+    syncDashboardAutoRefresh();
+  }
+}
+
+function renderPageLoadingOverlay() {
+  if (!state.pageLoading.active) {
+    return '';
+  }
+
+  const completedTasks = Array.isArray(state.pageLoading.completedTasks) ? state.pageLoading.completedTasks : [];
+  const currentTask = String(state.pageLoading.currentTask || '').trim();
+
+  return `
+    <div class="page-loading-overlay" aria-live="polite" aria-busy="true">
+      <div class="page-loading-card">
+        <div class="page-loading-spinner" aria-hidden="true"></div>
+        <p class="page-loading-eyebrow">Atualizando pagina</p>
+        <h2 class="page-loading-title">${escapeHtml(state.pageLoading.title || 'Carregando pagina')}</h2>
+        <p class="page-loading-description">${escapeHtml(state.pageLoading.description || 'Aguarde enquanto os dados sao carregados.')}</p>
+        <div class="page-loading-status">
+          <strong>Agora:</strong> ${escapeHtml(currentTask || 'Preparando pagina')}
+        </div>
+        ${
+          completedTasks.length
+            ? `<ul class="page-loading-task-list">
+                ${completedTasks
+                  .map((task) => `<li class="page-loading-task page-loading-task-done">${escapeHtml(task)}</li>`)
+                  .join('')}
+                ${currentTask ? `<li class="page-loading-task page-loading-task-active">${escapeHtml(currentTask)}</li>` : ''}
+              </ul>`
+            : ''
+        }
+      </div>
+    </div>
+  `;
 }
 
 function renderSidebar() {
@@ -2092,6 +2395,7 @@ function renderDashboardPage() {
   const cteStats = getCteDashboardStats();
   const certsExpiring = state.certificates.filter((cert) => cert.status === 'A vencer').length;
   const openCteDisagreementAlerts = getOpenCteDisagreementAlerts();
+  const openNfseRetentionAlerts = getOpenNfseRetentionAlerts();
   const latestSearchRows = [...state.clients]
     .sort((a, b) => Date.parse(b.ultimaBusca || 0) - Date.parse(a.ultimaBusca || 0))
     .slice(0, 8);
@@ -2113,6 +2417,19 @@ function renderDashboardPage() {
                   <span class="dashboard-alert-button-copy">
                     <strong>${escapeHtml(String(openCteDisagreementAlerts.length))}</strong>
                     <span>CT-e em desacordo</span>
+                  </span>
+                </button>
+              `
+              : ''
+          }
+          ${
+            openNfseRetentionAlerts.length
+              ? `
+                <button class="dashboard-alert-button" type="button" data-action="dashboard-open-nfse-retention-alerts" aria-label="Abrir alertas de NFS-e com retencao">
+                  <span class="dashboard-alert-button-icon">${icon('alert')}</span>
+                  <span class="dashboard-alert-button-copy">
+                    <strong>${escapeHtml(String(openNfseRetentionAlerts.length))}</strong>
+                    <span>NFS-e com retencao</span>
                   </span>
                 </button>
               `
@@ -4418,7 +4735,7 @@ function renderAlertsPage() {
             </label>
             <label class="field">
               Tipo
-              <select name="tipo">${renderOptions(['Todos', 'Certificado', 'Prefeitura', 'XML', 'Cliente', 'Servidor', 'Busca', 'CT-e'], state.filters.alerts.tipo)}</select>
+              <select name="tipo">${renderOptions(['Todos', 'Certificado', 'Prefeitura', 'XML', 'Cliente', 'Servidor', 'Busca', 'CT-e', 'NFS-e'], state.filters.alerts.tipo)}</select>
             </label>
             <label class="field">
               Status
@@ -4478,10 +4795,12 @@ function renderAlertCards(alerts) {
           </div>
           <p class="alert-row-sub">${escapeHtml(alert.descricao)}</p>
           <p class="alert-row-sub">Cliente: ${escapeHtml(alert.cliente)} • ${escapeHtml(formatDateTime(alert.dataHora))} • ${statusBadge(alert.status, toneFromAlertStatus(alert.status))}</p>
-          ${alert.tipo === 'CT-e' ? `<p class="alert-row-sub">CT-e: ${escapeHtml(renderAlertDocumentLine(alert))}</p>` : ''}
+          ${hasAlertDocumentAction(alert) ? `<p class="alert-row-sub">${escapeHtml(renderAlertDocumentLine(alert))}</p>` : ''}
+          ${alert.emissor ? `<p class="alert-row-sub">Emissor: ${escapeHtml(alert.emissor)}</p>` : ''}
+          ${alert.retencoes?.length ? `<p class="alert-row-sub">Retencoes: ${escapeHtml(alert.retencoes.join(' • '))}</p>` : ''}
           <div class="table-actions">
             <button class="icon-btn" type="button" data-action="alert-details" data-alert-id="${alert.id}">Ver detalhes</button>
-            ${alert.tipo === 'CT-e' ? `<button class="icon-btn" type="button" data-action="alert-open-document" data-alert-id="${alert.id}">Ver CT-e</button>` : ''}
+            ${hasAlertDocumentAction(alert) ? `<button class="icon-btn" type="button" data-action="alert-open-document" data-alert-id="${alert.id}">${renderAlertOpenDocumentLabel(alert)}</button>` : ''}
             ${
               alert.status === 'Resolvido'
                 ? '<button class="icon-btn" type="button" data-action="alert-unresolve" data-alert-id="' + alert.id + '">Reabrir alerta</button>'
@@ -4733,12 +5052,29 @@ function renderXmlReader30Page() {
         actions: []
       })}
 
+      ${renderXmlReader30Tabs()}
       ${renderXmlReader30Section()}
     </section>
   `;
 }
 
+function renderXmlReader30Tabs() {
+  const activeTab = state.xmlReader30.activeTab === 'nfse-fiscal' ? 'nfse-fiscal' : 'nfe';
+  return `
+    <article class="card" style="padding-bottom:14px;">
+      <div class="tabs" style="margin-bottom:0;">
+        <button class="tab-btn ${activeTab === 'nfe' ? 'active' : ''}" type="button" data-action="xml-reader30-switch-tab" data-tab="nfe">NF-e</button>
+        <button class="tab-btn ${activeTab === 'nfse-fiscal' ? 'active' : ''}" type="button" data-action="xml-reader30-switch-tab" data-tab="nfse-fiscal">NFS-e fiscal</button>
+      </div>
+    </article>
+  `;
+}
+
 function renderXmlReader30Section() {
+  if (state.xmlReader30.activeTab === 'nfse-fiscal') {
+    return renderXmlReader30NfseFiscalSection();
+  }
+
   const reader = state.xmlReader30;
   const hasClients = state.clients.length > 0;
   const currentCount = Number(reader.total || reader.results.length || 0);
@@ -4795,6 +5131,79 @@ function renderXmlReader30Section() {
       }
 
       ${reader.hasSearched ? renderXmlReader30ResultsTable(results) : ''}
+    </article>
+  `;
+}
+
+function renderXmlReader30NfseFiscalSection() {
+  const selectedClientId = state.filters.xmls.cliente && state.filters.xmls.cliente !== 'Todos' ? state.filters.xmls.cliente : '';
+  const canShowTable =
+    state.xmlSearch.hasSearched || state.tableState.xmls === 'loading' || state.tableState.xmls === 'error';
+  const summary =
+    state.xmlSearch.hasSearched && state.tableState.xmls !== 'loading' ? renderXmlSearchSummary() : '';
+
+  return `
+    <article class="card compare-reader-card">
+      <div class="compare-card-header">
+        <div>
+          <h3 class="card-title">Leitura fiscal de NFS-e</h3>
+          <p class="card-subtitle">Consulte as NFS-e armazenadas e monte a tabela fiscal consolidada em uma tela dedicada do leitor.</p>
+        </div>
+        ${statusBadge(
+          `${escapeHtml(String((state.nfseFiscalReader.rows || []).length))} linha(s)`,
+          state.nfseFiscalReader.rows?.length ? 'success' : 'neutral'
+        )}
+      </div>
+
+      <form id="xmlsFilterForm" class="form-grid">
+        <label class="field">
+          Empresa
+          <select name="cliente" required>${renderOptions(state.clients.map((client) => client.id), state.filters.xmls.cliente === 'Todos' ? '' : state.filters.xmls.cliente, mapClientOptions(), 'Selecione uma empresa')}</select>
+        </label>
+        <label class="field">
+          Emissao inicio
+          <input name="emissaoInicio" type="date" value="${escapeHtml(state.filters.xmls.emissaoInicio)}" />
+        </label>
+        <label class="field">
+          Emissao fim
+          <input name="emissaoFim" type="date" value="${escapeHtml(state.filters.xmls.emissaoFim)}" />
+        </label>
+        <label class="field">
+          Tipo
+          <select name="tipo">${renderOptions(['Todos', 'Emitida', 'Tomada'], state.filters.xmls.tipo)}</select>
+        </label>
+        <label class="field">
+          CNPJ
+          <input name="cnpj" value="${escapeHtml(state.filters.xmls.cnpj)}" />
+        </label>
+        <label class="field">
+          Numero da NFS-e
+          <input name="numero" value="${escapeHtml(state.filters.xmls.numero)}" />
+        </label>
+        <label class="field">
+          Municipio
+          <select name="municipio">${renderOptions(['Todos', ...uniqueValues(state.xmlFiles.map((xml) => xml.municipio))], state.filters.xmls.municipio)}</select>
+        </label>
+        <label class="field">
+          Download inicio
+          <input name="downloadInicio" type="date" value="${escapeHtml(state.filters.xmls.downloadInicio)}" />
+        </label>
+        <label class="field">
+          Download fim
+          <input name="downloadFim" type="date" value="${escapeHtml(state.filters.xmls.downloadFim)}" />
+        </label>
+        <label class="field">
+          Status do armazenamento
+          <select name="status">${renderOptions(['Todos', 'Armazenado', 'Pendente', 'Erro'], state.filters.xmls.status)}</select>
+        </label>
+        <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
+          <button class="btn primary" type="submit">Buscar NFS-e fiscal</button>
+          <button class="btn secondary" type="button" data-action="xmls-clear-filters">Limpar</button>
+          <button class="btn secondary" type="button" data-action="xmls-recover-past-nsus" ${selectedClientId ? '' : 'disabled'}>Reprocessar NSUs do cliente</button>
+        </div>
+      </form>
+
+      ${canShowTable ? `${summary}${renderNfseFiscalReaderCard()}` : renderXmlSearchEmptyState()}
     </article>
   `;
 }
@@ -5411,7 +5820,7 @@ function hideXmlReader30NfeColumn(columnKey) {
   nextHidden.add(normalizedKey);
   state.xmlReader30.hiddenNfeColumns = nextHidden;
   closeXmlReader30NfeColumnMenu();
-  render();
+  renderPreservingScroll(['.xml-reader30-pan-scroll']);
 }
 
 function toggleXmlReader30NfeColumnMenu(columnKey, anchorNode) {
@@ -5422,7 +5831,7 @@ function toggleXmlReader30NfeColumnMenu(columnKey, anchorNode) {
 
   if (state.xmlReader30.columnMenuOpenKey === normalizedKey) {
     closeXmlReader30NfeColumnMenu();
-    render();
+    renderPreservingScroll(['.xml-reader30-pan-scroll']);
     return;
   }
 
@@ -5443,7 +5852,7 @@ function toggleXmlReader30NfeColumnMenu(columnKey, anchorNode) {
   }
 
   state.xmlReader30.columnMenuOpenKey = normalizedKey;
-  render();
+  renderPreservingScroll(['.xml-reader30-pan-scroll']);
 }
 
 function closeXmlReader30NfeColumnMenu() {
@@ -5677,7 +6086,9 @@ function resetXmlReader30Search() {
   const nfeColumnOrder = Array.isArray(state.xmlReader30.nfeColumnOrder)
     ? [...state.xmlReader30.nfeColumnOrder]
     : [...XML_READER30_NFE_DEFAULT_COLUMN_ORDER];
+  const activeTab = state.xmlReader30.activeTab === 'nfse-fiscal' ? 'nfse-fiscal' : 'nfe';
   state.xmlReader30 = {
+    activeTab,
     hasSearched: false,
     results: [],
     lastQuery: null,
@@ -6861,6 +7272,8 @@ function renderModal() {
       return renderDominioImportReportModal();
     case 'cte-disagreement-alerts':
       return renderCteDisagreementAlertsModal();
+    case 'nfse-retention-alerts':
+      return renderNfseRetentionAlertsModal();
     case 'dominio-nfe-view':
       return renderDominioNfeViewerModal();
     case 'compare-sped-report':
@@ -8102,6 +8515,7 @@ function renderXmlDetailsModal(xmlId) {
             ${detailItem('Data de cancelamento', xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '-')}
             ${detailItem('Resumo de eventos', xml.eventosResumo || '-')}
           </div>
+          ${renderDocumentInsightsSection('nfse', xml)}
           <div style="margin-top:18px;">
             <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
             ${renderXmlEventsList(xml.eventos)}
@@ -8334,6 +8748,49 @@ function renderDocumentInsightsSection(documentType, doc) {
   }
 
   const serviceSummary = extractNfseServiceSummary(doc);
+  const leituraFiscal = normalizeNfseLeituraFiscal(doc?.leituraFiscal);
+  if (leituraFiscal) {
+    const cards = [
+      detailItem('Layout', mapNfseLeituraLayoutLabel(leituraFiscal.layout)),
+      detailItem('Local prestacao', leituraFiscal.localPrestacao || '-'),
+      detailItem('Local ISS', leituraFiscal.localIncidenciaIss || '-'),
+      detailItem('Retencao ISS', leituraFiscal.retencaoIss || '-'),
+      detailItem('Retencao federal', leituraFiscal.retencaoFederal || '-'),
+      detailItem('Valor retido total', formatOptionalCurrency(leituraFiscal.valorTotalRetencoes)),
+      detailItem('ISS retido real', formatOptionalCurrency(leituraFiscal.valorIssRetidoReal)),
+      detailItem('Aliquota ISS', formatOptionalPercentage(leituraFiscal.aliquotaIss)),
+      detailItem('Aliquota real ISS', formatOptionalPercentage(leituraFiscal.aliquotaRealIss))
+    ].join('');
+    const retencoesRows = Array.isArray(leituraFiscal.retencoes)
+      ? leituraFiscal.retencoes.map((entry) => ({
+          imposto: entry.label || '-',
+          valor: entry.amount || 'Detectado no XML'
+        }))
+      : [];
+    const retencoesTable = retencoesRows.length
+      ? renderDocumentInsightsTable(retencoesRows, [
+          { key: 'imposto', label: 'Retencao' },
+          { key: 'valor', label: 'Valor' }
+        ])
+      : renderDocumentInsightsEmpty('Nenhuma retencao destacada foi encontrada no XML desta NFS-e.');
+    const alertBlock =
+      leituraFiscal.statusProcessamento === 'Erro'
+        ? `<div style="margin-top:14px; padding:12px 14px; border:1px solid #f0c36d; border-radius:12px; background:#fff7e6; color:#7a4b00;">
+            <strong>Atencao na leitura:</strong> ${escapeHtml(leituraFiscal.erroProcessamento || 'Inconsistencia detectada no XML.')}
+            <div style="margin-top:6px;"><strong>Campos com problema:</strong> ${escapeHtml(
+              Array.isArray(leituraFiscal.camposComProblema) && leituraFiscal.camposComProblema.length
+                ? leituraFiscal.camposComProblema.join(', ')
+                : '-'
+            )}</div>
+          </div>`
+        : '';
+
+    return renderDocumentInsightsBlock(
+      'Leitura fiscal da NFS-e',
+      `<div class="form-grid three">${cards}</div><div style="margin-top:14px;">${retencoesTable}</div>${alertBlock}`
+    );
+  }
+
   const cards = [
     detailItem('Servico', serviceSummary.description || '-'),
     detailItem('Codigo do servico', serviceSummary.serviceCode || '-'),
@@ -8535,6 +8992,56 @@ function extractNfseServiceSummary(doc) {
   };
 }
 
+function normalizeNfseLeituraFiscal(leituraFiscal) {
+  if (!leituraFiscal || typeof leituraFiscal !== 'object') {
+    return null;
+  }
+
+  return {
+    layout: String(leituraFiscal.layout || '').trim(),
+    localPrestacao: String(leituraFiscal.localPrestacao || '').trim(),
+    localIncidenciaIss: String(leituraFiscal.localIncidenciaIss || '').trim(),
+    valorTotalRetencoes: leituraFiscal.valorTotalRetencoes ?? '',
+    valorIssRetidoReal: leituraFiscal.valorIssRetidoReal ?? '',
+    aliquotaIss: leituraFiscal.aliquotaIss ?? '',
+    aliquotaRealIss: leituraFiscal.aliquotaRealIss ?? '',
+    retencaoIss: String(leituraFiscal.retencaoIss || '').trim(),
+    retencaoFederal: String(leituraFiscal.retencaoFederal || '').trim(),
+    erroProcessamento: String(leituraFiscal.erroProcessamento || '').trim(),
+    statusProcessamento: String(leituraFiscal.statusProcessamento || '').trim(),
+    camposComProblema: Array.isArray(leituraFiscal.camposComProblema)
+      ? leituraFiscal.camposComProblema.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    retencoes: Array.isArray(leituraFiscal.retencoes)
+      ? leituraFiscal.retencoes.map((entry) => ({
+          label: String(entry?.label || '').trim(),
+          amount: String(entry?.amount || '').trim()
+        }))
+      : []
+  };
+}
+
+function mapNfseLeituraLayoutLabel(layout) {
+  if (layout === 'padrao_nacional') {
+    return 'Padrao nacional';
+  }
+  if (layout === 'abrasf') {
+    return 'ABRASF';
+  }
+  return layout || '-';
+}
+
+function formatOptionalPercentage(value) {
+  if (value === null || value === undefined || value === '') {
+    return '-';
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return String(value);
+  }
+  return `${parsed.toFixed(2)}%`;
+}
+
 function renderCteDisagreementAlertsModal() {
   const alerts = getCteDisagreementAlerts();
   const openAlerts = alerts.filter((alert) => alert.status !== 'Resolvido');
@@ -8579,7 +9086,7 @@ function renderCteDisagreementAlertsModal() {
                                 <span><strong>Data:</strong> ${escapeHtml(formatDateTime(alert.dataHora))}</span>
                               </div>
                               <div class="dashboard-alert-overlay-meta">
-                                <span><strong>CT-e:</strong> ${escapeHtml(renderAlertDocumentLine(alert))}</span>
+                                <span><strong>CT-e:</strong> ${escapeHtml(alert.numeroDocumento || alert.chaveAcesso || '-')}</span>
                                 <span><strong>Chave:</strong> ${escapeHtml(alert.chaveAcesso || '-')}</span>
                               </div>
                               <div class="table-actions" style="margin-top:12px;">
@@ -8599,6 +9106,538 @@ function renderCteDisagreementAlertsModal() {
                     .join('')}
                 </div>`
               : '<div class="table-state">Nenhum alerta de desacordo de CT-e encontrado.</div>'
+          }
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="close-modal">Fechar</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderNfseFiscalReaderCard() {
+  if (!state.xmlSearch.hasSearched) {
+    return '';
+  }
+
+  const summary = state.nfseFiscalReader.summary;
+  const rows = Array.isArray(state.nfseFiscalReader.rows) ? state.nfseFiscalReader.rows : [];
+  const visibleColumns = getNfseFiscalReaderVisibleColumns();
+  const hiddenColumns = state.nfseFiscalReader.hiddenColumns instanceof Set ? state.nfseFiscalReader.hiddenColumns : new Set();
+  const hiddenCount = hiddenColumns.size;
+  const minWidth = Math.max(1480, visibleColumns.length * 138);
+  const summaryCards = summary
+    ? `
+      <div class="form-grid six" style="margin-bottom:18px;">
+        ${detailItem('Filtradas', String(summary.totalDocumentosFiltrados || 0))}
+        ${detailItem('Lidas', String(summary.totalDocumentosLidos || 0))}
+        ${detailItem('Com erro', String(summary.totalDocumentosComErro || 0))}
+        ${detailItem('Sem XML', String(summary.totalDocumentosSemXml || 0))}
+        ${detailItem('Valor servico', formatOptionalCurrency(summary.valorServicoTotal))}
+        ${detailItem('ISS retido real', formatOptionalCurrency(summary.valorIssRetidoRealTotal))}
+      </div>
+      <div class="form-grid four" style="margin-bottom:18px;">
+        ${detailItem('Valor liquido', formatOptionalCurrency(summary.valorLiquidoTotal))}
+        ${detailItem('Valor retido', formatOptionalCurrency(summary.valorRetidoTotal))}
+        ${detailItem('ISS total', formatOptionalCurrency(summary.valorIssTotal))}
+        ${detailItem('Retencoes federais', formatOptionalCurrency(summary.totalRetencoesFederais))}
+      </div>
+    `
+    : '';
+
+  return `
+    <article class="card">
+      <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;">
+        <div>
+          <h3 class="card-title">Leitura fiscal das NFS-e filtradas</h3>
+          <p class="card-subtitle">Tabela consolidada no estilo do LeitorXML, usando exatamente as NFS-e retornadas pelos filtros atuais. Arraste os cabecalhos para reorganizar e oculte colunas quando precisar focar na conferencia.</p>
+        </div>
+        <div class="stack-mini" style="align-items:flex-end;">
+          <div class="progress-meta">
+            <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.nfseFiscalReader.lastLoadedAt || new Date().toISOString()))}</strong></span>
+            <span>Linhas: <strong>${escapeHtml(String(rows.length))}</strong></span>
+            <span>Colunas visiveis: <strong>${escapeHtml(String(visibleColumns.length))}</strong></span>
+          </div>
+          <div class="table-actions" style="justify-content:flex-end;">
+            <button class="btn secondary" type="button" data-action="nfse-fiscal-show-all-columns" ${hiddenCount ? '' : 'disabled'}>
+              Restaurar colunas${hiddenCount ? ` (${escapeHtml(String(hiddenCount))})` : ''}
+            </button>
+          </div>
+        </div>
+      </div>
+      ${summaryCards}
+      <div class="table-wrap nfse-fiscal-reader-scroll">
+        <table class="xml-reader30-table xml-reader30-reorderable-table nfse-fiscal-reader-table" style="min-width:${minWidth}px;">
+          <thead>
+            <tr>
+              ${visibleColumns
+                .map(
+                  (column, index) => `
+                    <th
+                      class="xml-reader30-column-header"
+                      data-action="nfse-fiscal-column-drag"
+                      data-column-key="${escapeHtml(column.key)}"
+                      data-column-index="${index}"
+                      draggable="true"
+                      title="Arraste para mover esta coluna"
+                    >
+                      <div class="xml-reader30-column-header-inner">
+                        <span class="xml-reader30-column-title">${escapeHtml(column.label)}</span>
+                        <div class="xml-reader30-column-menu-wrap" data-nfse-fiscal-column-menu-wrap>
+                          <button
+                            class="xml-reader30-column-menu"
+                            type="button"
+                            data-action="nfse-fiscal-column-menu-toggle"
+                            data-column-key="${escapeHtml(column.key)}"
+                            aria-expanded="${state.nfseFiscalReader.columnMenuOpenKey === column.key ? 'true' : 'false'}"
+                            aria-label="Abrir menu da coluna ${escapeHtml(column.label)}"
+                            title="Abrir menu"
+                          >&#8942;</button>
+                          ${
+                            state.nfseFiscalReader.columnMenuOpenKey === column.key
+                              ? `
+                                <div
+                                  class="xml-reader30-column-menu-panel"
+                                  role="menu"
+                                  aria-label="Menu da coluna ${escapeHtml(column.label)}"
+                                  style="top:${escapeHtml(String(state.nfseFiscalReader.columnMenuAnchor?.top ?? 8))}px; left:${escapeHtml(String(state.nfseFiscalReader.columnMenuAnchor?.left ?? 8))}px;"
+                                >
+                                  <button
+                                    type="button"
+                                    class="xml-reader30-column-menu-item"
+                                    data-action="nfse-fiscal-column-menu-hide"
+                                    data-column-key="${escapeHtml(column.key)}"
+                                    role="menuitem"
+                                    ${visibleColumns.length <= 1 ? 'disabled' : ''}
+                                  >Ocultar coluna</button>
+                                </div>
+                              `
+                              : ''
+                          }
+                        </div>
+                      </div>
+                    </th>
+                  `
+                )
+                .join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${renderTableRowsOrState({
+              key: 'nfseFiscalReader',
+              colSpan: visibleColumns.length,
+              rowsHtml: rows
+                .map((row) => `<tr>${visibleColumns.map((column) => renderNfseFiscalReaderColumnCell(column, row)).join('')}</tr>`)
+                .join(''),
+              emptyMessage: 'Nenhuma NFS-e armazenada foi processada para a leitura fiscal com os filtros atuais.'
+            })}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
+function getNfseFiscalReaderOrderedColumns() {
+  const order = normalizeNfseFiscalReaderColumnOrder(state.nfseFiscalReader.columnOrder);
+  const currentOrder = Array.isArray(state.nfseFiscalReader.columnOrder) ? state.nfseFiscalReader.columnOrder : [];
+  if (order.join('|') !== currentOrder.join('|')) {
+    state.nfseFiscalReader.columnOrder = order;
+  }
+
+  const definitions = getNfseFiscalReaderColumnDefinitions();
+  const byKey = new Map(definitions.map((column) => [column.key, column]));
+  return order.map((key) => byKey.get(key)).filter(Boolean);
+}
+
+function getNfseFiscalReaderVisibleColumns() {
+  const hiddenColumns = state.nfseFiscalReader.hiddenColumns instanceof Set ? state.nfseFiscalReader.hiddenColumns : new Set();
+  return getNfseFiscalReaderOrderedColumns().filter((column) => !hiddenColumns.has(column.key));
+}
+
+function getNfseFiscalReaderColumnDefinitions() {
+  return [
+    {
+      key: 'numeroNfse',
+      label: 'Numero',
+      className: 'nfse-fiscal-reader-number',
+      html: false,
+      render: (row) => row.numeroNfse || '-'
+    },
+    {
+      key: 'localPrestacao',
+      label: 'Local prestacao',
+      className: 'nfse-fiscal-reader-place',
+      html: false,
+      render: (row) => row.localPrestacao || '-'
+    },
+    {
+      key: 'localIncidenciaIss',
+      label: 'Local ISS',
+      className: 'nfse-fiscal-reader-place',
+      html: false,
+      render: (row) => row.localIncidenciaIss || '-'
+    },
+    {
+      key: 'prestador',
+      label: 'Prestador',
+      className: 'nfse-fiscal-reader-party',
+      html: false,
+      render: (row) => row.prestador || '-'
+    },
+    {
+      key: 'cnpjPrestador',
+      label: 'CNPJ prestador',
+      className: 'nfse-fiscal-reader-cnpj',
+      html: false,
+      render: (row) => formatCnpj(row.cnpjPrestador || '') || '-'
+    },
+    {
+      key: 'tomador',
+      label: 'Tomador',
+      className: 'nfse-fiscal-reader-party',
+      html: false,
+      render: (row) => row.tomador || '-'
+    },
+    {
+      key: 'cnpjTomador',
+      label: 'CNPJ tomador',
+      className: 'nfse-fiscal-reader-cnpj',
+      html: false,
+      render: (row) => formatCnpj(row.cnpjTomador || '') || '-'
+    },
+    {
+      key: 'valorLiquidoNfse',
+      label: 'Valor liquido',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorLiquidoNfse)
+    },
+    {
+      key: 'valorTotalRetencoes',
+      label: 'Valor retido',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorTotalRetencoes)
+    },
+    {
+      key: 'valorServico',
+      label: 'Valor servico',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorServico)
+    },
+    {
+      key: 'valorIss',
+      label: 'ISS',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorIss)
+    },
+    {
+      key: 'valorPis',
+      label: 'PIS',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorPis)
+    },
+    {
+      key: 'valorCofins',
+      label: 'COFINS',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorCofins)
+    },
+    {
+      key: 'valorInss',
+      label: 'INSS',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorInss)
+    },
+    {
+      key: 'valorIrrf',
+      label: 'IRRF',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorIrrf)
+    },
+    {
+      key: 'valorCsll',
+      label: 'CSLL',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorCsll)
+    },
+    {
+      key: 'dataEmissao',
+      label: 'Data emissao',
+      className: 'xml-reader30-date nfse-fiscal-reader-date',
+      html: false,
+      render: (row) => formatDate(row.dataEmissao)
+    },
+    {
+      key: 'retencaoIss',
+      label: 'ISS RET',
+      className: 'nfse-fiscal-reader-flag',
+      html: false,
+      render: (row) => row.retencaoIss || '-'
+    },
+    {
+      key: 'retencaoFederal',
+      label: 'Federal RET',
+      className: 'nfse-fiscal-reader-flag',
+      html: false,
+      render: (row) => row.retencaoFederal || '-'
+    },
+    {
+      key: 'aliquotaIss',
+      label: 'Aliq ISS',
+      className: 'nfse-fiscal-reader-rate',
+      html: false,
+      render: (row) => formatOptionalPercentage(row.aliquotaIss)
+    },
+    {
+      key: 'valorIssRetidoReal',
+      label: 'ISS retido real',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorIssRetidoReal)
+    },
+    {
+      key: 'aliquotaRealIss',
+      label: 'Aliq real ISS',
+      className: 'nfse-fiscal-reader-rate',
+      html: false,
+      render: (row) => formatOptionalPercentage(row.aliquotaRealIss)
+    },
+    {
+      key: 'statusProcessamento',
+      label: 'Status',
+      className: 'nfse-fiscal-reader-status',
+      html: true,
+      render: (row) => statusBadge(
+        row.statusProcessamento || '-',
+        row.statusProcessamento === 'OK'
+          ? 'success'
+          : row.statusProcessamento === 'ERRO'
+            ? 'danger'
+            : 'warning'
+      )
+    },
+    {
+      key: 'erroProcessamento',
+      label: 'Erro',
+      className: 'nfse-fiscal-reader-error',
+      html: false,
+      render: (row) => row.erroProcessamento || (Array.isArray(row.camposComProblema) && row.camposComProblema.length ? row.camposComProblema.join(', ') : '-') || '-'
+    }
+  ];
+}
+
+function renderNfseFiscalReaderColumnCell(column, row) {
+  const value = column.render(row);
+  if (column.html) {
+    return `<td class="${escapeHtml(column.className || '')}">${value}</td>`;
+  }
+
+  return `<td class="${escapeHtml(column.className || '')}">${escapeHtml(String(value ?? '-'))}</td>`;
+}
+
+function hideNfseFiscalReaderColumn(columnKey) {
+  const normalizedKey = String(columnKey || '').trim();
+  if (!normalizedKey || getNfseFiscalReaderVisibleColumns().length <= 1) {
+    closeNfseFiscalReaderColumnMenu();
+    renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
+    return;
+  }
+
+  const nextHidden = state.nfseFiscalReader.hiddenColumns instanceof Set
+    ? new Set(state.nfseFiscalReader.hiddenColumns)
+    : new Set();
+  nextHidden.add(normalizedKey);
+  state.nfseFiscalReader.hiddenColumns = nextHidden;
+  closeNfseFiscalReaderColumnMenu();
+  renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
+}
+
+function restoreAllNfseFiscalReaderColumns() {
+  state.nfseFiscalReader.hiddenColumns = new Set();
+  closeNfseFiscalReaderColumnMenu();
+  renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
+}
+
+function toggleNfseFiscalReaderColumnMenu(columnKey, anchorNode) {
+  const normalizedKey = String(columnKey || '').trim();
+  if (!normalizedKey) {
+    return;
+  }
+
+  if (state.nfseFiscalReader.columnMenuOpenKey === normalizedKey) {
+    closeNfseFiscalReaderColumnMenu();
+    renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
+    return;
+  }
+
+  const rect = anchorNode instanceof HTMLElement ? anchorNode.getBoundingClientRect() : null;
+  if (rect) {
+    const estimatedWidth = 164;
+    const left = Math.min(window.innerWidth - estimatedWidth - 8, Math.max(8, rect.right - estimatedWidth));
+    const top = Math.min(window.innerHeight - 12, rect.bottom + 6);
+    state.nfseFiscalReader.columnMenuAnchor = {
+      left,
+      top
+    };
+  } else {
+    state.nfseFiscalReader.columnMenuAnchor = {
+      left: 8,
+      top: 8
+    };
+  }
+
+  state.nfseFiscalReader.columnMenuOpenKey = normalizedKey;
+  renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
+}
+
+function closeNfseFiscalReaderColumnMenu() {
+  if (!state.nfseFiscalReader.columnMenuOpenKey) {
+    return;
+  }
+
+  state.nfseFiscalReader.columnMenuOpenKey = null;
+  state.nfseFiscalReader.columnMenuAnchor = null;
+}
+
+function normalizeNfseFiscalReaderColumnOrder(columnOrder) {
+  const seen = new Set();
+  const normalized = [];
+
+  (Array.isArray(columnOrder) ? columnOrder : []).forEach((key) => {
+    const columnKey = String(key || '').trim();
+    if (!columnKey || seen.has(columnKey) || !NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER.includes(columnKey)) {
+      return;
+    }
+    seen.add(columnKey);
+    normalized.push(columnKey);
+  });
+
+  NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER.forEach((key) => {
+    if (!seen.has(key)) {
+      normalized.push(key);
+    }
+  });
+
+  return normalized;
+}
+
+function moveNfseFiscalReaderColumn(columnOrder, sourceKey, targetKey, insertAfter) {
+  const normalized = normalizeNfseFiscalReaderColumnOrder(columnOrder);
+  const filtered = normalized.filter((key) => key !== sourceKey);
+  const targetIndex = filtered.indexOf(targetKey);
+  if (targetIndex < 0) {
+    return normalized;
+  }
+
+  const nextIndex = insertAfter ? targetIndex + 1 : targetIndex;
+  filtered.splice(nextIndex, 0, sourceKey);
+  return normalizeNfseFiscalReaderColumnOrder(filtered);
+}
+
+function renderNfseRetentionAlertsModal() {
+  const companyId = state.modal?.kind === 'nfse-retention-alerts' ? String(state.modal.empresaId || '') : '';
+  const alerts = getFilteredNfseRetentionAlerts(companyId);
+  const openAlerts = alerts.filter((alert) => alert.status !== 'Resolvido');
+  const resolvedAlerts = alerts.filter((alert) => alert.status === 'Resolvido');
+  const availableClientIds = [...new Set(getNfseRetentionAlerts().map((alert) => String(alert?.clientId || '').trim()).filter(Boolean))];
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(1100px, calc(100vw - 24px));">
+        <div class="modal-header">
+          <h3 class="modal-title">Alertas de NFS-e com retencao</h3>
+          <p class="modal-subtitle">Acompanhe NFS-es tomadas com retencoes detectadas no XML e marque como resolvido quando a conferencia fiscal for concluida.</p>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid" style="margin-bottom:18px;">
+            <label class="field">
+              Empresa
+              <select data-action="nfse-retention-company-filter">
+                ${renderOptions(availableClientIds, companyId, mapClientOptions(), 'Selecione uma empresa')}
+              </select>
+            </label>
+          </div>
+          ${
+            companyId
+              ? `
+                <div class="table-actions" style="margin:0 0 18px;">
+                  <button
+                    class="btn secondary"
+                    type="button"
+                    data-action="nfse-retention-resolve-company"
+                    data-company-id="${escapeHtml(companyId)}"
+                    ${openAlerts.length ? '' : 'disabled'}
+                  >
+                    Marcar todas da empresa como resolvido
+                  </button>
+                </div>
+              `
+              : ''
+          }
+          <div class="form-grid four" style="margin-bottom:18px;">
+            ${detailItem('Total', String(alerts.length))}
+            ${detailItem('Em aberto', String(openAlerts.length))}
+            ${detailItem('Resolvidos', String(resolvedAlerts.length))}
+            ${detailItem('Empresas afetadas', String(new Set(openAlerts.map((alert) => alert.clientId).filter(Boolean)).size))}
+          </div>
+          ${
+            alerts.length
+              ? `<div style="display:grid; gap:14px;">
+                  ${alerts
+                    .map(
+                      (alert) => `
+                        <article class="dashboard-alert-overlay-card ${alert.status === 'Resolvido' ? 'resolved' : 'open'}">
+                          <div class="dashboard-alert-overlay-main">
+                            <div class="dashboard-alert-overlay-icon">${icon('alert')}</div>
+                            <div style="min-width:0;">
+                              <div class="dashboard-alert-overlay-header">
+                                <div>
+                                  <h4 class="dashboard-alert-overlay-title">${escapeHtml(alert.titulo)}</h4>
+                                  <p class="dashboard-alert-overlay-subtitle">${escapeHtml(alert.descricao)}</p>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
+                                  ${statusBadge(alert.status, toneFromAlertStatus(alert.status))}
+                                  ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
+                                </div>
+                              </div>
+                              <div class="dashboard-alert-overlay-meta">
+                                <span><strong>Cliente:</strong> ${escapeHtml(alert.cliente)}</span>
+                                <span><strong>Data:</strong> ${escapeHtml(formatDateTime(alert.dataHora))}</span>
+                              </div>
+                              <div class="dashboard-alert-overlay-meta">
+                                <span><strong>NFS-e:</strong> ${escapeHtml(alert.numeroDocumento || alert.chaveAcesso || '-')}</span>
+                                <span><strong>Emissor:</strong> ${escapeHtml(alert.emissor || '-')}</span>
+                              </div>
+                              <div class="dashboard-alert-overlay-meta">
+                                <span><strong>Retencoes:</strong> ${escapeHtml(alert.retencoes?.length ? alert.retencoes.join(' • ') : '-')}</span>
+                              </div>
+                              <div class="table-actions" style="margin-top:12px;">
+                                <button class="btn secondary" type="button" data-action="alert-details" data-alert-id="${escapeHtml(alert.id)}">Ver detalhes</button>
+                                <button class="btn secondary" type="button" data-action="alert-open-document" data-alert-id="${escapeHtml(alert.id)}">Ver NFS-e</button>
+                                ${
+                                  alert.status === 'Resolvido'
+                                    ? `<button class="btn primary" type="button" data-action="alert-unresolve" data-alert-id="${escapeHtml(alert.id)}">Reabrir alerta</button>`
+                                    : `<button class="btn primary" type="button" data-action="alert-resolve" data-alert-id="${escapeHtml(alert.id)}">Marcar como resolvido</button>`
+                                }
+                              </div>
+                            </div>
+                          </div>
+                        </article>
+                      `
+                    )
+                    .join('')}
+                </div>`
+              : '<div class="table-state">Nenhuma NFS-e com retencao encontrada para a empresa selecionada.</div>'
           }
         </div>
         <div class="modal-footer">
@@ -8733,6 +9772,8 @@ function renderDrawer() {
                 ${detailItem('Origem', alert.origem)}
                 ${detailItem('Status', alert.status)}
                 ${detailItem('Documento', renderAlertDocumentLine(alert))}
+                ${detailItem('Emissor', alert.emissor || '-')}
+                ${detailItem('Retencoes', alert.retencoes?.length ? alert.retencoes.join(' • ') : '-')}
                 <div style="grid-column: span 2;">${detailItem('Mensagem tecnica', alert.mensagemTecnica)}</div>
                 <div style="grid-column: span 2;">${detailItem('Sugestao de acao', alert.sugestaoAcao)}</div>
               </div>
@@ -8743,7 +9784,7 @@ function renderDrawer() {
                 ${alert.historicoTentativas.map((entry) => `<li>${escapeHtml(entry)}</li>`).join('')}
               </ul>
               <div class="table-actions" style="margin-top:10px;">
-                ${alert.tipo === 'CT-e' ? `<button class="btn secondary" type="button" data-action="alert-open-document" data-alert-id="${alert.id}">Ver CT-e</button>` : ''}
+                ${hasAlertDocumentAction(alert) ? `<button class="btn secondary" type="button" data-action="alert-open-document" data-alert-id="${alert.id}">${renderAlertOpenDocumentLabel(alert)}</button>` : ''}
                 ${
                   alert.status === 'Resolvido'
                     ? `<button class="btn secondary" type="button" data-action="alert-unresolve" data-alert-id="${alert.id}">Reabrir alerta</button>`
@@ -9079,9 +10120,9 @@ function navigate(path) {
   window.location.hash = `#${path}`;
 }
 
-function resolvePageMeta() {
-  if (state.route.name === 'client-details') {
-    const client = findClientById(state.route.params.id);
+function resolvePageMetaForRoute(route = state.route) {
+  if (route.name === 'client-details') {
+    const client = findClientById(route.params.id);
     if (client) {
       return {
         title: client.razaoSocial,
@@ -9090,7 +10131,11 @@ function resolvePageMeta() {
     }
   }
 
-  return pageMeta[state.route.name] || pageMeta.dashboard;
+  return pageMeta[route.name] || pageMeta.dashboard;
+}
+
+function resolvePageMeta() {
+  return resolvePageMetaForRoute(state.route);
 }
 
 function resolveNavKeyByRoute(routeName) {
@@ -11420,10 +12465,15 @@ async function applyXmlFilters(form) {
     state.xmlSearch.lastQuery = null;
     state.xmlSearch.numberingValidation = null;
     state.xmlSearch.informativeRows = 0;
+    state.nfseFiscalReader.rows = [];
+    state.nfseFiscalReader.summary = null;
+    state.nfseFiscalReader.lastQuery = null;
+    state.nfseFiscalReader.lastLoadedAt = null;
     state.xmlSearch.total = 0;
     state.xmlSearch.totalPages = 0;
     state.xmlSearch.page = 1;
     state.tableState.xmls = 'data';
+    state.tableState.nfseFiscalReader = 'data';
     pushToast('Selecione uma empresa para buscar XMLs.', 'error');
     render();
     return;
@@ -11439,10 +12489,15 @@ async function applyXmlFilters(form) {
     state.xmlSearch.lastQuery = null;
     state.xmlSearch.numberingValidation = null;
     state.xmlSearch.informativeRows = 0;
+    state.nfseFiscalReader.rows = [];
+    state.nfseFiscalReader.summary = null;
+    state.nfseFiscalReader.lastQuery = null;
+    state.nfseFiscalReader.lastLoadedAt = null;
     state.xmlSearch.total = 0;
     state.xmlSearch.totalPages = 0;
     state.xmlSearch.page = 1;
     state.tableState.xmls = 'data';
+    state.tableState.nfseFiscalReader = 'data';
     pushToast('A data inicial nao pode ser maior que a data final.', 'error');
     render();
     return;
@@ -12043,6 +13098,11 @@ function resetXmlSearch() {
   state.xmlSearch.total = 0;
   state.xmlSearch.totalPages = 0;
   state.tableState.xmls = 'data';
+  state.nfseFiscalReader.rows = [];
+  state.nfseFiscalReader.summary = null;
+  state.nfseFiscalReader.lastQuery = null;
+  state.nfseFiscalReader.lastLoadedAt = null;
+  state.tableState.nfseFiscalReader = 'data';
 }
 
 function resetNfeSyncFilters() {
@@ -12129,11 +13189,22 @@ async function executeXmlSearch() {
   state.xmlSearch.hasSearched = true;
   state.xmlSearch.results = [];
   state.tableState.xmls = 'loading';
+  state.tableState.nfseFiscalReader = 'loading';
+  state.nfseFiscalReader.rows = [];
+  state.nfseFiscalReader.summary = null;
+  state.nfseFiscalReader.lastQuery = { ...state.filters.xmls };
   render();
 
   try {
     const query = buildXmlSearchQuery(state.filters.xmls, 1, SEARCH_PAGE_SIZE, true);
-    const payload = normalizePaginatedResponse(await apiRequest(`/nfse?${query.toString()}`));
+    const [payloadRaw, fiscalReaderRaw] = await Promise.allSettled([
+      apiRequest(`/nfse?${query.toString()}`),
+      apiRequest(`/nfse/leitura-fiscal?${query.toString()}`)
+    ]);
+    if (payloadRaw.status !== 'fulfilled') {
+      throw payloadRaw.reason;
+    }
+    const payload = normalizePaginatedResponse(payloadRaw.value);
     const xmls = buildXmlFilesFromApi(payload.items, state.clients);
     state.xmlFiles = mergeXmlFilesById(state.xmlFiles, xmls);
     const filteredXmls = getFilteredXmlsFromSource(xmls);
@@ -12147,6 +13218,19 @@ async function executeXmlSearch() {
     state.xmlSearch.total = payload.total;
     state.xmlSearch.totalPages = payload.totalPages;
     state.tableState.xmls = 'data';
+    if (fiscalReaderRaw.status === 'fulfilled') {
+      const normalizedFiscalReader = normalizeNfseFiscalReaderResponse(fiscalReaderRaw.value);
+      state.nfseFiscalReader.rows = normalizedFiscalReader.items;
+      state.nfseFiscalReader.summary = normalizedFiscalReader.summary;
+      state.nfseFiscalReader.lastLoadedAt = new Date().toISOString();
+      state.tableState.nfseFiscalReader = 'data';
+    } else {
+      state.nfseFiscalReader.rows = [];
+      state.nfseFiscalReader.summary = null;
+      state.nfseFiscalReader.lastLoadedAt = null;
+      state.tableState.nfseFiscalReader = 'error';
+      pushToast(`Falha ao montar a leitura fiscal das NFS-e: ${toErrorMessage(fiscalReaderRaw.reason)}`, 'error');
+    }
     reportIfListingCapped('nota(s)', payload);
   } catch (error) {
     state.xmlSearch.results = [];
@@ -12155,6 +13239,10 @@ async function executeXmlSearch() {
     state.xmlSearch.total = 0;
     state.xmlSearch.totalPages = 0;
     state.tableState.xmls = 'error';
+    state.nfseFiscalReader.rows = [];
+    state.nfseFiscalReader.summary = null;
+    state.nfseFiscalReader.lastLoadedAt = null;
+    state.tableState.nfseFiscalReader = 'error';
     pushToast(`Falha ao buscar XMLs: ${toErrorMessage(error)}`, 'error');
   }
 
@@ -12636,6 +13724,40 @@ function markSelectedAlertsResolved() {
   })();
 }
 
+async function markNfseRetentionAlertsResolvedByCompany(companyId) {
+  const normalizedCompanyId = String(companyId || '').trim();
+  if (!normalizedCompanyId) {
+    pushToast('Selecione uma empresa para marcar os alertas como resolvidos.', 'error');
+    return;
+  }
+
+  const alerts = getFilteredNfseRetentionAlerts(normalizedCompanyId).filter((alert) => alert.status !== 'Resolvido');
+  if (!alerts.length) {
+    pushToast('Nao ha alertas em aberto para a empresa selecionada.', 'info');
+    return;
+  }
+
+  let resolvedCount = 0;
+
+  for (const alert of alerts) {
+    try {
+      await setAlertResolved(alert, true);
+      resolvedCount += 1;
+    } catch (error) {
+      pushToast(`Falha ao resolver a NFS-e ${alert.numeroDocumento || alert.chaveAcesso || alert.id}: ${toErrorMessage(error)}`, 'error');
+    }
+  }
+
+  if (resolvedCount > 0) {
+    pushToast(
+      `${resolvedCount} alerta(s) da empresa ${alerts[0]?.cliente || 'selecionada'} marcado(s) como resolvido(s).`,
+      'success'
+    );
+  }
+
+  render();
+}
+
 function resolveAlert(alertId) {
   const alert = state.alerts.find((item) => item.id === alertId);
   if (!alert) {
@@ -12676,35 +13798,63 @@ async function openAlertDocument(alertId) {
     return;
   }
 
-  if (alert.tipo !== 'CT-e') {
-    pushToast('Este alerta nao possui um CT-e vinculado para visualizacao.', 'info');
-    return;
-  }
+  if (alert.tipo === 'CT-e') {
+    let doc = findCteForAlert(alert);
 
-  let doc = findCteForAlert(alert);
-
-  if (!doc && state.dataSource === 'api' && alert.documentoId && alert.clientId) {
-    try {
-      const raw = await apiRequest(`/cte/${encodeURIComponent(alert.documentoId)}?clienteId=${encodeURIComponent(alert.clientId)}`);
-      const mapped = buildCteDocumentsFromApi([raw], state.clients)[0] || null;
-      if (mapped) {
-        state.cteDocuments = mergeCteDocumentsById(state.cteDocuments, [mapped]);
-        doc = mapped;
+    if (!doc && state.dataSource === 'api' && alert.documentoId && alert.clientId) {
+      try {
+        const raw = await apiRequest(`/cte/${encodeURIComponent(alert.documentoId)}?clienteId=${encodeURIComponent(alert.clientId)}`);
+        const mapped = buildCteDocumentsFromApi([raw], state.clients)[0] || null;
+        if (mapped) {
+          state.cteDocuments = mergeCteDocumentsById(state.cteDocuments, [mapped]);
+          doc = mapped;
+        }
+      } catch (error) {
+        pushToast(`Falha ao carregar CT-e do alerta: ${toErrorMessage(error)}`, 'error');
+        return;
       }
-    } catch (error) {
-      pushToast(`Falha ao carregar CT-e do alerta: ${toErrorMessage(error)}`, 'error');
+    }
+
+    if (!doc) {
+      pushToast('Nao foi possivel localizar o CT-e vinculado a este alerta.', 'error');
       return;
     }
-  }
 
-  if (!doc) {
-    pushToast('Nao foi possivel localizar o CT-e vinculado a este alerta.', 'error');
+    state.drawer = null;
+    state.modal = null;
+    await openCteDetails(doc.id);
     return;
   }
 
-  state.drawer = null;
-  state.modal = null;
-  await openCteDetails(doc.id);
+  if (alert.tipo === 'NFS-e') {
+    let doc = findNfseForAlert(alert);
+
+    if (!doc && state.dataSource === 'api' && alert.documentoId && alert.clientId) {
+      try {
+        const raw = await apiRequest(`/nfse/${encodeURIComponent(alert.documentoId)}?clienteId=${encodeURIComponent(alert.clientId)}`);
+        const mapped = buildXmlFilesFromApi([raw], state.clients)[0] || null;
+        if (mapped) {
+          state.xmlFiles = mergeXmlFilesById(state.xmlFiles, [mapped]);
+          doc = mapped;
+        }
+      } catch (error) {
+        pushToast(`Falha ao carregar NFS-e do alerta: ${toErrorMessage(error)}`, 'error');
+        return;
+      }
+    }
+
+    if (!doc) {
+      pushToast('Nao foi possivel localizar a NFS-e vinculada a este alerta.', 'error');
+      return;
+    }
+
+    state.drawer = null;
+    state.modal = null;
+    await openXmlDetails(doc.id);
+    return;
+  }
+
+  pushToast('Este alerta nao possui documento vinculado para visualizacao.', 'info');
 }
 
 async function executeConfirmAction(payload) {
@@ -12970,6 +14120,29 @@ function getCteDisagreementAlerts() {
 
 function getOpenCteDisagreementAlerts() {
   return getCteDisagreementAlerts().filter((alert) => alert.status !== 'Resolvido');
+}
+
+function getNfseRetentionAlerts() {
+  return [...state.alerts]
+    .filter((alert) => alert.origem === 'nfse-retencao-entrada' || (alert.tipo === 'NFS-e' && Array.isArray(alert.retencoes) && alert.retencoes.length > 0))
+    .sort((a, b) => {
+      const leftResolved = a.status === 'Resolvido' ? 1 : 0;
+      const rightResolved = b.status === 'Resolvido' ? 1 : 0;
+      return leftResolved - rightResolved || Date.parse(b.dataHora || 0) - Date.parse(a.dataHora || 0);
+    });
+}
+
+function getOpenNfseRetentionAlerts() {
+  return getNfseRetentionAlerts().filter((alert) => alert.status !== 'Resolvido');
+}
+
+function getFilteredNfseRetentionAlerts(companyId = '') {
+  const normalizedCompanyId = String(companyId || '').trim();
+  if (!normalizedCompanyId) {
+    return getNfseRetentionAlerts();
+  }
+
+  return getNfseRetentionAlerts().filter((alert) => String(alert?.clientId || '').trim() === normalizedCompanyId);
 }
 
 function openModal(modal) {
@@ -13313,6 +14486,11 @@ async function openXmlSearchForGapContext(context) {
   state.xmlSearch.total = 0;
   state.xmlSearch.totalPages = 0;
   state.selectedXmlIds = new Set();
+  state.nfseFiscalReader.rows = [];
+  state.nfseFiscalReader.summary = null;
+  state.nfseFiscalReader.lastQuery = null;
+  state.nfseFiscalReader.lastLoadedAt = null;
+  state.tableState.nfseFiscalReader = 'data';
 
   navigate('/xmls');
   await wait(0);
@@ -13912,6 +15090,119 @@ function pushToast(message, tone = 'info') {
   }, 3200);
 }
 
+function buildPageLoadingPlan(route = state.route) {
+  const meta = resolvePageMetaForRoute(route);
+  const routeSpecificDescription =
+    route?.name === 'auditoria-lacunas'
+      ? 'Atualizando dados gerais e a auditoria de lacunas desta tela.'
+      : `Atualizando os dados exibidos em ${meta.title}.`;
+
+  return {
+    title: `Carregando ${meta.title}`,
+    description: routeSpecificDescription,
+    initialTask: 'Preparando pagina'
+  };
+}
+
+function normalizeNfseFiscalReaderResponse(payload) {
+  const items = Array.isArray(payload?.items)
+    ? payload.items.map((row) => ({
+        id: String(row?.id || '').trim(),
+        clienteId: String(row?.clienteId || '').trim(),
+        estabelecimentoId: String(row?.estabelecimentoId || '').trim(),
+        numeroNfse: row?.numeroNfse == null ? '' : String(row.numeroNfse),
+        chaveAcesso: String(row?.chaveAcesso || '').trim(),
+        dataEmissao: row?.dataEmissao ? String(row.dataEmissao) : '',
+        prestador: String(row?.prestador || '').trim(),
+        cnpjPrestador: normalizeDigits(String(row?.cnpjPrestador || '')),
+        tomador: String(row?.tomador || '').trim(),
+        cnpjTomador: normalizeDigits(String(row?.cnpjTomador || '')),
+        municipio: String(row?.municipio || '').trim(),
+        codigoServicoPrestado: String(row?.codigoServicoPrestado || '').trim(),
+        descricaoServico: String(row?.descricaoServico || '').trim(),
+        layout: String(row?.layout || '').trim(),
+        localPrestacao: String(row?.localPrestacao || '').trim(),
+        localIncidenciaIss: String(row?.localIncidenciaIss || '').trim(),
+        valorServico: row?.valorServico ?? '',
+        valorLiquidoNfse: row?.valorLiquidoNfse ?? '',
+        valorTotalRetencoes: row?.valorTotalRetencoes ?? '',
+        valorIss: row?.valorIss ?? '',
+        valorIssRetido: row?.valorIssRetido ?? '',
+        valorIssRetidoReal: row?.valorIssRetidoReal ?? '',
+        valorIrrf: row?.valorIrrf ?? '',
+        valorInss: row?.valorInss ?? '',
+        valorCsll: row?.valorCsll ?? '',
+        valorPis: row?.valorPis ?? '',
+        valorCofins: row?.valorCofins ?? '',
+        aliquotaIss: row?.aliquotaIss ?? '',
+        aliquotaRealIss: row?.aliquotaRealIss ?? '',
+        retencaoIss: String(row?.retencaoIss || '').trim(),
+        retencaoFederal: String(row?.retencaoFederal || '').trim(),
+        totalRetencoesFederais: row?.totalRetencoesFederais ?? '',
+        statusProcessamento: String(row?.statusProcessamento || '').trim(),
+        erroProcessamento: String(row?.erroProcessamento || '').trim(),
+        camposComProblema: Array.isArray(row?.camposComProblema)
+          ? row.camposComProblema.map((item) => String(item || '').trim()).filter(Boolean)
+          : []
+      }))
+    : [];
+  const summary = payload?.summary
+    ? {
+        totalDocumentosFiltrados: Number(payload.summary.totalDocumentosFiltrados || 0),
+        totalDocumentosLidos: Number(payload.summary.totalDocumentosLidos || 0),
+        totalDocumentosComErro: Number(payload.summary.totalDocumentosComErro || 0),
+        totalDocumentosSemXml: Number(payload.summary.totalDocumentosSemXml || 0),
+        valorServicoTotal: Number(payload.summary.valorServicoTotal || 0),
+        valorLiquidoTotal: Number(payload.summary.valorLiquidoTotal || 0),
+        valorRetidoTotal: Number(payload.summary.valorRetidoTotal || 0),
+        valorIssTotal: Number(payload.summary.valorIssTotal || 0),
+        valorIssRetidoRealTotal: Number(payload.summary.valorIssRetidoRealTotal || 0),
+        totalRetencoesFederais: Number(payload.summary.totalRetencoesFederais || 0)
+      }
+    : null;
+
+  return {
+    items,
+    total: Number(payload?.total || items.length || 0),
+    summary
+  };
+}
+
+function startPageLoading(plan = {}) {
+  state.pageLoading = {
+    active: true,
+    title: String(plan.title || 'Carregando pagina'),
+    description: String(plan.description || 'Atualizando dados da pagina atual.'),
+    currentTask: String(plan.initialTask || 'Preparando pagina'),
+    completedTasks: []
+  };
+}
+
+function updatePageLoadingTask(task) {
+  const label = String(task || '').trim();
+  if (!state.pageLoading.active || !label) {
+    return;
+  }
+
+  const current = String(state.pageLoading.currentTask || '').trim();
+  if (current && current !== label) {
+    state.pageLoading.completedTasks = [...state.pageLoading.completedTasks, current].slice(-4);
+  }
+
+  state.pageLoading.currentTask = label;
+  render();
+}
+
+function stopPageLoading() {
+  state.pageLoading = {
+    active: false,
+    title: '',
+    description: '',
+    currentTask: '',
+    completedTasks: []
+  };
+}
+
 function createBrowserId() {
   if (globalThis.crypto && typeof globalThis.crypto.randomUUID === 'function') {
     return globalThis.crypto.randomUUID();
@@ -13937,9 +15228,11 @@ async function refreshApiData(options = {}) {
     return;
   }
 
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+
   try {
-    await hydrateFromApi();
-    await ensureRouteDataLoaded({ silent: true });
+    await hydrateFromApi({ onProgress });
+    await ensureRouteDataLoaded({ silent: true, onProgress });
   } catch (error) {
     if (!options.silent) {
       pushToast(`Falha ao atualizar dados reais: ${toErrorMessage(error)}`, 'error');
@@ -13977,13 +15270,28 @@ async function refreshDashboardRouteData(options = {}) {
 }
 
 async function ensureRouteDataLoaded(options = {}) {
-  if (!state.dataReady || state.dataSource !== 'api') {
+  if (state.dataSource !== 'api') {
     return;
   }
 
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+
   if (state.route.name === 'auditoria-lacunas') {
+    onProgress?.('Carregando auditoria de lacunas');
     await loadNfseGapAuditOverview(options);
   }
+}
+
+function shouldLoadRouteData(route = state.route) {
+  if (state.dataSource !== 'api') {
+    return false;
+  }
+
+  if (route?.name === 'auditoria-lacunas') {
+    return !state.nfseGapAuditOverview.lastLoadedAt;
+  }
+
+  return false;
 }
 
 async function refreshExecutionMonitorNow() {
@@ -14536,6 +15844,7 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
         contraparteNome,
         iss: toNumber(doc.valorIss),
         conteudoXml: null,
+        leituraFiscal: doc.leituraFiscal || null,
         ignorarNumeracaoValidacao: Boolean(doc.ignorarNumeracaoValidacao),
         ignorarNumeracaoObservacao: doc.ignorarNumeracaoObservacao || ''
       };
@@ -15234,7 +16543,9 @@ function buildPersistentAlertsFromApi(alertsRaw) {
     numeroDocumento: String(alert?.numeroDocumento || ''),
     eventoTipo: String(alert?.eventoTipo || ''),
     eventoDescricao: String(alert?.eventoDescricao || ''),
-    resolvedAt: alert?.resolvedAt ? String(alert.resolvedAt) : null
+    resolvedAt: alert?.resolvedAt ? String(alert.resolvedAt) : null,
+    emissor: String(alert?.emissor || ''),
+    retencoes: Array.isArray(alert?.retencoes) ? alert.retencoes.map((entry) => String(entry || '')) : []
   }));
 }
 
@@ -15392,13 +16703,28 @@ function renderAlertResolvedCheckbox(alert, options = {}) {
 function renderAlertDocumentLine(alert) {
   const numero = String(alert?.numeroDocumento || '').trim();
   const chave = String(alert?.chaveAcesso || '').trim();
+  const documentType = String(alert?.tipo || '').trim() || 'Documento';
   if (numero) {
-    return `CT-e ${numero}`;
+    return `${documentType} ${numero}`;
   }
   if (chave) {
-    return `CT-e ${chave}`;
+    return `${documentType} ${chave}`;
   }
   return '-';
+}
+
+function hasAlertDocumentAction(alert) {
+  return alert?.tipo === 'CT-e' || alert?.tipo === 'NFS-e';
+}
+
+function renderAlertOpenDocumentLabel(alert) {
+  if (alert?.tipo === 'NFS-e') {
+    return 'Ver NFS-e';
+  }
+  if (alert?.tipo === 'CT-e') {
+    return 'Ver CT-e';
+  }
+  return 'Ver documento';
 }
 
 function buildAlertPriorityMeta(alert) {
@@ -16027,6 +17353,33 @@ function findCteForAlert(alert) {
   );
 }
 
+function findNfseByChaveAcesso(chaveAcesso) {
+  const chaveNormalizada = normalizeDigits(chaveAcesso || '');
+  if (!chaveNormalizada) {
+    return null;
+  }
+
+  return (
+    state.xmlSearch.results.find((doc) => normalizeDigits(doc?.chaveAcesso || '') === chaveNormalizada) ||
+    state.xmlFiles.find((doc) => normalizeDigits(doc?.chaveAcesso || '') === chaveNormalizada) ||
+    null
+  );
+}
+
+function findNfseForAlert(alert) {
+  if (!alert || alert.tipo !== 'NFS-e') {
+    return null;
+  }
+
+  return (
+    findXmlById(alert.documentoId) ||
+    state.xmlSearch.results.find((doc) => doc.apiNfseId === alert.documentoId) ||
+    state.xmlFiles.find((doc) => doc.apiNfseId === alert.documentoId) ||
+    findNfseByChaveAcesso(alert.chaveAcesso) ||
+    null
+  );
+}
+
 function canSyncXmlEvents(xml) {
   return Boolean(state.dataSource === 'api' && xml?.apiNfseId && xml?.clientId && normalizeDigits(xml?.chaveAcesso || '').length > 0);
 }
@@ -16640,7 +17993,7 @@ async function openXmlViewer(xmlId) {
 }
 
 async function openXmlDetails(xmlId) {
-  const xml = findXmlById(xmlId);
+  let xml = findXmlById(xmlId);
   if (!xml) {
     pushToast('XML nao encontrado.', 'error');
     return;
@@ -16648,13 +18001,14 @@ async function openXmlDetails(xmlId) {
 
   if (xml.apiNfseId && xml.clientId) {
     try {
+      xml = (await ensureNfseDetailsLoaded(xml)) || xml;
       await ensureXmlContentLoaded(xml);
     } catch (error) {
       pushToast(`Nao foi possivel enriquecer os detalhes da NFS-e agora: ${toErrorMessage(error)}`, 'info');
     }
   }
 
-  openModal({ kind: 'xml-details', xmlId });
+  openModal({ kind: 'xml-details', xmlId: xml.id });
 }
 
 async function updateXmlNumberingValidation(xmlId, ignore) {
@@ -17863,6 +19217,22 @@ async function ensureXmlContentLoaded(xml) {
   }
 
   xml.conteudoXml = rawXml;
+}
+
+async function ensureNfseDetailsLoaded(xml) {
+  if (!xml.apiNfseId || !xml.clientId) {
+    throw new Error('Documento sem referencia para recuperar detalhes na API');
+  }
+
+  const raw = await apiRequest(`/nfse/${xml.apiNfseId}?clienteId=${encodeURIComponent(xml.clientId)}`);
+  const mapped = buildXmlFilesFromApi([raw], state.clients)[0] || null;
+  if (!mapped) {
+    return xml;
+  }
+
+  mapped.conteudoXml = xml.conteudoXml || null;
+  replaceDocumentInStateCollections('nfse', mapped);
+  return findXmlById(mapped.id) || mapped;
 }
 
 async function ensureNfeContentLoaded(doc) {

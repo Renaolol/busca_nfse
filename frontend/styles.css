@@ -30,10 +30,12 @@ html,
 body {
   margin: 0;
   padding: 0;
+  height: 100%;
   min-height: 100%;
   font-family: 'Manrope', sans-serif;
   color: var(--text-primary);
   background: var(--bg);
+  overflow: hidden;
 }
 
 button,
@@ -49,9 +51,123 @@ a {
 }
 
 .app-shell {
+  height: 100vh;
   min-height: 100vh;
   display: grid;
-  grid-template-columns: var(--sidebar-width) 1fr;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  overflow-x: hidden;
+  overflow-y: hidden;
+}
+
+.page-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background:
+    radial-gradient(circle at top left, rgba(250, 211, 43, 0.22), transparent 32%),
+    rgba(32, 30, 30, 0.58);
+  backdrop-filter: blur(10px);
+}
+
+.page-loading-card {
+  width: min(560px, 100%);
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(32, 30, 30, 0.08);
+  border-radius: 22px;
+  box-shadow: 0 22px 60px rgba(21, 24, 28, 0.18);
+  padding: 28px 28px 24px;
+}
+
+.page-loading-spinner {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  border: 4px solid rgba(32, 30, 30, 0.08);
+  border-top-color: var(--accent-dark);
+  animation: page-loading-spin 0.9s linear infinite;
+}
+
+.page-loading-eyebrow {
+  margin: 14px 0 6px;
+  font-size: 0.74rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--warning);
+}
+
+.page-loading-title {
+  margin: 0;
+  font-family: 'Sora', 'Manrope', sans-serif;
+  font-size: 1.42rem;
+}
+
+.page-loading-description {
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.page-loading-status {
+  margin-top: 18px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #f6f6f7;
+  border: 1px solid var(--line);
+  color: var(--text-primary);
+}
+
+.page-loading-task-list {
+  list-style: none;
+  padding: 0;
+  margin: 14px 0 0;
+  display: grid;
+  gap: 8px;
+}
+
+.page-loading-task {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fafafa;
+  color: var(--text-secondary);
+  border: 1px solid var(--line);
+}
+
+.page-loading-task::before {
+  content: '';
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  flex: 0 0 auto;
+}
+
+.page-loading-task-done::before {
+  background: var(--success);
+}
+
+.page-loading-task-active {
+  color: var(--text-primary);
+  border-color: rgba(226, 161, 8, 0.28);
+  background: #fff8e2;
+}
+
+.page-loading-task-active::before {
+  background: var(--warning);
+  box-shadow: 0 0 0 5px rgba(226, 161, 8, 0.14);
+}
+
+@keyframes page-loading-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .sidebar {
@@ -65,6 +181,7 @@ a {
   position: sticky;
   top: 0;
   height: 100vh;
+  overflow-y: auto;
 }
 
 .brand {
@@ -173,9 +290,12 @@ a {
 }
 
 .main-shell {
+  height: 100vh;
   min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 
 .header {
@@ -271,12 +391,19 @@ a {
 }
 
 .content {
+  flex: 1 1 auto;
   padding: 28px;
+  min-width: 0;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
 }
 
 .page-section {
   display: grid;
   gap: 20px;
+  min-width: 0;
 }
 
 .page-header {
@@ -400,6 +527,8 @@ textarea:focus-visible,
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-soft);
   padding: 18px;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .card-title {
@@ -1049,7 +1178,9 @@ textarea:focus-visible,
 }
 
 .table-wrap {
+  display: block;
   width: 100%;
+  max-width: 100%;
   overflow-x: auto;
 }
 
@@ -1065,6 +1196,74 @@ textarea:focus-visible,
 
 .xml-reader30-pan-scroll.is-panning {
   cursor: default;
+}
+
+.nfse-fiscal-reader-scroll {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  max-height: min(68vh, 760px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.nfse-fiscal-reader-scroll thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: #fbfbfc;
+}
+
+.nfse-fiscal-reader-table {
+  min-width: 1480px;
+}
+
+.nfse-fiscal-reader-number,
+.nfse-fiscal-reader-date,
+.nfse-fiscal-reader-flag,
+.nfse-fiscal-reader-rate,
+.nfse-fiscal-reader-status,
+.nfse-fiscal-reader-cnpj {
+  white-space: nowrap;
+}
+
+.nfse-fiscal-reader-number {
+  min-width: 92px;
+}
+
+.nfse-fiscal-reader-place {
+  min-width: 140px;
+  white-space: nowrap;
+}
+
+.nfse-fiscal-reader-party {
+  min-width: 220px;
+  max-width: 280px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nfse-fiscal-reader-cnpj {
+  min-width: 138px;
+}
+
+.nfse-fiscal-reader-rate,
+.nfse-fiscal-reader-flag {
+  min-width: 88px;
+  text-align: center;
+}
+
+.nfse-fiscal-reader-status {
+  min-width: 110px;
+}
+
+.nfse-fiscal-reader-error {
+  min-width: 260px;
+  max-width: 340px;
 }
 
 .xml-batch-bar {

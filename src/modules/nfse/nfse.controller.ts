@@ -7,6 +7,7 @@ import { DownloadLoteResponseDto } from './dto/download-lote-response.dto';
 import { DownloadDocumentDto } from './dto/download-document.dto';
 import { DashboardStatsQueryDto, DashboardStatsResponseDto } from './dto/dashboard-stats.dto';
 import { ImportXmlDto } from './dto/import-xml.dto';
+import { NfseLeituraFiscalResponseDto } from './dto/leitura-fiscal.dto';
 import { ListNfseGapAuditsQueryDto, NfseGapAuditOverviewRowDto } from './dto/list-gap-audits.dto';
 import { NfseNumeracaoValidationDto } from './dto/list-nfse-response.dto';
 import {
@@ -67,6 +68,13 @@ export class NfseController {
   @ApiOkResponse({ type: NfseGapAuditOverviewRowDto, isArray: true })
   listGapAudits(@Query() query: ListNfseGapAuditsQueryDto) {
     return this.nfseService.listGapAudits(query);
+  }
+
+  @Get('leitura-fiscal')
+  @ApiOkResponse({ type: NfseLeituraFiscalResponseDto })
+  @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })
+  getLeituraFiscal(@Query() query: QueryNfseDto) {
+    return this.nfseService.getLeituraFiscal(query);
   }
 
   @Get('numeracao-excecoes')

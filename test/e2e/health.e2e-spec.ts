@@ -1,6 +1,7 @@
 import { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
+import packageJson from '../../package.json';
 import { HealthModule } from '../../src/modules/health/health.module';
 
 describe('Health (e2e)', () => {
@@ -22,5 +23,6 @@ describe('Health (e2e)', () => {
   it('/health (GET)', async () => {
     const response = await request(app.getHttpServer()).get('/health').expect(200);
     expect(response.body.status).toBe('ok');
+    expect(response.body.version).toBe(packageJson.version);
   });
 });

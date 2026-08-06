@@ -1,0 +1,7 @@
+{
+  "manifestUrl": "https://updates.seudominio.com/notasync/stable/manifest.json",
+  "serviceName": "NotaSyncGCONT",
+  "winSwExecutable": "NotaSyncGCONT.exe",
+  "releaseRoot": "releases",
+  "backupRoot": "backups"
+}

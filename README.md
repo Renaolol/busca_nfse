@@ -60,6 +60,7 @@ Para rodar como servico Windows e acessar pela rede interna com hostname, consul
 - `docs/architecture.md`
 - `docs/sync-flow.md`
 - `docs/nfe-distribuicao.md`
+- `docs/update-distribution.md`
 - `docs/troubleshooting.md`
 - `docs/operational-review-2026-07.md`
 
@@ -251,7 +252,7 @@ Valores aceitos:
 - `GET /nfe/sync/status?clienteId=UUID`: lista os controles de NF-e do cliente.
 - `GET /nfe/sync/scheduler-status`: mostra o status do ciclo automatico e da busca noturna de NF-e.
 - `PUT /nfe/sync/scheduler-settings`: atualiza a configuracao da busca noturna de NF-e.
-- `GET /alertas`: lista alertas persistidos do backend. No momento inclui os alertas de `CT-e` com evento de `desacordo`, com resolucao persistida em banco.
+- `GET /alertas`: lista alertas persistidos do backend. No momento inclui os alertas de `CT-e` com evento de `desacordo` e de `NFS-e` tomada com retencoes detectadas no XML. Para `NFS-e`, o aviso considera apenas notas com `dataEmissao >= 01/07/2026`. O payload agora informa tambem `emissor` e `retencoes`; a resolucao de `CT-e` segue especializada por evento e a de `NFS-e` usa o armazenamento generico de resolucoes por `alertId`/`fingerprint`.
 - `GET /alertas/resolucoes`: lista resolucoes persistidas para alertas genericos do painel, como auditoria, certificado e falhas operacionais.
 - `PUT /alertas/resolucoes/:alertId`: marca ou reabre um alerta generico, persistindo a resolucao em banco por `alertId` e `fingerprint`.
 - `POST /clientes/:id/nfe/ativar`: habilita o cliente para as rotinas de NF-e.
@@ -275,6 +276,7 @@ Valores aceitos:
 Use `POST /nfse/importar-xml` para carregar XMLs legados de NFS-e ou XMLs de evento.
 Use `POST /nfse/recuperar-por-chave` para recuperar XMLs faltantes que estejam disponiveis no Portal Nacional/Emissor Publico. O endpoint recebe `clienteId`, `cnpjConsulta`, `ambiente` e a lista `chavesAcesso`; para cada chave, o backend consulta a API oficial e importa o XML retornado.
 Use `POST /sync/reprocessar-nsus-passados/execucao` com `clienteId`, `cnpjConsulta`, `ambiente` e `lacunas` para auditar apenas os NSUs mais provaveis de uma lacuna de numeracao detectada na listagem. O backend usa os XMLs ja armazenados para inferir as faixas de NSU vizinhas e tenta recuperar os documentos faltantes por NSU, sem depender de consulta automatica por DPS.
+Use `GET /nfse/leitura-fiscal` para montar a tabela consolidada de leitura fiscal das NFS-e filtradas na tela `XMLs NFS-e`. O endpoint reutiliza os mesmos filtros de `GET /nfse`, processa apenas documentos com XML salvo e retorna totais de servico/retercoes, mais uma linha por nota com colunas de ISS, PIS, COFINS, INSS, IRRF, CSLL, retencao federal e status de processamento.
 Notas aplicam deduplicacao por `ambiente + chave_acesso` e geram/salvam o DANFSE em PDF.
 Eventos sao vinculados pela chave da NFS-e referenciada (`chNFSe`) e salvos em `nfse_eventos`; evento de cancelamento (`e101101`) marca a nota relacionada como `cancelada`, preenche `data_cancelamento` e forca regeneracao futura do DANFSE.
 
