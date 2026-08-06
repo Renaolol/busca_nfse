@@ -60,6 +60,7 @@ Para rodar como servico Windows e acessar pela rede interna com hostname, consul
 - `docs/architecture.md`
 - `docs/sync-flow.md`
 - `docs/nfe-distribuicao.md`
+- `docs/update-distribution.md`
 - `docs/troubleshooting.md`
 - `docs/operational-review-2026-07.md`
 

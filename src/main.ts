@@ -3,6 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { NestExpressApplication } from '@nestjs/platform-express';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { join } from 'node:path';
+import packageJson from '../package.json';
 import { AppModule } from './app.module';
 import { BigIntSerializerInterceptor } from './common/interceptors/bigint-serializer.interceptor';
 
@@ -29,7 +30,7 @@ async function bootstrap(): Promise<void> {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Documentos Fiscais Collector API')
       .setDescription('API interna para sincronizacao, armazenamento e consulta de NFS-e Nacional e NF-e')
-      .setVersion('0.1.0')
+      .setVersion(packageJson.version)
       .build();
 
     const document = SwaggerModule.createDocument(app, swaggerConfig);

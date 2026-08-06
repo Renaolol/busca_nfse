@@ -24,6 +24,7 @@
     "nfe:separar-cte": "ts-node -r tsconfig-paths/register scripts/separate-cte-documents.ts",
     "docker:up": "docker compose up -d",
     "docker:down": "docker compose down -v",
+    "release:manifest": "node scripts/generate-release-manifest.js",
     "sync:run-once": "node dist/jobs/run-sync-once.js",
     "job:verificar-certificados": "node dist/jobs/run-verificar-certificados-once.js",
     "job:gerar-danfse-pendente": "node dist/jobs/run-gerar-danfse-pendente-once.js",

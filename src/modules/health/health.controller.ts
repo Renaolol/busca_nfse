@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { ApiTags } from '@nestjs/swagger';
+import packageJson from '../../../package.json';
 import { Public } from '../auth/decorators/public.decorator';
 
 @ApiTags('health')
@@ -7,10 +8,11 @@ import { Public } from '../auth/decorators/public.decorator';
 export class HealthController {
   @Get()
   @Public()
-  health(): { status: string; timestamp: string } {
+  health(): { status: string; timestamp: string; version: string } {
     return {
       status: 'ok',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      version: packageJson.version
     };
   }
 }

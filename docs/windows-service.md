@@ -189,3 +189,26 @@ Teste de conectividade:
 ```powershell
 Test-NetConnection 10.0.0.10 -Port 3000
 ```
+
+## Atualizacao automatica sem acesso remoto
+
+Para permitir que cada escritorio atualize o app sozinho, sem novo acesso da GCONT:
+
+1. Copie `deploy/windows/update-config.example.json` para `storage/update-config.json`.
+2. Preencha a `manifestUrl` apontando para o manifesto HTTPS da release.
+3. Instale a tarefa agendada:
+
+```powershell
+.\deploy\windows\install-update-task.ps1 -DailyAt 02:30
+```
+
+4. A tarefa executa `deploy/windows/update-notasync.ps1`, que:
+   - baixa a release ZIP;
+   - valida SHA256;
+   - para o servico;
+   - aplica a nova versao;
+   - roda `npm ci`, build e `prisma:deploy`;
+   - reinicia o servico;
+   - faz rollback automatico se falhar.
+
+O fluxo completo de distribuicao de releases e rollout esta em `docs/update-distribution.md`.
