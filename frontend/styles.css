@@ -1557,15 +1557,6 @@ tbody tr:hover {
   color: var(--accent);
 }
 
-.xml-reader30-select-all-checkbox,
-.xml-reader30-check > input[data-action="xml-reader30-toggle-all"] {
-  width: 15px;
-  height: 15px;
-  min-width: 15px;
-  min-height: 15px;
-  transform: none;
-}
-
 .xml-reader30-column-header.is-dragging {
   opacity: 0.55;
   cursor: grabbing;

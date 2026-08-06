@@ -612,7 +612,7 @@ function onDocumentClick(event) {
     return;
   }
 
-  if (action === 'xml-reader30-select' || action === 'xml-reader30-toggle-all') {
+  if (action === 'xml-reader30-select') {
     return;
   }
 
@@ -1452,19 +1452,7 @@ function onDocumentClick(event) {
         return;
       }
       setXmlReader30Selection(selectionKey, actionNode.checked);
-      render();
-      return;
-    }
-    case 'xml-reader30-toggle-all': {
-      const checked = actionNode.checked;
-      getXmlReader30SelectionRows().forEach((row) => {
-        const selectionKey = getXmlReader30SelectionKey(row);
-        if (!selectionKey) {
-          return;
-        }
-        setXmlReader30Selection(selectionKey, checked);
-      });
-      render();
+      renderPreservingScroll(['.xml-reader30-pan-scroll']);
       return;
     }
     case 'xml-reader30-batch-download': {
@@ -1819,20 +1807,7 @@ function onDocumentChange(event) {
       return;
     }
     setXmlReader30Selection(selectionKey, target.checked);
-    render();
-    return;
-  }
-
-  if (action === 'xml-reader30-toggle-all') {
-    const checked = target.checked;
-    getXmlReader30SelectionRows().forEach((row) => {
-      const selectionKey = getXmlReader30SelectionKey(row);
-      if (!selectionKey) {
-        return;
-      }
-      setXmlReader30Selection(selectionKey, checked);
-    });
-    render();
+    renderPreservingScroll(['.xml-reader30-pan-scroll']);
     return;
   }
 
@@ -5272,9 +5247,7 @@ function renderXmlReader30ResultsTable(results) {
         <table class="xml-reader30-table">
           <thead>
             <tr>
-              <th class="xml-reader30-check">
-                <input type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />
-              </th>
+              <th class="xml-reader30-check">Selecao</th>
               <th>Tipo</th>
               ${renderXmlReader30SortHeader('numeroNf', 'Documento')}
               <th>Empresa</th>
@@ -5359,9 +5332,7 @@ function renderXmlReader30NfeResultsTable(results) {
         <table class="xml-reader30-table" style="min-width: 1380px;">
           <thead>
             <tr>
-              <th class="xml-reader30-check">
-                <input type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />
-              </th>
+              <th class="xml-reader30-check">Selecao</th>
               ${renderXmlReader30SortHeader('numeroNf', 'Número NF')}
               <th>Status NF-e</th>
               ${renderXmlReader30SortHeader('dataEmissao', 'Data Emissão')}
@@ -5456,18 +5427,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
                     >
                       <div class="xml-reader30-column-header-inner">
                         <span class="xml-reader30-column-title">
-                          ${
-                            column.key === 'select'
-                              ? `
-                                <span class="xml-reader30-select-header-content">
-                                  <span class="xml-reader30-column-title-select">Checkbox</span>
-                                  <input class="xml-reader30-select-all-checkbox" type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" />
-                                </span>
-                              `
-                              : column.key === 'numeroNf' || column.key === 'dataEmissao'
-                                ? renderXmlReader30SortHeader(column.key, column.label)
-                                : column.headerHtml || escapeHtml(column.label)
-                          }
+                          ${column.key === 'select' ? `<span class="xml-reader30-column-title-select">Selecao</span>` : column.key === 'numeroNf' || column.key === 'dataEmissao' ? renderXmlReader30SortHeader(column.key, column.label) : column.headerHtml || escapeHtml(column.label)}
                         </span>
                         <div class="xml-reader30-column-menu-wrap" data-xml-reader30-column-menu-wrap>
                           <button
@@ -5554,7 +5514,7 @@ function getXmlReader30NfeColumnDefinitions() {
     {
       key: 'select',
       label: 'Checkbox',
-      headerHtml: '<input type="checkbox" data-action="xml-reader30-toggle-all" aria-label="Selecionar todos os XMLs do leitor" />',
+      headerHtml: 'Selecao',
       className: 'xml-reader30-check',
       html: true,
       render: (row) => {
@@ -6817,7 +6777,7 @@ function renderXmlReader30ResultsTableLegacyUnused(results) {
         <table>
           <thead>
             <tr>
-              <th><input type="checkbox" data-action="xml-reader30-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableRows.length ? '' : 'disabled'} aria-label="Selecionar todos os XMLs do leitor" /></th>
+              <th>Selecao</th>
               <th>Tipo</th>
               <th>Documento</th>
               <th>Status</th>
