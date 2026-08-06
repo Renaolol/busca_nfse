@@ -526,7 +526,6 @@ function wireGlobalEvents() {
   });
 
   document.addEventListener('click', onDocumentClick);
-  document.addEventListener('input', onDocumentInput);
   document.addEventListener('submit', onDocumentSubmit);
   document.addEventListener('change', onDocumentChange);
   document.addEventListener('mousedown', onDocumentMouseDown);
@@ -537,34 +536,6 @@ function wireGlobalEvents() {
   document.addEventListener('dragover', onDocumentDragOver);
   document.addEventListener('drop', onDocumentDrop);
   document.addEventListener('dragend', onDocumentDragEnd);
-}
-
-function onDocumentInput(event) {
-  const target = event.target;
-  if (!(target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)) {
-    return;
-  }
-
-  const action = target.getAttribute('data-action');
-  if (action === 'nfse-retention-company-filter' && state.modal?.kind === 'nfse-retention-alerts') {
-    const selectionStart = typeof target.selectionStart === 'number' ? target.selectionStart : null;
-    const selectionEnd = typeof target.selectionEnd === 'number' ? target.selectionEnd : null;
-    state.modal = {
-      ...state.modal,
-      empresaQuery: String(target.value || '')
-    };
-    render();
-    window.requestAnimationFrame(() => {
-      const nextInput = document.querySelector('[data-action="nfse-retention-company-filter"]');
-      if (!(nextInput instanceof HTMLInputElement)) {
-        return;
-      }
-      nextInput.focus();
-      if (selectionStart !== null && selectionEnd !== null) {
-        nextInput.setSelectionRange(selectionStart, selectionEnd);
-      }
-    });
-  }
 }
 
 function onDocumentClick(event) {
@@ -701,7 +672,7 @@ function onDocumentClick(event) {
       return;
     }
     case 'dashboard-open-nfse-retention-alerts': {
-      openModal({ kind: 'nfse-retention-alerts', empresaQuery: '' });
+      openModal({ kind: 'nfse-retention-alerts', empresaId: '' });
       return;
     }
     case 'open-new-client-modal': {
@@ -1765,6 +1736,15 @@ function onDocumentChange(event) {
     return;
   }
 
+  if (action === 'nfse-retention-company-filter' && state.modal?.kind === 'nfse-retention-alerts') {
+    state.modal = {
+      ...state.modal,
+      empresaId: String(target.value || '')
+    };
+    render();
+    return;
+  }
+
   if (target.id === 'clientsFilterStatusBusca') {
     state.filters.clients.statusBusca = target.value;
   }
@@ -1986,19 +1966,23 @@ function render() {
 }
 
 async function handleRouteAccess() {
+  const needsRouteLoad = shouldLoadRouteData(state.route);
+  if (!needsRouteLoad) {
+    stopPageLoading();
+    render();
+    syncDashboardAutoRefresh();
+    return;
+  }
+
   const plan = buildPageLoadingPlan(state.route);
   startPageLoading(plan);
   render();
 
   try {
-    if (state.dataSource === 'api') {
-      await refreshApiData({
-        silent: true,
-        onProgress: updatePageLoadingTask
-      });
-    } else {
-      await wait(150);
-    }
+    await ensureRouteDataLoaded({
+      silent: true,
+      onProgress: updatePageLoadingTask
+    });
   } finally {
     stopPageLoading();
     render();
@@ -8628,10 +8612,11 @@ function renderCteDisagreementAlertsModal() {
 }
 
 function renderNfseRetentionAlertsModal() {
-  const companyQuery = state.modal?.kind === 'nfse-retention-alerts' ? String(state.modal.empresaQuery || '') : '';
-  const alerts = getFilteredNfseRetentionAlerts(companyQuery);
+  const companyId = state.modal?.kind === 'nfse-retention-alerts' ? String(state.modal.empresaId || '') : '';
+  const alerts = getFilteredNfseRetentionAlerts(companyId);
   const openAlerts = alerts.filter((alert) => alert.status !== 'Resolvido');
   const resolvedAlerts = alerts.filter((alert) => alert.status === 'Resolvido');
+  const availableClientIds = [...new Set(getNfseRetentionAlerts().map((alert) => String(alert?.clientId || '').trim()).filter(Boolean))];
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -8644,12 +8629,9 @@ function renderNfseRetentionAlertsModal() {
           <div class="form-grid" style="margin-bottom:18px;">
             <label class="field">
               Empresa
-              <input
-                type="text"
-                data-action="nfse-retention-company-filter"
-                value="${escapeHtml(companyQuery)}"
-                placeholder="Digite a empresa para filtrar as notas"
-              />
+              <select data-action="nfse-retention-company-filter">
+                ${renderOptions(availableClientIds, companyId, mapClientOptions(), 'Selecione uma empresa')}
+              </select>
             </label>
           </div>
           <div class="form-grid four" style="margin-bottom:18px;">
@@ -8705,7 +8687,7 @@ function renderNfseRetentionAlertsModal() {
                     )
                     .join('')}
                 </div>`
-              : '<div class="table-state">Nenhuma NFS-e com retencao encontrada para a empresa informada.</div>'
+              : '<div class="table-state">Nenhuma NFS-e com retencao encontrada para a empresa selecionada.</div>'
           }
         </div>
         <div class="modal-footer">
@@ -13127,17 +13109,13 @@ function getOpenNfseRetentionAlerts() {
   return getNfseRetentionAlerts().filter((alert) => alert.status !== 'Resolvido');
 }
 
-function getFilteredNfseRetentionAlerts(companyQuery = '') {
-  const normalizedQuery = normalizeSearchText(companyQuery);
-  if (!normalizedQuery) {
+function getFilteredNfseRetentionAlerts(companyId = '') {
+  const normalizedCompanyId = String(companyId || '').trim();
+  if (!normalizedCompanyId) {
     return getNfseRetentionAlerts();
   }
 
-  return getNfseRetentionAlerts().filter((alert) => {
-    const cliente = normalizeSearchText(alert?.cliente || '');
-    const emissor = normalizeSearchText(alert?.emissor || '');
-    return cliente.includes(normalizedQuery) || emissor.includes(normalizedQuery);
-  });
+  return getNfseRetentionAlerts().filter((alert) => String(alert?.clientId || '').trim() === normalizedCompanyId);
 }
 
 function openModal(modal) {
@@ -14206,6 +14184,18 @@ async function ensureRouteDataLoaded(options = {}) {
     onProgress?.('Carregando auditoria de lacunas');
     await loadNfseGapAuditOverview(options);
   }
+}
+
+function shouldLoadRouteData(route = state.route) {
+  if (state.dataSource !== 'api') {
+    return false;
+  }
+
+  if (route?.name === 'auditoria-lacunas') {
+    return !state.nfseGapAuditOverview.lastLoadedAt;
+  }
+
+  return false;
 }
 
 async function refreshExecutionMonitorNow() {
