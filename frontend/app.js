@@ -8112,6 +8112,7 @@ function renderXmlDetailsModal(xmlId) {
             ${detailItem('Data de cancelamento', xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '-')}
             ${detailItem('Resumo de eventos', xml.eventosResumo || '-')}
           </div>
+          ${renderDocumentInsightsSection('nfse', xml)}
           <div style="margin-top:18px;">
             <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
             ${renderXmlEventsList(xml.eventos)}
@@ -8344,6 +8345,49 @@ function renderDocumentInsightsSection(documentType, doc) {
   }
 
   const serviceSummary = extractNfseServiceSummary(doc);
+  const leituraFiscal = normalizeNfseLeituraFiscal(doc?.leituraFiscal);
+  if (leituraFiscal) {
+    const cards = [
+      detailItem('Layout', mapNfseLeituraLayoutLabel(leituraFiscal.layout)),
+      detailItem('Local prestacao', leituraFiscal.localPrestacao || '-'),
+      detailItem('Local ISS', leituraFiscal.localIncidenciaIss || '-'),
+      detailItem('Retencao ISS', leituraFiscal.retencaoIss || '-'),
+      detailItem('Retencao federal', leituraFiscal.retencaoFederal || '-'),
+      detailItem('Valor retido total', formatOptionalCurrency(leituraFiscal.valorTotalRetencoes)),
+      detailItem('ISS retido real', formatOptionalCurrency(leituraFiscal.valorIssRetidoReal)),
+      detailItem('Aliquota ISS', formatOptionalPercentage(leituraFiscal.aliquotaIss)),
+      detailItem('Aliquota real ISS', formatOptionalPercentage(leituraFiscal.aliquotaRealIss))
+    ].join('');
+    const retencoesRows = Array.isArray(leituraFiscal.retencoes)
+      ? leituraFiscal.retencoes.map((entry) => ({
+          imposto: entry.label || '-',
+          valor: entry.amount || 'Detectado no XML'
+        }))
+      : [];
+    const retencoesTable = retencoesRows.length
+      ? renderDocumentInsightsTable(retencoesRows, [
+          { key: 'imposto', label: 'Retencao' },
+          { key: 'valor', label: 'Valor' }
+        ])
+      : renderDocumentInsightsEmpty('Nenhuma retencao destacada foi encontrada no XML desta NFS-e.');
+    const alertBlock =
+      leituraFiscal.statusProcessamento === 'Erro'
+        ? `<div style="margin-top:14px; padding:12px 14px; border:1px solid #f0c36d; border-radius:12px; background:#fff7e6; color:#7a4b00;">
+            <strong>Atencao na leitura:</strong> ${escapeHtml(leituraFiscal.erroProcessamento || 'Inconsistencia detectada no XML.')}
+            <div style="margin-top:6px;"><strong>Campos com problema:</strong> ${escapeHtml(
+              Array.isArray(leituraFiscal.camposComProblema) && leituraFiscal.camposComProblema.length
+                ? leituraFiscal.camposComProblema.join(', ')
+                : '-'
+            )}</div>
+          </div>`
+        : '';
+
+    return renderDocumentInsightsBlock(
+      'Leitura fiscal da NFS-e',
+      `<div class="form-grid three">${cards}</div><div style="margin-top:14px;">${retencoesTable}</div>${alertBlock}`
+    );
+  }
+
   const cards = [
     detailItem('Servico', serviceSummary.description || '-'),
     detailItem('Codigo do servico', serviceSummary.serviceCode || '-'),
@@ -8543,6 +8587,56 @@ function extractNfseServiceSummary(doc) {
     serviceValue: toNumber(doc?.valor),
     issValue: toNumber(doc?.iss)
   };
+}
+
+function normalizeNfseLeituraFiscal(leituraFiscal) {
+  if (!leituraFiscal || typeof leituraFiscal !== 'object') {
+    return null;
+  }
+
+  return {
+    layout: String(leituraFiscal.layout || '').trim(),
+    localPrestacao: String(leituraFiscal.localPrestacao || '').trim(),
+    localIncidenciaIss: String(leituraFiscal.localIncidenciaIss || '').trim(),
+    valorTotalRetencoes: leituraFiscal.valorTotalRetencoes ?? '',
+    valorIssRetidoReal: leituraFiscal.valorIssRetidoReal ?? '',
+    aliquotaIss: leituraFiscal.aliquotaIss ?? '',
+    aliquotaRealIss: leituraFiscal.aliquotaRealIss ?? '',
+    retencaoIss: String(leituraFiscal.retencaoIss || '').trim(),
+    retencaoFederal: String(leituraFiscal.retencaoFederal || '').trim(),
+    erroProcessamento: String(leituraFiscal.erroProcessamento || '').trim(),
+    statusProcessamento: String(leituraFiscal.statusProcessamento || '').trim(),
+    camposComProblema: Array.isArray(leituraFiscal.camposComProblema)
+      ? leituraFiscal.camposComProblema.map((item) => String(item || '').trim()).filter(Boolean)
+      : [],
+    retencoes: Array.isArray(leituraFiscal.retencoes)
+      ? leituraFiscal.retencoes.map((entry) => ({
+          label: String(entry?.label || '').trim(),
+          amount: String(entry?.amount || '').trim()
+        }))
+      : []
+  };
+}
+
+function mapNfseLeituraLayoutLabel(layout) {
+  if (layout === 'padrao_nacional') {
+    return 'Padrao nacional';
+  }
+  if (layout === 'abrasf') {
+    return 'ABRASF';
+  }
+  return layout || '-';
+}
+
+function formatOptionalPercentage(value) {
+  if (value === null || value === undefined || value === '') {
+    return '-';
+  }
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return String(value);
+  }
+  return `${parsed.toFixed(2)}%`;
 }
 
 function renderCteDisagreementAlertsModal() {
@@ -14807,6 +14901,7 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
         contraparteNome,
         iss: toNumber(doc.valorIss),
         conteudoXml: null,
+        leituraFiscal: doc.leituraFiscal || null,
         ignorarNumeracaoValidacao: Boolean(doc.ignorarNumeracaoValidacao),
         ignorarNumeracaoObservacao: doc.ignorarNumeracaoObservacao || ''
       };
@@ -16955,7 +17050,7 @@ async function openXmlViewer(xmlId) {
 }
 
 async function openXmlDetails(xmlId) {
-  const xml = findXmlById(xmlId);
+  let xml = findXmlById(xmlId);
   if (!xml) {
     pushToast('XML nao encontrado.', 'error');
     return;
@@ -16963,13 +17058,14 @@ async function openXmlDetails(xmlId) {
 
   if (xml.apiNfseId && xml.clientId) {
     try {
+      xml = (await ensureNfseDetailsLoaded(xml)) || xml;
       await ensureXmlContentLoaded(xml);
     } catch (error) {
       pushToast(`Nao foi possivel enriquecer os detalhes da NFS-e agora: ${toErrorMessage(error)}`, 'info');
     }
   }
 
-  openModal({ kind: 'xml-details', xmlId });
+  openModal({ kind: 'xml-details', xmlId: xml.id });
 }
 
 async function updateXmlNumberingValidation(xmlId, ignore) {
@@ -18178,6 +18274,22 @@ async function ensureXmlContentLoaded(xml) {
   }
 
   xml.conteudoXml = rawXml;
+}
+
+async function ensureNfseDetailsLoaded(xml) {
+  if (!xml.apiNfseId || !xml.clientId) {
+    throw new Error('Documento sem referencia para recuperar detalhes na API');
+  }
+
+  const raw = await apiRequest(`/nfse/${xml.apiNfseId}?clienteId=${encodeURIComponent(xml.clientId)}`);
+  const mapped = buildXmlFilesFromApi([raw], state.clients)[0] || null;
+  if (!mapped) {
+    return xml;
+  }
+
+  mapped.conteudoXml = xml.conteudoXml || null;
+  replaceDocumentInStateCollections('nfse', mapped);
+  return findXmlById(mapped.id) || mapped;
 }
 
 async function ensureNfeContentLoaded(doc) {

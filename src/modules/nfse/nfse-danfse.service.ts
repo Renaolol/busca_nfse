@@ -126,6 +126,27 @@ export interface NfseRetentionAlertData {
   entries: NfseRetentionAlertEntry[];
 }
 
+export interface NfseLeituraFiscal {
+  layout: 'padrao_nacional' | 'abrasf' | 'desconhecido';
+  localPrestacao?: string;
+  localIncidenciaIss?: string;
+  valorServico?: string;
+  valorLiquidoNfse?: string;
+  valorTotalRetencoes?: string;
+  valorIss?: string;
+  valorIssRetido?: string;
+  valorIssRetidoReal?: string;
+  aliquotaIss?: string;
+  aliquotaRealIss?: string;
+  retencaoIss?: string;
+  retencaoFederal?: 'Retido' | 'Normal';
+  totalRetencoesFederais?: string;
+  statusProcessamento: 'OK' | 'Erro';
+  erroProcessamento?: string;
+  camposComProblema: string[];
+  retencoes: NfseRetentionAlertEntry[];
+}
+
 type PdfFont = '/F1' | '/F2';
 
 interface PdfField {
@@ -178,6 +199,77 @@ export class NfseDanfseService {
     return {
       hasRetention: entries.length > 0,
       entries
+    };
+  }
+
+  extractLeituraFiscal(xml: string): NfseLeituraFiscal {
+    const extracted = this.extractFromXml(xml);
+    const retencoes = this.extractRetentionAlertData(xml).entries;
+    const valorServico = this.toNumber(extracted.valorServico) ?? 0;
+    const valorIss = this.toNumber(extracted.valorIss) ?? 0;
+    const valorTotalRetencoes = this.toNumber(extracted.valorTotalRetencoes);
+    const valorIssRetido = this.toNumber(extracted.valorIssRetido);
+    const irrf = this.toNumber(extracted.valorIrrf) ?? 0;
+    const inss = this.toNumber(extracted.valorContribuicaoPrevidenciaria) ?? 0;
+    const csll = this.toNumber(extracted.valorContribuicoesSociais) ?? 0;
+    const pis = this.toNumber(extracted.valorPis) ?? 0;
+    const cofins = this.toNumber(extracted.valorCofins) ?? 0;
+    const totalRetencoesFederais = irrf + inss + csll + pis + cofins;
+    const retencaoIss = this.describeRetencaoIss(extracted.retencaoIss, extracted.valorIssRetido);
+    const valorIssRetidoReal =
+      valorIssRetido ??
+      (valorTotalRetencoes !== undefined ? Math.max(valorTotalRetencoes - totalRetencoesFederais, 0) : undefined);
+    const aliquotaRealIss =
+      valorIssRetidoReal !== undefined && valorServico > 0 ? Number(((valorIssRetidoReal / valorServico) * 100).toFixed(2)) : undefined;
+
+    const camposComProblema: string[] = [];
+    if (valorServico === 0) {
+      if ((valorIssRetidoReal ?? 0) > 0) {
+        camposComProblema.push('Valor Servico', 'ISS Retido Real');
+      }
+      if (valorIss > 0) {
+        camposComProblema.push('ISS');
+      }
+      if (inss > 0) {
+        camposComProblema.push('INSS');
+      }
+      if (irrf > 0) {
+        camposComProblema.push('IRRF');
+      }
+      if (csll > 0) {
+        camposComProblema.push('CSLL');
+      }
+      if (pis > 0) {
+        camposComProblema.push('PIS');
+      }
+      if (cofins > 0) {
+        camposComProblema.push('COFINS');
+      }
+    }
+
+    return {
+      layout: this.detectLeituraFiscalLayout(xml),
+      localPrestacao: this.safeValue(extracted.localPrestacao) !== '-' ? extracted.localPrestacao ?? undefined : undefined,
+      localIncidenciaIss:
+        this.safeValue(extracted.municipioIncidenciaIssqn) !== '-' ? extracted.municipioIncidenciaIssqn ?? undefined : undefined,
+      valorServico: this.toFixedCurrencyString(valorServico),
+      valorLiquidoNfse: this.toFixedCurrencyString(this.toNumber(extracted.valorLiquidoNfse)),
+      valorTotalRetencoes: this.toFixedCurrencyString(valorTotalRetencoes),
+      valorIss: this.toFixedCurrencyString(valorIss),
+      valorIssRetido: this.toFixedCurrencyString(valorIssRetido),
+      valorIssRetidoReal: this.toFixedCurrencyString(valorIssRetidoReal),
+      aliquotaIss: this.toFixedRateString(this.toNumber(extracted.aliquotaIss)),
+      aliquotaRealIss: this.toFixedRateString(aliquotaRealIss),
+      retencaoIss,
+      retencaoFederal: totalRetencoesFederais > 0 ? 'Retido' : 'Normal',
+      totalRetencoesFederais: this.toFixedCurrencyString(totalRetencoesFederais),
+      statusProcessamento: camposComProblema.length > 0 ? 'Erro' : 'OK',
+      erroProcessamento:
+        camposComProblema.length > 0
+          ? 'Divisao por zero evitada: valor do servico zerado para calculo de aliquotas e retencoes.'
+          : undefined,
+      camposComProblema: Array.from(new Set(camposComProblema)),
+      retencoes
     };
   }
 
@@ -2442,6 +2534,44 @@ export class NfseDanfseService {
       return 'Nao Retido';
     }
     return normalized;
+  }
+
+  private detectLeituraFiscalLayout(xml: string): NfseLeituraFiscal['layout'] {
+    if (
+      /<(?:\w+:)?CompNfse\b/.test(xml) ||
+      /<(?:\w+:)?InfNfse\b/.test(xml) ||
+      /<(?:\w+:)?DeclaracaoPrestacaoServico\b/.test(xml) ||
+      /abrasf/i.test(xml)
+    ) {
+      return 'abrasf';
+    }
+
+    if (
+      /<(?:\w+:)?infDPS\b/.test(xml) ||
+      /<(?:\w+:)?DPS\b/.test(xml) ||
+      /<(?:\w+:)?infNFSe\b/.test(xml) ||
+      /sped\.fazenda\.gov\.br\/nfse/i.test(xml)
+    ) {
+      return 'padrao_nacional';
+    }
+
+    return 'desconhecido';
+  }
+
+  private toFixedCurrencyString(value?: number | null): string | undefined {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    return value.toFixed(2);
+  }
+
+  private toFixedRateString(value?: number | null): string | undefined {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+
+    return value.toFixed(2);
   }
 
   private describeTributacaoIssqn(value?: string | null): string | undefined {

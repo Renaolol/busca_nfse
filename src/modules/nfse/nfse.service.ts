@@ -12,7 +12,7 @@ import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardStatsQueryDto } from './dto/dashboard-stats.dto';
 import { DownloadLoteDto } from './dto/download-lote.dto';
-import { DanfseRenderInput, NfseDanfseService } from './nfse-danfse.service';
+import { DanfseRenderInput, NfseDanfseService, NfseLeituraFiscal } from './nfse-danfse.service';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { ListNfseGapAuditsQueryDto } from './dto/list-gap-audits.dto';
 import {
@@ -1144,6 +1144,7 @@ export class NfseService {
     NfseDocumento & {
       eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
       retencaoIss?: string | null;
+      leituraFiscal?: NfseLeituraFiscal | null;
     }
   > {
     if (!doc.xmlPath) {
@@ -1173,7 +1174,8 @@ export class NfseService {
         razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
         razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
         municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome ?? null,
-        retencaoIss: parsed.retencaoIss ?? null
+        retencaoIss: parsed.retencaoIss ?? null,
+        leituraFiscal: this.danfse.extractLeituraFiscal(xml)
       };
     } catch (error) {
       this.logger.warn(`Falha ao enriquecer detalhes da NFS-e ${doc.id}: ${this.toErrorMessage(error)}`);
