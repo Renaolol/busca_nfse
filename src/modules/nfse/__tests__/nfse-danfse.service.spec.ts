@@ -167,7 +167,7 @@ describe('NfseDanfseService', () => {
     expect(content).toContain('88020-900');
     expect(content).toContain('15/06/2026');
     expect(content).not.toContain('14/06/2026');
-    expect(content).toContain('Retido');
+    expect(content).toContain('Nao Retido');
     expect(content).toContain('1.566,72');
     expect(content).toContain('Servico de publicidade institucional');
   });
@@ -321,5 +321,104 @@ describe('NfseDanfseService', () => {
     expect(content).toContain('2,40 %');
     expect(content).toContain('ISSQN Apurado');
     expect(content).toContain('R$ 21,36');
+  });
+
+  it('prioriza o valor de ISS retido quando o codigo de retencao vier inconsistente no XML', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse versao="1.00">
+    <InfNfse>
+      <Numero>798</Numero>
+      <CodigoVerificacao>42134012219893422000161000000000079826079564386937</CodigoVerificacao>
+      <DataEmissao>2026-07-31T10:15:00-03:00</DataEmissao>
+      <ValoresNfse>
+        <BaseCalculo>12600.00</BaseCalculo>
+        <Aliquota>3.00</Aliquota>
+        <ValorIss>378.00</ValorIss>
+        <ValorIssRetido>378.00</ValorIssRetido>
+      </ValoresNfse>
+      <PrestadorServico>
+        <IdentificacaoPrestador>
+          <CpfCnpj>
+            <Cnpj>19893422000161</Cnpj>
+          </CpfCnpj>
+        </IdentificacaoPrestador>
+        <RazaoSocial>Prestador Exemplo LTDA</RazaoSocial>
+      </PrestadorServico>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <Competencia>2026-07-31T00:00:00</Competencia>
+          <Servico>
+            <Valores>
+              <ValorServicos>12600.00</ValorServicos>
+              <ValorIss>378.00</ValorIss>
+              <ValorIssRetido>378.00</ValorIssRetido>
+            </Valores>
+            <IssRetido>1</IssRetido>
+            <Discriminacao>Servico com ISS retido no tomador</Discriminacao>
+          </Servico>
+          <Tomador>
+            <IdentificacaoTomador>
+              <CpfCnpj>
+                <Cnpj>00000000000191</Cnpj>
+              </CpfCnpj>
+            </IdentificacaoTomador>
+            <RazaoSocial>Tomador Exemplo SA</RazaoSocial>
+          </Tomador>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`;
+
+    const pdf = service.generateFromXml(xml, {
+      chaveAcesso: '42134012219893422000161000000000079826079564386937'
+    });
+
+    const content = pdf.toString('latin1');
+
+    expect(content).toContain('Retencao do ISSQN');
+    expect(content).toContain('Retido');
+    expect(content).toContain('ISSQN Retido');
+    expect(content).toContain('R$ 378,00');
+  });
+
+  it('interpreta IssRetido=1 como retido mesmo sem ValorIssRetido informado', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse versao="1.00">
+    <InfNfse>
+      <Numero>799</Numero>
+      <CodigoVerificacao>42134012219893422000161000000000079926079564386938</CodigoVerificacao>
+      <DataEmissao>2026-07-31T10:20:00-03:00</DataEmissao>
+      <ValoresNfse>
+        <BaseCalculo>1000.00</BaseCalculo>
+        <Aliquota>3.00</Aliquota>
+        <ValorIss>30.00</ValorIss>
+      </ValoresNfse>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <Servico>
+            <Valores>
+              <ValorServicos>1000.00</ValorServicos>
+              <ValorIss>30.00</ValorIss>
+            </Valores>
+            <IssRetido>1</IssRetido>
+            <Discriminacao>Servico com codigo de ISS retido</Discriminacao>
+          </Servico>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`;
+
+    const pdf = service.generateFromXml(xml, {
+      chaveAcesso: '42134012219893422000161000000000079926079564386938'
+    });
+
+    const content = pdf.toString('latin1');
+
+    expect(content).toContain('Retencao do ISSQN');
+    expect(content).toContain('Retido');
   });
 });

@@ -62,6 +62,7 @@ export interface DanfseRenderInput {
   valorTotalIbscbs?: string | null;
   valorLiquidoComIbscbs?: string | null;
   valorIss?: string | null;
+  valorIssRetido?: string | null;
   baseCalculoIss?: string | null;
   retencaoIss?: string | null;
   aliquotaIss?: string | null;
@@ -162,7 +163,7 @@ export class NfseDanfseService {
   extractRetentionAlertData(xml: string): NfseRetentionAlertData {
     const extracted = this.extractFromXml(xml);
     const entries: NfseRetentionAlertEntry[] = [];
-    const issRetido = this.describeRetencaoIss(extracted.retencaoIss) === 'Retido';
+    const issRetido = this.describeRetencaoIss(extracted.retencaoIss, extracted.valorIssRetido) === 'Retido';
 
     if (issRetido) {
       entries.push({ code: 'iss', label: 'ISS retido' });
@@ -478,7 +479,7 @@ export class NfseDanfseService {
             field('Calculo do BM', input.calculoBeneficioMunicipal),
             field('BC ISSQN', money(input.baseCalculoIss)),
             field('Aliquota Aplicada', this.formatAliquota(input.aliquotaIss)),
-            field('Retencao do ISSQN', this.describeRetencaoIss(input.retencaoIss)),
+            field('Retencao do ISSQN', this.describeRetencaoIss(input.retencaoIss, input.valorIssRetido)),
             field('ISSQN Apurado', money(input.valorIss))
           ]
     });
@@ -520,7 +521,7 @@ export class NfseDanfseService {
         field('Valor do Servico', money(input.valorServico)),
         field('Desconto Condicionado', money(input.valorDescontoCondicionado)),
         field('Desconto Incondicionado', money(input.valorDescontoIncondicionado)),
-        field('ISSQN Retido', this.describeRetencaoIss(input.retencaoIss)),
+        field('ISSQN Retido', money(input.valorIssRetido)),
         field('Total das Retencoes Federais', money(this.totalRetencoesFederais(input))),
         field('PIS/COFINS - Debito Apur. Propria', money(this.sumValues(input.valorPis, input.valorCofins))),
         field('Total das Retencoes (ISSQN / Federais)', money(input.valorTotalRetencoes), 2),
@@ -944,7 +945,7 @@ export class NfseDanfseService {
       pushField('Calculo do BM', this.safeValue(input.calculoBeneficioMunicipal));
       pushField('BC ISSQN', this.safeValue(this.formatMoney(input.baseCalculoIss)));
       pushField('Aliquota Aplicada', this.safeValue(this.formatAliquota(input.aliquotaIss)));
-      pushField('Retencao do ISSQN', this.safeValue(this.describeRetencaoIss(input.retencaoIss)));
+      pushField('Retencao do ISSQN', this.safeValue(this.describeRetencaoIss(input.retencaoIss, input.valorIssRetido)));
       pushField('ISSQN Apurado', this.safeValue(this.formatMoney(input.valorIss)));
     }
 
@@ -987,7 +988,7 @@ export class NfseDanfseService {
     pushField('Valor do Servico', this.safeValue(this.formatMoney(input.valorServico)));
     pushField('Desconto Condicionado', this.safeValue(this.formatMoney(input.valorDescontoCondicionado)));
     pushField('Desconto Incondicionado', this.safeValue(this.formatMoney(input.valorDescontoIncondicionado)));
-    pushField('ISSQN Retido', this.safeValue(this.describeRetencaoIss(input.retencaoIss)));
+    pushField('ISSQN Retido', this.safeValue(this.formatMoney(input.valorIssRetido)));
     pushField('Total das Retencoes Federais', this.safeValue(this.formatMoney(this.totalRetencoesFederais(input))));
     pushField('PIS/COFINS - Debito Apur. Propria', this.safeValue(this.formatMoney(this.sumValues(input.valorPis, input.valorCofins))));
     pushField('Total das Retencoes (ISSQN / Federais)', this.safeValue(this.formatMoney(input.valorTotalRetencoes)));
@@ -1359,6 +1360,13 @@ export class NfseDanfseService {
       valorTotalIbscbs,
       valorLiquidoComIbscbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'vTotNF']]),
       valorIss: this.extract(xml, ['valorIss', 'valorISS', 'ValorIss', 'vISSQN', 'vISS']),
+      valorIssRetido: this.extractFromPaths(xml, [
+        ['infNFSe', 'valores', 'vISSRet'],
+        ['valores', 'vISSRet'],
+        ['InfNfse', 'ValoresNfse', 'ValorIssRetido'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorIssRetido'],
+        ['InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorIssRetido']
+      ]),
       baseCalculoIss: this.extractFromPaths(xml, [
         ['infNFSe', 'valores', 'vBC'],
         ['valores', 'vBC'],
@@ -2417,16 +2425,21 @@ export class NfseDanfseService {
     return `${parsed.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} %`;
   }
 
-  private describeRetencaoIss(value?: string | null): string | undefined {
+  private describeRetencaoIss(value?: string | null, valorIssRetido?: string | null): string | undefined {
+    const valorRetido = this.toNumber(valorIssRetido);
+    if (valorRetido !== undefined && valorRetido > 0) {
+      return 'Retido';
+    }
+
     const normalized = this.safeValue(value);
     if (normalized === '-') {
       return undefined;
     }
     if (normalized === '1') {
-      return 'Nao Retido';
+      return 'Retido';
     }
     if (normalized === '2') {
-      return 'Retido';
+      return 'Nao Retido';
     }
     return normalized;
   }
