@@ -5219,28 +5219,21 @@ function renderXmlReader30Summary() {
     return '';
   }
 
-  const client = findClientById(query.cliente);
   const totals = getXmlReader30NfeSummaryTotals(Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : []);
-  const periodText =
-    query.emissaoInicio || query.emissaoFim
-      ? `${formatDate(query.emissaoInicio || '')} ate ${formatDate(query.emissaoFim || '')}`
-      : 'Sem período';
+  const totalXmls = Number(state.xmlReader30.total || state.xmlReader30.results.length || 0);
 
   return `
     <article class="card" style="box-shadow:none; border-style:dashed; margin-top: 2px;">
-      <div class="progress-meta">
-        <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
-        <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
-        <span>Valor total das notas: <strong>${escapeHtml(formatCurrency(totals.totalNotasValue))}</strong></span>
-        <span>Somatorio ICMS: <strong>${escapeHtml(formatCurrency(totals.totalIcmsValue))}</strong></span>
-        <span>Resultado: <strong>${escapeHtml(String(state.xmlReader30.total || state.xmlReader30.results.length || 0))} XML(s)</strong></span>
-        <span>Acervo lido: <strong>${escapeHtml(formatXmlReader30SourceTotals(state.xmlReader30.sourceTotals))}</strong></span>
-        <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.xmlReader30.lastSearchedAt || new Date().toISOString()))}</strong></span>
+      <div class="xml-reader30-summary-meta">
+        <span>Resultado: <strong>${escapeHtml(String(totalXmls))} XML(s)</strong></span>
+        <span>Valor Total das notas: <strong>${escapeHtml(formatCurrency(totals.totalNotasValue))}</strong></span>
+        <span>Valor Total ICMS: <strong>${escapeHtml(formatCurrency(totals.totalIcmsValue))}</strong></span>
+        <span>Valor ICMS Monofasico: <strong>${escapeHtml(formatCurrency(totals.totalIcmsMonofasicoValue))}</strong></span>
+        <span>Valor ICMS ST RET: <strong>${escapeHtml(formatCurrency(totals.totalIcmsStRetValue))}</strong></span>
       </div>
     </article>
   `;
 }
-
 function renderXmlReader30EmptyState() {
   return `
     <div class="compare-history-empty">
@@ -6236,12 +6229,29 @@ function getXmlReader30NfeSummaryTotals(rows) {
     return sum + toNumber(row?.valorIcmsRaw ?? row?.valorIcms ?? 0);
   }, 0);
 
+  const totalIcmsMonofasicoValue = itemRows.reduce((sum, row) => {
+    if (!shouldIncludeDocumentValueInSum(row?.raw || row)) {
+      return sum;
+    }
+
+    return sum + toNumber(row?.vICMSMonoRetRaw ?? row?.vICMSMonoRet ?? 0);
+  }, 0);
+
+  const totalIcmsStRetValue = itemRows.reduce((sum, row) => {
+    if (!shouldIncludeDocumentValueInSum(row?.raw || row)) {
+      return sum;
+    }
+
+    return sum + toNumber(row?.icmsStRetRaw ?? row?.icmsStRet ?? 0);
+  }, 0);
+
   return {
     totalNotasValue,
-    totalIcmsValue
+    totalIcmsValue,
+    totalIcmsMonofasicoValue,
+    totalIcmsStRetValue
   };
 }
-
 function renderXmlReader30ResultsTableLegacyUnusedOld2(results) {
   return `
     <article class="card" style="margin-top: 2px;">
