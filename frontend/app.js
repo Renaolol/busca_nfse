@@ -1442,7 +1442,8 @@ function onDocumentClick(event) {
           : `A NFS-e ${xml.numeroNfse || xml.chaveAcesso || xml.id} voltara a participar da validacao de numeracao e da auditoria de lacunas.`,
         confirmLabel: ignore ? 'Desconsiderar documento' : 'Voltar para numeracao',
         intent: ignore ? 'warning' : 'info',
-        payload: { type: 'xml-toggle-numbering-validation', xmlId, ignore }
+        payload: { type: 'xml-toggle-numbering-validation', xmlId, ignore },
+        returnTo: state.modal ? cloneModalState(state.modal) : null
       });
       return;
     }
@@ -1570,6 +1571,12 @@ function onDocumentClick(event) {
       if (!alertId) {
         return;
       }
+      const alert = state.alerts.find((item) => item.id === alertId);
+      if (isNfseRetentionAlert(alert)) {
+        const returnToModal = state.modal ? cloneModalState(state.modal) : null;
+        void openAlertDocument(alertId, { returnToModal, preferDetails: true });
+        return;
+      }
       state.modal = null;
       openDrawer({ kind: 'alert-details', alertId });
       return;
@@ -1579,7 +1586,8 @@ function onDocumentClick(event) {
       if (!alertId) {
         return;
       }
-      void openAlertDocument(alertId);
+      const returnToModal = state.modal ? cloneModalState(state.modal) : null;
+      void openAlertDocument(alertId, { returnToModal, preferDetails: true });
       return;
     }
     case 'alert-resolve': {
@@ -5411,7 +5419,7 @@ function renderXmlReader30NfeResultsTableReorderable(results) {
         </div>
       </div>
       <div class="table-wrap xml-reader30-pan-scroll">
-        <table class="xml-reader30-table xml-reader30-reorderable-table" style="min-width: ${minWidth}px;">
+        <table class="xml-reader30-table xml-reader30-reorderable-table xml-reader30-nfe-reorderable-table" style="min-width: ${minWidth}px;">
           <thead>
             <tr>
               ${visibleColumns
@@ -5548,7 +5556,7 @@ function getXmlReader30NfeColumnDefinitions() {
       label: 'Produto',
       className: 'xml-reader30-product',
       html: true,
-      render: (row) => `<span class="row-title">${escapeHtml(row.produto || '-')}</span>`
+      render: (row) => `<span class="row-title">${escapeHtml(normalizeXmlReader30InlineText(row.produto))}</span>`
     },
     {
       key: 'quantidade',
@@ -5643,7 +5651,7 @@ function getXmlReader30NfeColumnMinWidth(columnKey) {
     case 'dataEmissao':
       return 125;
     case 'produto':
-      return 620;
+      return 180;
     case 'quantidade':
       return 84;
     case 'valorUnitario':
@@ -5677,6 +5685,14 @@ function formatXmlReader30UnitValue(value) {
   }
 
   return value ? String(value) : '-';
+}
+
+function normalizeXmlReader30InlineText(value) {
+  const normalized = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return normalized || '-';
 }
 
 function renderXmlReader30SortHeader(key, label) {
@@ -5884,7 +5900,7 @@ function expandXmlReader30NfeRows(rows) {
           statusNf: baseStatusLabel,
           statusTone: baseStatusTone,
           dataEmissaoLabel: baseDataEmissao,
-          produto: row.productLabel || '-',
+          produto: normalizeXmlReader30InlineText(row.productLabel),
           quantidade: '0.00',
           valorUnitario: '-',
           valorTotal: '-',
@@ -5910,7 +5926,7 @@ function expandXmlReader30NfeRows(rows) {
       statusNf: baseStatusLabel,
       statusTone: baseStatusTone,
       dataEmissaoLabel: baseDataEmissao,
-      produto: item.description || '-',
+      produto: normalizeXmlReader30InlineText(item.description),
       quantidade: formatXmlReader30QuantityValue(item.quantity),
       valorUnitario: item.unitValueRaw || item.unitValue || '-',
       valorTotal: item.totalValueRaw || item.totalValue || '-',
@@ -8486,6 +8502,8 @@ function renderXmlDetailsModal(xmlId) {
     return '';
   }
   const syncEventsDisabled = state.xmlEventsSyncRunning || !canSyncXmlEvents(xml) ? 'disabled' : '';
+  const sourceAlert = state.modal?.kind === 'xml-details' && state.modal.alertId ? state.alerts.find((item) => item.id === state.modal.alertId) || null : null;
+  const closeLabel = getModalCloseActionLabel(state.modal);
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -8513,6 +8531,7 @@ function renderXmlDetailsModal(xmlId) {
             ${detailItem('Data de cancelamento', xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '-')}
             ${detailItem('Resumo de eventos', xml.eventosResumo || '-')}
           </div>
+          ${renderNfseRetentionSummarySection(xml, sourceAlert)}
           ${renderDocumentInsightsSection('nfse', xml)}
           <div style="margin-top:18px;">
             <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
@@ -8520,6 +8539,14 @@ function renderXmlDetailsModal(xmlId) {
           </div>
         </div>
         <div class="modal-footer">
+          <button class="btn secondary" data-action="close-modal">${escapeHtml(closeLabel)}</button>
+          ${
+            sourceAlert
+              ? sourceAlert.status === 'Resolvido'
+                ? `<button class="btn secondary" type="button" data-action="alert-unresolve" data-alert-id="${escapeHtml(sourceAlert.id)}">Reabrir alerta</button>`
+                : `<button class="btn secondary" type="button" data-action="alert-resolve" data-alert-id="${escapeHtml(sourceAlert.id)}">Marcar como resolvido</button>`
+              : ''
+          }
           <button class="btn secondary" data-action="xml-toggle-numbering-validation" data-xml-id="${xml.id}">${escapeHtml(
             xml.ignorarNumeracaoValidacao ? 'Voltar numeracao' : 'Desconsiderar numeracao'
           )}</button>
@@ -8777,6 +8804,57 @@ function renderDocumentInsightsSection(documentType, doc) {
   ].join('');
 
   return renderDocumentInsightsBlock('Servico destacado', `<div class="form-grid two">${cards}</div>`);
+}
+
+function renderNfseRetentionSummarySection(xml, alert = null) {
+  const leituraFiscal = normalizeNfseLeituraFiscal(xml?.leituraFiscal);
+  const alertRetencoes = Array.isArray(alert?.retencoes) ? alert.retencoes.map((entry) => String(entry || '').trim()).filter(Boolean) : [];
+  const leituraRetencoes = Array.isArray(leituraFiscal?.retencoes) ? leituraFiscal.retencoes : [];
+  const combinedRetencoes = [...new Set([...alertRetencoes, ...leituraRetencoes.map((entry) => String(entry?.label || '').trim()).filter(Boolean)])];
+
+  if (!combinedRetencoes.length && !leituraFiscal && !alert) {
+    return '';
+  }
+
+  const cards = [
+    detailItem('Retencoes detectadas', combinedRetencoes.length ? combinedRetencoes.join(' • ') : '-'),
+    detailItem('Valor retido total', formatOptionalCurrency(leituraFiscal?.valorTotalRetencoes)),
+    detailItem('ISS retido real', formatOptionalCurrency(leituraFiscal?.valorIssRetidoReal)),
+    detailItem('Retencao federal', leituraFiscal?.retencaoFederal || '-'),
+    detailItem('Status do alerta', alert?.status || '-'),
+    detailItem('Severidade', alert?.severity || '-')
+  ].join('');
+
+  const retencoesRows = leituraRetencoes.length
+    ? leituraRetencoes.map((entry) => ({
+        imposto: entry.label || '-',
+        valor: entry.amount || 'Detectado no XML'
+      }))
+    : combinedRetencoes.map((label) => ({
+        imposto: label,
+        valor: 'Detectado no XML'
+      }));
+
+  const retencoesTable = retencoesRows.length
+    ? renderDocumentInsightsTable(retencoesRows, [
+        { key: 'imposto', label: 'Retencao' },
+        { key: 'valor', label: 'Valor' }
+      ])
+    : '';
+
+  const alertSummary = alert
+    ? `
+        <div style="margin-top:14px; padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb;">
+          <div><strong>Resumo do alerta:</strong> ${escapeHtml(alert.descricao || '-')}</div>
+          <div style="margin-top:6px;"><strong>Sugestao:</strong> ${escapeHtml(alert.sugestaoAcao || '-')}</div>
+        </div>
+      `
+    : '';
+
+  return renderDocumentInsightsBlock(
+    'Resumo das retencoes',
+    `<div class="form-grid three">${cards}</div>${retencoesTable ? `<div style="margin-top:14px;">${retencoesTable}</div>` : ''}${alertSummary}`
+  );
 }
 
 function renderDocumentInsightsBlock(title, content) {
@@ -9690,6 +9768,7 @@ function renderXmlViewerModal(xmlId) {
   if (!xml) {
     return '';
   }
+  const closeLabel = getModalCloseActionLabel(state.modal);
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -9702,7 +9781,7 @@ function renderXmlViewerModal(xmlId) {
           <pre class="xml-viewer">${escapeHtml(formatXml(xml.conteudoXml))}</pre>
         </div>
         <div class="modal-footer">
-          <button class="btn secondary" data-action="close-modal">Fechar</button>
+          <button class="btn secondary" data-action="close-modal">${escapeHtml(closeLabel)}</button>
           <button class="btn secondary" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
           <button class="btn primary" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
         </div>
@@ -13829,11 +13908,13 @@ function unresolveAlert(alertId) {
   })();
 }
 
-async function openAlertDocument(alertId) {
+async function openAlertDocument(alertId, options = {}) {
   const alert = state.alerts.find((item) => item.id === alertId);
   if (!alert) {
     return;
   }
+  const returnToModal = options.returnToModal ? cloneModalState(options.returnToModal) : null;
+  const preferDetails = options.preferDetails !== false;
 
   if (alert.tipo === 'CT-e') {
     let doc = findCteForAlert(alert);
@@ -13887,7 +13968,14 @@ async function openAlertDocument(alertId) {
 
     state.drawer = null;
     state.modal = null;
-    await openXmlDetails(doc.id);
+    if (preferDetails) {
+      await openXmlDetails(doc.id, {
+        returnToModal,
+        alertId: alert.id
+      });
+    } else {
+      await openXmlViewer(doc.id, { returnToModal });
+    }
     return;
   }
 
@@ -14159,9 +14247,17 @@ function getOpenCteDisagreementAlerts() {
   return getCteDisagreementAlerts().filter((alert) => alert.status !== 'Resolvido');
 }
 
+function isNfseRetentionAlert(alert) {
+  return Boolean(
+    alert &&
+      alert.tipo === 'NFS-e' &&
+      (alert.origem === 'nfse-retencao-entrada' || (Array.isArray(alert.retencoes) && alert.retencoes.length > 0))
+  );
+}
+
 function getNfseRetentionAlerts() {
   return [...state.alerts]
-    .filter((alert) => alert.origem === 'nfse-retencao-entrada' || (alert.tipo === 'NFS-e' && Array.isArray(alert.retencoes) && alert.retencoes.length > 0))
+    .filter((alert) => isNfseRetentionAlert(alert))
     .sort((a, b) => {
       const leftResolved = a.status === 'Resolvido' ? 1 : 0;
       const rightResolved = b.status === 'Resolvido' ? 1 : 0;
@@ -14191,8 +14287,33 @@ function closeModal() {
   if (!state.modal) {
     return;
   }
-  state.modal = null;
+  state.modal = state.modal.returnTo ? cloneModalState(state.modal.returnTo) : null;
   render();
+}
+
+function cloneModalState(modal) {
+  if (!modal || typeof modal !== 'object') {
+    return null;
+  }
+
+  return {
+    ...modal,
+    returnTo: modal.returnTo ? cloneModalState(modal.returnTo) : null
+  };
+}
+
+function getModalCloseActionLabel(modal) {
+  const returnTo = modal?.returnTo;
+  if (!returnTo) {
+    return 'Fechar';
+  }
+  if (returnTo.kind === 'nfse-retention-alerts') {
+    return 'Voltar aos alertas';
+  }
+  if (returnTo.kind === 'xml-details' || returnTo.kind === 'nfe-details' || returnTo.kind === 'cte-details') {
+    return 'Voltar aos detalhes';
+  }
+  return 'Voltar';
 }
 
 function openPastNsuRecoveryReportModal(params) {
@@ -18014,7 +18135,7 @@ async function downloadCteXmlById(cteId) {
   pushToast(`Download do CT-e ${doc.numeroCte || doc.chaveAcesso} iniciado.`, 'success');
 }
 
-async function openXmlViewer(xmlId) {
+async function openXmlViewer(xmlId, options = {}) {
   const xml = findXmlById(xmlId);
   if (!xml) {
     pushToast('XML nao encontrado.', 'error');
@@ -18023,13 +18144,17 @@ async function openXmlViewer(xmlId) {
 
   try {
     await ensureXmlContentLoaded(xml);
-    openModal({ kind: 'xml-view', xmlId });
+    openModal({
+      kind: 'xml-view',
+      xmlId,
+      returnTo: options.returnToModal ? cloneModalState(options.returnToModal) : state.modal?.kind === 'xml-details' ? cloneModalState(state.modal) : null
+    });
   } catch (error) {
     pushToast(`Falha ao carregar XML: ${toErrorMessage(error)}`, 'error');
   }
 }
 
-async function openXmlDetails(xmlId) {
+async function openXmlDetails(xmlId, options = {}) {
   let xml = findXmlById(xmlId);
   if (!xml) {
     pushToast('XML nao encontrado.', 'error');
@@ -18045,7 +18170,12 @@ async function openXmlDetails(xmlId) {
     }
   }
 
-  openModal({ kind: 'xml-details', xmlId: xml.id });
+  openModal({
+    kind: 'xml-details',
+    xmlId: xml.id,
+    alertId: String(options.alertId || '').trim(),
+    returnTo: options.returnToModal ? cloneModalState(options.returnToModal) : null
+  });
 }
 
 async function updateXmlNumberingValidation(xmlId, ignore) {
