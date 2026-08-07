@@ -9,7 +9,7 @@ const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
 const COMPARE_SPED_HISTORY_LIMIT = 10;
 const XML_READER30_NFE_COLUMN_ORDER_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-order:v1';
-const XML_READER30_SCROLL_SELECTORS = ['.xml-reader30-pan-scroll'];
+const XML_READER30_SCROLL_SELECTORS = ['.xml-reader30-top-scroll', '.xml-reader30-pan-scroll'];
 const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'select',
   'numeroNf',
@@ -17,10 +17,13 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'nfCancelada',
   'dataEmissao',
   'produto',
+  'quantidade',
+  'valorUnitario',
   'valorTotal',
   'valorTotalNfXml',
   'icmsStRet',
   'cstCsosn',
+  'cfop',
   'baseCalculoIcms',
   'aliquotaIcms',
   'valorIcms',
@@ -2207,8 +2210,6 @@ function captureScrollState(selectors = []) {
   return {
     contentTop: contentNode instanceof HTMLElement ? contentNode.scrollTop : 0,
     contentLeft: contentNode instanceof HTMLElement ? contentNode.scrollLeft : 0,
-    windowTop: Number(window.scrollY || 0),
-    windowLeft: Number(window.scrollX || 0),
     extras
   };
 }
@@ -2222,14 +2223,6 @@ function restoreScrollState(scrollState) {
   if (contentNode instanceof HTMLElement) {
     contentNode.scrollTop = Number(scrollState.contentTop || 0);
     contentNode.scrollLeft = Number(scrollState.contentLeft || 0);
-  }
-
-  if (typeof window.scrollTo === 'function') {
-    window.scrollTo({
-      top: Number(scrollState.windowTop || 0),
-      left: Number(scrollState.windowLeft || 0),
-      behavior: 'auto'
-    });
   }
 
   (Array.isArray(scrollState.extras) ? scrollState.extras : []).forEach((entry) => {
@@ -5351,7 +5344,7 @@ function renderXmlReader30ResultsTable(results) {
   const sourceRows = Array.isArray(results) ? results : [];
   const currentDocumentType = state.xmlReader30.lastQuery?.documento || 'todos';
   if (currentDocumentType === 'nfe') {
-    return renderXmlReader30NfeResultsTableReorderable(sourceRows);
+    return renderXmlReader30NfeResultsTable(sourceRows);
   }
 
   const selectableRows = sourceRows.filter((row) => getXmlReader30SelectionKey(row));
@@ -5439,9 +5432,9 @@ function renderXmlReader30ResultsTable(results) {
 
 function renderXmlReader30NfeResultsTable(results) {
   const sortedRows = sortXmlReader30Results(results, { documentType: 'nfe' });
-  const selectableRows = sortedRows.filter((row) => getXmlReader30SelectionKey(row));
-  const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
   const displayedRows = buildXmlReader30NfeGroupedRows(sortedRows);
+  const selectableRows = displayedRows.filter((row) => getXmlReader30SelectionKey(row));
+  const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
 
   return `
     <article class="card" style="margin-top: 2px;">
@@ -5452,11 +5445,11 @@ function renderXmlReader30NfeResultsTable(results) {
         </div>
         <div class="stack-mini" style="align-items:flex-end;">
           ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
-          <span class="row-sub">Clique na seta para ver os produtos de cada NF-e.</span>
+          <span class="row-sub">Cada nota aparece uma vez, sem menu de produtos.</span>
         </div>
       </div>
       <div class="table-wrap">
-        <table class="xml-reader30-table" style="min-width: 1380px;">
+        <table class="xml-reader30-table" style="min-width: 1360px;">
           <thead>
             <tr>
               <th class="xml-reader30-check">Conferido</th>
@@ -5484,7 +5477,7 @@ function renderXmlReader30NfeResultsTable(results) {
           <tbody>
             ${renderTableRowsOrState({
               key: 'xmlReader30',
-              colSpan: 19,
+              colSpan: 20,
               rowsHtml: displayedRows.length
                 ? displayedRows
                     .map((row) => {
@@ -5504,7 +5497,7 @@ function renderXmlReader30NfeResultsTable(results) {
                           <td>${escapeHtml(row.nfCancelada || (row.raw?.cancelada ? 'Sim' : 'Nao'))}</td>
                           <td>${escapeHtml(row.dataEmissaoLabel || formatDate(row.dataEmissao || row.raw?.dataEmissao || ''))}</td>
                           <td class="xml-reader30-doc">
-                            ${renderXmlReader30ProductLabel(row.fornecedor || row.produto || '-')}
+                            ${renderXmlReader30ProductLabel(row.fornecedor || '-')}
                           </td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorTotal || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorTotalNfXml || '-')}</td>
@@ -5694,7 +5687,7 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
 
 function renderXmlReader30NfeFullscreenBody() {
   const results = Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : [];
-  return renderXmlReader30NfeResultsTableReorderable(results, { fullscreen: true });
+  return renderXmlReader30NfeResultsTable(results);
 }
 
 function renderXmlReader30NfeFullscreenModal() {

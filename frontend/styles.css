@@ -1800,18 +1800,8 @@ tbody tr:hover {
   background: #fff;
 }
 
-.xml-reader30-nfe-products-scroll {
-  width: 100%;
-  max-width: 100%;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-x: contain;
-  scrollbar-gutter: stable;
-}
-
 .xml-reader30-nfe-items-table {
-  width: max-content;
-  min-width: 1280px;
+  width: 100%;
   border-collapse: collapse;
   font-weight: 400;
   table-layout: auto;
@@ -1819,10 +1809,10 @@ tbody tr:hover {
 
 .xml-reader30-nfe-items-table th,
 .xml-reader30-nfe-items-table td {
-  padding: 3px 6px;
+  padding: 6px 10px;
   text-align: left;
   white-space: nowrap;
-  font-size: 11.5px;
+  font-size: 12.5px;
 }
 
 .xml-reader30-nfe-items-table thead th {
