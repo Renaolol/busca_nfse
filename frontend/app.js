@@ -17,13 +17,10 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'nfCancelada',
   'dataEmissao',
   'produto',
-  'quantidade',
-  'valorUnitario',
   'valorTotal',
   'valorTotalNfXml',
   'icmsStRet',
   'cstCsosn',
-  'cfop',
   'baseCalculoIcms',
   'aliquotaIcms',
   'valorIcms',
@@ -5439,14 +5436,11 @@ function renderXmlReader30NfeResultsTable(results) {
               <th>Status NF-e</th>
               <th>NF Cancelada?</th>
               ${renderXmlReader30SortHeader('dataEmissao', 'Data Emissao')}
-              <th>Produto</th>
-              <th>Quantidade</th>
-              <th>Valor Unitario</th>
+              <th>Fornecedor</th>
               <th>Valor Total</th>
               <th>Valor Total NF XML R$</th>
               <th>ICMS ST RET R$</th>
               <th>CST/CSOSN</th>
-              <th>CFOP</th>
               <th>Base de Calculo ICMS</th>
               <th>Aliquota ICMS (%)</th>
               <th>Valor ICMS</th>
@@ -5462,7 +5456,7 @@ function renderXmlReader30NfeResultsTable(results) {
           <tbody>
             ${renderTableRowsOrState({
               key: 'xmlReader30',
-              colSpan: 22,
+              colSpan: 19,
               rowsHtml: displayedRows.length
                 ? displayedRows
                     .map((row) => {
@@ -5482,15 +5476,12 @@ function renderXmlReader30NfeResultsTable(results) {
                           <td>${escapeHtml(row.nfCancelada || (row.raw?.cancelada ? 'Sim' : 'Nao'))}</td>
                           <td>${escapeHtml(row.dataEmissaoLabel || formatDate(row.dataEmissao || row.raw?.dataEmissao || ''))}</td>
                           <td class="xml-reader30-doc">
-                            ${renderXmlReader30ProductLabel(row.produto || '-')}
+                            ${renderXmlReader30ProductLabel(row.fornecedor || row.produto || '-')}
                           </td>
-                          <td>${escapeHtml(row.quantidade || '-')}</td>
-                          <td class="xml-reader30-money">${escapeHtml(row.valorUnitario || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorTotal || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorTotalNfXml || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.icmsStRet || '-')}</td>
                           <td>${escapeHtml(row.cstCsosn || '-')}</td>
-                          <td>${escapeHtml(row.cfop || '-')}</td>
                           <td>${escapeHtml(row.baseCalculoIcms || '-')}</td>
                           <td>${escapeHtml(row.aliquotaIcms || '-')}</td>
                           <td>${escapeHtml(row.valorIcms || '-')}</td>
@@ -5780,24 +5771,10 @@ function getXmlReader30NfeColumnDefinitions() {
     },
     {
       key: 'produto',
-      label: 'Produto',
+      label: 'Fornecedor',
       className: 'xml-reader30-product',
       html: true,
-      render: (row) => renderXmlReader30ProductLabel(row.produto)
-    },
-    {
-      key: 'quantidade',
-      label: 'Quantidade',
-      className: 'xml-reader30-quantity',
-      html: false,
-      render: (row) => row.quantidade || '-'
-    },
-    {
-      key: 'valorUnitario',
-      label: 'Valor Unitario',
-      className: 'xml-reader30-money',
-      html: false,
-      render: (row) => formatXmlReader30UnitValue(row.valorUnitario)
+      render: (row) => renderXmlReader30ProductLabel(row.fornecedor || row.produto || '-')
     },
     {
       key: 'valorTotal',
@@ -5826,13 +5803,6 @@ function getXmlReader30NfeColumnDefinitions() {
       className: 'xml-reader30-icms-code',
       html: false,
       render: (row) => row.cstCsosn || '-'
-    },
-    {
-      key: 'cfop',
-      label: 'CFOP',
-      className: 'xml-reader30-icms-cfop',
-      html: false,
-      render: (row) => row.cfop || '-'
     },
     {
       key: 'baseCalculoIcms',
@@ -5923,10 +5893,6 @@ function getXmlReader30NfeColumnMinWidth(columnKey) {
       return 125;
     case 'produto':
       return 320;
-    case 'quantidade':
-      return 84;
-    case 'valorUnitario':
-      return 118;
     case 'valorTotal':
       return 118;
     case 'valorTotalNfXml':
@@ -5935,8 +5901,6 @@ function getXmlReader30NfeColumnMinWidth(columnKey) {
       return 118;
     case 'cstCsosn':
       return 92;
-    case 'cfop':
-      return 84;
     case 'baseCalculoIcms':
       return 116;
     case 'aliquotaIcms':
@@ -6458,19 +6422,39 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
 }
 
 function getXmlReader30NfeGroupKey(row) {
-  const selectionKey = getXmlReader30SelectionKey(row);
-  if (selectionKey) {
-    return selectionKey;
+  const raw = row?.raw || {};
+  const chaveAcesso = normalizeDigits(String(raw?.chaveAcesso || row?.chaveAcesso || ''));
+  const clientId = String(raw?.clientId || row?.clientId || '').trim();
+  const numeroNfe = String(raw?.numeroNfe || row?.numeroLabel || row?.numeroNf || '').trim();
+  const serie = String(raw?.serie || row?.serie || '').trim();
+  const dataEmissao = String(raw?.dataEmissao || row?.dataEmissao || '').trim();
+  const emitenteCnpj = normalizeDigits(String(raw?.emitenteCnpj || row?.emitenteCnpj || ''));
+  const destinatarioCnpj = normalizeDigits(String(raw?.destinatarioCnpj || row?.destinatarioCnpj || ''));
+
+  if (chaveAcesso) {
+    return ['nfe', clientId || '-', chaveAcesso].join('|');
   }
 
-  const raw = row?.raw || {};
   return [
-    String(raw?.chaveAcesso || raw?.apiNfeId || raw?.id || row?.numeroLabel || row?.numeroNf || '').trim(),
-    String(raw?.serie || '').trim(),
-    String(raw?.dataEmissao || row?.dataEmissao || '').trim()
+    'nfe',
+    clientId || '-',
+    numeroNfe || '-',
+    serie || '-',
+    dataEmissao || '-',
+    emitenteCnpj || '-',
+    destinatarioCnpj || '-'
   ]
-    .filter(Boolean)
     .join('|');
+}
+
+function resolveXmlReader30NfeFornecedorLabel(row) {
+  const raw = row?.raw || row || {};
+  const contraparte = normalizeXmlReader30InlineText(raw?.contraparteNome || row?.contraparteNome || '');
+  const emitente = normalizeXmlReader30InlineText(raw?.emitenteNome || row?.emitenteNome || '');
+  const destinatario = normalizeXmlReader30InlineText(raw?.destinatarioNome || row?.destinatarioNome || '');
+  const cliente = normalizeXmlReader30InlineText(raw?.cliente || row?.cliente || '');
+
+  return contraparte || emitente || destinatario || cliente || '-';
 }
 
 function buildXmlReader30NfeGroupedRows(rows) {
@@ -6488,7 +6472,16 @@ function buildXmlReader30NfeGroupedRows(rows) {
 
     const itemRows = buildXmlReader30NfeItemRows(row);
     const current = groupedRows.get(groupKey);
-    if (!current || itemRows.length > current.itemRows.length) {
+    if (!current) {
+      groupedRows.set(groupKey, {
+        headerRow: row,
+        itemRows
+      });
+      return;
+    }
+
+    const currentItemCount = Array.isArray(current.itemRows) ? current.itemRows.length : 0;
+    if (itemRows.length > currentItemCount) {
       groupedRows.set(groupKey, {
         headerRow: row,
         itemRows
@@ -6543,14 +6536,12 @@ function buildXmlReader30NfeGroupRow(headerRow, itemRows) {
   return {
     ...base,
     selectionKey: groupKey,
+    fornecedor: resolveXmlReader30NfeFornecedorLabel(headerRow),
     produto: `${itemCount} ${itemCount === 1 ? 'produto' : 'produtos'}`,
-    quantidade: '-',
-    valorUnitario: '-',
     valorTotal: formatXmlReader30CurrencyValue(sumXmlReader30ItemsField(rows, 'valorTotal')),
     icmsStRet: formatXmlReader30CurrencyValue(sumXmlReader30ItemsField(rows, 'icmsStRetRaw')),
     icmsStRetRaw: String(sumXmlReader30ItemsField(rows, 'icmsStRetRaw')),
     cstCsosn: commonOrDiverseXmlReader30Value(rows, 'cstCsosn'),
-    cfop: commonOrDiverseXmlReader30Value(rows, 'cfop'),
     baseCalculoIcms: formatXmlReader30DecimalValue(sumXmlReader30ItemsField(rows, 'baseCalculoIcmsRaw')),
     baseCalculoIcmsRaw: String(sumXmlReader30ItemsField(rows, 'baseCalculoIcmsRaw')),
     aliquotaIcms: commonOrDiverseXmlReader30Value(rows, 'aliquotaIcms'),
@@ -6604,6 +6595,7 @@ function renderXmlReader30NfeItemsDetailRow(groupRow, colSpanCount) {
                 <th>Aliquota ICMS</th>
                 <th>ICMS</th>
                 <th>CST/CSOSN</th>
+                <th>CFOP</th>
               </tr>
             </thead>
             <tbody>
@@ -6620,6 +6612,7 @@ function renderXmlReader30NfeItemsDetailRow(groupRow, colSpanCount) {
                       <td>${escapeHtml(item.aliquotaIcms || '0')}%</td>
                       <td>${escapeHtml(formatXmlReader30CurrencyValue(item.valorIcmsRaw ?? item.valorIcms))}</td>
                       <td>${escapeHtml(item.cstCsosn || '-')}</td>
+                      <td>${escapeHtml(item.cfop || '-')}</td>
                     </tr>
                   `
                 )
@@ -6627,7 +6620,7 @@ function renderXmlReader30NfeItemsDetailRow(groupRow, colSpanCount) {
             </tbody>
             <tfoot>
               <tr class="xml-reader30-nfe-detail-total">
-                <td colspan="4">Total da NF ${escapeHtml(String(groupRow.numeroNf || '-'))}</td>
+                <td colspan="5">Total da NF ${escapeHtml(String(groupRow.numeroNf || '-'))}</td>
                 <td>${escapeHtml(formatXmlReader30CurrencyValue(totalValorTotal))}</td>
                 <td>${escapeHtml(formatXmlReader30CurrencyValue(totalBaseIcms))}</td>
                 <td></td>
