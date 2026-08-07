@@ -9,7 +9,7 @@ const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
 const COMPARE_SPED_HISTORY_LIMIT = 10;
 const XML_READER30_NFE_COLUMN_ORDER_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-order:v1';
-const XML_READER30_SCROLL_SELECTORS = ['.xml-reader30-top-scroll', '.xml-reader30-pan-scroll'];
+const XML_READER30_SCROLL_SELECTORS = ['.xml-reader30-pan-scroll'];
 const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'select',
   'numeroNf',
@@ -5597,9 +5597,6 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
         </div>
       </div>
       <div class="${viewportClassName}" style="max-height:${compactMaxHeight};">
-        <div class="xml-reader30-top-scroll" aria-hidden="true">
-          <div class="xml-reader30-top-scroll-spacer" style="min-width:${minWidth}px;"></div>
-        </div>
         <div class="${tableWrapClassName}">
           <table class="xml-reader30-table xml-reader30-reorderable-table xml-reader30-nfe-reorderable-table" style="min-width: ${minWidth}px;">
           <thead>
@@ -6601,7 +6598,8 @@ function renderXmlReader30NfeItemsDetailRow(groupRow, colSpanCount) {
     <tr class="xml-reader30-nfe-detail-row">
       <td colspan="${Math.max(1, Number(colSpanCount) || 1)}">
         <div class="xml-reader30-nfe-detail-wrap">
-          <table class="xml-reader30-nfe-items-table">
+          <div class="xml-reader30-nfe-products-scroll">
+            <table class="xml-reader30-nfe-items-table">
             <thead>
               <tr>
                 <th>Produto</th>
@@ -6646,7 +6644,8 @@ function renderXmlReader30NfeItemsDetailRow(groupRow, colSpanCount) {
                 <td></td>
               </tr>
             </tfoot>
-          </table>
+            </table>
+          </div>
         </div>
       </td>
     </tr>

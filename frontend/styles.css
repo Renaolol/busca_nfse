@@ -1800,6 +1800,13 @@ tbody tr:hover {
   background: #fff;
 }
 
+.xml-reader30-nfe-products-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .xml-reader30-nfe-items-table {
   width: 100%;
   border-collapse: collapse;
@@ -1809,10 +1816,10 @@ tbody tr:hover {
 
 .xml-reader30-nfe-items-table th,
 .xml-reader30-nfe-items-table td {
-  padding: 6px 10px;
+  padding: 4px 8px;
   text-align: left;
   white-space: nowrap;
-  font-size: 12.5px;
+  font-size: 12px;
 }
 
 .xml-reader30-nfe-items-table thead th {
