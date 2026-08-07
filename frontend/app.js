@@ -5432,7 +5432,7 @@ function renderXmlReader30ResultsTable(results) {
 
 function renderXmlReader30NfeResultsTable(results) {
   const sortedRows = sortXmlReader30Results(results, { documentType: 'nfe' });
-  const displayedRows = buildXmlReader30NfeGroupedRows(sortedRows);
+  const displayedRows = expandXmlReader30NfeRows(sortedRows);
   const selectableRows = displayedRows.filter((row) => getXmlReader30SelectionKey(row));
   const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
 
@@ -5441,15 +5441,15 @@ function renderXmlReader30NfeResultsTable(results) {
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">XMLs encontrados</h3>
-          <p class="card-subtitle">Mostrando ${escapeHtml(String(displayedRows.length))} nota(s) da NF-e do acervo interno.</p>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(displayedRows.length))} linha(s) itemizada(s) da NF-e do acervo interno.</p>
         </div>
         <div class="stack-mini" style="align-items:flex-end;">
           ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
-          <span class="row-sub">Cada nota aparece uma vez, sem menu de produtos.</span>
+          <span class="row-sub">Cada produto aparece em uma linha para facilitar a conferencia.</span>
         </div>
       </div>
       <div class="table-wrap">
-        <table class="xml-reader30-table" style="min-width: 1360px;">
+        <table class="xml-reader30-table" style="min-width: 1380px;">
           <thead>
             <tr>
               <th class="xml-reader30-check">Conferido</th>
@@ -5457,11 +5457,14 @@ function renderXmlReader30NfeResultsTable(results) {
               <th>Status NF-e</th>
               <th>NF Cancelada?</th>
               ${renderXmlReader30SortHeader('dataEmissao', 'Data Emissao')}
-              <th>Fornecedor</th>
+              <th>Produto</th>
+              <th>Quantidade</th>
+              <th>Valor Unitario</th>
               <th>Valor Total</th>
               <th>Valor Total NF XML R$</th>
               <th>ICMS ST RET R$</th>
               <th>CST/CSOSN</th>
+              <th>CFOP</th>
               <th>Base de Calculo ICMS</th>
               <th>Aliquota ICMS (%)</th>
               <th>Valor ICMS</th>
@@ -5477,11 +5480,10 @@ function renderXmlReader30NfeResultsTable(results) {
           <tbody>
             ${renderTableRowsOrState({
               key: 'xmlReader30',
-              colSpan: 20,
+              colSpan: 22,
               rowsHtml: displayedRows.length
                 ? displayedRows
                     .map((row) => {
-                      const actions = renderXmlReader30Actions(row);
                       const selectionKey = getXmlReader30SelectionKey(row);
                       const statusTone = row.raw?.cancelada ? 'danger' : row.raw?.statusFiscal === 'Autorizada' ? 'success' : row.statusTone || 'info';
                       const numberLabel = row.numeroNf || row.numeroLabel || '-';
@@ -5497,12 +5499,15 @@ function renderXmlReader30NfeResultsTable(results) {
                           <td>${escapeHtml(row.nfCancelada || (row.raw?.cancelada ? 'Sim' : 'Nao'))}</td>
                           <td>${escapeHtml(row.dataEmissaoLabel || formatDate(row.dataEmissao || row.raw?.dataEmissao || ''))}</td>
                           <td class="xml-reader30-doc">
-                            ${renderXmlReader30ProductLabel(row.fornecedor || '-')}
+                            ${renderXmlReader30ProductLabel(row.produto || '-')}
                           </td>
+                          <td>${escapeHtml(row.quantidade || '-')}</td>
+                          <td class="xml-reader30-money">${escapeHtml(row.valorUnitario || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorTotal || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorTotalNfXml || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.icmsStRet || '-')}</td>
                           <td>${escapeHtml(row.cstCsosn || '-')}</td>
+                          <td>${escapeHtml(row.cfop || '-')}</td>
                           <td>${escapeHtml(row.baseCalculoIcms || '-')}</td>
                           <td>${escapeHtml(row.aliquotaIcms || '-')}</td>
                           <td>${escapeHtml(row.valorIcms || '-')}</td>
@@ -5512,9 +5517,7 @@ function renderXmlReader30NfeResultsTable(results) {
                           <td>${escapeHtml(row.aliqVigente || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorCorreto || '-')}</td>
                           <td>${escapeHtml(row.evento || '-')}</td>
-                          <td>
-                            <div class="table-actions">${actions}</div>
-                          </td>
+                          <td></td>
                         </tr>
                       `;
                     })
@@ -6775,10 +6778,7 @@ function renderXmlReader30Actions(row) {
   }
 
   if (row.documentType === 'nfe') {
-    return `
-      <button class="icon-btn" data-action="nfe-details" data-nfe-id="${escapeHtml(row.rowId)}">Detalhes</button>
-      <button class="icon-btn" data-action="nfe-view" data-nfe-id="${escapeHtml(row.rowId)}">Ver XML</button>
-    `;
+    return '';
   }
 
   return `
