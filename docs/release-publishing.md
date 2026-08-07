@@ -9,6 +9,8 @@ O fluxo abaixo assume:
 - manifesto publicado no proprio repositorio em `updates/stable/manifest.json`;
 - servidores clientes consumindo o manifesto via `raw.githubusercontent.com`.
 
+Quando houver push na branch `main` com alteracao relevante do projeto, o workflow `Publish Windows Release` automatiza a publicacao da release, atualiza o manifesto `stable` e deixa o servidor apto a puxar a nova versao. Ainda assim, a versao do `package.json` precisa ser incrementada antes do push para que o updater enxergue a novidade.
+
 ## Visao geral
 
 Para publicar uma release nova, voce sempre faz estes blocos:

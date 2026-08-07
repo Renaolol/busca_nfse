@@ -137,7 +137,7 @@ Exemplo:
 
 ```json
 {
-  "manifestUrl": "https://updates.seudominio.com/notasync/stable/manifest.json",
+  "manifestUrl": "https://raw.githubusercontent.com/Renaolol/busca_nfse/main/updates/stable/manifest.json",
   "serviceName": "NotaSyncGCONT",
   "winSwExecutable": "NotaSyncGCONT.exe",
   "releaseRoot": "releases",
