@@ -1917,8 +1917,7 @@ function onDocumentChange(event) {
   }
 
   if (action === 'xml-reader30-nfe-regime') {
-    applyXmlReader30NfeRegime(target.value);
-    renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
+    void applyXmlReader30NfeRegimeWithLoading(target.value);
     return;
   }
 
@@ -5585,17 +5584,17 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
           </p>
 
         </div>
-        <div class="stack-mini" style="align-items:flex-end;">
-          <div style="display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap;">
-            <label class="field" style="margin:0; min-width:150px;">
+        <div class="stack-mini xml-reader30-toolbar-stack">
+          <div class="xml-reader30-toolbar-controls">
+            <label class="field xml-reader30-filter-field">
               <span style="font-size:11px;">CST/CSOSN</span>
-              <select data-action="xml-reader30-cst-filter" style="height:32px;">
+              <select data-action="xml-reader30-cst-filter">
                 ${renderOptions(['', ...cstOptions], cstFilter, { '': 'Todos' })}
               </select>
             </label>
-            <label class="field" style="margin:0; min-width:180px;">
+            <label class="field xml-reader30-filter-field xml-reader30-filter-field-regime">
               <span style="font-size:11px;">Regime da empresa</span>
-              <select data-action="xml-reader30-nfe-regime" style="height:32px;">
+              <select data-action="xml-reader30-nfe-regime">
                 ${renderOptions(
                   ['lucro_real', 'lucro_presumido', 'simples_nacional'],
                   state.xmlReader30.nfeRegime || 'lucro_real',
@@ -5607,7 +5606,7 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
                 )}
               </select>
             </label>
-            ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
+            <div class="xml-reader30-selection-badge">${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}</div>
             ${
               fullscreen
                 ? ''
@@ -5625,7 +5624,7 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
                 `
             }
           </div>
-          <span class="row-sub">${fullscreen ? 'Use a barra de rolagem da janela para consultar a tabela inteira.' : 'A tabela esta compactada para consulta rapida. Use o botao de tela cheia para ampliar.'}</span>
+          <span class="row-sub xml-reader30-toolbar-hint">${fullscreen ? 'Use a barra de rolagem da janela para consultar a tabela inteira.' : 'A tabela esta compactada para consulta rapida. Use o botao de tela cheia para ampliar.'}</span>
         </div>
       </div>
       <div class="${viewportClassName}" style="max-height:${compactMaxHeight};">
@@ -6320,6 +6319,20 @@ function formatXmlReader30CurrencyValue(value) {
   }
 
   return formatCurrency(numericValue);
+}
+
+async function applyXmlReader30NfeRegimeWithLoading(regime) {
+  startPageLoading({
+    title: 'Atualizando regime da empresa',
+    description: 'Recalculando as colunas visiveis do Leitor NFE.',
+    initialTask: 'Aplicando configuracao selecionada'
+  });
+  render();
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  applyXmlReader30NfeRegime(regime);
+  renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
+  stopPageLoading();
+  render();
 }
 
 function applyXmlReader30NfeRegime(regime) {

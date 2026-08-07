@@ -1376,6 +1376,41 @@ textarea:focus-visible,
   margin-bottom: 12px;
 }
 
+.xml-reader30-toolbar-stack {
+  align-items: stretch;
+}
+
+.xml-reader30-toolbar-controls {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.xml-reader30-filter-field {
+  margin: 0;
+  min-width: 150px;
+}
+
+.xml-reader30-filter-field-regime {
+  min-width: 180px;
+}
+
+.xml-reader30-filter-field select {
+  height: 32px;
+}
+
+.xml-reader30-selection-badge {
+  display: flex;
+  align-items: flex-end;
+  min-height: 32px;
+}
+
+.xml-reader30-toolbar-hint {
+  margin-top: 0;
+}
+
 table {
   width: 100%;
   border-collapse: collapse;
