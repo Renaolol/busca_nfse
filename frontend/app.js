@@ -866,7 +866,7 @@ function onDocumentClick(event) {
       const checked = actionNode.checked;
       const filtered = getFilteredClients();
       state.selectedClientIds = checked ? new Set(filtered.map((item) => item.id)) : new Set();
-      render();
+      renderPreservingScroll();
       return;
     }
     case 'client-select': {
@@ -879,7 +879,7 @@ function onDocumentClick(event) {
       } else {
         state.selectedClientIds.delete(clientId);
       }
-      render();
+      renderPreservingScroll();
       return;
     }
     case 'clients-bulk-activate': {
@@ -1343,7 +1343,7 @@ function onDocumentClick(event) {
       } else {
         state.selectedNfeIds.delete(nfeId);
       }
-      render();
+      renderPreservingScroll();
       return;
     }
     case 'nfe-toggle-all': {
@@ -1358,7 +1358,7 @@ function onDocumentClick(event) {
           state.selectedNfeIds.delete(doc.id);
         }
       });
-      render();
+      renderPreservingScroll();
       return;
     }
     case 'nfe-batch-download': {
@@ -1567,7 +1567,7 @@ function onDocumentClick(event) {
       } else {
         state.selectedXmlIds.delete(xmlId);
       }
-      render();
+      renderPreservingScroll();
       return;
     }
     case 'xmls-toggle-all': {
@@ -1582,7 +1582,7 @@ function onDocumentClick(event) {
           state.selectedXmlIds.delete(xml.id);
         }
       });
-      render();
+      renderPreservingScroll();
       return;
     }
     case 'xmls-batch-download': {
@@ -1628,7 +1628,7 @@ function onDocumentClick(event) {
       } else {
         state.selectedAlertIds.delete(alertId);
       }
-      render();
+      renderPreservingScroll();
       return;
     }
     case 'alert-details': {
@@ -6043,7 +6043,7 @@ function updateXmlReader30Sort(key) {
     key: normalizedKey,
     direction: current.key === normalizedKey && current.direction === 'asc' ? 'desc' : 'asc'
   };
-  render();
+  renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
 }
 
 function sortXmlReader30Results(rows) {
@@ -6103,7 +6103,7 @@ function updateNfseFiscalReaderSort(key) {
     key: normalizedKey,
     direction: current.key === normalizedKey && current.direction === 'asc' ? 'desc' : 'asc'
   };
-  render();
+  renderPreservingScroll(['.nfse-fiscal-reader-scroll']);
 }
 
 function sortNfseFiscalReaderRows(rows) {
@@ -13842,7 +13842,7 @@ function updateXmlSort(key) {
     key,
     direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
   };
-  render();
+  renderPreservingScroll();
 }
 
 function updateNfeSort(key) {
@@ -13851,7 +13851,7 @@ function updateNfeSort(key) {
     key,
     direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
   };
-  render();
+  renderPreservingScroll();
 }
 
 function updateCteSort(key) {
@@ -13860,7 +13860,7 @@ function updateCteSort(key) {
     key,
     direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc'
   };
-  render();
+  renderPreservingScroll();
 }
 
 function sortXmls(xmls) {
