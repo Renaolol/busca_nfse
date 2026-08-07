@@ -10097,6 +10097,7 @@ function renderNfseFiscalReaderCard() {
 
   const summary = state.nfseFiscalReader.summary;
   const rows = sortNfseFiscalReaderRows(Array.isArray(state.nfseFiscalReader.rows) ? state.nfseFiscalReader.rows : []);
+  const exportableRows = getNfseFiscalReaderExportableRows(rows);
   const exportConfig = state.nfseFiscalReader.exportConfig || {};
   const visibleColumns = getNfseFiscalReaderVisibleColumns();
   const hiddenColumns = state.nfseFiscalReader.hiddenColumns instanceof Set ? state.nfseFiscalReader.hiddenColumns : new Set();
@@ -10110,7 +10111,7 @@ function renderNfseFiscalReaderCard() {
     clienteAtual?.codigoEmpresaDominio != null && clienteAtual.codigoEmpresaDominio !== '' ? String(clienteAtual.codigoEmpresaDominio) : '';
   const codigoEmpresaValue = codigoEmpresaCadastrado || String(exportConfig.codigoEmpresa || '');
   const exportDisabled =
-    !rows.length ||
+    !exportableRows.length ||
     state.tableState.nfseFiscalReader === 'loading' ||
     state.tableState.nfseFiscalReader === 'error' ||
     exportConfig.exporting;
@@ -10187,7 +10188,11 @@ function renderNfseFiscalReaderCard() {
           Gerenciar contas por codigo de servico
         </button>
         <span style="color:#606062; font-size:13px;">
-          ${rows.length ? 'O arquivo segue o padrao do LeitorXML para NFS-e.' : 'Busque NFS-e com XML valido para habilitar a exportacao.'}
+          ${
+            rows.length
+              ? `O arquivo segue o padrao do LeitorXML para NFS-e e ignora automaticamente ${escapeHtml(String(rows.length - exportableRows.length))} nota(s) cancelada(s).`
+              : 'Busque NFS-e com XML valido para habilitar a exportacao.'
+          }
         </span>
       </div>
     </form>
@@ -10276,7 +10281,12 @@ function renderNfseFiscalReaderCard() {
               key: 'nfseFiscalReader',
               colSpan: visibleColumns.length,
               rowsHtml: rows
-                .map((row) => `<tr>${visibleColumns.map((column) => renderNfseFiscalReaderColumnCell(column, row)).join('')}</tr>`)
+                .map(
+                  (row) =>
+                    `<tr class="${row.cancelada ? 'xml-row-cancelled' : ''}">${visibleColumns
+                      .map((column) => renderNfseFiscalReaderColumnCell(column, row))
+                      .join('')}</tr>`
+                )
                 .join(''),
               emptyMessage: 'Nenhuma NFS-e armazenada foi processada para a leitura fiscal com os filtros atuais.'
             })}
@@ -10286,6 +10296,10 @@ function renderNfseFiscalReaderCard() {
       ${resumoPorMunicipioHtml}
     </article>
   `;
+}
+
+function getNfseFiscalReaderExportableRows(rows) {
+  return (Array.isArray(rows) ? rows : []).filter((row) => !row?.cancelada);
 }
 
 function getNfseFiscalReaderOrderedColumns() {
@@ -14398,6 +14412,12 @@ async function submitNfseFiscalDominioExportForm(form) {
     return;
   }
 
+  const exportableRows = getNfseFiscalReaderExportableRows(state.nfseFiscalReader.rows);
+  if (!exportableRows.length) {
+    pushToast('As linhas carregadas estao canceladas; nao ha NFS-e elegivel para exportacao.', 'error');
+    return;
+  }
+
   const data = new FormData(form);
   const codigoEmpresa = String(data.get('codigoEmpresa') || '').trim();
   const tipoRegistro = String(data.get('tipoRegistro') || 'Entrada').trim() === 'Servico' ? 'Servico' : 'Entrada';
@@ -14455,7 +14475,11 @@ async function submitNfseFiscalDominioExportForm(form) {
     });
 
     downloadFromPayload(payload, 'DOMINIO-NFSE.txt');
-    pushToast(`Exportacao Dominio do leitor NFS-e gerada com ${state.nfseFiscalReader.rows.length} linha(s).`, 'success');
+    const ignoredCancelled = state.nfseFiscalReader.rows.length - exportableRows.length;
+    pushToast(
+      `Exportacao Dominio do leitor NFS-e gerada com ${exportableRows.length} linha(s)${ignoredCancelled ? `; ${ignoredCancelled} cancelada(s) ignorada(s)` : ''}.`,
+      'success'
+    );
   } catch (error) {
     pushToast(`Falha ao exportar layout Dominio da leitura fiscal: ${toErrorMessage(error)}`, 'error');
   } finally {
@@ -16621,6 +16645,7 @@ function normalizeNfseFiscalReaderResponse(payload) {
         estabelecimentoId: String(row?.estabelecimentoId || '').trim(),
         numeroNfse: row?.numeroNfse == null ? '' : String(row.numeroNfse),
         chaveAcesso: String(row?.chaveAcesso || '').trim(),
+        cancelada: Boolean(row?.cancelada),
         dataEmissao: row?.dataEmissao ? String(row.dataEmissao) : '',
         prestador: String(row?.prestador || '').trim(),
         cnpjPrestador: normalizeDigits(String(row?.cnpjPrestador || '')),

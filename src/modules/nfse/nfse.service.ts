@@ -289,6 +289,7 @@ export class NfseService {
     let totalRetencoesFederais = 0;
 
     for (const doc of uniqueItems) {
+      const cancelada = this.hasCancelamento(doc);
       if (!doc.xmlPath) {
         totalDocumentosSemXml += 1;
         continue;
@@ -305,6 +306,7 @@ export class NfseService {
           estabelecimentoId: doc.estabelecimentoId,
           numeroNfse: doc.numeroNfse ?? null,
           chaveAcesso: doc.chaveAcesso,
+          cancelada,
           dataEmissao: doc.dataEmissao ?? null,
           prestador: doc.razaoSocialPrestador ?? null,
           cnpjPrestador: doc.cnpjPrestador ?? null,
@@ -334,6 +336,7 @@ export class NfseService {
           estabelecimentoId: doc.estabelecimentoId,
           numeroNfse: doc.numeroNfse ?? null,
           chaveAcesso: doc.chaveAcesso,
+          cancelada,
           dataEmissao: doc.dataEmissao ?? null,
           prestador: doc.razaoSocialPrestador ?? null,
           cnpjPrestador: doc.cnpjPrestador ?? null,
@@ -435,7 +438,7 @@ export class NfseService {
       throw new BadRequestException('DOMINIO_ODBC_CONNECTION_STRING nao configurada para exportacao Por Fornecedor.');
     }
 
-    const documentos = await this.findLeituraFiscalDocumentos(dto);
+    const documentos = (await this.findLeituraFiscalDocumentos(dto)).filter((doc) => !this.hasCancelamento(doc));
     const sources: NfseDominioExportSource[] = [];
 
     for (const doc of documentos) {

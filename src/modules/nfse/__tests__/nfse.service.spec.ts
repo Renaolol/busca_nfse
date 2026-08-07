@@ -1353,6 +1353,65 @@ describe('NfseService', () => {
     expect(result.resumoPorMunicipio.localIncidenciaIss).toEqual(result.resumoPorMunicipio.localPrestacao);
   });
 
+  it('sinaliza NFS-e cancelada na leitura fiscal', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-fiscal-cancelada',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42134012219893422000161000000000089926070269374163',
+        numeroNfse: '77',
+        dataEmissao: new Date('2026-07-28T00:00:00.000Z'),
+        cnpjPrestador: '19893422000161',
+        razaoSocialPrestador: 'Prestador Cancelado',
+        cnpjTomador: '20714171000190',
+        razaoSocialTomador: 'Tomador Cancelado',
+        municipioPrestacaoNome: 'Faxinal dos Guedes',
+        codigoServicoNacional: '170101',
+        itemListaServico: '1701',
+        descricaoServico: 'Servico cancelado',
+        status: 'cancelada',
+        dataCancelamento: new Date('2026-07-29T00:00:00.000Z'),
+        xmlPath: 'nfse/producao/19893422000161/2026/07/xml/doc-fiscal-cancelada.xml',
+        createdAt: new Date('2026-07-28T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-29T00:00:00.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<NFSe>
+  <infNFSe>
+    <numeroNFSe>77</numeroNFSe>
+    <dEmi>2026-07-28</dEmi>
+    <valores>
+      <vServ>100.00</vServ>
+      <vLiq>100.00</vLiq>
+      <vTotalRet>0.00</vTotalRet>
+      <vISSQN>0.00</vISSQN>
+      <trib>
+        <tribMun>
+          <tpRetISSQN>2</tpRetISSQN>
+        </tribMun>
+      </trib>
+    </valores>
+  </infNFSe>
+</NFSe>`,
+        'utf8'
+      )
+    );
+
+    const result = await service.getLeituraFiscal({ clienteId: 'cliente-1', all: true });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: 'doc-fiscal-cancelada',
+      cancelada: true,
+      numeroNfse: '77'
+    });
+  });
+
   it('nao soma retencoes federais em ABRASF quando o liquido reflete apenas ISS retido', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
       {
@@ -1556,6 +1615,124 @@ describe('NfseService', () => {
     expect(content).toContain('|1020|18||180,00|5,00|9,00');
     expect(content).toContain('|1030|557|1|180,00');
     expect(content).toContain('|1300|10/07/2026|0|183|9,00||ISS RETIDO SOBRE NFS-E N 333 Prestador Exportacao|||');
+  });
+
+  it('ignora NFS-e cancelada na exportacao da leitura fiscal para a Dominio', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-export-ativo',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000033326071005552016',
+        numeroNfse: '333',
+        dataEmissao: new Date('2026-07-10T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Exportacao',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador Exportacao',
+        municipioPrestacaoNome: 'Mondai',
+        codigoServicoNacional: '170101',
+        itemListaServico: '1701',
+        descricaoServico: 'Servico ativo',
+        status: 'autorizada',
+        xmlPath: 'nfse/producao/06960810000176/2026/07/xml/doc-export-ativo.xml',
+        createdAt: new Date('2026-07-10T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-10T00:00:00.000Z')
+      },
+      {
+        id: 'doc-export-cancelada',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000044426071005552017',
+        numeroNfse: '444',
+        dataEmissao: new Date('2026-07-11T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Cancelado',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador Exportacao',
+        municipioPrestacaoNome: 'Mondai',
+        codigoServicoNacional: '170101',
+        itemListaServico: '1701',
+        descricaoServico: 'Servico cancelado',
+        status: 'cancelada',
+        dataCancelamento: new Date('2026-07-12T00:00:00.000Z'),
+        xmlPath: 'nfse/producao/06960810000176/2026/07/xml/doc-export-cancelada.xml',
+        createdAt: new Date('2026-07-11T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-12T00:00:00.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <DPS>
+    <infDPS>
+      <dhEmi>2026-07-10T00:00:00-03:00</dhEmi>
+      <prest>
+        <CNPJ>06960810000176</CNPJ>
+        <xNome>Prestador Exportacao</xNome>
+        <end>
+          <endNac>
+            <xMun>Chapeco</xMun>
+            <UF>SC</UF>
+          </endNac>
+        </end>
+      </prest>
+      <toma>
+        <CNPJ>11111111000111</CNPJ>
+        <xNome>Tomador Exportacao</xNome>
+        <end>
+          <endNac>
+            <xMun>Mondai</xMun>
+            <UF>SC</UF>
+          </endNac>
+        </end>
+      </toma>
+      <valores>
+        <vServPrest>
+          <vServ>180.00</vServ>
+        </vServPrest>
+        <trib>
+          <tribMun>
+            <tpRetISSQN>2</tpRetISSQN>
+          </tribMun>
+        </trib>
+      </valores>
+    </infDPS>
+  </DPS>
+  <infNFSe Id="NFS42110092206960810000176000000000033326071005552016">
+    <nNFSe>333</nNFSe>
+    <xLocPrestacao>Mondai</xLocPrestacao>
+    <xLocIncid>Mondai</xLocIncid>
+    <valores>
+      <vLiq>171.00</vLiq>
+      <vTotalRet>9.00</vTotalRet>
+      <vISSQN>9.00</vISSQN>
+      <vISSRet>9.00</vISSRet>
+      <pAliqAplic>5.00</pAliqAplic>
+    </valores>
+  </infNFSe>
+</NFSe>`,
+        'utf8'
+      )
+    );
+
+    const result = await service.exportarLeituraFiscalDominio({
+      clienteId: 'cliente-1',
+      all: true,
+      codigoEmpresa: 10105,
+      tipoRegistro: 'Entrada',
+      contas: 'Padrao',
+      produtoPadrao: 557
+    });
+
+    const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
+    expect(storage.getObject).toHaveBeenCalledTimes(1);
+    expect(content).toContain('|333|');
+    expect(content).not.toContain('|444|');
+    expect(content).not.toContain('Prestador Cancelado');
   });
 
   it('aplica a conta por codigo de servico configurada mesmo com contas Padrao (independente do modo Por Fornecedor)', async () => {
