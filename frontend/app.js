@@ -2207,6 +2207,8 @@ function captureScrollState(selectors = []) {
   return {
     contentTop: contentNode instanceof HTMLElement ? contentNode.scrollTop : 0,
     contentLeft: contentNode instanceof HTMLElement ? contentNode.scrollLeft : 0,
+    windowTop: Number(window.scrollY || 0),
+    windowLeft: Number(window.scrollX || 0),
     extras
   };
 }
@@ -2220,6 +2222,14 @@ function restoreScrollState(scrollState) {
   if (contentNode instanceof HTMLElement) {
     contentNode.scrollTop = Number(scrollState.contentTop || 0);
     contentNode.scrollLeft = Number(scrollState.contentLeft || 0);
+  }
+
+  if (typeof window.scrollTo === 'function') {
+    window.scrollTo({
+      top: Number(scrollState.windowTop || 0),
+      left: Number(scrollState.windowLeft || 0),
+      behavior: 'auto'
+    });
   }
 
   (Array.isArray(scrollState.extras) ? scrollState.extras : []).forEach((entry) => {
