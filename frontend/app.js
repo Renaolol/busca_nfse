@@ -235,6 +235,7 @@ const state = {
   nfseFiscalReader: {
     rows: [],
     summary: null,
+    resumoPorMunicipio: null,
     lastQuery: null,
     lastLoadedAt: null,
     exportConfig: {
@@ -9697,6 +9698,64 @@ function renderCteDisagreementAlertsModal() {
   `;
 }
 
+function renderNfseFiscalReaderResumoMunicipioTable(titulo, linhas) {
+  const items = Array.isArray(linhas) ? linhas : [];
+  if (!items.length) {
+    return `
+      <div class="card" style="padding:14px; border:1px solid #e4e5e7; border-radius:14px;">
+        <h4 class="card-title" style="margin-bottom:8px;">${escapeHtml(titulo)}</h4>
+        <div class="table-state">Sem dados para somar.</div>
+      </div>
+    `;
+  }
+
+  const totalNotas = items.reduce((acc, item) => acc + Number(item.quantidadeNotas || 0), 0);
+  const totalValorServico = items.reduce((acc, item) => acc + Number(item.valorServicoTotal || 0), 0);
+
+  return `
+    <div class="card" style="padding:14px; border:1px solid #e4e5e7; border-radius:14px;">
+      <h4 class="card-title" style="margin-bottom:8px;">${escapeHtml(titulo)}</h4>
+      <div style="overflow:auto; max-height:320px; border:1px solid #eef0f2; border-radius:10px;">
+        <table style="width:100%; border-collapse:collapse; font-size:13px;">
+          <thead>
+            <tr style="background:#f6f7f8; text-align:left;">
+              <th style="padding:8px 10px; border-bottom:1px solid #e4e5e7;">Municipio</th>
+              <th style="padding:8px 10px; border-bottom:1px solid #e4e5e7; text-align:right;">Notas</th>
+              <th style="padding:8px 10px; border-bottom:1px solid #e4e5e7; text-align:right;">Valor servico</th>
+              <th style="padding:8px 10px; border-bottom:1px solid #e4e5e7; text-align:right;">Valor liquido</th>
+              <th style="padding:8px 10px; border-bottom:1px solid #e4e5e7; text-align:right;">ISS</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${items
+              .map(
+                (item) => `
+                  <tr style="border-bottom:1px solid #f2f3f4;">
+                    <td style="padding:8px 10px;">${escapeHtml(item.municipio)}</td>
+                    <td style="padding:8px 10px; text-align:right;">${escapeHtml(String(item.quantidadeNotas || 0))}</td>
+                    <td style="padding:8px 10px; text-align:right;">${escapeHtml(formatOptionalCurrency(item.valorServicoTotal))}</td>
+                    <td style="padding:8px 10px; text-align:right;">${escapeHtml(formatOptionalCurrency(item.valorLiquidoTotal))}</td>
+                    <td style="padding:8px 10px; text-align:right;">${escapeHtml(formatOptionalCurrency(item.valorIssTotal))}</td>
+                  </tr>
+                `
+              )
+              .join('')}
+          </tbody>
+          <tfoot>
+            <tr style="background:#f6f7f8; font-weight:600;">
+              <td style="padding:8px 10px;">Total (${escapeHtml(String(items.length))} municipio${items.length > 1 ? 's' : ''})</td>
+              <td style="padding:8px 10px; text-align:right;">${escapeHtml(String(totalNotas))}</td>
+              <td style="padding:8px 10px; text-align:right;">${escapeHtml(formatOptionalCurrency(totalValorServico))}</td>
+              <td style="padding:8px 10px;"></td>
+              <td style="padding:8px 10px;"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
 function renderNfseFiscalReaderCard() {
   if (!state.xmlSearch.hasSearched) {
     return '';
@@ -9739,6 +9798,16 @@ function renderNfseFiscalReaderCard() {
       </div>
     `
     : '';
+  const resumoPorMunicipio = state.nfseFiscalReader.resumoPorMunicipio || null;
+  const resumoPorMunicipioHtml =
+    resumoPorMunicipio && (resumoPorMunicipio.localPrestacao.length || resumoPorMunicipio.localIncidenciaIss.length)
+      ? `
+      <div class="form-grid two" style="margin-bottom:18px; align-items:start;">
+        ${renderNfseFiscalReaderResumoMunicipioTable('Somatorio por municipio - Local prestacao', resumoPorMunicipio.localPrestacao)}
+        ${renderNfseFiscalReaderResumoMunicipioTable('Somatorio por municipio - Local ISS', resumoPorMunicipio.localIncidenciaIss)}
+      </div>
+    `
+      : '';
   const exportForm = `
     <form id="nfseFiscalDominioExportForm" class="form-grid four" style="margin:0 0 18px;">
       <label class="field">
@@ -9811,6 +9880,7 @@ function renderNfseFiscalReaderCard() {
         </div>
       </div>
       ${summaryCards}
+      ${resumoPorMunicipioHtml}
       ${exportForm}
       <div class="table-wrap nfse-fiscal-reader-scroll">
         <table class="xml-reader30-table xml-reader30-reorderable-table nfse-fiscal-reader-table" style="min-width:${minWidth}px;">
@@ -9915,14 +9985,14 @@ function getNfseFiscalReaderColumnDefinitions() {
       label: 'Local prestacao',
       className: 'nfse-fiscal-reader-place',
       html: false,
-      render: (row) => resolveNfseFiscalReaderMunicipioLabel(row.localPrestacao, row.municipio)
+      render: (row) => row.localPrestacao || row.municipio || '-'
     },
     {
       key: 'localIncidenciaIss',
       label: 'Local ISS',
       className: 'nfse-fiscal-reader-place',
       html: false,
-      render: (row) => resolveNfseFiscalReaderMunicipioLabel(row.localIncidenciaIss, row.municipio)
+      render: (row) => row.localIncidenciaIss || row.municipio || '-'
     },
     {
       key: 'prestador',
@@ -13170,6 +13240,7 @@ async function applyXmlFilters(form) {
     state.xmlSearch.informativeRows = 0;
     state.nfseFiscalReader.rows = [];
     state.nfseFiscalReader.summary = null;
+    state.nfseFiscalReader.resumoPorMunicipio = null;
     state.nfseFiscalReader.lastQuery = null;
     state.nfseFiscalReader.lastLoadedAt = null;
     state.xmlSearch.total = 0;
@@ -13194,6 +13265,7 @@ async function applyXmlFilters(form) {
     state.xmlSearch.informativeRows = 0;
     state.nfseFiscalReader.rows = [];
     state.nfseFiscalReader.summary = null;
+    state.nfseFiscalReader.resumoPorMunicipio = null;
     state.nfseFiscalReader.lastQuery = null;
     state.nfseFiscalReader.lastLoadedAt = null;
     state.xmlSearch.total = 0;
@@ -13803,6 +13875,7 @@ function resetXmlSearch() {
   state.tableState.xmls = 'data';
   state.nfseFiscalReader.rows = [];
   state.nfseFiscalReader.summary = null;
+  state.nfseFiscalReader.resumoPorMunicipio = null;
   state.nfseFiscalReader.lastQuery = null;
   state.nfseFiscalReader.lastLoadedAt = null;
   state.nfseFiscalReader.exportConfig = {
@@ -13899,6 +13972,7 @@ async function executeXmlSearch() {
   state.tableState.nfseFiscalReader = 'loading';
   state.nfseFiscalReader.rows = [];
   state.nfseFiscalReader.summary = null;
+  state.nfseFiscalReader.resumoPorMunicipio = null;
   state.nfseFiscalReader.lastQuery = { ...state.filters.xmls };
   state.nfseFiscalReader.exportConfig = {
     ...(state.nfseFiscalReader.exportConfig || {}),
@@ -13933,11 +14007,13 @@ async function executeXmlSearch() {
       const normalizedFiscalReader = normalizeNfseFiscalReaderResponse(fiscalReaderRaw.value);
       state.nfseFiscalReader.rows = normalizedFiscalReader.items;
       state.nfseFiscalReader.summary = normalizedFiscalReader.summary;
+      state.nfseFiscalReader.resumoPorMunicipio = normalizedFiscalReader.resumoPorMunicipio;
       state.nfseFiscalReader.lastLoadedAt = new Date().toISOString();
       state.tableState.nfseFiscalReader = 'data';
     } else {
       state.nfseFiscalReader.rows = [];
       state.nfseFiscalReader.summary = null;
+      state.nfseFiscalReader.resumoPorMunicipio = null;
       state.nfseFiscalReader.lastLoadedAt = null;
       state.tableState.nfseFiscalReader = 'error';
       pushToast(`Falha ao montar a leitura fiscal das NFS-e: ${toErrorMessage(fiscalReaderRaw.reason)}`, 'error');
@@ -13952,6 +14028,7 @@ async function executeXmlSearch() {
     state.tableState.xmls = 'error';
     state.nfseFiscalReader.rows = [];
     state.nfseFiscalReader.summary = null;
+    state.nfseFiscalReader.resumoPorMunicipio = null;
     state.nfseFiscalReader.lastLoadedAt = null;
     state.tableState.nfseFiscalReader = 'error';
     pushToast(`Falha ao buscar XMLs: ${toErrorMessage(error)}`, 'error');
@@ -15356,6 +15433,7 @@ async function openXmlSearchForGapContext(context) {
   state.selectedXmlIds = new Set();
   state.nfseFiscalReader.rows = [];
   state.nfseFiscalReader.summary = null;
+  state.nfseFiscalReader.resumoPorMunicipio = null;
   state.nfseFiscalReader.lastQuery = null;
   state.nfseFiscalReader.lastLoadedAt = null;
   state.tableState.nfseFiscalReader = 'data';
@@ -16246,29 +16324,27 @@ function normalizeNfseFiscalReaderResponse(payload) {
         totalRetencoesFederais: Number(payload.summary.totalRetencoesFederais || 0)
       }
     : null;
+  const normalizeResumoPorMunicipio = (list) =>
+    Array.isArray(list)
+      ? list.map((item) => ({
+          municipio: String(item?.municipio || '').trim() || 'Nao informado',
+          quantidadeNotas: Number(item?.quantidadeNotas || 0),
+          valorServicoTotal: Number(item?.valorServicoTotal || 0),
+          valorLiquidoTotal: Number(item?.valorLiquidoTotal || 0),
+          valorIssTotal: Number(item?.valorIssTotal || 0)
+        }))
+      : [];
+  const resumoPorMunicipio = {
+    localPrestacao: normalizeResumoPorMunicipio(payload?.resumoPorMunicipio?.localPrestacao),
+    localIncidenciaIss: normalizeResumoPorMunicipio(payload?.resumoPorMunicipio?.localIncidenciaIss)
+  };
 
   return {
     items,
     total: Number(payload?.total || items.length || 0),
-    summary
+    summary,
+    resumoPorMunicipio
   };
-}
-
-function resolveNfseFiscalReaderMunicipioLabel(rawValue, municipioNome) {
-  const value = String(rawValue || '').trim();
-  const municipio = String(municipioNome || '').trim();
-
-  if (!value) {
-    return municipio || '-';
-  }
-
-  const ibgeMatch = value.match(/^(\d{7})(\s*\/\s*[A-Z]{2})?$/);
-  if (!ibgeMatch || !municipio) {
-    return value;
-  }
-
-  const suffix = ibgeMatch[2] || '';
-  return `${municipio}${suffix}`;
 }
 
 function startPageLoading(plan = {}) {

@@ -365,8 +365,58 @@ export class NfseService {
         valorIssTotal: this.roundTo2(valorIssTotal),
         valorIssRetidoRealTotal: this.roundTo2(valorIssRetidoRealTotal),
         totalRetencoesFederais: this.roundTo2(totalRetencoesFederais)
+      },
+      resumoPorMunicipio: {
+        localPrestacao: this.buildResumoPorMunicipio(rows, 'localPrestacao'),
+        localIncidenciaIss: this.buildResumoPorMunicipio(rows, 'localIncidenciaIss')
       }
     };
+  }
+
+  private buildResumoPorMunicipio(
+    rows: Array<Record<string, unknown>>,
+    campo: 'localPrestacao' | 'localIncidenciaIss'
+  ): Array<{
+    municipio: string;
+    quantidadeNotas: number;
+    valorServicoTotal: number;
+    valorLiquidoTotal: number;
+    valorIssTotal: number;
+  }> {
+    const acumulado = new Map<
+      string,
+      { municipio: string; quantidadeNotas: number; valorServicoTotal: number; valorLiquidoTotal: number; valorIssTotal: number }
+    >();
+
+    for (const row of rows) {
+      if (row.statusProcessamento !== 'OK') {
+        continue;
+      }
+
+      const municipio = String(row[campo] || '').trim() || 'Nao informado';
+      const atual = acumulado.get(municipio) ?? {
+        municipio,
+        quantidadeNotas: 0,
+        valorServicoTotal: 0,
+        valorLiquidoTotal: 0,
+        valorIssTotal: 0
+      };
+
+      atual.quantidadeNotas += 1;
+      atual.valorServicoTotal += this.toNumber(row.valorServico as string | undefined) ?? 0;
+      atual.valorLiquidoTotal += this.toNumber(row.valorLiquidoNfse as string | undefined) ?? 0;
+      atual.valorIssTotal += this.toNumber(row.valorIss as string | undefined) ?? 0;
+      acumulado.set(municipio, atual);
+    }
+
+    return Array.from(acumulado.values())
+      .map((item) => ({
+        ...item,
+        valorServicoTotal: this.roundTo2(item.valorServicoTotal),
+        valorLiquidoTotal: this.roundTo2(item.valorLiquidoTotal),
+        valorIssTotal: this.roundTo2(item.valorIssTotal)
+      }))
+      .sort((first, second) => second.valorServicoTotal - first.valorServicoTotal);
   }
 
   async exportarLeituraFiscalDominio(dto: ExportarLeituraFiscalDominioDto) {

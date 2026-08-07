@@ -1280,6 +1280,79 @@ describe('NfseService', () => {
     });
   });
 
+  it('resolve o codigo IBGE de local de prestacao/ISS para o nome do municipio e soma por municipio', async () => {
+    const buildAbrasfXml = (municipioIncidencia: string, valorServico: string) => `<?xml version="1.0" encoding="utf-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd"><Nfse versao="1.00"><InfNfse><Numero>1</Numero><DataEmissao>2026-07-28T08:14:45-03:00</DataEmissao><ValoresNfse><BaseCalculo>${valorServico}.00</BaseCalculo><Aliquota>3.00</Aliquota><ValorIss>0.00</ValorIss><ValorLiquidoNfse>${valorServico}.00</ValorLiquidoNfse></ValoresNfse><DeclaracaoPrestacaoServico><InfDeclaracaoPrestacaoServico><Servico><Valores><ValorServicos>${valorServico}.00</ValorServicos><ValorIss>0.00</ValorIss></Valores><IssRetido>2</IssRetido><CodigoMunicipio>${municipioIncidencia}</CodigoMunicipio><MunicipioIncidencia>${municipioIncidencia}</MunicipioIncidencia></Servico></InfDeclaracaoPrestacaoServico></DeclaracaoPrestacaoServico></InfNfse></Nfse></CompNfse>`;
+
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-municipio-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42134012219893422000161000000000089926070269374160',
+        numeroNfse: '1',
+        dataEmissao: new Date('2026-07-28T00:00:00.000Z'),
+        cnpjPrestador: '19893422000161',
+        razaoSocialPrestador: 'Prestador Municipio 1',
+        xmlPath: 'nfse/producao/19893422000161/2026/07/xml/doc-municipio-1.xml',
+        createdAt: new Date('2026-07-28T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-28T00:00:00.000Z')
+      },
+      {
+        id: 'doc-municipio-2',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42134012219893422000161000000000089926070269374161',
+        numeroNfse: '2',
+        dataEmissao: new Date('2026-07-28T00:00:00.000Z'),
+        cnpjPrestador: '19893422000161',
+        razaoSocialPrestador: 'Prestador Municipio 2',
+        xmlPath: 'nfse/producao/19893422000161/2026/07/xml/doc-municipio-2.xml',
+        createdAt: new Date('2026-07-28T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-28T00:00:00.000Z')
+      },
+      {
+        id: 'doc-municipio-3',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42134012219893422000161000000000089926070269374162',
+        numeroNfse: '3',
+        dataEmissao: new Date('2026-07-28T00:00:00.000Z'),
+        cnpjPrestador: '19893422000161',
+        razaoSocialPrestador: 'Prestador Municipio 3',
+        xmlPath: 'nfse/producao/19893422000161/2026/07/xml/doc-municipio-3.xml',
+        createdAt: new Date('2026-07-28T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-28T00:00:00.000Z')
+      }
+    ]);
+    storage.getObject
+      .mockResolvedValueOnce(Buffer.from(buildAbrasfXml('4205308', '180'), 'utf8'))
+      .mockResolvedValueOnce(Buffer.from(buildAbrasfXml('4213401', '220'), 'utf8'))
+      .mockResolvedValueOnce(Buffer.from(buildAbrasfXml('4205308', '20'), 'utf8'));
+
+    const result = await service.getLeituraFiscal({ clienteId: 'cliente-1', all: true });
+
+    expect(result.items.map((item) => item.localPrestacao)).toEqual([
+      'Faxinal dos Guedes/SC',
+      'Ponte Serrada/SC',
+      'Faxinal dos Guedes/SC'
+    ]);
+    expect(result.items.map((item) => item.localIncidenciaIss)).toEqual([
+      'Faxinal dos Guedes/SC',
+      'Ponte Serrada/SC',
+      'Faxinal dos Guedes/SC'
+    ]);
+
+    expect(result.resumoPorMunicipio.localPrestacao).toEqual([
+      { municipio: 'Ponte Serrada/SC', quantidadeNotas: 1, valorServicoTotal: 220, valorLiquidoTotal: 220, valorIssTotal: 0 },
+      { municipio: 'Faxinal dos Guedes/SC', quantidadeNotas: 2, valorServicoTotal: 200, valorLiquidoTotal: 200, valorIssTotal: 0 }
+    ]);
+    expect(result.resumoPorMunicipio.localIncidenciaIss).toEqual(result.resumoPorMunicipio.localPrestacao);
+  });
+
   it('nao soma retencoes federais em ABRASF quando o liquido reflete apenas ISS retido', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
       {

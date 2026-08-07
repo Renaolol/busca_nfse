@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as QRCode from 'qrcode';
+import { replaceMunicipioCodigoComNome } from '../../common/utils/municipio-ibge.util';
 
 export interface DanfseRenderInput {
   layoutNfse?: 'padrao_nacional' | 'abrasf' | 'desconhecido';
@@ -333,11 +334,15 @@ export class NfseDanfseService {
       }
     }
 
+    const localPrestacaoBruto =
+      this.safeValue(extracted.localPrestacao) !== '-' ? extracted.localPrestacao ?? undefined : undefined;
+    const localIncidenciaIssBruto =
+      this.safeValue(extracted.municipioIncidenciaIssqn) !== '-' ? extracted.municipioIncidenciaIssqn ?? undefined : undefined;
+
     return {
       layout: layoutNfse,
-      localPrestacao: this.safeValue(extracted.localPrestacao) !== '-' ? extracted.localPrestacao ?? undefined : undefined,
-      localIncidenciaIss:
-        this.safeValue(extracted.municipioIncidenciaIssqn) !== '-' ? extracted.municipioIncidenciaIssqn ?? undefined : undefined,
+      localPrestacao: replaceMunicipioCodigoComNome(localPrestacaoBruto),
+      localIncidenciaIss: replaceMunicipioCodigoComNome(localIncidenciaIssBruto),
       valorServico: this.toFixedCurrencyString(valorServico),
       valorLiquidoNfse: this.toFixedCurrencyString(this.toNumber(extracted.valorLiquidoNfse)),
       valorTotalRetencoes: this.toFixedCurrencyString(valorTotalRetencoes),

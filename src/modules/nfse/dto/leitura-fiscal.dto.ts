@@ -139,6 +139,31 @@ export class NfseLeituraFiscalSummaryDto {
   totalRetencoesFederais?: number;
 }
 
+export class NfseLeituraFiscalResumoMunicipioDto {
+  @ApiProperty()
+  municipio!: string;
+
+  @ApiProperty()
+  quantidadeNotas!: number;
+
+  @ApiProperty()
+  valorServicoTotal!: number;
+
+  @ApiProperty()
+  valorLiquidoTotal!: number;
+
+  @ApiProperty()
+  valorIssTotal!: number;
+}
+
+export class NfseLeituraFiscalResumoPorMunicipioDto {
+  @ApiProperty({ type: [NfseLeituraFiscalResumoMunicipioDto] })
+  localPrestacao!: NfseLeituraFiscalResumoMunicipioDto[];
+
+  @ApiProperty({ type: [NfseLeituraFiscalResumoMunicipioDto] })
+  localIncidenciaIss!: NfseLeituraFiscalResumoMunicipioDto[];
+}
+
 export class NfseLeituraFiscalResponseDto {
   @ApiProperty({ type: [NfseLeituraFiscalRowDto] })
   items!: NfseLeituraFiscalRowDto[];
@@ -148,4 +173,7 @@ export class NfseLeituraFiscalResponseDto {
 
   @ApiProperty({ type: NfseLeituraFiscalSummaryDto })
   summary!: NfseLeituraFiscalSummaryDto;
+
+  @ApiProperty({ type: NfseLeituraFiscalResumoPorMunicipioDto })
+  resumoPorMunicipio!: NfseLeituraFiscalResumoPorMunicipioDto;
 }
