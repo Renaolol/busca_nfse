@@ -8123,6 +8123,10 @@ function renderClientFormModal() {
                 UF
                 <input name="uf" maxlength="2" required value="${escapeHtml(ufValue)}" />
               </label>
+              <label class="field">
+                Codigo empresa Dominio
+                <input name="codigoEmpresaDominio" type="number" min="0" step="1" placeholder="Ex.: 10105" value="${escapeHtml(String(client?.codigoEmpresaDominio ?? ''))}" />
+              </label>
               <label class="field" style="grid-column: span 2;">
                 Responsavel interno
                 <input name="responsavelInterno" value="${escapeHtml(responsavelInternoValue)}" />
@@ -9690,6 +9694,10 @@ function renderNfseFiscalReaderCard() {
   const tipoRegistro = String(exportConfig.tipoRegistro || 'Entrada') === 'Servico' ? 'Servico' : 'Entrada';
   const contas = String(exportConfig.contas || 'Padrao') === 'PorFornecedor' ? 'PorFornecedor' : 'Padrao';
   const clienteIdAtual = state.filters.xmls.cliente && state.filters.xmls.cliente !== 'Todos' ? state.filters.xmls.cliente : '';
+  const clienteAtual = clienteIdAtual ? findClientById(clienteIdAtual) : null;
+  const codigoEmpresaCadastrado =
+    clienteAtual?.codigoEmpresaDominio != null && clienteAtual.codigoEmpresaDominio !== '' ? String(clienteAtual.codigoEmpresaDominio) : '';
+  const codigoEmpresaValue = codigoEmpresaCadastrado || String(exportConfig.codigoEmpresa || '');
   const exportDisabled =
     !rows.length ||
     state.tableState.nfseFiscalReader === 'loading' ||
@@ -9722,10 +9730,15 @@ function renderNfseFiscalReaderCard() {
           type="number"
           min="0"
           step="1"
-          value="${escapeHtml(String(exportConfig.codigoEmpresa || ''))}"
+          value="${escapeHtml(codigoEmpresaValue)}"
           placeholder="Ex.: 10105"
           required
         />
+        ${
+          codigoEmpresaCadastrado
+            ? '<span style="color:#606062; font-size:12px;">Preenchido automaticamente a partir do cadastro do cliente.</span>'
+            : '<span style="color:#606062; font-size:12px;">Cliente sem codigo cadastrado; informe manualmente ou cadastre em Clientes.</span>'
+        }
       </label>
       <label class="field">
         Tipo de registro
@@ -10920,7 +10933,8 @@ async function submitClientForm(form) {
     uf: String(formData.get('uf') || '').trim().toUpperCase(),
     responsavelInterno: String(formData.get('responsavelInterno') || '').trim(),
     buscaAtiva: formData.get('buscaAtiva') === 'on',
-    buscaNfeAtiva: formData.get('buscaNfeAtiva') === 'on'
+    buscaNfeAtiva: formData.get('buscaNfeAtiva') === 'on',
+    codigoEmpresaDominio: String(formData.get('codigoEmpresaDominio') || '').trim()
   };
 
   if (payload.cnpj.length !== 14) {
@@ -10937,7 +10951,8 @@ async function submitClientForm(form) {
       municipioNome: payload.municipio || undefined,
       responsavelInterno: payload.responsavelInterno || undefined,
       ativo: payload.buscaAtiva,
-      nfeHabilitado: payload.buscaNfeAtiva
+      nfeHabilitado: payload.buscaNfeAtiva,
+      codigoEmpresaDominio: payload.codigoEmpresaDominio ? Number(payload.codigoEmpresaDominio) : undefined
     };
 
     const responsavelEmail = sanitizeEmail(payload.responsavelInterno);
@@ -16744,7 +16759,8 @@ function buildClientsFromApi(apiClients, establishmentsByClient, certificatesByC
       horarioPreferencial: '02:00',
       tipoBusca: 'Ambas',
       municipioIntegrado: Boolean(primaryEstablishment?.municipioNome),
-      estabelecimentoIdPrincipal: primaryEstablishment?.id || null
+      estabelecimentoIdPrincipal: primaryEstablishment?.id || null,
+      codigoEmpresaDominio: client.codigoEmpresaDominio ?? null
     };
   });
 }

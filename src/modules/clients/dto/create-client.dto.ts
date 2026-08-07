@@ -1,5 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEmail, IsOptional, IsString, Length } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
 
 export class CreateClientDto {
   @ApiProperty()
@@ -55,4 +56,11 @@ export class CreateClientDto {
   @IsOptional()
   @IsBoolean()
   nfeHabilitado?: boolean;
+
+  @ApiPropertyOptional({ description: 'Codigo da empresa no Dominio/Contabil, usado para preencher a exportacao Dominio automaticamente' })
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  codigoEmpresaDominio?: number;
 }

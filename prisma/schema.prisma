@@ -72,6 +72,7 @@ model Cliente {
   telefone           String?  @db.VarChar(30)
   ativo              Boolean  @default(true)
   nfeHabilitado      Boolean  @default(true) @map("nfe_habilitado")
+  codigoEmpresaDominio Int?   @map("codigo_empresa_dominio")
   createdAt          DateTime @default(now()) @map("created_at")
   updatedAt          DateTime @updatedAt @map("updated_at")
 

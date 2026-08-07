@@ -23,7 +23,8 @@ export class ClientsService {
           emailResponsavel: dto.emailResponsavel,
           telefone: dto.telefone,
           ativo: dto.ativo ?? true,
-          nfeHabilitado: dto.nfeHabilitado ?? true
+          nfeHabilitado: dto.nfeHabilitado ?? true,
+          codigoEmpresaDominio: dto.codigoEmpresaDominio
         }
       });
 
@@ -81,7 +82,8 @@ export class ClientsService {
           emailResponsavel: dto.emailResponsavel,
           telefone: dto.telefone,
           ativo: dto.ativo,
-          nfeHabilitado: dto.nfeHabilitado
+          nfeHabilitado: dto.nfeHabilitado,
+          codigoEmpresaDominio: dto.codigoEmpresaDominio
         }
       });
 
