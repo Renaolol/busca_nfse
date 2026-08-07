@@ -844,6 +844,10 @@ function onDocumentClick(event) {
       void toggleClientNfeSearchStatus(clientId);
       return;
     }
+    case 'client-buscar-codigo-empresa-dominio': {
+      void buscarCodigoEmpresaDominioAutomatico();
+      return;
+    }
     case 'clients-toggle-all': {
       const checked = actionNode.checked;
       const filtered = getFilteredClients();
@@ -8086,6 +8090,9 @@ function renderClientFormModal() {
   const municipioValue = getEditableValue(client?.municipio);
   const ufValue = getEditableValue(client?.uf);
   const responsavelInternoValue = getEditableValue(client?.responsavelInterno);
+  const codigoEmpresaDominioValue =
+    state.modal.codigoEmpresaDominioOverride ?? (client?.codigoEmpresaDominio != null ? String(client.codigoEmpresaDominio) : '');
+  const buscandoCodigoEmpresa = Boolean(state.modal.buscandoCodigoEmpresa);
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -8125,7 +8132,18 @@ function renderClientFormModal() {
               </label>
               <label class="field">
                 Codigo empresa Dominio
-                <input name="codigoEmpresaDominio" type="number" min="0" step="1" placeholder="Ex.: 10105" value="${escapeHtml(String(client?.codigoEmpresaDominio ?? ''))}" />
+                <div style="display:flex; gap:8px; align-items:center;">
+                  <input name="codigoEmpresaDominio" type="number" min="0" step="1" placeholder="Ex.: 10105" value="${escapeHtml(codigoEmpresaDominioValue)}" style="flex:1;" />
+                  <button
+                    class="btn secondary"
+                    type="button"
+                    data-action="client-buscar-codigo-empresa-dominio"
+                    ${client?.id ? '' : 'disabled title="Salve o cliente primeiro para buscar pelo CNPJ."'}
+                    ${buscandoCodigoEmpresa ? 'disabled' : ''}
+                  >
+                    ${buscandoCodigoEmpresa ? 'Buscando...' : 'Buscar por CNPJ'}
+                  </button>
+                </div>
               </label>
               <label class="field" style="grid-column: span 2;">
                 Responsavel interno
@@ -11017,6 +11035,61 @@ async function submitClientForm(form) {
 
   closeModal();
   render();
+}
+
+async function buscarCodigoEmpresaDominioAutomatico() {
+  if (state.modal?.kind !== 'client-form') {
+    return;
+  }
+
+  const clientId = String(state.modal.clientId || '').trim();
+  if (!clientId) {
+    pushToast('Salve o cliente primeiro para buscar o codigo pelo CNPJ.', 'error');
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('A busca automatica na Dominio so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    buscandoCodigoEmpresa: true
+  };
+  render();
+
+  try {
+    const result = await apiRequest('/nfse/dominio/codigo-empresa', {
+      method: 'POST',
+      body: { clienteId: clientId }
+    });
+
+    if (state.modal?.kind === 'client-form') {
+      state.modal = {
+        ...state.modal,
+        buscandoCodigoEmpresa: false,
+        codigoEmpresaDominioOverride: String(result?.codigoEmpresaDominio ?? '')
+      };
+      render();
+    }
+
+    const client = findClientById(clientId);
+    if (client) {
+      client.codigoEmpresaDominio = result?.codigoEmpresaDominio ?? client.codigoEmpresaDominio;
+    }
+
+    pushToast(`Codigo da empresa Dominio encontrado: ${result?.codigoEmpresaDominio}.`, 'success');
+  } catch (error) {
+    if (state.modal?.kind === 'client-form') {
+      state.modal = {
+        ...state.modal,
+        buscandoCodigoEmpresa: false
+      };
+      render();
+    }
+    pushToast(`Falha ao buscar o codigo da empresa na Dominio: ${toErrorMessage(error)}`, 'error');
+  }
 }
 
 async function submitClientSearchConfigForm(form) {

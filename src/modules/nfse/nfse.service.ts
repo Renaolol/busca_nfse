@@ -91,6 +91,11 @@ type DominioFornecedorContaRecord = {
   codi_cta: string | number;
 };
 
+type DominioEmpresaRecord = {
+  cnpj_empresa: string;
+  codigo_empresa: string | number;
+};
+
 type NfseDominioExportSource = {
   documento: NfseDocumento;
   exportData: NfseDominioExportData;
@@ -101,6 +106,7 @@ export class NfseService {
   private readonly logger = new Logger(NfseService.name);
   private readonly dominioPythonBin = resolveDominioPythonBin();
   private readonly dominioFornecedorContaScriptPath = join(process.cwd(), 'scripts', 'dominio_nfse_fornecedor_contas.py');
+  private readonly dominioEmpresaPorCnpjScriptPath = join(process.cwd(), 'scripts', 'dominio_empresa_por_cnpj.py');
   private readonly dominioConnectionString = process.env.DOMINIO_ODBC_CONNECTION_STRING || '';
   private readonly eventRequestIntervalMs = process.env.NODE_ENV === 'test' ? 0 : this.readPositiveNumberEnv('NFSE_EVENTOS_REQUEST_INTERVAL_MS', 5000);
   private readonly eventRateLimitRetryCount =
@@ -927,6 +933,88 @@ export class NfseService {
       records
         .map((record) => [this.normalizeCnpj(record.cnpj_fornecedor) ?? '', String(record.codi_cta || '').trim()] as const)
         .filter(([cnpj, conta]) => Boolean(cnpj) && Boolean(conta))
+    );
+  }
+
+  async buscarCodigoEmpresaDominioPorCnpj(clienteId: string) {
+    const cliente = await this.prisma.cliente.findUnique({ where: { id: clienteId } });
+    if (!cliente) {
+      throw new NotFoundException('Cliente nao encontrado.');
+    }
+
+    const cnpj = this.normalizeCnpj(cliente.cnpj);
+    if (!cnpj) {
+      throw new BadRequestException('Cliente sem CNPJ valido cadastrado.');
+    }
+
+    const codigoEmpresaByCnpj = await this.lookupDominioCodigoEmpresaPorCnpj([cnpj]);
+    const codigoEmpresa = codigoEmpresaByCnpj.get(cnpj);
+    if (codigoEmpresa === undefined) {
+      throw new NotFoundException('Nenhuma empresa encontrada na Dominio para o CNPJ deste cliente.');
+    }
+
+    const atualizado = await this.prisma.cliente.update({
+      where: { id: clienteId },
+      data: { codigoEmpresaDominio: codigoEmpresa }
+    });
+
+    return { clienteId, codigoEmpresaDominio: atualizado.codigoEmpresaDominio };
+  }
+
+  private async lookupDominioCodigoEmpresaPorCnpj(cnpjs: string[]): Promise<Map<string, number>> {
+    if (!this.dominioConnectionString) {
+      throw new BadRequestException('DOMINIO_ODBC_CONNECTION_STRING nao configurada para buscar o codigo da empresa na Dominio.');
+    }
+
+    const normalizedCnpjs = [...new Set(cnpjs.map((value) => this.normalizeCnpj(value)).filter((value): value is string => Boolean(value)))];
+    if (!normalizedCnpjs.length) {
+      return new Map();
+    }
+
+    const payload = JSON.stringify({
+      connectionString: this.dominioConnectionString,
+      cnpjs: normalizedCnpjs
+    });
+
+    const records = await new Promise<DominioEmpresaRecord[]>((resolve, reject) => {
+      const processRef = spawn(this.dominioPythonBin, [this.dominioEmpresaPorCnpjScriptPath], {
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+
+      let stdout = '';
+      let stderr = '';
+
+      processRef.stdout.setEncoding('utf8');
+      processRef.stderr.setEncoding('utf8');
+      processRef.stdout.on('data', (chunk: string) => {
+        stdout += chunk;
+      });
+      processRef.stderr.on('data', (chunk: string) => {
+        stderr += chunk;
+      });
+      processRef.on('error', (error) => reject(error));
+      processRef.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(stderr.trim() || `Falha ao consultar empresa na Dominio. Exit code ${code}.`));
+          return;
+        }
+
+        const parsed = stdout
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter(Boolean)
+          .map((line) => JSON.parse(line) as DominioEmpresaRecord);
+        resolve(parsed);
+      });
+
+      processRef.stdin.write(payload);
+      processRef.stdin.end();
+    });
+
+    return new Map(
+      records
+        .map((record) => [this.normalizeCnpj(record.cnpj_empresa) ?? '', Number(record.codigo_empresa)] as const)
+        .filter(([cnpj, codigo]) => Boolean(cnpj) && Number.isFinite(codigo))
     );
   }
 

@@ -6,6 +6,7 @@ import { DownloadLoteDto } from './dto/download-lote.dto';
 import { DownloadLoteResponseDto } from './dto/download-lote-response.dto';
 import { DownloadDocumentDto } from './dto/download-document.dto';
 import { DashboardStatsQueryDto, DashboardStatsResponseDto } from './dto/dashboard-stats.dto';
+import { BuscarCodigoEmpresaDominioDto } from './dto/buscar-codigo-empresa-dominio.dto';
 import {
   CreateNfseContaContabilConfigDto,
   ListNfseContaContabilConfigQueryDto,
@@ -141,6 +142,12 @@ export class NfseController {
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   deleteContaContabilConfig(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
     return this.nfseService.deleteContaContabilConfig(id, query.clienteId);
+  }
+
+  @Post('dominio/codigo-empresa')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  buscarCodigoEmpresaDominioPorCnpj(@Body() dto: BuscarCodigoEmpresaDominioDto) {
+    return this.nfseService.buscarCodigoEmpresaDominioPorCnpj(dto.clienteId);
   }
 
   @Post(':id/validacao-numeracao')

@@ -9,7 +9,9 @@ import { NfseXmlParserService } from '../nfse-xml-parser.service';
 describe('NfseService', () => {
   const prisma = {
     cliente: {
-      findMany: jest.fn()
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      update: jest.fn()
     },
     clienteEstabelecimento: {
       findFirst: jest.fn()
@@ -75,6 +77,7 @@ describe('NfseService', () => {
     jest.resetAllMocks();
     prisma.clienteEstabelecimento.findFirst.mockResolvedValue(undefined);
     prisma.cliente.findMany.mockResolvedValue([]);
+    prisma.cliente.findUnique.mockResolvedValue(undefined);
     prisma.nfseNumeracaoExcecao.findMany.mockResolvedValue([]);
     prisma.nfseNumeracaoExcecao.findUnique.mockResolvedValue(undefined);
     prisma.nfseContaContabilConfig.findMany.mockResolvedValue([]);
@@ -1763,6 +1766,32 @@ describe('NfseService', () => {
         produtoPadrao: 557
       })
     ).rejects.toThrow('DOMINIO_ODBC_CONNECTION_STRING nao configurada para exportacao Por Fornecedor.');
+  });
+
+  it('rejeita busca automatica do codigo empresa Dominio quando cliente nao existe', async () => {
+    prisma.cliente.findUnique.mockResolvedValueOnce(undefined);
+
+    await expect(service.buscarCodigoEmpresaDominioPorCnpj('cliente-inexistente')).rejects.toThrow('Cliente nao encontrado.');
+  });
+
+  it('rejeita busca automatica do codigo empresa Dominio quando cliente nao tem CNPJ valido', async () => {
+    prisma.cliente.findUnique.mockResolvedValueOnce({
+      id: 'cliente-1',
+      cnpj: ''
+    });
+
+    await expect(service.buscarCodigoEmpresaDominioPorCnpj('cliente-1')).rejects.toThrow('Cliente sem CNPJ valido cadastrado.');
+  });
+
+  it('rejeita busca automatica do codigo empresa Dominio sem configuracao ODBC', async () => {
+    prisma.cliente.findUnique.mockResolvedValueOnce({
+      id: 'cliente-1',
+      cnpj: '06960810000176'
+    });
+
+    await expect(service.buscarCodigoEmpresaDominioPorCnpj('cliente-1')).rejects.toThrow(
+      'DOMINIO_ODBC_CONNECTION_STRING nao configurada para buscar o codigo da empresa na Dominio.'
+    );
   });
 
   it('retorna XML com metadados de download', async () => {
