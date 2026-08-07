@@ -9,6 +9,7 @@ const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
 const COMPARE_SPED_HISTORY_LIMIT = 10;
 const XML_READER30_NFE_COLUMN_ORDER_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-order:v1';
+const XML_READER30_NFE_REGIME_STORAGE_KEY = 'gcont:xml-reader30-nfe-regime:v1';
 const XML_READER30_SCROLL_SELECTORS = ['.xml-reader30-top-scroll', '.xml-reader30-pan-scroll'];
 const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'select',
@@ -27,6 +28,18 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'baseCalculoIcms',
   'aliquotaIcms',
   'valorIcms',
+  'qBCMonoRet',
+  'adRemICMSRet',
+  'vICMSMonoRet',
+  'aliqVigente',
+  'valorCorreto',
+  'evento'
+];
+const XML_READER30_NFE_SIMPLE_NATIONAL_HIDDEN_COLUMNS = [
+  'nfCancelada',
+  'icmsStRet',
+  'baseCalculoIcms',
+  'aliquotaIcms',
   'qBCMonoRet',
   'adRemICMSRet',
   'vICMSMonoRet',
@@ -65,6 +78,7 @@ const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
 let dashboardAutoRefreshTimer = null;
 let dashboardAutoRefreshRunning = false;
 let xmlReader30ScrollSyncing = false;
+const initialXmlReader30NfeRegime = loadXmlReader30NfeRegimeStore();
 
 const navItems = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', route: '/dashboard' },
@@ -268,7 +282,8 @@ const state = {
       cte: 0
     },
     nfeColumnOrder: loadXmlReader30NfeColumnOrderStore(),
-    hiddenNfeColumns: new Set(),
+    nfeRegime: initialXmlReader30NfeRegime,
+    hiddenNfeColumns: new Set(getXmlReader30NfeRegimeHiddenColumns(initialXmlReader30NfeRegime)),
     cstFilter: '',
 
     selectionDrag: null,
@@ -1897,6 +1912,12 @@ function onDocumentChange(event) {
 
   if (action === 'xml-reader30-cst-filter') {
     state.xmlReader30.cstFilter = String(target.value || '').trim();
+    renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
+    return;
+  }
+
+  if (action === 'xml-reader30-nfe-regime') {
+    applyXmlReader30NfeRegime(target.value);
     renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
     return;
   }
@@ -5572,6 +5593,20 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
                 ${renderOptions(['', ...cstOptions], cstFilter, { '': 'Todos' })}
               </select>
             </label>
+            <label class="field" style="margin:0; min-width:180px;">
+              <span style="font-size:11px;">Regime da empresa</span>
+              <select data-action="xml-reader30-nfe-regime" style="height:32px;">
+                ${renderOptions(
+                  ['lucro_real', 'lucro_presumido', 'simples_nacional'],
+                  state.xmlReader30.nfeRegime || 'lucro_real',
+                  {
+                    lucro_real: 'Lucro Real',
+                    lucro_presumido: 'Lucro Presumido',
+                    simples_nacional: 'Simples Nacional'
+                  }
+                )}
+              </select>
+            </label>
             ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
             ${
               fullscreen
@@ -6287,6 +6322,14 @@ function formatXmlReader30CurrencyValue(value) {
   return formatCurrency(numericValue);
 }
 
+function applyXmlReader30NfeRegime(regime) {
+  const normalizedRegime = normalizeXmlReader30NfeRegime(regime);
+  state.xmlReader30.nfeRegime = normalizedRegime;
+  state.xmlReader30.hiddenNfeColumns = new Set(getXmlReader30NfeRegimeHiddenColumns(normalizedRegime));
+  saveXmlReader30NfeRegimeStore(normalizedRegime);
+  closeXmlReader30NfeColumnMenu();
+}
+
 function hideXmlReader30NfeColumn(columnKey) {
   const normalizedKey = String(columnKey || '').trim();
   if (!normalizedKey) {
@@ -6670,6 +6713,11 @@ function mapXmlReader30TypeLabel(documentType) {
 
 function resetXmlReader30Search() {
   const activeTab = state.xmlReader30.activeTab === 'nfse-fiscal' ? 'nfse-fiscal' : 'nfe';
+  const nfeRegime = normalizeXmlReader30NfeRegime(state.xmlReader30.nfeRegime);
+  const nfeColumnOrder = normalizeXmlReader30NfeColumnOrder(state.xmlReader30.nfeColumnOrder);
+  const hiddenNfeColumns = state.xmlReader30.hiddenNfeColumns instanceof Set
+    ? new Set(state.xmlReader30.hiddenNfeColumns)
+    : new Set(getXmlReader30NfeRegimeHiddenColumns(nfeRegime));
   state.xmlReader30 = {
     activeTab,
     hasSearched: false,
@@ -6682,6 +6730,7 @@ function resetXmlReader30Search() {
       nfe: 0,
       cte: 0
     },
+    nfeRegime,
     nfeColumnOrder,
     hiddenNfeColumns,
     selectionDrag: null,
@@ -18234,6 +18283,46 @@ function saveXmlReader30NfeColumnOrderStore(columnOrder) {
   } catch (error) {
     console.warn('Falha ao persistir a ordem das colunas da NF-e no leitor XML 3.0.', error);
   }
+}
+
+function normalizeXmlReader30NfeRegime(regime) {
+  const normalized = String(regime || '').trim().toLowerCase();
+  if (normalized === 'simples_nacional' || normalized === 'simples nacional' || normalized === 'simples') {
+    return 'simples_nacional';
+  }
+  if (normalized === 'lucro_presumido' || normalized === 'lucro presumido' || normalized === 'presumido') {
+    return 'lucro_presumido';
+  }
+  if (normalized === 'lucro_real' || normalized === 'lucro real' || normalized === 'real') {
+    return 'lucro_real';
+  }
+  return 'lucro_real';
+}
+
+function loadXmlReader30NfeRegimeStore() {
+  try {
+    const raw = window.localStorage.getItem(XML_READER30_NFE_REGIME_STORAGE_KEY);
+    return normalizeXmlReader30NfeRegime(raw || 'lucro_real');
+  } catch (error) {
+    console.warn('Falha ao carregar o regime da empresa no leitor XML 3.0.', error);
+    return 'lucro_real';
+  }
+}
+
+function saveXmlReader30NfeRegimeStore(regime) {
+  try {
+    window.localStorage.setItem(XML_READER30_NFE_REGIME_STORAGE_KEY, normalizeXmlReader30NfeRegime(regime));
+  } catch (error) {
+    console.warn('Falha ao persistir o regime da empresa no leitor XML 3.0.', error);
+  }
+}
+
+function getXmlReader30NfeRegimeHiddenColumns(regime) {
+  if (normalizeXmlReader30NfeRegime(regime) !== 'simples_nacional') {
+    return [];
+  }
+
+  return [...XML_READER30_NFE_SIMPLE_NATIONAL_HIDDEN_COLUMNS];
 }
 
 function normalizeXmlReader30NfeColumnOrder(columnOrder) {
