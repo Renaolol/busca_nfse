@@ -269,6 +269,7 @@ const state = {
     },
     nfeColumnOrder: loadXmlReader30NfeColumnOrderStore(),
     hiddenNfeColumns: new Set(),
+    expandedNfeKeys: new Set(),
     selectionDrag: null,
     scrollDrag: null,
     columnMenuOpenKey: null,
@@ -714,6 +715,15 @@ function onDocumentClick(event) {
     }
     case 'xml-reader30-open-fullscreen': {
       void openXmlReader30Fullscreen();
+      return;
+    }
+    case 'xml-reader30-toggle-nfe-row': {
+      const rowKey = actionNode.getAttribute('data-row-key');
+      if (!rowKey) {
+        return;
+      }
+      toggleXmlReader30NfeRowExpand(rowKey);
+      renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
       return;
     }
     case 'nfse-fiscal-column-menu-toggle': {
@@ -5503,7 +5513,7 @@ function renderXmlReader30NfeFullscreenIcon() {
 function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
   const fullscreen = Boolean(options.fullscreen);
   const sortedRows = sortXmlReader30Results(results, { documentType: 'nfe' });
-  const displayedRows = expandXmlReader30NfeRows(sortedRows);
+  const displayedRows = sortedRows.map((row) => buildXmlReader30NfeGroupRow(row, expandXmlReader30NfeRows([row])));
   const selectableRows = displayedRows.filter((row) => getXmlReader30SelectionKey(row));
   const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
   const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
@@ -5519,7 +5529,7 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">XMLs encontrados</h3>
-          <p class="card-subtitle">Mostrando ${escapeHtml(String(displayedRows.length))} linha(s) itemizada(s) da NF-e do acervo interno.</p>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(displayedRows.length))} NF-e do acervo interno.</p>
         </div>
         <div class="stack-mini" style="align-items:flex-end;">
           <div style="display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap;">
@@ -5541,7 +5551,7 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
                 `
             }
           </div>
-          <span class="row-sub">${fullscreen ? 'Use a barra de rolagem da janela para consultar a tabela inteira.' : 'A tabela esta compactada para consulta rapida. Use o botao de tela cheia para ampliar.'}</span>
+          <span class="row-sub">${fullscreen ? 'Use a barra de rolagem da janela para consultar a tabela inteira. Clique na seta para ver os produtos de cada NF-e.' : 'A tabela esta compactada para consulta rapida. Clique na seta para ver os produtos de cada NF-e.'}</span>
         </div>
       </div>
       <div class="${viewportClassName}" style="max-height:${compactMaxHeight};">
@@ -5613,11 +5623,13 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
                 ? displayedRows
                     .map((row) => {
                       const statusTone = row.raw?.cancelada ? 'danger' : row.raw?.statusFiscal === 'Autorizada' ? 'success' : row.statusTone || 'info';
-                      return `
+                      const mainRowHtml = `
                         <tr>
                           ${visibleColumns.map((column) => renderXmlReader30NfeColumnCell(column, row, statusTone)).join('')}
                         </tr>
                       `;
+                      const detailRowHtml = row.__nfeExpanded ? renderXmlReader30NfeItemsDetailRow(row, visibleColumns.length) : '';
+                      return mainRowHtml + detailRowHtml;
                     })
                     .join('')
                 : '',
@@ -5684,7 +5696,25 @@ function getXmlReader30NfeColumnDefinitions() {
       html: true,
       render: (row) => {
         const selectionKey = getXmlReader30SelectionKey(row);
-        return `<input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Marcar NF-e como conferida ${escapeHtml(String(row.numeroNf || row.numeroLabel || '-'))}" />`;
+        const checkboxHtml = `<input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Marcar NF-e como conferida ${escapeHtml(String(row.numeroNf || row.numeroLabel || '-'))}" />`;
+        if (!row.__nfeGroupKey) {
+          return checkboxHtml;
+        }
+
+        const isExpanded = Boolean(row.__nfeExpanded);
+        const numeroLabel = String(row.numeroNf || row.numeroLabel || '-');
+        const toggleButtonHtml = `
+          <button
+            type="button"
+            class="xml-reader30-row-expand-toggle"
+            data-action="xml-reader30-toggle-nfe-row"
+            data-row-key="${escapeHtml(row.__nfeGroupKey)}"
+            aria-expanded="${isExpanded ? 'true' : 'false'}"
+            aria-label="${isExpanded ? 'Ocultar' : 'Mostrar'} produtos da NF-e ${escapeHtml(numeroLabel)}"
+            title="${isExpanded ? 'Ocultar produtos' : 'Mostrar produtos'}"
+          >${renderXmlReader30ExpandToggleIcon(isExpanded)}</button>
+        `;
+        return `<div class="xml-reader30-select-cell">${toggleButtonHtml}${checkboxHtml}</div>`;
       }
     },
     {
@@ -6186,7 +6216,7 @@ function expandXmlReader30NfeRows(rows) {
       return [
         {
           ...row,
-          selectionKey: `${row.documentType}:${row.rowId}:item:0`,
+          selectionKey: `${row.documentType}:${row.rowId}`,
           numeroNf: baseNumero,
           statusNf: baseStatusLabel,
           statusTone: baseStatusTone,
@@ -6224,7 +6254,7 @@ function expandXmlReader30NfeRows(rows) {
 
     return items.map((item, index) => ({
       ...row,
-      selectionKey: `${row.documentType}:${row.rowId}:item:${index}`,
+      selectionKey: `${row.documentType}:${row.rowId}`,
       numeroNf: baseNumero,
       statusNf: baseStatusLabel,
       statusTone: baseStatusTone,
@@ -6255,6 +6285,149 @@ function expandXmlReader30NfeRows(rows) {
       evento: baseEvento
     }));
   });
+}
+
+function toggleXmlReader30NfeRowExpand(rowKey) {
+  const normalizedKey = String(rowKey || '').trim();
+  if (!normalizedKey) {
+    return;
+  }
+
+  const expandedKeys = state.xmlReader30.expandedNfeKeys instanceof Set
+    ? state.xmlReader30.expandedNfeKeys
+    : new Set();
+  if (expandedKeys.has(normalizedKey)) {
+    expandedKeys.delete(normalizedKey);
+  } else {
+    expandedKeys.add(normalizedKey);
+  }
+  state.xmlReader30.expandedNfeKeys = expandedKeys;
+}
+
+function sumXmlReader30ItemsField(itemRows, key) {
+  return (Array.isArray(itemRows) ? itemRows : []).reduce((sum, item) => sum + toNumber(item?.[key]), 0);
+}
+
+function commonOrDiverseXmlReader30Value(itemRows, key) {
+  const values = (Array.isArray(itemRows) ? itemRows : [])
+    .map((item) => String(item?.[key] ?? '').trim())
+    .filter((value) => value && value !== '-');
+  if (!values.length) {
+    return '-';
+  }
+
+  const unique = [...new Set(values)];
+  return unique.length === 1 ? unique[0] : 'Diversos';
+}
+
+function buildXmlReader30NfeGroupRow(headerRow, itemRows) {
+  const rows = Array.isArray(itemRows) && itemRows.length ? itemRows : [headerRow];
+  const base = rows[0] || headerRow;
+  const groupKey = getXmlReader30SelectionKey(headerRow) || String(headerRow?.rowId || '');
+  const expandedKeys = state.xmlReader30.expandedNfeKeys instanceof Set ? state.xmlReader30.expandedNfeKeys : new Set();
+  const isExpanded = expandedKeys.has(groupKey);
+  const itemCount = rows.length;
+
+  return {
+    ...base,
+    selectionKey: groupKey,
+    produto: `${itemCount} ${itemCount === 1 ? 'produto' : 'produtos'}`,
+    quantidade: '-',
+    valorUnitario: '-',
+    valorTotal: formatXmlReader30CurrencyValue(sumXmlReader30ItemsField(rows, 'valorTotal')),
+    icmsStRet: formatXmlReader30CurrencyValue(sumXmlReader30ItemsField(rows, 'icmsStRetRaw')),
+    icmsStRetRaw: String(sumXmlReader30ItemsField(rows, 'icmsStRetRaw')),
+    cstCsosn: commonOrDiverseXmlReader30Value(rows, 'cstCsosn'),
+    cfop: commonOrDiverseXmlReader30Value(rows, 'cfop'),
+    baseCalculoIcms: formatXmlReader30DecimalValue(sumXmlReader30ItemsField(rows, 'baseCalculoIcmsRaw')),
+    baseCalculoIcmsRaw: String(sumXmlReader30ItemsField(rows, 'baseCalculoIcmsRaw')),
+    aliquotaIcms: commonOrDiverseXmlReader30Value(rows, 'aliquotaIcms'),
+    valorIcms: formatXmlReader30DecimalValue(sumXmlReader30ItemsField(rows, 'valorIcmsRaw')),
+    valorIcmsRaw: String(sumXmlReader30ItemsField(rows, 'valorIcmsRaw')),
+    qBCMonoRet: formatXmlReader30DecimalValue(sumXmlReader30ItemsField(rows, 'qBCMonoRetRaw')),
+    qBCMonoRetRaw: String(sumXmlReader30ItemsField(rows, 'qBCMonoRetRaw')),
+    adRemICMSRet: formatXmlReader30DecimalValue(sumXmlReader30ItemsField(rows, 'adRemICMSRetRaw')),
+    adRemICMSRetRaw: String(sumXmlReader30ItemsField(rows, 'adRemICMSRetRaw')),
+    vICMSMonoRet: formatXmlReader30CurrencyValue(sumXmlReader30ItemsField(rows, 'vICMSMonoRetRaw')),
+    vICMSMonoRetRaw: String(sumXmlReader30ItemsField(rows, 'vICMSMonoRetRaw')),
+    aliqVigente: commonOrDiverseXmlReader30Value(rows, 'aliqVigente'),
+    valorCorreto: formatXmlReader30CurrencyValue(sumXmlReader30ItemsField(rows, 'valorCorretoRaw')),
+    valorCorretoRaw: String(sumXmlReader30ItemsField(rows, 'valorCorretoRaw')),
+    __nfeGroupKey: groupKey,
+    __nfeExpanded: isExpanded,
+    __nfeItemCount: itemCount,
+    __nfeItems: rows
+  };
+}
+
+function renderXmlReader30ExpandToggleIcon(isExpanded) {
+  return `
+    <span aria-hidden="true" class="xml-reader30-row-expand-icon" style="transform:rotate(${isExpanded ? '180deg' : '0deg'});">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+        <path d="M6 9l6 6 6-6"></path>
+      </svg>
+    </span>
+  `;
+}
+
+function renderXmlReader30NfeItemsDetailRow(groupRow, colSpanCount) {
+  const items = Array.isArray(groupRow.__nfeItems) ? groupRow.__nfeItems : [];
+  const totalValorTotal = sumXmlReader30ItemsField(items, 'valorTotal');
+  const totalBaseIcms = sumXmlReader30ItemsField(items, 'baseCalculoIcmsRaw');
+  const totalValorIcms = sumXmlReader30ItemsField(items, 'valorIcmsRaw');
+
+  return `
+    <tr class="xml-reader30-nfe-detail-row">
+      <td colspan="${Math.max(1, Number(colSpanCount) || 1)}">
+        <div class="xml-reader30-nfe-detail-wrap">
+          <table class="xml-reader30-nfe-items-table">
+            <thead>
+              <tr>
+                <th>Produto</th>
+                <th>Descricao</th>
+                <th>Quantidade</th>
+                <th>Valor Unit.</th>
+                <th>Valor Total</th>
+                <th>Base ICMS</th>
+                <th>Aliquota ICMS</th>
+                <th>ICMS</th>
+                <th>CST/CSOSN</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items
+                .map(
+                  (item, index) => `
+                    <tr>
+                      <td>${escapeHtml(String(index + 1))}</td>
+                      <td>${escapeHtml(normalizeXmlReader30InlineText(item.produto))}</td>
+                      <td>${escapeHtml(item.quantidade || '-')}</td>
+                      <td>${escapeHtml(formatXmlReader30CurrencyValue(item.valorUnitario))}</td>
+                      <td>${escapeHtml(formatXmlReader30CurrencyValue(item.valorTotal))}</td>
+                      <td>${escapeHtml(formatXmlReader30CurrencyValue(item.baseCalculoIcmsRaw ?? item.baseCalculoIcms))}</td>
+                      <td>${escapeHtml(item.aliquotaIcms || '0')}%</td>
+                      <td>${escapeHtml(formatXmlReader30CurrencyValue(item.valorIcmsRaw ?? item.valorIcms))}</td>
+                      <td>${escapeHtml(item.cstCsosn || '-')}</td>
+                    </tr>
+                  `
+                )
+                .join('')}
+            </tbody>
+            <tfoot>
+              <tr class="xml-reader30-nfe-detail-total">
+                <td colspan="4">Total da NF ${escapeHtml(String(groupRow.numeroNf || '-'))}</td>
+                <td>${escapeHtml(formatXmlReader30CurrencyValue(totalValorTotal))}</td>
+                <td>${escapeHtml(formatXmlReader30CurrencyValue(totalBaseIcms))}</td>
+                <td></td>
+                <td>${escapeHtml(formatXmlReader30CurrencyValue(totalValorIcms))}</td>
+                <td></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </td>
+    </tr>
+  `;
 }
 
 function countXmlReader30NfeNotes(rows) {
@@ -6468,6 +6641,7 @@ function resetXmlReader30Search() {
     },
     nfeColumnOrder,
     hiddenNfeColumns,
+    expandedNfeKeys: new Set(),
     selectionDrag: null,
     scrollDrag: null,
     columnMenuOpenKey: null,

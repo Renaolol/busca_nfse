@@ -1757,6 +1757,80 @@ tbody tr:hover {
   white-space: nowrap;
 }
 
+.xml-reader30-select-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.xml-reader30-row-expand-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.xml-reader30-row-expand-toggle:hover {
+  color: inherit;
+  border-color: #c9c9cf;
+}
+
+.xml-reader30-row-expand-icon {
+  display: inline-flex;
+  transition: transform 0.15s ease;
+}
+
+.xml-reader30-nfe-detail-row td {
+  padding: 0 10px 12px !important;
+  background: #fafafb;
+}
+
+.xml-reader30-nfe-detail-wrap {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.xml-reader30-nfe-items-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-weight: 400;
+  table-layout: auto;
+}
+
+.xml-reader30-nfe-items-table th,
+.xml-reader30-nfe-items-table td {
+  padding: 6px 10px;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 12.5px;
+}
+
+.xml-reader30-nfe-items-table thead th {
+  background: #f3f3f5;
+  color: var(--muted);
+  font-weight: 600;
+  border-bottom: 1px solid var(--line);
+}
+
+.xml-reader30-nfe-items-table tbody tr:not(:last-child) td {
+  border-bottom: 1px solid var(--line);
+}
+
+.xml-reader30-nfe-items-table tfoot td {
+  border-top: 1px solid var(--line);
+  font-weight: 700;
+}
+
 .document-products-shell {
   border: 1px solid var(--line);
   border-radius: 18px;
