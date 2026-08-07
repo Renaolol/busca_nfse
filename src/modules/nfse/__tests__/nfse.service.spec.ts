@@ -1410,6 +1410,22 @@ describe('NfseService', () => {
       cancelada: true,
       numeroNfse: '77'
     });
+    expect(result.summary).toMatchObject({
+      totalDocumentosFiltrados: 1,
+      totalDocumentosLidos: 1,
+      totalDocumentosComErro: 0,
+      totalDocumentosSemXml: 0,
+      valorServicoTotal: 0,
+      valorLiquidoTotal: 0,
+      valorRetidoTotal: 0,
+      valorIssTotal: 0,
+      valorIssRetidoRealTotal: 0,
+      totalRetencoesFederais: 0
+    });
+    expect(result.resumoPorMunicipio).toEqual({
+      localPrestacao: [],
+      localIncidenciaIss: []
+    });
   });
 
   it('nao soma retencoes federais em ABRASF quando o liquido reflete apenas ISS retido', async () => {

@@ -318,7 +318,7 @@ export class NfseService {
           ...leitura
         });
 
-        if (leitura.statusProcessamento === 'OK') {
+        if (leitura.statusProcessamento === 'OK' && !cancelada) {
           valorServicoTotal += this.toNumber(leitura.valorServico) ?? 0;
           valorLiquidoTotal += this.toNumber(leitura.valorLiquidoNfse) ?? 0;
           valorRetidoTotal += this.toNumber(leitura.valorTotalRetencoes) ?? 0;
@@ -393,6 +393,9 @@ export class NfseService {
 
     for (const row of rows) {
       if (row.statusProcessamento !== 'OK') {
+        continue;
+      }
+      if (Boolean(row.cancelada)) {
         continue;
       }
 
