@@ -740,9 +740,6 @@ function onDocumentClick(event) {
       updateNfseFiscalReaderSort(key);
       return;
     }
-
-      return;
-    }
     case 'nfse-fiscal-column-menu-toggle': {
       const columnKey = actionNode.getAttribute('data-column-key');
       if (!columnKey) {
