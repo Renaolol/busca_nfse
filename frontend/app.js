@@ -9802,7 +9802,7 @@ function renderNfseFiscalReaderCard() {
   const resumoPorMunicipioHtml =
     resumoPorMunicipio && (resumoPorMunicipio.localPrestacao.length || resumoPorMunicipio.localIncidenciaIss.length)
       ? `
-      <div class="form-grid two" style="margin-bottom:18px; align-items:start;">
+      <div class="form-grid two" style="margin-top:18px; align-items:start;">
         ${renderNfseFiscalReaderResumoMunicipioTable('Somatorio por municipio - Local prestacao', resumoPorMunicipio.localPrestacao)}
         ${renderNfseFiscalReaderResumoMunicipioTable('Somatorio por municipio - Local ISS', resumoPorMunicipio.localIncidenciaIss)}
       </div>
@@ -9880,7 +9880,6 @@ function renderNfseFiscalReaderCard() {
         </div>
       </div>
       ${summaryCards}
-      ${resumoPorMunicipioHtml}
       ${exportForm}
       <div class="table-wrap nfse-fiscal-reader-scroll">
         <table class="xml-reader30-table xml-reader30-reorderable-table nfse-fiscal-reader-table" style="min-width:${minWidth}px;">
@@ -9950,6 +9949,7 @@ function renderNfseFiscalReaderCard() {
           </tbody>
         </table>
       </div>
+      ${resumoPorMunicipioHtml}
     </article>
   `;
 }
