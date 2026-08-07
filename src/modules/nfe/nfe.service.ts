@@ -1256,6 +1256,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     catalogoIds?: number[];
     catalogoIdMinExclusive?: number;
     sortDirection?: 'asc' | 'desc';
+    defaultCurrentMonthDateRange?: boolean;
   }) {
     const establishments = await this.resolveTargetEstablishments(params.clienteId, params.estabelecimentoId);
     const establishmentByCnpj = new Map(
@@ -1267,12 +1268,20 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         .filter((entry): entry is [string, (typeof establishments)[number]] => entry !== null)
     );
 
+    const effectiveRange =
+      params.defaultCurrentMonthDateRange && !params.dataEmissaoInicio && !params.dataEmissaoFim
+        ? this.resolveCurrentMonthDateRange()
+        : {
+            dataEmissaoInicio: params.dataEmissaoInicio,
+            dataEmissaoFim: params.dataEmissaoFim
+          };
+
     const documents = await this.loadDominioDocumentsForClient({
       clienteId: params.clienteId,
       estabelecimentoId: params.estabelecimentoId,
       limit: params.limit,
-      dataEmissaoInicio: params.dataEmissaoInicio,
-      dataEmissaoFim: params.dataEmissaoFim,
+      dataEmissaoInicio: effectiveRange.dataEmissaoInicio,
+      dataEmissaoFim: effectiveRange.dataEmissaoFim,
       chavesAcesso: params.chavesAcesso,
       catalogoIds: params.catalogoIds,
       catalogoIdMinExclusive: params.catalogoIdMinExclusive,
@@ -1534,6 +1543,26 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       catalogoIdMinExclusive: params.catalogoIdMinExclusive,
       sortDirection: params.sortDirection
     });
+  }
+
+  private resolveCurrentMonthDateRange(): {
+    dataEmissaoInicio?: string;
+    dataEmissaoFim?: string;
+  } {
+    const now = new Date();
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+    return {
+      dataEmissaoInicio: this.formatLocalDateAsIso(startOfMonth),
+      dataEmissaoFim: this.formatLocalDateAsIso(endOfMonth)
+    };
+  }
+
+  private formatLocalDateAsIso(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
   }
 
   private async loadDominioCatalogForClient(params: {
@@ -1838,6 +1867,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     ambiente?: NfeAmbiente;
     estabelecimentoId?: string;
     limitControles?: number;
+    defaultCurrentMonthDateRange?: boolean;
   }): Promise<NfeSyncRunResult> {
     const controls = await this.prisma.nfeSyncControle.findMany({
       where: {
@@ -1869,7 +1899,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           ambiente: control.ambiente,
           limit: limitPorControle,
           catalogoIdMinExclusive: this.toSafeCatalogoCursor(control.ultimoNsuConsultado),
-          sortDirection: 'asc'
+          sortDirection: 'asc',
+          defaultCurrentMonthDateRange: params.defaultCurrentMonthDateRange
         });
         const cursorAtualizado = BigInt(result.cursorAtualizadoAte);
         const maxCatalogoEncontrado = BigInt(result.maxCatalogoIdEncontrado);
@@ -3571,7 +3602,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       const activation = await this.ativarSyncNoNsuAtualParaTodos({
         ambiente: NfeAmbiente.producao
       });
-      const runResult = await this.runNowGlobal();
+      const runResult = this.isDominioXmlSyncSource()
+        ? await this.runNowViaDominio({
+            limitControles: 50,
+            defaultCurrentMonthDateRange: true
+          })
+        : await this.runNowGlobal();
       this.logger.log(
         `Busca noturna NF-e executada (${executionKey}): ${activation.controlesCriadosOuReativados} controle(s) preparados, ${runResult.documentsSaved} documento(s) salvo(s)`
       );

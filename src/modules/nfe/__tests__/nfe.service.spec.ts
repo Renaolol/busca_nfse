@@ -86,6 +86,7 @@ describe('NfeService', () => {
   );
 
   beforeEach(() => {
+    jest.useRealTimers();
     jest.clearAllMocks();
     delete process.env.NFE_SYNC_SOURCE_MODE;
     delete process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN;
@@ -1272,6 +1273,79 @@ describe('NfeService', () => {
       ],
       failureDetails: []
     });
+  });
+
+  it('aplica o periodo do mes corrente apenas na busca noturna via Dominio', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    jest.useFakeTimers().setSystemTime(new Date('2026-08-07T00:00:00.000Z'));
+    try {
+      (service as unknown as { nightlySweepEnabled: boolean }).nightlySweepEnabled = true;
+      (service as unknown as { nightlySweepActiveSlots: string[] }).nightlySweepActiveSlots = ['00:00'];
+      (service as unknown as { nightlySweepTimezoneOffsetMinutes: number }).nightlySweepTimezoneOffsetMinutes = 0;
+      (service as unknown as { executedNightlySweepKeys: Set<string> }).executedNightlySweepKeys.clear();
+      jest.spyOn(service, 'ativarSyncNoNsuAtualParaTodos').mockResolvedValue({
+        ambiente: NfeAmbiente.producao,
+        clientesProcessados: 0,
+        clientesComSucesso: 0,
+        controlesCriadosOuReativados: 0,
+        controlesInicializados: 0,
+        controlesReativados: 0,
+        falhas: 0,
+        detalhes: []
+      });
+      prisma.nfeSyncControle.findMany.mockResolvedValue([
+        {
+          id: 'ctrl-1',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          cnpjConsulta: '12345678000199',
+          ambiente: NfeAmbiente.producao,
+          ultimoNsuConsultado: 10n,
+          ultimoNsuDistribuido: 10n,
+          maxNsu: 10n,
+          status: NfeSyncStatus.ativo
+        }
+      ]);
+      (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
+        {
+          catalogoId: 11,
+          codigoEmpresa: 20,
+          cnpjEmpresa: '12345678000199',
+          chaveAcesso: '35260612345678000199550010000001231000001231',
+          dataEmissao: '2026-06-29',
+          xmlBase64: Buffer.from(
+            `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe35260612345678000199550010000001231000001231">
+      <ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>2026-06-29T10:00:00-03:00</dhEmi></ide>
+      <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
+      <dest><CNPJ>99888777000166</CNPJ><xNome>Cliente Teste</xNome></dest>
+      <total><ICMSTot><vNF>150.00</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat><dhRecbto>2026-06-29T10:00:01-03:00</dhRecbto></infProt></protNFe>
+</nfeProc>`,
+            'utf8'
+          ).toString('base64')
+        }
+      ]);
+
+      await (service as unknown as { runNightlySweepCycle(): Promise<void> }).runNightlySweepCycle();
+
+      expect(dominioXmlSource.listDocuments).toHaveBeenCalledWith({
+        cnpjs: ['12345678000199'],
+        limit: 500,
+        dataEmissaoInicio: '2026-08-01',
+        dataEmissaoFim: '2026-08-31',
+        chavesAcesso: undefined,
+        catalogoIds: [],
+        catalogoIdMinExclusive: 10,
+        sortDirection: 'asc'
+      });
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('roda consulta por chave via catalogo Dominio usando cursor salvo no controle', async () => {
