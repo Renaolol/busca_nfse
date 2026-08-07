@@ -269,6 +269,7 @@ const state = {
     },
     nfeColumnOrder: loadXmlReader30NfeColumnOrderStore(),
     hiddenNfeColumns: new Set(),
+    cstFilter: '',
     selectionDrag: null,
     scrollDrag: null,
     columnMenuOpenKey: null,
@@ -428,6 +429,10 @@ const state = {
       direction: 'desc'
     },
     cteDocs: {
+      key: 'dataEmissao',
+      direction: 'desc'
+    },
+    nfseFiscalReader: {
       key: 'dataEmissao',
       direction: 'desc'
     }
@@ -714,6 +719,14 @@ function onDocumentClick(event) {
     }
     case 'xml-reader30-open-fullscreen': {
       void openXmlReader30Fullscreen();
+      return;
+    }
+    case 'nfse-fiscal-sort': {
+      const key = actionNode.getAttribute('data-sort-key');
+      if (!key) {
+        return;
+      }
+      updateNfseFiscalReaderSort(key);
       return;
     }
     case 'nfse-fiscal-column-menu-toggle': {
@@ -1877,6 +1890,12 @@ function onDocumentChange(event) {
       return;
     }
     setXmlReader30Selection(selectionKey, target.checked);
+    renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
+    return;
+  }
+
+  if (action === 'xml-reader30-cst-filter') {
+    state.xmlReader30.cstFilter = String(target.value || '').trim();
     renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
     return;
   }
@@ -5503,7 +5522,10 @@ function renderXmlReader30NfeFullscreenIcon() {
 function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
   const fullscreen = Boolean(options.fullscreen);
   const sortedRows = sortXmlReader30Results(results, { documentType: 'nfe' });
-  const displayedRows = expandXmlReader30NfeRows(sortedRows);
+  const allDisplayedRows = expandXmlReader30NfeRows(sortedRows);
+  const cstFilter = String(state.xmlReader30.cstFilter || '').trim();
+  const cstOptions = uniqueValues(allDisplayedRows.map((row) => String(row.cstCsosn || '').trim()));
+  const displayedRows = cstFilter ? allDisplayedRows.filter((row) => String(row.cstCsosn || '').trim() === cstFilter) : allDisplayedRows;
   const selectableRows = displayedRows.filter((row) => getXmlReader30SelectionKey(row));
   const selectedVisibleCount = selectableRows.filter((row) => state.selectedXmlReaderIds.has(getXmlReader30SelectionKey(row))).length;
   const allVisibleSelected = selectableRows.length > 0 && selectedVisibleCount === selectableRows.length;
@@ -5519,10 +5541,18 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">XMLs encontrados</h3>
-          <p class="card-subtitle">Mostrando ${escapeHtml(String(displayedRows.length))} linha(s) itemizada(s) da NF-e do acervo interno.</p>
+          <p class="card-subtitle">
+            Mostrando ${escapeHtml(String(displayedRows.length))}${cstFilter ? ` de ${escapeHtml(String(allDisplayedRows.length))}` : ''} linha(s) itemizada(s) da NF-e do acervo interno.
+          </p>
         </div>
         <div class="stack-mini" style="align-items:flex-end;">
           <div style="display:flex; gap:8px; align-items:center; justify-content:flex-end; flex-wrap:wrap;">
+            <label class="field" style="margin:0; min-width:150px;">
+              <span style="font-size:11px;">CST/CSOSN</span>
+              <select data-action="xml-reader30-cst-filter" style="height:32px;">
+                ${renderOptions(['', ...cstOptions], cstFilter, { '': 'Todos' })}
+              </select>
+            </label>
             ${statusBadge(`${selectedVisibleCount} selecionado(s)`, selectedVisibleCount ? 'info' : 'neutral')}
             ${
               fullscreen
@@ -5565,7 +5595,7 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
                     >
                       <div class="xml-reader30-column-header-inner">
                         <span class="xml-reader30-column-title">
-                          ${column.key === 'select' ? `<span class="xml-reader30-column-title-select">Conferido</span>` : column.key === 'numeroNf' || column.key === 'dataEmissao' ? renderXmlReader30SortHeader(column.key, column.label) : column.headerHtml || escapeHtml(column.label)}
+                          ${column.key === 'select' ? `<span class="xml-reader30-column-title-select">Conferido</span>` : renderXmlReader30SortHeader(column.key, column.label)}
                         </span>
                         <div class="xml-reader30-column-menu-wrap" data-xml-reader30-column-menu-wrap>
                           <button
@@ -6044,6 +6074,95 @@ function sortXmlReader30Results(rows) {
   });
 }
 
+function renderNfseFiscalReaderSortHeader(key, label) {
+  const isActive = state.sort.nfseFiscalReader.key === key;
+  const direction = isActive ? state.sort.nfseFiscalReader.direction : 'none';
+  const sortLabel =
+    direction === 'asc'
+      ? `${label}, ordenado crescente`
+      : direction === 'desc'
+        ? `${label}, ordenado decrescente`
+        : `${label}, ordenar`;
+
+  return `
+    <button class="sort-header nfse-fiscal-reader-sort-header ${isActive ? 'active' : ''}" type="button" data-action="nfse-fiscal-sort" data-sort-key="${escapeHtml(key)}" aria-label="${escapeHtml(sortLabel)}">
+      <span>${escapeHtml(label)}</span>
+      <span class="sort-indicator" aria-hidden="true">${direction === 'asc' ? '▲' : direction === 'desc' ? '▼' : '↕'}</span>
+    </button>
+  `;
+}
+
+function updateNfseFiscalReaderSort(key) {
+  const normalizedKey = String(key || '').trim();
+  if (!normalizedKey) {
+    return;
+  }
+
+  const current = state.sort.nfseFiscalReader;
+  state.sort.nfseFiscalReader = {
+    key: normalizedKey,
+    direction: current.key === normalizedKey && current.direction === 'asc' ? 'desc' : 'asc'
+  };
+  render();
+}
+
+function sortNfseFiscalReaderRows(rows) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const sort = state.sort.nfseFiscalReader;
+  const directionMultiplier = sort.direction === 'asc' ? 1 : -1;
+  return [...sourceRows].sort((left, right) => {
+    const comparison = compareXmlSortValues(getNfseFiscalReaderSortValue(left, sort.key), getNfseFiscalReaderSortValue(right, sort.key));
+    if (comparison !== 0) {
+      return comparison * directionMultiplier;
+    }
+
+    if (sort.key !== 'dataEmissao') {
+      const dataComparison = compareXmlSortValues(
+        getNfseFiscalReaderSortValue(left, 'dataEmissao'),
+        getNfseFiscalReaderSortValue(right, 'dataEmissao')
+      );
+      if (dataComparison !== 0) {
+        return dataComparison;
+      }
+    }
+
+    return compareXmlSortValues(String(left?.id || ''), String(right?.id || ''));
+  });
+}
+
+function getNfseFiscalReaderSortValue(row, key) {
+  if (!row) {
+    return '';
+  }
+
+  switch (key) {
+    case 'numeroNfse':
+      return toSortableNumber(row.numeroNfse);
+    case 'dataEmissao':
+      return toSortableDate(row.dataEmissao);
+    case 'cnpjPrestador':
+      return row.cnpjPrestador || '';
+    case 'cnpjTomador':
+      return row.cnpjTomador || '';
+    case 'valorLiquidoNfse':
+    case 'valorTotalRetencoes':
+    case 'valorServico':
+    case 'valorIss':
+    case 'valorPis':
+    case 'valorCofins':
+    case 'valorInss':
+    case 'valorIrrf':
+    case 'valorCsll':
+    case 'valorIssRetidoReal':
+    case 'aliquotaIss':
+    case 'aliquotaRealIss':
+    case 'totalRetencoesFederais':
+      return toSortableBrNumber(row[key]);
+    default:
+      return row[key] || '';
+  }
+}
+
 function getXmlReader30SortValue(row, key) {
   if (!row) {
     return '';
@@ -6061,6 +6180,44 @@ function getXmlReader30SortValue(row, key) {
       return row.cliente || '';
     case 'valor':
       return Number(String(row.valorLabel || row.valorTotal || row.valorTotalNfXml || row.raw?.valor || 0).replace(/[^\d.-]/g, '')) || 0;
+    case 'statusNf':
+      return row.statusNf || row.statusLabel || '';
+    case 'nfCancelada':
+      return row.raw?.cancelada ? 1 : 0;
+    case 'produto':
+      return row.produto || '';
+    case 'quantidade':
+      return toSortableBrNumber(row.quantidade);
+    case 'valorUnitario':
+      return toSortableBrNumber(row.valorUnitario);
+    case 'valorTotal':
+      return toSortableBrNumber(row.valorTotal);
+    case 'valorTotalNfXml':
+      return toSortableBrNumber(row.valorTotalNfXml);
+    case 'icmsStRet':
+      return toSortableBrNumber(row.icmsStRetRaw ?? row.icmsStRet);
+    case 'cstCsosn':
+      return row.cstCsosn || '';
+    case 'cfop':
+      return row.cfop || '';
+    case 'baseCalculoIcms':
+      return toSortableBrNumber(row.baseCalculoIcmsRaw ?? row.baseCalculoIcms);
+    case 'aliquotaIcms':
+      return toSortableBrNumber(row.aliquotaIcmsRaw ?? row.aliquotaIcms);
+    case 'valorIcms':
+      return toSortableBrNumber(row.valorIcmsRaw ?? row.valorIcms);
+    case 'qBCMonoRet':
+      return toSortableBrNumber(row.qBCMonoRet);
+    case 'adRemICMSRet':
+      return toSortableBrNumber(row.adRemICMSRet);
+    case 'vICMSMonoRet':
+      return toSortableBrNumber(row.vICMSMonoRet);
+    case 'aliqVigente':
+      return toSortableBrNumber(row.aliqVigente);
+    case 'valorCorreto':
+      return toSortableBrNumber(row.valorCorreto);
+    case 'evento':
+      return row.evento || '';
     default:
       return row[key] || row.raw?.[key] || '';
   }
@@ -9762,7 +9919,7 @@ function renderNfseFiscalReaderCard() {
   }
 
   const summary = state.nfseFiscalReader.summary;
-  const rows = Array.isArray(state.nfseFiscalReader.rows) ? state.nfseFiscalReader.rows : [];
+  const rows = sortNfseFiscalReaderRows(Array.isArray(state.nfseFiscalReader.rows) ? state.nfseFiscalReader.rows : []);
   const exportConfig = state.nfseFiscalReader.exportConfig || {};
   const visibleColumns = getNfseFiscalReaderVisibleColumns();
   const hiddenColumns = state.nfseFiscalReader.hiddenColumns instanceof Set ? state.nfseFiscalReader.hiddenColumns : new Set();
@@ -9897,7 +10054,7 @@ function renderNfseFiscalReaderCard() {
                       title="Arraste para mover esta coluna"
                     >
                       <div class="xml-reader30-column-header-inner">
-                        <span class="xml-reader30-column-title">${escapeHtml(column.label)}</span>
+                        <span class="xml-reader30-column-title">${renderNfseFiscalReaderSortHeader(column.key, column.label)}</span>
                         <div class="xml-reader30-column-menu-wrap" data-nfse-fiscal-column-menu-wrap>
                           <button
                             class="xml-reader30-column-menu"
@@ -13845,6 +14002,17 @@ function toSortableNumber(value) {
 
 function toSortableDate(value) {
   const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function toSortableBrNumber(value) {
+  if (value === null || value === undefined || value === '' || value === '-') {
+    return 0;
+  }
+
+  const stringValue = String(value).trim();
+  const normalized = stringValue.includes(',') ? stringValue.replace(/\./g, '').replace(',', '.') : stringValue;
+  const parsed = Number(normalized.replace(/[^\d.-]/g, ''));
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
