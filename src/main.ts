@@ -37,7 +37,14 @@ async function bootstrap(): Promise<void> {
     SwaggerModule.setup('api/docs', app, document);
   }
 
-  app.useStaticAssets(join(process.cwd(), 'frontend'), { prefix: '/app' });
+  app.useStaticAssets(join(process.cwd(), 'frontend'), {
+    prefix: '/app',
+    setHeaders: (response, filePath) => {
+      if (/\.(html|js|css|png|svg|ico)$/i.test(filePath)) {
+        response.setHeader('Cache-Control', 'no-store, max-age=0');
+      }
+    }
+  });
 
   const port = Number(process.env.PORT ?? 3000);
   await app.listen(port);

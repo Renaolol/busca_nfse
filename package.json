@@ -1,6 +1,6 @@
 {
   "name": "nfse-collector",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Backend para coleta e consulta de NFS-e Nacional via ADN por NSU",
   "license": "UNLICENSED",
