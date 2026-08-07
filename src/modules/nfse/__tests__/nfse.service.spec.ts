@@ -311,6 +311,86 @@ describe('NfseService', () => {
     });
   });
 
+  it('nao trata como lacuna um numero existente em outro ambiente do mesmo emissor', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-emitida-370-producao',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000037026019687178145',
+        numeroNfse: '370',
+        serie: 'A1',
+        dataEmissao: new Date('2026-06-01T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador 1',
+        xmlPath: 'nfse/producao/06960810000176/2026/06/xml/doc-370.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-01T00:00:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-emitida-372-producao',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000037226019687178145',
+        numeroNfse: '372',
+        serie: 'A1',
+        dataEmissao: new Date('2026-06-03T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '22222222000122',
+        razaoSocialTomador: 'Tomador 2',
+        xmlPath: 'nfse/producao/06960810000176/2026/06/xml/doc-372.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-06-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-03T00:00:00.000Z'),
+        eventos: []
+      },
+      {
+        id: 'doc-emitida-371-restrita',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao_restrita,
+        chaveAcesso: '42110092206960810000176000000000037126019687178145',
+        numeroNfse: '371',
+        serie: 'A1',
+        dataEmissao: new Date('2026-06-02T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '33333333000133',
+        razaoSocialTomador: 'Tomador 3',
+        xmlPath: 'nfse/producao_restrita/06960810000176/2026/06/xml/doc-371.xml',
+        danfsePath: null,
+        createdAt: new Date('2026-06-02T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-02T00:00:00.000Z'),
+        eventos: []
+      }
+    ]);
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      cnpjConsulta: '06960810000176',
+      tipoRelacao: 'emitidas',
+      all: true
+    });
+
+    expect(result.validacaoNumeracao).toEqual({
+      aplicada: true,
+      cnpjPrestador: '06960810000176',
+      totalDocumentosAnalisados: 3,
+      totalNumerosValidos: 3,
+      totalFaixasLacuna: 0,
+      totalNumerosPulados: 0,
+      possuiNumeracaoPulada: false,
+      lacunas: []
+    });
+  });
+
   it('desconsidera documentos marcados para ignorar na validacao de numeracao', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValue([
       {

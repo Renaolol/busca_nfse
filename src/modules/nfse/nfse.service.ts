@@ -1784,6 +1784,7 @@ export class NfseService {
   ): NfseNumeracaoValidation {
     const documentsForValidation = documents.filter((document) => !document.ignorarNumeracaoValidacao);
     const groupedNumbers = new Map<string, { ambiente: Ambiente; serie: string | null; numbers: Set<number> }>();
+    const existingNumbersAcrossEnvironments = new Set<number>();
     const ignoredNumberSet = this.buildIgnoredNumberSet(ignoredNumbers);
     let totalNumerosValidos = 0;
 
@@ -1794,6 +1795,7 @@ export class NfseService {
       }
 
       totalNumerosValidos += 1;
+      existingNumbersAcrossEnvironments.add(numero);
       const groupKey = String(document.ambiente);
       const current =
         groupedNumbers.get(groupKey) ??
@@ -1822,7 +1824,14 @@ export class NfseService {
         }
 
         lacunas.push(
-          ...this.buildNumberingGapsExcludingIgnored(group.ambiente, group.serie, anterior + 1, atual - 1, ignoredNumberSet)
+          ...this.buildNumberingGapsExcludingIgnored(
+            group.ambiente,
+            group.serie,
+            anterior + 1,
+            atual - 1,
+            ignoredNumberSet,
+            existingNumbersAcrossEnvironments
+          )
         );
       }
     });
@@ -1890,12 +1899,28 @@ export class NfseService {
     serie: string | null,
     numeroInicial: number,
     numeroFinal: number,
-    ignoredNumberSet: Set<string>
+    ignoredNumberSet: Set<string>,
+    existingNumbersAcrossEnvironments: Set<number>
   ): NfseNumeracaoGap[] {
     const lacunas: NfseNumeracaoGap[] = [];
     let rangeStart: number | null = null;
 
     for (let numero = numeroInicial; numero <= numeroFinal; numero += 1) {
+      const existsInAnyEnvironment = existingNumbersAcrossEnvironments.has(numero);
+      if (existsInAnyEnvironment) {
+        if (rangeStart !== null) {
+          lacunas.push({
+            ambiente,
+            serie,
+            numeroInicial: rangeStart,
+            numeroFinal: numero - 1,
+            quantidade: numero - rangeStart
+          });
+          rangeStart = null;
+        }
+        continue;
+      }
+
       const ignored = ignoredNumberSet.has(`${String(ambiente)}:${numero}`);
       if (ignored) {
         if (rangeStart !== null) {
