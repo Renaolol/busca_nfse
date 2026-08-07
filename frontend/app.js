@@ -1206,6 +1206,32 @@ function onDocumentClick(event) {
       void deleteNfseNumberingException(exceptionId);
       return;
     }
+    case 'nfse-open-conta-contabil-config': {
+      const clientId = actionNode.getAttribute('data-client-id') || '';
+      if (!clientId) {
+        pushToast('Selecione uma empresa para gerenciar as contas por codigo de servico.', 'error');
+        return;
+      }
+      openNfseContaContabilConfigModal(clientId);
+      return;
+    }
+    case 'nfse-delete-conta-contabil-config': {
+      const configId = actionNode.getAttribute('data-config-id') || '';
+      if (!configId) {
+        return;
+      }
+      void deleteNfseContaContabilConfig(configId);
+      return;
+    }
+    case 'nfse-toggle-conta-contabil-config': {
+      const configId = actionNode.getAttribute('data-config-id') || '';
+      const nextAtivo = actionNode.getAttribute('data-next-ativo') === 'true';
+      if (!configId) {
+        return;
+      }
+      void toggleNfseContaContabilConfigAtivo(configId, nextAtivo);
+      return;
+    }
     case 'nfe-open-client-xmls': {
       const clientId = actionNode.getAttribute('data-client-id');
       if (!clientId) {
@@ -1768,6 +1794,11 @@ function onDocumentSubmit(event) {
     case 'nfseNumberingExceptionForm': {
       event.preventDefault();
       void submitNfseNumberingExceptionForm(target);
+      return;
+    }
+    case 'nfseContaContabilConfigForm': {
+      event.preventDefault();
+      void submitNfseContaContabilConfigForm(target);
       return;
     }
     case 'nfeDocsFilterForm': {
@@ -7603,6 +7634,8 @@ function renderModal() {
       return renderNfseRecoverByKeyModal();
     case 'nfse-numbering-exception':
       return renderNfseNumberingExceptionModal();
+    case 'nfse-conta-contabil-config':
+      return renderNfseContaContabilConfigModal();
     case 'download-by-key-report':
       return renderDownloadByKeyReportModal();
     case 'dominio-import-report':
@@ -7963,6 +7996,83 @@ function renderNfseNumberingExceptionModal() {
                     </div>
                   `
                   : '<div class="table-state">Nenhuma excecao de numeracao cadastrada para este cliente/CNPJ.</div>'
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderNfseContaContabilConfigModal() {
+  if (state.modal?.kind !== 'nfse-conta-contabil-config') {
+    return '';
+  }
+
+  const submitting = Boolean(state.modal.submitting);
+  const loading = Boolean(state.modal.loading);
+  const errorMessage = String(state.modal.errorMessage || '').trim();
+  const configs = Array.isArray(state.modal.configs) ? state.modal.configs : [];
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 900px); max-width:900px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Contas contabeis por codigo de servico</h3>
+          <p class="modal-subtitle">${escapeHtml(state.modal.clientName || 'Cliente selecionado')} • defina a conta de debito (registro 1300) usada automaticamente em toda exportacao Dominio de Entrada, independente do modo Contas selecionado. Sem configuracao para o codigo, a exportacao usa a conta padrao 467; a conta do fornecedor (credito) continua controlada pelo campo Contas.</p>
+        </div>
+        <div class="modal-body">
+          <form id="nfseContaContabilConfigForm">
+            <input type="hidden" name="clienteId" value="${escapeHtml(state.modal.clientId || '')}" />
+            <div class="form-grid two">
+              <label>
+                <span>Codigo do servico</span>
+                <input type="text" name="codigoServico" placeholder="Ex.: 170101" value="${escapeHtml(String(state.modal.codigoServico || ''))}" ${submitting ? 'disabled' : ''} required />
+              </label>
+              <label>
+                <span>Conta contabil</span>
+                <input type="text" name="contaContabil" placeholder="Ex.: 505" value="${escapeHtml(String(state.modal.contaContabil || ''))}" ${submitting ? 'disabled' : ''} required />
+              </label>
+            </div>
+            ${errorMessage ? `<div class="table-state error" style="margin-top:14px;">${escapeHtml(errorMessage)}</div>` : ''}
+            <p class="card-subtitle" style="margin-top:10px;">Use o Codigo Servico Nacional da NFS-e (cai para o Item Lista Servico quando o nacional nao tiver configuracao).</p>
+            <div class="modal-footer" style="padding:18px 0 0;">
+              <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Fechar</button>
+              <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Salvando...' : 'Salvar configuracao'}</button>
+            </div>
+          </form>
+          <div style="margin-top:18px;">
+            <h4 class="card-title" style="margin-bottom:8px;">Configuracoes cadastradas</h4>
+            ${
+              loading
+                ? '<div class="table-state loading">Carregando configuracoes...</div>'
+                : configs.length
+                  ? `
+                    <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(46vh, 420px);">
+                      <div style="display:grid; grid-template-columns:minmax(160px, 1fr) minmax(140px, .8fr) minmax(100px, .6fr) minmax(160px, 1fr); gap:0; min-width:600px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                        <div style="padding:12px 14px;">Codigo do servico</div>
+                        <div style="padding:12px 14px;">Conta contabil</div>
+                        <div style="padding:12px 14px;">Status</div>
+                        <div style="padding:12px 14px;">Acao</div>
+                      </div>
+                      ${configs
+                        .map(
+                          (row) => `
+                            <div style="display:grid; grid-template-columns:minmax(160px, 1fr) minmax(140px, .8fr) minmax(100px, .6fr) minmax(160px, 1fr); gap:0; min-width:600px; border-bottom:1px solid #eef0f2; align-items:center;">
+                              <div style="padding:14px;"><strong>${escapeHtml(row.codigoServico || '-')}</strong></div>
+                              <div style="padding:14px;">${escapeHtml(row.contaContabil || '-')}</div>
+                              <div style="padding:14px;">${statusBadge(row.ativo ? 'Ativa' : 'Inativa', row.ativo ? 'success' : 'neutral')}</div>
+                              <div style="padding:14px; display:flex; gap:8px;">
+                                <button class="btn secondary" type="button" data-action="nfse-toggle-conta-contabil-config" data-config-id="${escapeHtml(row.id)}" data-next-ativo="${row.ativo ? 'false' : 'true'}" ${submitting ? 'disabled' : ''}>${row.ativo ? 'Desativar' : 'Ativar'}</button>
+                                <button class="btn secondary" type="button" data-action="nfse-delete-conta-contabil-config" data-config-id="${escapeHtml(row.id)}" ${submitting ? 'disabled' : ''}>Remover</button>
+                              </div>
+                            </div>
+                          `
+                        )
+                        .join('')}
+                    </div>
+                  `
+                  : '<div class="table-state">Nenhuma conta configurada para este cliente ainda.</div>'
             }
           </div>
         </div>
@@ -9579,6 +9689,7 @@ function renderNfseFiscalReaderCard() {
   const minWidth = Math.max(1480, visibleColumns.length * 138);
   const tipoRegistro = String(exportConfig.tipoRegistro || 'Entrada') === 'Servico' ? 'Servico' : 'Entrada';
   const contas = String(exportConfig.contas || 'Padrao') === 'PorFornecedor' ? 'PorFornecedor' : 'Padrao';
+  const clienteIdAtual = state.filters.xmls.cliente && state.filters.xmls.cliente !== 'Todos' ? state.filters.xmls.cliente : '';
   const exportDisabled =
     !rows.length ||
     state.tableState.nfseFiscalReader === 'loading' ||
@@ -9631,6 +9742,15 @@ function renderNfseFiscalReaderCard() {
       <div class="stack-actions" style="grid-column:1 / -1; justify-content:flex-start; align-items:flex-end;">
         <button class="btn primary" type="submit" ${exportDisabled ? 'disabled' : ''}>
           ${exportConfig.exporting ? 'Exportando layout Dominio...' : 'Exportar layout Dominio'}
+        </button>
+        <button
+          class="btn secondary"
+          type="button"
+          data-action="nfse-open-conta-contabil-config"
+          data-client-id="${escapeHtml(clienteIdAtual)}"
+          ${clienteIdAtual ? '' : 'disabled'}
+        >
+          Gerenciar contas por codigo de servico
         </button>
         <span style="color:#606062; font-size:13px;">
           ${rows.length ? 'O arquivo segue o padrao do LeitorXML para NFS-e.' : 'Busque NFS-e com XML valido para habilitar a exportacao.'}
@@ -15294,6 +15414,224 @@ async function deleteNfseNumberingException(exceptionId) {
     };
     render();
     pushToast(`Falha ao remover a excecao de numeracao: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+function openNfseContaContabilConfigModal(clientId) {
+  if (state.dataSource !== 'api') {
+    pushToast('O cadastro de contas por codigo de servico so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  const client = findClientById(clientId);
+  if (!client) {
+    pushToast('Nao foi possivel identificar a empresa selecionada.', 'error');
+    return;
+  }
+
+  openModal({
+    kind: 'nfse-conta-contabil-config',
+    clientId,
+    clientName: client.razaoSocial || 'Cliente selecionado',
+    codigoServico: '',
+    contaContabil: '',
+    submitting: false,
+    loading: true,
+    errorMessage: '',
+    configs: []
+  });
+  void loadNfseContaContabilConfigsForModal();
+}
+
+async function loadNfseContaContabilConfigsForModal() {
+  if (state.modal?.kind !== 'nfse-conta-contabil-config') {
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    loading: true,
+    errorMessage: ''
+  };
+  render();
+
+  try {
+    const query = new URLSearchParams({ clienteId: state.modal.clientId || '' });
+    const payload = await apiRequest(`/nfse/contas-contabeis?${query.toString()}`);
+    if (state.modal?.kind !== 'nfse-conta-contabil-config') {
+      return;
+    }
+    const configs = Array.isArray(payload) ? payload : [];
+    state.modal = {
+      ...state.modal,
+      loading: false,
+      configs: [...configs].sort((left, right) => String(left.codigoServico || '').localeCompare(String(right.codigoServico || '')))
+    };
+    render();
+  } catch (error) {
+    if (state.modal?.kind !== 'nfse-conta-contabil-config') {
+      return;
+    }
+    state.modal = {
+      ...state.modal,
+      loading: false,
+      errorMessage: toErrorMessage(error)
+    };
+    render();
+  }
+}
+
+async function submitNfseContaContabilConfigForm(form) {
+  if (state.modal?.kind !== 'nfse-conta-contabil-config') {
+    return;
+  }
+
+  const data = new FormData(form);
+  const clienteId = String(data.get('clienteId') || state.modal.clientId || '').trim();
+  const codigoServico = String(data.get('codigoServico') || '').trim();
+  const contaContabil = String(data.get('contaContabil') || '').trim();
+
+  if (!clienteId || !codigoServico || !contaContabil) {
+    state.modal = {
+      ...state.modal,
+      errorMessage: 'Informe o codigo do servico e a conta contabil para salvar a configuracao.'
+    };
+    render();
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    submitting: true,
+    codigoServico,
+    contaContabil,
+    errorMessage: ''
+  };
+  render();
+
+  try {
+    await apiRequest('/nfse/contas-contabeis', {
+      method: 'POST',
+      body: {
+        clienteId,
+        codigoServico,
+        contaContabil
+      }
+    });
+
+    if (state.modal?.kind === 'nfse-conta-contabil-config') {
+      state.modal = {
+        ...state.modal,
+        submitting: false,
+        codigoServico: '',
+        contaContabil: '',
+        errorMessage: ''
+      };
+      render();
+    }
+
+    await loadNfseContaContabilConfigsForModal();
+    pushToast('Configuracao de conta contabil salva com sucesso.', 'success');
+  } catch (error) {
+    if (state.modal?.kind !== 'nfse-conta-contabil-config') {
+      return;
+    }
+    state.modal = {
+      ...state.modal,
+      submitting: false,
+      errorMessage: toErrorMessage(error)
+    };
+    render();
+    pushToast(`Falha ao salvar a configuracao de conta contabil: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function toggleNfseContaContabilConfigAtivo(configId, nextAtivo) {
+  if (state.modal?.kind !== 'nfse-conta-contabil-config') {
+    return;
+  }
+
+  const clienteId = String(state.modal.clientId || '').trim();
+  if (!configId || !clienteId) {
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    submitting: true,
+    errorMessage: ''
+  };
+  render();
+
+  try {
+    await apiRequest(`/nfse/contas-contabeis/${encodeURIComponent(configId)}?clienteId=${encodeURIComponent(clienteId)}`, {
+      method: 'PATCH',
+      body: { ativo: nextAtivo }
+    });
+    if (state.modal?.kind === 'nfse-conta-contabil-config') {
+      state.modal = {
+        ...state.modal,
+        submitting: false
+      };
+      render();
+    }
+    await loadNfseContaContabilConfigsForModal();
+    pushToast(`Configuracao ${nextAtivo ? 'ativada' : 'desativada'} com sucesso.`, 'success');
+  } catch (error) {
+    if (state.modal?.kind !== 'nfse-conta-contabil-config') {
+      return;
+    }
+    state.modal = {
+      ...state.modal,
+      submitting: false,
+      errorMessage: toErrorMessage(error)
+    };
+    render();
+    pushToast(`Falha ao atualizar a configuracao de conta contabil: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function deleteNfseContaContabilConfig(configId) {
+  if (state.modal?.kind !== 'nfse-conta-contabil-config') {
+    return;
+  }
+
+  const clienteId = String(state.modal.clientId || '').trim();
+  if (!configId || !clienteId) {
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    submitting: true,
+    errorMessage: ''
+  };
+  render();
+
+  try {
+    await apiRequest(`/nfse/contas-contabeis/${encodeURIComponent(configId)}?clienteId=${encodeURIComponent(clienteId)}`, {
+      method: 'DELETE'
+    });
+    if (state.modal?.kind === 'nfse-conta-contabil-config') {
+      state.modal = {
+        ...state.modal,
+        submitting: false
+      };
+      render();
+    }
+    await loadNfseContaContabilConfigsForModal();
+    pushToast('Configuracao de conta contabil removida com sucesso.', 'success');
+  } catch (error) {
+    if (state.modal?.kind !== 'nfse-conta-contabil-config') {
+      return;
+    }
+    state.modal = {
+      ...state.modal,
+      submitting: false,
+      errorMessage: toErrorMessage(error)
+    };
+    render();
+    pushToast(`Falha ao remover a configuracao de conta contabil: ${toErrorMessage(error)}`, 'error');
   }
 }
 

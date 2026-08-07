@@ -184,6 +184,7 @@ node_modules/
 dist/
 coverage/
 .nyc_output/
+*.tsbuildinfo
 
 # Build and runtime artifacts
 /storage/

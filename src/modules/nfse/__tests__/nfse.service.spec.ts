@@ -33,6 +33,13 @@ describe('NfseService', () => {
       upsert: jest.fn(),
       delete: jest.fn()
     },
+    nfseContaContabilConfig: {
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      upsert: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn()
+    },
     certificado: {
       findFirst: jest.fn()
     }
@@ -70,6 +77,8 @@ describe('NfseService', () => {
     prisma.cliente.findMany.mockResolvedValue([]);
     prisma.nfseNumeracaoExcecao.findMany.mockResolvedValue([]);
     prisma.nfseNumeracaoExcecao.findUnique.mockResolvedValue(undefined);
+    prisma.nfseContaContabilConfig.findMany.mockResolvedValue([]);
+    prisma.nfseContaContabilConfig.findUnique.mockResolvedValue(undefined);
   });
 
   it('pagina a listagem de NFS-e armazenadas', async () => {
@@ -1471,6 +1480,276 @@ describe('NfseService', () => {
     expect(content).toContain('|1020|18||180,00|5,00|9,00');
     expect(content).toContain('|1030|557|1|180,00');
     expect(content).toContain('|1300|10/07/2026|0|183|9,00||ISS RETIDO SOBRE NFS-E N 333 Prestador Exportacao|||');
+  });
+
+  it('aplica a conta por codigo de servico configurada mesmo com contas Padrao (independente do modo Por Fornecedor)', async () => {
+    prisma.nfseContaContabilConfig.findMany.mockResolvedValueOnce([
+      {
+        id: 'config-1',
+        clienteId: 'cliente-1',
+        codigoServico: '170101',
+        contaContabil: '999',
+        ativo: true,
+        createdAt: new Date('2026-07-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-01T00:00:00.000Z')
+      }
+    ]);
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-export-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000033326071005552016',
+        numeroNfse: '333',
+        dataEmissao: new Date('2026-07-10T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Exportacao',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador Exportacao',
+        municipioPrestacaoNome: 'Mondai',
+        codigoServicoNacional: '170101',
+        itemListaServico: '1701',
+        descricaoServico: 'Servico de consultoria',
+        xmlPath: 'nfse/producao/06960810000176/2026/07/xml/doc-export-1.xml',
+        createdAt: new Date('2026-07-10T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-10T00:00:00.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <DPS>
+    <infDPS>
+      <dhEmi>2026-07-10T00:00:00-03:00</dhEmi>
+      <prest>
+        <CNPJ>06960810000176</CNPJ>
+        <xNome>Prestador Exportacao</xNome>
+        <end>
+          <endNac>
+            <xMun>Chapeco</xMun>
+            <UF>SC</UF>
+          </endNac>
+        </end>
+      </prest>
+      <toma>
+        <CNPJ>11111111000111</CNPJ>
+        <xNome>Tomador Exportacao</xNome>
+        <end>
+          <endNac>
+            <xMun>Mondai</xMun>
+            <UF>SC</UF>
+          </endNac>
+        </end>
+      </toma>
+      <valores>
+        <vServPrest>
+          <vServ>180.00</vServ>
+        </vServPrest>
+      </valores>
+    </infDPS>
+  </DPS>
+  <infNFSe Id="NFS42110092206960810000176000000000033326071005552016">
+    <nNFSe>333</nNFSe>
+    <xLocPrestacao>Mondai</xLocPrestacao>
+    <xLocIncid>Mondai</xLocIncid>
+    <valores>
+      <vLiq>180.00</vLiq>
+      <vISSQN>0.00</vISSQN>
+      <pAliqAplic>0.00</pAliqAplic>
+    </valores>
+  </infNFSe>
+</NFSe>`,
+        'utf8'
+      )
+    );
+
+    const result = await service.exportarLeituraFiscalDominio({
+      clienteId: 'cliente-1',
+      all: true,
+      codigoEmpresa: 10105,
+      tipoRegistro: 'Entrada',
+      contas: 'Padrao',
+      produtoPadrao: 557
+    });
+
+    const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
+    expect(prisma.nfseContaContabilConfig.findMany).toHaveBeenCalledWith({
+      where: { clienteId: 'cliente-1', ativo: true }
+    });
+    // debito (registro 1300) vem da configuracao (999); credito continua o fornecedor padrao (506), pois contas=Padrao nao aciona a busca ODBC.
+    expect(content).toContain('|1300|09/07/2026|999|506|180,00|| NFS-E N 333 Prestador Exportacao|||');
+  });
+
+  it('usa a conta padrao 467 quando nao ha configuracao para o codigo de servico da nota', async () => {
+    prisma.nfseContaContabilConfig.findMany.mockResolvedValueOnce([]);
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-export-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000033326071005552016',
+        numeroNfse: '333',
+        dataEmissao: new Date('2026-07-10T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Exportacao',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador Exportacao',
+        municipioPrestacaoNome: 'Mondai',
+        codigoServicoNacional: '999999',
+        itemListaServico: '9999',
+        descricaoServico: 'Servico sem configuracao',
+        xmlPath: 'nfse/producao/06960810000176/2026/07/xml/doc-export-1.xml',
+        createdAt: new Date('2026-07-10T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-10T00:00:00.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <DPS>
+    <infDPS>
+      <dhEmi>2026-07-10T00:00:00-03:00</dhEmi>
+      <prest>
+        <CNPJ>06960810000176</CNPJ>
+        <xNome>Prestador Exportacao</xNome>
+        <end>
+          <endNac>
+            <xMun>Chapeco</xMun>
+            <UF>SC</UF>
+          </endNac>
+        </end>
+      </prest>
+      <toma>
+        <CNPJ>11111111000111</CNPJ>
+        <xNome>Tomador Exportacao</xNome>
+        <end>
+          <endNac>
+            <xMun>Mondai</xMun>
+            <UF>SC</UF>
+          </endNac>
+        </end>
+      </toma>
+      <valores>
+        <vServPrest>
+          <vServ>180.00</vServ>
+        </vServPrest>
+      </valores>
+    </infDPS>
+  </DPS>
+  <infNFSe Id="NFS42110092206960810000176000000000033326071005552016">
+    <nNFSe>333</nNFSe>
+    <xLocPrestacao>Mondai</xLocPrestacao>
+    <xLocIncid>Mondai</xLocIncid>
+    <valores>
+      <vLiq>180.00</vLiq>
+      <vISSQN>0.00</vISSQN>
+      <pAliqAplic>0.00</pAliqAplic>
+    </valores>
+  </infNFSe>
+</NFSe>`,
+        'utf8'
+      )
+    );
+
+    const result = await service.exportarLeituraFiscalDominio({
+      clienteId: 'cliente-1',
+      all: true,
+      codigoEmpresa: 10105,
+      tipoRegistro: 'Entrada',
+      contas: 'Padrao',
+      produtoPadrao: 557
+    });
+
+    const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
+    expect(content).toContain('|1300|09/07/2026|467|506|180,00|| NFS-E N 333 Prestador Exportacao|||');
+  });
+
+  it('nao consulta contas por codigo de servico ao exportar Servico (aplicavel apenas a Entrada)', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-export-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000033326071005552016',
+        numeroNfse: '333',
+        dataEmissao: new Date('2026-07-10T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Exportacao',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador Exportacao',
+        municipioPrestacaoNome: 'Mondai',
+        codigoServicoNacional: '170101',
+        itemListaServico: '1701',
+        descricaoServico: 'Servico de consultoria',
+        xmlPath: 'nfse/producao/06960810000176/2026/07/xml/doc-export-1.xml',
+        createdAt: new Date('2026-07-10T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-10T00:00:00.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <DPS>
+    <infDPS>
+      <dhEmi>2026-07-10T00:00:00-03:00</dhEmi>
+      <prest>
+        <CNPJ>06960810000176</CNPJ>
+        <xNome>Prestador Exportacao</xNome>
+        <end>
+          <endNac>
+            <xMun>Chapeco</xMun>
+            <UF>SC</UF>
+          </endNac>
+        </end>
+      </prest>
+      <toma>
+        <CNPJ>11111111000111</CNPJ>
+        <xNome>Tomador Exportacao</xNome>
+        <end>
+          <endNac>
+            <xMun>Mondai</xMun>
+            <UF>SC</UF>
+          </endNac>
+        </end>
+      </toma>
+      <valores>
+        <vServPrest>
+          <vServ>180.00</vServ>
+        </vServPrest>
+      </valores>
+    </infDPS>
+  </DPS>
+  <infNFSe Id="NFS42110092206960810000176000000000033326071005552016">
+    <nNFSe>333</nNFSe>
+    <xLocPrestacao>Mondai</xLocPrestacao>
+    <xLocIncid>Mondai</xLocIncid>
+    <valores>
+      <vLiq>180.00</vLiq>
+      <vISSQN>0.00</vISSQN>
+      <pAliqAplic>0.00</pAliqAplic>
+    </valores>
+  </infNFSe>
+</NFSe>`,
+        'utf8'
+      )
+    );
+
+    await service.exportarLeituraFiscalDominio({
+      clienteId: 'cliente-1',
+      all: true,
+      codigoEmpresa: 10105,
+      tipoRegistro: 'Servico',
+      contas: 'Padrao',
+      produtoPadrao: 557
+    });
+
+    expect(prisma.nfseContaContabilConfig.findMany).not.toHaveBeenCalled();
   });
 
   it('rejeita exportacao por fornecedor sem configuracao ODBC da Dominio', async () => {

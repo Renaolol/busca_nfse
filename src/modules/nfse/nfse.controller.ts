@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
 import { ApiExtraModels, ApiOkResponse, ApiQuery, ApiTags, getSchemaPath } from '@nestjs/swagger';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
@@ -6,6 +6,12 @@ import { DownloadLoteDto } from './dto/download-lote.dto';
 import { DownloadLoteResponseDto } from './dto/download-lote-response.dto';
 import { DownloadDocumentDto } from './dto/download-document.dto';
 import { DashboardStatsQueryDto, DashboardStatsResponseDto } from './dto/dashboard-stats.dto';
+import {
+  CreateNfseContaContabilConfigDto,
+  ListNfseContaContabilConfigQueryDto,
+  NfseContaContabilConfigResponseDto,
+  UpdateNfseContaContabilConfigDto
+} from './dto/conta-contabil-config.dto';
 import { ImportXmlDto } from './dto/import-xml.dto';
 import { ExportarLeituraFiscalDominioDto } from './dto/exportar-leitura-fiscal-dominio.dto';
 import { NfseLeituraFiscalResponseDto } from './dto/leitura-fiscal.dto';
@@ -105,6 +111,36 @@ export class NfseController {
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   deleteNumberingException(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
     return this.nfseService.deleteNumberingException(id, query.clienteId);
+  }
+
+  @Get('contas-contabeis')
+  @ApiOkResponse({ type: NfseContaContabilConfigResponseDto, isArray: true })
+  @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })
+  listContaContabilConfigs(@Query() query: ListNfseContaContabilConfigQueryDto) {
+    return this.nfseService.listContaContabilConfigs(query);
+  }
+
+  @Post('contas-contabeis')
+  @ApiOkResponse({ type: NfseContaContabilConfigResponseDto })
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  createContaContabilConfig(@Body() dto: CreateNfseContaContabilConfigDto) {
+    return this.nfseService.createContaContabilConfig(dto);
+  }
+
+  @Patch('contas-contabeis/:id')
+  @ApiOkResponse({ type: NfseContaContabilConfigResponseDto })
+  @ApiQuery({ name: 'clienteId', required: true, description: 'Escopo do cliente para editar a configuracao de conta contabil' })
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  updateContaContabilConfig(@Param('id') id: string, @Body() dto: UpdateNfseContaContabilConfigDto, @Query() query: ClienteScopeQueryDto) {
+    return this.nfseService.updateContaContabilConfig(id, dto, query.clienteId);
+  }
+
+  @Delete('contas-contabeis/:id')
+  @ApiOkResponse({ type: NfseContaContabilConfigResponseDto })
+  @ApiQuery({ name: 'clienteId', required: true, description: 'Escopo do cliente para remover a configuracao de conta contabil' })
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  deleteContaContabilConfig(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
+    return this.nfseService.deleteContaContabilConfig(id, query.clienteId);
   }
 
   @Post(':id/validacao-numeracao')

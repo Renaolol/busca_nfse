@@ -14,6 +14,11 @@ import { NFSE_ADN_CLIENT, NfseAdnClient } from '../../integrations/nfse-adn/nfse
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { DashboardStatsQueryDto } from './dto/dashboard-stats.dto';
+import {
+  CreateNfseContaContabilConfigDto,
+  ListNfseContaContabilConfigQueryDto,
+  UpdateNfseContaContabilConfigDto
+} from './dto/conta-contabil-config.dto';
 import { DownloadLoteDto } from './dto/download-lote.dto';
 import { ExportarLeituraFiscalDominioDto } from './dto/exportar-leitura-fiscal-dominio.dto';
 import { DanfseRenderInput, NfseDanfseService, NfseDominioExportData, NfseLeituraFiscal } from './nfse-danfse.service';
@@ -405,6 +410,9 @@ export class NfseService {
           )
         : new Map<string, string>();
 
+    const contaServicoByCodigo =
+      tipoRegistro === 'Entrada' ? await this.lookupContaContabilPorCodigoServico(dto.clienteId) : new Map<string, string>();
+
     const headerCnpj = this.resolveDominioHeaderCnpj(dto, sources, tipoRegistro);
     const lines = [`|0000|${headerCnpj}|`];
 
@@ -414,7 +422,8 @@ export class NfseService {
           source,
           tipoRegistro,
           produtoPadrao,
-          contaFornecedorByCnpj
+          contaFornecedorByCnpj,
+          contaServicoByCodigo
         })
       );
     }
@@ -521,8 +530,9 @@ export class NfseService {
     tipoRegistro: 'Entrada' | 'Servico';
     produtoPadrao: number;
     contaFornecedorByCnpj: Map<string, string>;
+    contaServicoByCodigo: Map<string, string>;
   }): string[] {
-    const { source, tipoRegistro, produtoPadrao, contaFornecedorByCnpj } = params;
+    const { source, tipoRegistro, produtoPadrao, contaFornecedorByCnpj, contaServicoByCodigo } = params;
     const data = source.exportData;
     const valorServico = this.roundTo2(data.valorServico ?? 0);
     const valorLiquido = this.roundTo2(data.valorLiquidoNfse ?? 0);
@@ -550,6 +560,12 @@ export class NfseService {
       params.tipoRegistro === 'Entrada'
         ? contaFornecedorByCnpj.get(prestadorCnpj) || '506'
         : '506';
+    const contaDebitoEntrada =
+      params.tipoRegistro === 'Entrada'
+        ? contaServicoByCodigo.get((source.documento.codigoServicoNacional || '').trim()) ||
+          contaServicoByCodigo.get((source.documento.itemListaServico || '').trim()) ||
+          '467'
+        : '467';
     const classEfd = valorInss > 0 ? '100000003' : '';
     const codEfd = valorInss > 0 ? '0' : '';
     const linhas: string[] = [];
@@ -597,9 +613,9 @@ export class NfseService {
       linhas.push(this.createDominioRegistro1030(valorServico, dataEmissao, aliquotaIss, valorIss, prestadorUf, produtoPadrao));
       const totalRetencoesLancto = this.roundTo2(valorCrf + valorIrrf + valorInss + valorIssRetidoReal);
       if (totalRetencoesLancto === 0) {
-        linhas.push(this.createDominioRegistro1300(dataEmissao, '467', contaFornecedor, valorServico, numeroNfse, nomeDescricao, ''));
+        linhas.push(this.createDominioRegistro1300(dataEmissao, contaDebitoEntrada, contaFornecedor, valorServico, numeroNfse, nomeDescricao, ''));
       } else {
-        linhas.push(this.createDominioRegistro1300(dataEmissao, '467', '0', valorServico, numeroNfse, nomeDescricao, ''));
+        linhas.push(this.createDominioRegistro1300(dataEmissao, contaDebitoEntrada, '0', valorServico, numeroNfse, nomeDescricao, ''));
         linhas.push(
           this.createDominioRegistro1300(
             dataEmissao,
@@ -1057,6 +1073,79 @@ export class NfseService {
     return this.prisma.nfseNumeracaoExcecao.delete({
       where: { id }
     });
+  }
+
+  async listContaContabilConfigs(query: ListNfseContaContabilConfigQueryDto = {}) {
+    return this.prisma.nfseContaContabilConfig.findMany({
+      where: {
+        ...(query.clienteId ? { clienteId: query.clienteId } : {})
+      },
+      orderBy: [{ codigoServico: 'asc' }]
+    });
+  }
+
+  async createContaContabilConfig(dto: CreateNfseContaContabilConfigDto) {
+    const codigoServico = dto.codigoServico.trim();
+    if (!codigoServico) {
+      throw new BadRequestException('Informe o codigo do servico para configurar a conta contabil.');
+    }
+    const contaContabil = dto.contaContabil.trim();
+    if (!contaContabil) {
+      throw new BadRequestException('Informe a conta contabil a ser usada para o codigo de servico.');
+    }
+
+    return this.prisma.nfseContaContabilConfig.upsert({
+      where: {
+        clienteId_codigoServico: {
+          clienteId: dto.clienteId,
+          codigoServico
+        }
+      },
+      create: {
+        clienteId: dto.clienteId,
+        codigoServico,
+        contaContabil,
+        ativo: dto.ativo ?? true
+      },
+      update: {
+        contaContabil,
+        ativo: dto.ativo ?? true
+      }
+    });
+  }
+
+  async updateContaContabilConfig(id: string, dto: UpdateNfseContaContabilConfigDto, clienteId: string) {
+    const found = await this.prisma.nfseContaContabilConfig.findUnique({ where: { id } });
+    if (!found || found.clienteId !== clienteId) {
+      throw new NotFoundException('Configuracao de conta contabil nao encontrada para o cliente informado.');
+    }
+
+    return this.prisma.nfseContaContabilConfig.update({
+      where: { id },
+      data: {
+        ...(dto.contaContabil !== undefined ? { contaContabil: dto.contaContabil.trim() } : {}),
+        ...(dto.ativo !== undefined ? { ativo: dto.ativo } : {})
+      }
+    });
+  }
+
+  async deleteContaContabilConfig(id: string, clienteId: string) {
+    const found = await this.prisma.nfseContaContabilConfig.findUnique({ where: { id } });
+    if (!found || found.clienteId !== clienteId) {
+      throw new NotFoundException('Configuracao de conta contabil nao encontrada para o cliente informado.');
+    }
+
+    return this.prisma.nfseContaContabilConfig.delete({
+      where: { id }
+    });
+  }
+
+  private async lookupContaContabilPorCodigoServico(clienteId: string): Promise<Map<string, string>> {
+    const configs = await this.prisma.nfseContaContabilConfig.findMany({
+      where: { clienteId, ativo: true }
+    });
+
+    return new Map(configs.map((config) => [config.codigoServico.trim(), config.contaContabil.trim()]));
   }
 
   async updateDocumentNumberingValidation(id: string, dto: UpdateNfseDocumentNumberingValidationDto) {

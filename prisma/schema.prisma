@@ -80,6 +80,7 @@ model Cliente {
   syncControles    NfseSyncControle[]
   documentos       NfseDocumento[]
   numeracaoExcecoes NfseNumeracaoExcecao[]
+  contasContabilConfig NfseContaContabilConfig[]
   nfeSyncControles NfeSyncControle[]
   nfeDocumentos    NfeDocumento[]
   syncLogs         NfseSyncLog[]
@@ -244,6 +245,21 @@ model NfseNumeracaoExcecao {
   @@unique([clienteId, cnpjConsulta, ambiente, numeroNfse], map: "nfse_numeracao_excecoes_cliente_cnpj_ambiente_numero_key")
   @@index([clienteId, cnpjConsulta, ambiente], map: "nfse_numeracao_excecoes_cliente_cnpj_ambiente_idx")
   @@map("nfse_numeracao_excecoes")
+}
+
+model NfseContaContabilConfig {
+  id            String   @id @default(uuid()) @db.Uuid
+  clienteId     String   @map("cliente_id") @db.Uuid
+  codigoServico String   @map("codigo_servico") @db.VarChar(50)
+  contaContabil String   @map("conta_contabil") @db.VarChar(50)
+  ativo         Boolean  @default(true)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  cliente Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+
+  @@unique([clienteId, codigoServico], map: "nfse_conta_contabil_config_cliente_id_codigo_servico_key")
+  @@map("nfse_conta_contabil_config")
 }
 
 model NfseSyncLog {
