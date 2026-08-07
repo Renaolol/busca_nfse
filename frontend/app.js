@@ -4544,11 +4544,13 @@ function renderXmlNumberingValidationSummary(query, validation) {
   }
 
   const summaryGaps = summarizeXmlNumberingGaps(validation.lacunas);
-  const preview = summaryGaps.slice(0, 5).map((gap) => formatXmlNumberingRange(gap)).filter(Boolean).join('; ');
+  const preview = summaryGaps.slice(0, 5).map((gap) => formatXmlNumberingGap(gap)).filter(Boolean).join('; ');
   const hiddenCount = Math.max(0, summaryGaps.length - 5);
   const suffix = hiddenCount > 0 ? ` (+${hiddenCount} faixa(s))` : '';
-  const totalFaixasResumo = summaryGaps.length;
-  const totalNumerosResumo = summaryGaps.reduce((total, gap) => total + gap.quantidade, 0);
+  const totalFaixasResumo = Number(validation.totalFaixasLacuna || summaryGaps.length || 0);
+  const totalNumerosResumo = Number(
+    validation.totalNumerosPulados || summaryGaps.reduce((total, gap) => total + Number(gap.quantidade || 0), 0)
+  );
 
   return `
     <div style="display:flex; gap:12px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; margin-top:12px;">
@@ -4603,11 +4605,23 @@ function summarizeXmlNumberingGaps(gaps) {
   const normalized = Array.isArray(gaps)
     ? gaps
         .map((gap) => ({
+          ambiente: String(gap?.ambiente || '') === 'producao_restrita' ? 'producao_restrita' : 'producao',
+          serie: gap?.serie == null ? null : String(gap.serie).trim() || null,
           numeroInicial: Number(gap?.numeroInicial || 0),
           numeroFinal: Number(gap?.numeroFinal || 0)
         }))
         .filter((gap) => gap.numeroInicial > 0 && gap.numeroFinal >= gap.numeroInicial)
         .sort((left, right) => {
+          const ambienteDiff = String(left.ambiente).localeCompare(String(right.ambiente));
+          if (ambienteDiff !== 0) {
+            return ambienteDiff;
+          }
+
+          const serieDiff = String(left.serie || '').localeCompare(String(right.serie || ''));
+          if (serieDiff !== 0) {
+            return serieDiff;
+          }
+
           if (left.numeroInicial !== right.numeroInicial) {
             return left.numeroInicial - right.numeroInicial;
           }
@@ -4621,6 +4635,8 @@ function summarizeXmlNumberingGaps(gaps) {
     const last = merged[merged.length - 1];
     if (!last) {
       merged.push({
+        ambiente: gap.ambiente,
+        serie: gap.serie,
         numeroInicial: gap.numeroInicial,
         numeroFinal: gap.numeroFinal,
         quantidade: gap.numeroFinal - gap.numeroInicial + 1
@@ -4628,13 +4644,15 @@ function summarizeXmlNumberingGaps(gaps) {
       continue;
     }
 
-    if (gap.numeroInicial <= last.numeroFinal + 1) {
+    if (gap.ambiente === last.ambiente && gap.serie === last.serie && gap.numeroInicial <= last.numeroFinal + 1) {
       last.numeroFinal = Math.max(last.numeroFinal, gap.numeroFinal);
       last.quantidade = last.numeroFinal - last.numeroInicial + 1;
       continue;
     }
 
     merged.push({
+      ambiente: gap.ambiente,
+      serie: gap.serie,
       numeroInicial: gap.numeroInicial,
       numeroFinal: gap.numeroFinal,
       quantidade: gap.numeroFinal - gap.numeroInicial + 1
@@ -4652,7 +4670,7 @@ function renderNfseGapAuditPreview(gaps) {
 
   const preview = summary
     .slice(0, 5)
-    .map((gap) => formatXmlNumberingRange(gap))
+    .map((gap) => formatXmlNumberingGap(gap))
     .filter(Boolean)
     .join('; ');
   const hiddenCount = Math.max(0, summary.length - 5);
@@ -15512,7 +15530,7 @@ function buildNfseGapContext({ clientId, client = null, cnpjConsulta, lacunasRaw
     requestedNumbers,
     gapPreview: summarizeXmlNumberingGaps(rawGaps)
       .slice(0, 5)
-      .map((gap) => formatXmlNumberingRange(gap))
+      .map((gap) => formatXmlNumberingGap(gap))
   };
 }
 
