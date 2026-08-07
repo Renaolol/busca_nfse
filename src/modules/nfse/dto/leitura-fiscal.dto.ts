@@ -16,6 +16,9 @@ export class NfseLeituraFiscalRowDto {
   @ApiProperty()
   chaveAcesso!: string;
 
+  @ApiProperty()
+  cancelada!: boolean;
+
   @ApiPropertyOptional({ nullable: true })
   dataEmissao!: Date | null;
 
