@@ -2678,6 +2678,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(
         `Documento reconciliado por NSU ${params.nsu.toString()} em ${params.ambiente}; chave anterior ${existingByNsu.chaveAcesso}, nova chave ${params.chaveAcesso}`
       );
+      await this.detachStaleEventosOnIdentityChange(target.id, params.chaveAcesso);
+      return this.updateDocumentoById(target.id, params, { identityChanged: true });
     }
 
     return this.updateDocumentoById(target.id, params);
@@ -2718,6 +2720,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       `Documento reconciliado por NSU ${nsu.toString()} em ${params.ambiente}; chave anterior ${existing.chaveAcesso}, nova chave ${params.chaveAcesso}`
     );
 
+    await this.detachStaleEventosOnIdentityChange(existing.id, params.chaveAcesso);
+
     try {
       return await this.prisma.nfseDocumento.update({
         where: { id: existing.id },
@@ -2728,6 +2732,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           ambiente: params.ambiente,
           nsu,
           chaveAcesso: params.chaveAcesso,
+          dataCancelamento: params.updateData.dataCancelamento ?? null,
           origem: params.createData.origem
         }
       });
@@ -2755,7 +2760,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       nsu?: bigint;
       updateData: Prisma.NfseDocumentoUncheckedUpdateInput;
       createData: Prisma.NfseDocumentoUncheckedCreateInput;
-    }
+    },
+    options: { identityChanged?: boolean } = {}
   ): Promise<NfseDocumento> {
     return this.prisma.nfseDocumento.update({
       where: { id: documentoId },
@@ -2766,9 +2772,31 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         ambiente: params.ambiente,
         nsu: params.nsu,
         chaveAcesso: params.chaveAcesso,
-        origem: params.createData.origem
+        origem: params.createData.origem,
+        ...(options.identityChanged ? { dataCancelamento: params.updateData.dataCancelamento ?? null } : {})
       }
     });
+  }
+
+  /**
+   * Ao reaproveitar uma linha de NfseDocumento existente para representar uma chave de acesso
+   * diferente (colisao de NSU), qualquer NfseEvento ja vinculado aquele id pertence a identidade
+   * ANTERIOR da linha. Sem essa limpeza, o novo documento herdaria eventos (ex: cancelamento) que
+   * nunca ocorreram para ele.
+   */
+  private async detachStaleEventosOnIdentityChange(documentoId: string, novaChaveAcesso: string): Promise<void> {
+    const removed = await this.prisma.nfseEvento.deleteMany({
+      where: {
+        nfseDocumentoId: documentoId,
+        chaveAcesso: { not: novaChaveAcesso }
+      }
+    });
+
+    if (removed.count > 0) {
+      this.logger.warn(
+        `Removidos ${removed.count} evento(s) orfao(s) do documento ${documentoId} ao reconciliar por NSU para a chave ${novaChaveAcesso}.`
+      );
+    }
   }
 
   private async mergeDocumentoDuplicates(params: {
@@ -2779,12 +2807,19 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     chaveAnterior: string;
     chaveAtual: string;
   }): Promise<void> {
-    await this.prisma.nfseEvento.updateMany({
+    const relinked = await this.prisma.nfseEvento.updateMany({
       where: {
-        nfseDocumentoId: params.duplicateId
+        nfseDocumentoId: params.duplicateId,
+        chaveAcesso: params.chaveAtual
       },
       data: {
         nfseDocumentoId: params.canonicalId
+      }
+    });
+
+    const removed = await this.prisma.nfseEvento.deleteMany({
+      where: {
+        nfseDocumentoId: params.duplicateId
       }
     });
 
@@ -2795,7 +2830,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     });
 
     this.logger.warn(
-      `Documento duplicado mesclado por NSU ${params.nsu.toString()} em ${params.ambiente}; chave antiga ${params.chaveAnterior}, chave canonica ${params.chaveAtual}`
+      `Documento duplicado mesclado por NSU ${params.nsu.toString()} em ${params.ambiente}; chave antiga ${params.chaveAnterior}, chave canonica ${params.chaveAtual}. ` +
+        `Eventos realocados: ${relinked.count}, eventos orfaos removidos: ${removed.count}.`
     );
   }
 
