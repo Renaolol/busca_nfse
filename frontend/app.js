@@ -269,6 +269,9 @@ const state = {
     rows: [],
     lastLoadedAt: null
   },
+  nfseGapAuditRecoverAll: {
+    active: false
+  },
   xmlReader30: {
     activeTab: 'nfe',
     hasSearched: false,
@@ -1180,6 +1183,10 @@ function onDocumentClick(event) {
     }
     case 'gap-audit-refresh': {
       void loadNfseGapAuditOverview();
+      return;
+    }
+    case 'gap-audit-recover-dps-all': {
+      void runNfseGapAuditRecoverAllByDps();
       return;
     }
     case 'gap-audit-open-xmls': {
@@ -4441,12 +4448,23 @@ function renderNfseGapAuditPage() {
     })
     .join('');
 
+  const recoveringAll = Boolean(state.nfseGapAuditRecoverAll.active);
+  const hasRecoverableRows = rows.some((row) => Array.isArray(row?.lacunas) && row.lacunas.length > 0);
+
   return `
     <section class="page-section">
       ${renderPageHeader({
         title: 'Auditoria de Lacunas',
         description: 'Liste por empresa as numeracoes visiveis em aberto e acione a auditoria das lacunas.',
-        actions: [actionButton('Atualizar auditoria', 'gap-audit-refresh', 'primary')]
+        actions: [
+          actionButton('Atualizar auditoria', 'gap-audit-refresh', 'primary', recoveringAll),
+          actionButton(
+            recoveringAll ? 'Recuperando DPS...' : 'Recuperar todas as DPS',
+            'gap-audit-recover-dps-all',
+            'secondary',
+            recoveringAll || !hasRecoverableRows
+          )
+        ]
       })}
 
       <section class="stats-grid">
@@ -10839,8 +10857,8 @@ function renderPageHeader({ title, description, actions, badgeText = '' }) {
   `;
 }
 
-function actionButton(label, action, variant) {
-  return `<button class="btn ${variant}" type="button" data-action="${action}">${escapeHtml(label)}</button>`;
+function actionButton(label, action, variant, disabled = false) {
+  return `<button class="btn ${variant}" type="button" data-action="${action}"${disabled ? ' disabled' : ''}>${escapeHtml(label)}</button>`;
 }
 
 function statCard(iconKey, label, value, caption, tone) {
@@ -14645,6 +14663,92 @@ async function submitNfseRecoverByDpsForm(form) {
     render();
     pushToast(`Falha ao recuperar NFS-e por DPS: ${toErrorMessage(error)}`, 'error');
   }
+}
+
+async function runNfseGapAuditRecoverAllByDps() {
+  if (state.dataSource !== 'api') {
+    pushToast('A recuperacao por DPS so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  if (state.nfseGapAuditRecoverAll.active) {
+    return;
+  }
+
+  const rows = Array.isArray(state.nfseGapAuditOverview.rows) ? state.nfseGapAuditOverview.rows : [];
+  const targets = rows
+    .map((row) => ({ row, context: getNfseGapContextFromAuditRow(row) }))
+    .filter((entry) => entry.context.clientId && entry.context.cnpjConsulta && entry.context.lacunas.length > 0);
+
+  if (!targets.length) {
+    pushToast('Nenhuma empresa com lacunas validas foi encontrada para recuperar por DPS.', 'info');
+    return;
+  }
+
+  state.nfseGapAuditRecoverAll.active = true;
+  render();
+
+  pushToast(`Recuperacao por DPS iniciada para ${targets.length} empresa(s). Esta operacao pode demorar.`, 'info');
+  startExecutionMonitor(
+    'Recuperacao por DPS (todas as empresas)',
+    targets.length,
+    'Recuperando DPS faltantes por empresa...'
+  );
+
+  let totalRecovered = 0;
+  let totalFailures = 0;
+  let companiesWithFailure = 0;
+
+  for (const { row, context } of targets) {
+    const clientName = row?.razaoSocial || context.client?.razaoSocial || 'Empresa selecionada';
+
+    try {
+      const response = await apiRequest('/nfse/recuperar-por-dps', {
+        method: 'POST',
+        body: {
+          clienteId: context.clientId,
+          cnpjConsulta: context.cnpjConsulta,
+          ambiente: context.ambiente,
+          lacunas: context.lacunas
+        },
+        timeoutMs: Math.max(180000, context.requestedNumbers * 45000)
+      });
+
+      const recovered = Number(response?.documentsRecovered || 0);
+      const failures = Number(response?.failures || 0);
+      totalRecovered += recovered;
+      totalFailures += failures;
+      if (failures > 0) {
+        companiesWithFailure += 1;
+      }
+
+      updateExecutionMonitorStep(
+        clientName,
+        failures === 0,
+        `${clientName}: ${recovered} XML(s) recuperado(s)${failures ? `, ${failures} falha(s)` : ''}.`
+      );
+    } catch (error) {
+      companiesWithFailure += 1;
+      updateExecutionMonitorStep(clientName, false, `${clientName}: falha ao recuperar - ${toErrorMessage(error)}`);
+    }
+  }
+
+  state.nfseGapAuditRecoverAll.active = false;
+  finishExecutionMonitor(
+    `Recuperacao por DPS finalizada. ${totalRecovered} XML(s) recuperado(s) em ${targets.length} empresa(s).`
+  );
+
+  await loadNfseGapAuditOverview({ silent: true });
+  if (state.xmlSearch.hasSearched) {
+    await executeXmlSearch();
+  }
+
+  pushToast(
+    `Recuperacao por DPS concluida: ${totalRecovered} XML(s) recuperado(s)${
+      totalFailures ? `, ${totalFailures} falha(s) em ${companiesWithFailure} empresa(s)` : ''
+    }.`,
+    totalFailures ? 'error' : 'success'
+  );
 }
 
 function extractNfseRecoveryKeysFromText(value) {
