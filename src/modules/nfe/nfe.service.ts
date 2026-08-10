@@ -42,11 +42,16 @@ import { RunNfeSyncDto } from './dto/run-sync.dto';
 import { SincronizarNfeEventosDto } from './dto/sincronizar-eventos.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
 import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
+import { MonofasicoAliquotaPeriodoDto, UpdateMonofasicoAliquotasDto } from './dto/update-monofasico-aliquotas.dto';
 import { NfeXmlParserService, ParsedDfeEvento, ParsedNfe } from './nfe-xml-parser.service';
 
 type NfeNightlySweepConfigFile = {
   enabled?: boolean;
   activeSlots?: string[];
+};
+
+type NfeMonofasicoAliquotasConfigFile = {
+  periodos?: MonofasicoAliquotaPeriodoDto[];
 };
 
 type NfeNightlySweepSlot = {
@@ -132,6 +137,11 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
   private static readonly NIGHTLY_SWEEP_CONFIG_STORAGE_KEY = 'settings/nfe-nightly-sweep.json';
   private static readonly DOMINIO_CHAVE_DATA_EMISSAO_INICIO = '2026-01-02';
+  private static readonly MONOFASICO_ALIQUOTAS_STORAGE_KEY = 'settings/nfe-monofasico-aliquotas.json';
+  private static readonly MONOFASICO_ALIQUOTAS_DEFAULT: MonofasicoAliquotaPeriodoDto[] = [
+    { aliquota: 1.12, dataInicio: '2000-01-01', dataFim: '2026-02-05' },
+    { aliquota: 1.17, dataInicio: '2026-02-06', dataFim: null }
+  ];
   private readonly logger = new Logger(NfeService.name);
   private autoSyncTimer: NodeJS.Timeout | null = null;
   private nightlySweepTimer: NodeJS.Timeout | null = null;
@@ -153,6 +163,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     -720,
     840
   );
+  private monofasicoAliquotas: MonofasicoAliquotaPeriodoDto[] = NfeService.MONOFASICO_ALIQUOTAS_DEFAULT;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -167,6 +178,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   async onModuleInit(): Promise<void> {
     await this.loadNightlySweepConfig();
+    await this.loadMonofasicoAliquotasConfig();
 
     if (this.autoSyncEnabled) {
       this.autoSyncTimer = setInterval(() => {
@@ -255,6 +267,81 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     await this.saveNightlySweepConfig();
     this.refreshNightlySweepTimer();
     return this.schedulerStatus();
+  }
+
+  getMonofasicoAliquotas(): { periodos: MonofasicoAliquotaPeriodoDto[] } {
+    return {
+      periodos: this.sortMonofasicoAliquotaPeriodos(this.monofasicoAliquotas)
+    };
+  }
+
+  async updateMonofasicoAliquotas(dto: UpdateMonofasicoAliquotasDto): Promise<{ periodos: MonofasicoAliquotaPeriodoDto[] }> {
+    const periodos = this.sortMonofasicoAliquotaPeriodos(
+      dto.periodos.map((periodo) => ({
+        aliquota: periodo.aliquota,
+        dataInicio: periodo.dataInicio,
+        dataFim: periodo.dataFim ?? null
+      }))
+    );
+
+    this.validateMonofasicoAliquotaPeriodos(periodos);
+
+    this.monofasicoAliquotas = periodos;
+    await this.saveMonofasicoAliquotasConfig();
+    return this.getMonofasicoAliquotas();
+  }
+
+  private sortMonofasicoAliquotaPeriodos(periodos: MonofasicoAliquotaPeriodoDto[]): MonofasicoAliquotaPeriodoDto[] {
+    return [...periodos].sort(
+      (left, right) => this.toDateStringTimestamp(left.dataInicio) - this.toDateStringTimestamp(right.dataInicio)
+    );
+  }
+
+  private toDateStringTimestamp(value?: string | null): number {
+    if (!value) {
+      return NaN;
+    }
+
+    return Date.parse(value);
+  }
+
+  private validateMonofasicoAliquotaPeriodos(periodosOrdenados: MonofasicoAliquotaPeriodoDto[]): void {
+    periodosOrdenados.forEach((periodo, index) => {
+      const inicio = this.toDateStringTimestamp(periodo.dataInicio);
+      if (!Number.isFinite(inicio)) {
+        throw new BadRequestException(`Data de inicio invalida no periodo ${index + 1}.`);
+      }
+
+      if (!(periodo.aliquota > 0)) {
+        throw new BadRequestException(`Aliquota invalida no periodo ${index + 1}: informe um valor maior que zero.`);
+      }
+
+      if (periodo.dataFim) {
+        const fim = this.toDateStringTimestamp(periodo.dataFim);
+        if (!Number.isFinite(fim)) {
+          throw new BadRequestException(`Data final invalida no periodo ${index + 1}.`);
+        }
+
+        if (fim < inicio) {
+          throw new BadRequestException(`A data final do periodo ${index + 1} nao pode ser anterior a data de inicio.`);
+        }
+      }
+
+      const anterior = periodosOrdenados[index - 1];
+      if (anterior) {
+        if (!anterior.dataFim) {
+          throw new BadRequestException(
+            `O periodo iniciado em ${anterior.dataInicio} precisa de uma data final antes do periodo seguinte comecar.`
+          );
+        }
+
+        if (this.toDateStringTimestamp(anterior.dataFim) >= inicio) {
+          throw new BadRequestException(
+            `Os periodos com inicio em ${anterior.dataInicio} e ${periodo.dataInicio} estao se sobrepondo.`
+          );
+        }
+      }
+    });
   }
 
   async ativarSyncNoNsuAtual(
@@ -3908,6 +3995,46 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           enabled: this.nightlySweepEnabled,
           activeSlots: this.nightlySweepActiveSlots
         } satisfies NfeNightlySweepConfigFile,
+        null,
+        2
+      ),
+      'utf8'
+    );
+  }
+
+  private async loadMonofasicoAliquotasConfig(): Promise<void> {
+    const absolutePath = this.storage.resolveKeyPath(NfeService.MONOFASICO_ALIQUOTAS_STORAGE_KEY);
+    try {
+      const raw = await readFile(absolutePath, 'utf8');
+      const parsed = JSON.parse(raw) as NfeMonofasicoAliquotasConfigFile;
+
+      if (Array.isArray(parsed.periodos) && parsed.periodos.length) {
+        const periodos = this.sortMonofasicoAliquotaPeriodos(
+          parsed.periodos.map((periodo) => ({
+            aliquota: Number(periodo.aliquota),
+            dataInicio: String(periodo.dataInicio || ''),
+            dataFim: periodo.dataFim ? String(periodo.dataFim) : null
+          }))
+        );
+        this.validateMonofasicoAliquotaPeriodos(periodos);
+        this.monofasicoAliquotas = periodos;
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+        this.logger.warn(`Falha ao carregar configuracao de aliquotas monofasico NF-e: ${this.toErrorMessage(error)}`);
+      }
+    }
+  }
+
+  private async saveMonofasicoAliquotasConfig(): Promise<void> {
+    const absolutePath = this.storage.resolveKeyPath(NfeService.MONOFASICO_ALIQUOTAS_STORAGE_KEY);
+    await mkdir(dirname(absolutePath), { recursive: true });
+    await writeFile(
+      absolutePath,
+      JSON.stringify(
+        {
+          periodos: this.monofasicoAliquotas
+        } satisfies NfeMonofasicoAliquotasConfigFile,
         null,
         2
       ),

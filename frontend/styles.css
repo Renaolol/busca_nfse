@@ -2391,6 +2391,28 @@ textarea {
   gap: 10px;
 }
 
+.aliquota-periodo-list {
+  display: grid;
+  gap: 10px;
+}
+
+.aliquota-periodo-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fdfdfd;
+}
+
+@media (max-width: 720px) {
+  .aliquota-periodo-row {
+    grid-template-columns: 1fr;
+  }
+}
+
 .maintenance-row {
   display: flex;
   align-items: center;

@@ -25,6 +25,7 @@ import { RunNfeSyncDto } from './dto/run-sync.dto';
 import { SincronizarNfeEventosDto, SincronizarNfeEventosResponseDto } from './dto/sincronizar-eventos.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
 import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
+import { UpdateMonofasicoAliquotasDto } from './dto/update-monofasico-aliquotas.dto';
 import { NfeService } from './nfe.service';
 
 @ApiTags('nfe')
@@ -147,6 +148,17 @@ export class NfeController {
   @Roles('admin')
   updateSchedulerSettings(@Body() dto: UpdateNfeSchedulerSettingsDto) {
     return this.nfeService.updateSchedulerSettings(dto);
+  }
+
+  @Get('xml-reader30/aliquotas-monofasico')
+  getMonofasicoAliquotas() {
+    return this.nfeService.getMonofasicoAliquotas();
+  }
+
+  @Put('xml-reader30/aliquotas-monofasico')
+  @Roles('admin')
+  updateMonofasicoAliquotas(@Body() dto: UpdateMonofasicoAliquotasDto) {
+    return this.nfeService.updateMonofasicoAliquotas(dto);
   }
 
   @Post('sync/rodar-agora')

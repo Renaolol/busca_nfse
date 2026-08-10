@@ -347,6 +347,12 @@ const state = {
       alertarXmlNaoArmazenado: true,
       canal: 'Somente painel'
     },
+    aliquotas: {
+      periodos: [],
+      draftPeriodos: null,
+      saving: false,
+      errorMessage: ''
+    },
     danfseReprocessRunning: false
   },
   filters: {
@@ -535,7 +541,8 @@ async function hydrateFromApi(options = {}) {
     persistedAlertResolutions,
     auditRows,
     schedulerStatus,
-    compareSpedHistoryRaw
+    compareSpedHistoryRaw,
+    monofasicoAliquotasConfig
   ] = await Promise.all([
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/estabelecimentos`, []),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/certificados`, []),
@@ -553,7 +560,8 @@ async function hydrateFromApi(options = {}) {
     apiRequest('/alertas/resolucoes').catch(() => []),
     apiRequest('/auditoria').catch(() => []),
     apiRequest('/sync/scheduler-status').catch(() => null),
-    apiRequest(`/comparacoes-sped?limit=${COMPARE_SPED_HISTORY_LIMIT}`).catch(() => [])
+    apiRequest(`/comparacoes-sped?limit=${COMPARE_SPED_HISTORY_LIMIT}`).catch(() => []),
+    apiRequest('/nfe/xml-reader30/aliquotas-monofasico').catch(() => null)
   ]);
 
   const nfseDocsPage = normalizePaginatedResponse(nfseDocs);
@@ -602,6 +610,7 @@ async function hydrateFromApi(options = {}) {
     Array.isArray(compareSpedHistoryRaw) ? compareSpedHistoryRaw : []
   );
   applySchedulerStatusToSettings(schedulerStatus);
+  applyMonofasicoAliquotasToSettings(monofasicoAliquotasConfig);
   syncExecutionMonitorWithData();
 }
 
@@ -1779,6 +1788,21 @@ function onDocumentClick(event) {
       render();
       return;
     }
+    case 'settings-aliquota-add-periodo': {
+      syncAliquotaDraftPeriodosFromForm(actionNode.closest('form'));
+      state.settings.aliquotas.draftPeriodos.push({ aliquota: '', dataInicio: '', dataFim: '' });
+      render();
+      return;
+    }
+    case 'settings-aliquota-remove-periodo': {
+      const index = Number(actionNode.getAttribute('data-index'));
+      syncAliquotaDraftPeriodosFromForm(actionNode.closest('form'));
+      if (state.settings.aliquotas.draftPeriodos.length > 1) {
+        state.settings.aliquotas.draftPeriodos.splice(index, 1);
+      }
+      render();
+      return;
+    }
     case 'settings-reprocess-danfse': {
       if (state.settings.danfseReprocessRunning) {
         pushToast('Reprocessamento de DANFSEs ja esta em andamento.', 'info');
@@ -1955,6 +1979,11 @@ function onDocumentSubmit(event) {
     case 'settingsNotificacoesForm': {
       event.preventDefault();
       pushToast('Configuracoes salvas com sucesso.', 'success');
+      return;
+    }
+    case 'settingsAliquotasForm': {
+      event.preventDefault();
+      void submitSettingsAliquotasForm(target);
       return;
     }
     default:
@@ -5049,6 +5078,7 @@ function renderSettingsPage() {
           ${renderTabButton('rotina', 'Rotina noturna')}
           ${renderTabButton('servidor', 'Servidor de XMLs')}
           ${renderTabButton('notificacoes', 'Notificacoes')}
+          ${renderTabButton('aliquotas', 'Aliquotas')}
           ${renderTabButton('manutencao', 'Manutencao')}
         </div>
         ${renderSettingsTabPanel()}
@@ -6156,12 +6186,26 @@ function resolveXmlReader30AliqVigente(dataEmissao, cstCsosn) {
   }
 
   const emissionTimestamp = Date.parse(dataEmissao || '');
-  const cutoffTimestamp = Date.parse('2026-02-05T23:59:59');
-  if (Number.isFinite(emissionTimestamp) && emissionTimestamp > cutoffTimestamp) {
-    return 1.17;
+  if (!Number.isFinite(emissionTimestamp)) {
+    return 0;
   }
 
-  return 1.12;
+  const periodos = Array.isArray(state.settings.aliquotas.periodos) ? state.settings.aliquotas.periodos : [];
+  const periodoVigente = periodos.find((periodo) => {
+    const inicioTimestamp = Date.parse(`${periodo.dataInicio}T00:00:00`);
+    if (!Number.isFinite(inicioTimestamp) || emissionTimestamp < inicioTimestamp) {
+      return false;
+    }
+
+    if (!periodo.dataFim) {
+      return true;
+    }
+
+    const fimTimestamp = Date.parse(`${periodo.dataFim}T23:59:59`);
+    return Number.isFinite(fimTimestamp) && emissionTimestamp <= fimTimestamp;
+  });
+
+  return periodoVigente ? Number(periodoVigente.aliquota) || 0 : 0;
 }
 
 function computeXmlReader30MonofasicValues(dataEmissao, cstCsosn, qBCMonoRet) {
@@ -7829,6 +7873,32 @@ function mapXmlReader30ItemLegacyUnused(documentType, doc) {
   };
 }
 
+function renderAliquotaPeriodoRow(periodo, index, total) {
+  return `
+    <div class="aliquota-periodo-row">
+      <label class="field">
+        Aliquota (fator)
+        <input name="aliquota" type="number" step="0.0001" min="0" value="${escapeHtml(periodo?.aliquota === '' || periodo?.aliquota == null ? '' : String(periodo.aliquota))}" required />
+      </label>
+      <label class="field">
+        Data inicio
+        <input name="dataInicio" type="date" value="${escapeHtml(periodo?.dataInicio || '')}" required />
+      </label>
+      <label class="field">
+        Data fim (vazio = vigente)
+        <input name="dataFim" type="date" value="${escapeHtml(periodo?.dataFim || '')}" />
+      </label>
+      <button
+        class="btn secondary"
+        type="button"
+        data-action="settings-aliquota-remove-periodo"
+        data-index="${index}"
+        ${total <= 1 ? 'disabled' : ''}
+      >Remover</button>
+    </div>
+  `;
+}
+
 function renderSettingsTabPanel() {
   switch (state.settings.tab) {
     case 'geral':
@@ -7940,6 +8010,33 @@ function renderSettingsTabPanel() {
           </div>
         </form>
       `;
+    case 'aliquotas': {
+      const periodos = Array.isArray(state.settings.aliquotas.draftPeriodos)
+        ? state.settings.aliquotas.draftPeriodos
+        : cloneMonofasicoAliquotaPeriodos(state.settings.aliquotas.periodos);
+      const errorMessage = state.settings.aliquotas.errorMessage;
+      const saving = state.settings.aliquotas.saving;
+
+      return `
+        <form id="settingsAliquotasForm">
+          <p class="card-subtitle" style="margin-top:0;">
+            Aliquota vigente usada na conferencia do monofasico (CST/CSOSN 61) no Leitor XML 3.0 -&gt; NF-e. Cadastre os periodos de vigencia; o periodo mais recente pode ficar sem data final (vigente).
+          </p>
+          ${errorMessage ? `<div class="table-state error" style="margin-bottom:14px;">${escapeHtml(errorMessage)}</div>` : ''}
+          <div class="aliquota-periodo-list">
+            ${
+              periodos.length
+                ? periodos.map((periodo, index) => renderAliquotaPeriodoRow(periodo, index, periodos.length)).join('')
+                : '<p class="row-sub">Nenhum periodo cadastrado.</p>'
+            }
+          </div>
+          <div class="stack-actions" style="justify-content:flex-start; margin-top:12px;">
+            <button class="btn secondary" type="button" data-action="settings-aliquota-add-periodo">+ Adicionar periodo</button>
+            <button class="btn primary" type="submit" ${saving ? 'disabled' : ''}>${saving ? 'Salvando...' : 'Salvar aliquotas'}</button>
+          </div>
+        </form>
+      `;
+    }
     case 'manutencao': {
       const running = state.settings.danfseReprocessRunning;
       return `
@@ -17092,6 +17189,75 @@ async function submitSettingsRotinaForm(form) {
   }
 }
 
+function syncAliquotaDraftPeriodosFromForm(form) {
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+
+  const data = new FormData(form);
+  const aliquotas = data.getAll('aliquota');
+  const datasInicio = data.getAll('dataInicio');
+  const datasFim = data.getAll('dataFim');
+
+  state.settings.aliquotas.draftPeriodos = aliquotas.map((aliquota, index) => ({
+    aliquota: String(aliquota ?? ''),
+    dataInicio: String(datasInicio[index] ?? ''),
+    dataFim: String(datasFim[index] ?? '')
+  }));
+}
+
+async function submitSettingsAliquotasForm(form) {
+  syncAliquotaDraftPeriodosFromForm(form);
+
+  const periodos = (state.settings.aliquotas.draftPeriodos || []).map((periodo) => ({
+    aliquota: Number(String(periodo.aliquota).replace(',', '.')),
+    dataInicio: String(periodo.dataInicio || '').trim(),
+    dataFim: String(periodo.dataFim || '').trim() || null
+  }));
+
+  const periodoInvalido = periodos.find(
+    (periodo) => !Number.isFinite(periodo.aliquota) || periodo.aliquota <= 0 || !periodo.dataInicio
+  );
+  if (!periodos.length || periodoInvalido) {
+    state.settings.aliquotas.errorMessage = 'Informe uma aliquota valida (maior que zero) e a data de inicio em todos os periodos.';
+    render();
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    const normalizados = normalizeMonofasicoAliquotaPeriodos(periodos);
+    state.settings.aliquotas.periodos = normalizados;
+    state.settings.aliquotas.draftPeriodos = cloneMonofasicoAliquotaPeriodos(normalizados);
+    state.settings.aliquotas.errorMessage = '';
+    render();
+    pushToast('Aliquotas salvas no modo mock.', 'success');
+    return;
+  }
+
+  state.settings.aliquotas.saving = true;
+  state.settings.aliquotas.errorMessage = '';
+  render();
+
+  try {
+    const response = await apiRequest('/nfe/xml-reader30/aliquotas-monofasico', {
+      method: 'PUT',
+      body: { periodos }
+    });
+
+    const normalizados = normalizeMonofasicoAliquotaPeriodos(response?.periodos);
+    state.settings.aliquotas.periodos = normalizados;
+    state.settings.aliquotas.draftPeriodos = cloneMonofasicoAliquotaPeriodos(normalizados);
+    state.settings.aliquotas.saving = false;
+    render();
+    pushToast('Aliquotas do monofasico atualizadas com sucesso.', 'success');
+  } catch (error) {
+    state.settings.aliquotas.saving = false;
+    state.settings.aliquotas.errorMessage = toErrorMessage(error);
+    render();
+    pushToast(`Falha ao salvar aliquotas: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
 async function pauseSyncForAllClients(clients) {
   const targets = Array.isArray(clients) ? clients.filter((client) => client && client.id) : [];
   if (!targets.length) {
@@ -17289,6 +17455,33 @@ function applySchedulerStatusToSettings(schedulerStatus) {
     Array.isArray(nightly.availableSlots) && nightly.availableSlots.length
       ? [...nightly.availableSlots]
       : [...NIGHTLY_SWEEP_AVAILABLE_SLOTS];
+}
+
+function normalizeMonofasicoAliquotaPeriodos(rawPeriodos) {
+  return (Array.isArray(rawPeriodos) ? rawPeriodos : [])
+    .map((periodo) => ({
+      aliquota: Number(periodo?.aliquota),
+      dataInicio: String(periodo?.dataInicio || ''),
+      dataFim: periodo?.dataFim ? String(periodo.dataFim) : null
+    }))
+    .filter((periodo) => Number.isFinite(periodo.aliquota) && periodo.dataInicio)
+    .sort((left, right) => Date.parse(left.dataInicio) - Date.parse(right.dataInicio));
+}
+
+function cloneMonofasicoAliquotaPeriodos(periodos) {
+  return (Array.isArray(periodos) ? periodos : []).map((periodo) => ({ ...periodo }));
+}
+
+function applyMonofasicoAliquotasToSettings(config) {
+  const periodos = normalizeMonofasicoAliquotaPeriodos(config?.periodos);
+  if (!periodos.length) {
+    return;
+  }
+
+  state.settings.aliquotas.periodos = periodos;
+  if (!Array.isArray(state.settings.aliquotas.draftPeriodos)) {
+    state.settings.aliquotas.draftPeriodos = cloneMonofasicoAliquotaPeriodos(periodos);
+  }
 }
 
 function getNightlyScheduleInfo() {
