@@ -40,6 +40,7 @@ const XML_READER30_NFE_SIMPLE_NATIONAL_HIDDEN_COLUMNS = [
   'icmsStRet',
   'baseCalculoIcms',
   'aliquotaIcms',
+  'valorIcms',
   'qBCMonoRet',
   'adRemICMSRet',
   'vICMSMonoRet',
@@ -16905,6 +16906,8 @@ function closeDrawer() {
   render();
 }
 
+const TOAST_PRESERVED_SCROLL_SELECTORS = [...XML_READER30_SCROLL_SELECTORS, '.nfse-fiscal-reader-scroll'];
+
 function pushToast(message, tone = 'info') {
   const toast = {
     id: createBrowserId(),
@@ -16913,11 +16916,11 @@ function pushToast(message, tone = 'info') {
   };
 
   state.toasts = [...state.toasts, toast].slice(-4);
-  render();
+  renderPreservingScroll(TOAST_PRESERVED_SCROLL_SELECTORS);
 
   setTimeout(() => {
     state.toasts = state.toasts.filter((item) => item.id !== toast.id);
-    render();
+    renderPreservingScroll(TOAST_PRESERVED_SCROLL_SELECTORS);
   }, 3200);
 }
 
