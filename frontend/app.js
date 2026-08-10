@@ -300,6 +300,12 @@ const state = {
     columnMenuAnchor: null,
     columnDrag: null
   },
+  difalReader: {
+    hasSearched: false,
+    lastQuery: null,
+    lastLoadedAt: null,
+    summary: null
+  },
   alerts: [],
   serverResolvedAlerts: {},
   resolvedAlerts: loadResolvedAlertsStore(),
@@ -443,6 +449,7 @@ const state = {
     nfeDocs: 'loading',
     cteDocs: 'loading',
     xmlReader30: 'loading',
+    difalReader: 'data',
     alerts: 'loading'
   },
   sort: {
@@ -797,7 +804,12 @@ function onDocumentClick(event) {
       if (!tab) {
         return;
       }
-      state.xmlReader30.activeTab = tab === 'nfse-fiscal' ? 'nfse-fiscal' : 'nfe';
+      state.xmlReader30.activeTab = tab === 'nfse-fiscal' || tab === 'difal' ? tab : 'nfe';
+      render();
+      return;
+    }
+    case 'difalReader-clear': {
+      resetDifalReader();
       render();
       return;
     }
@@ -1911,6 +1923,11 @@ function onDocumentSubmit(event) {
     case 'xmlsFilterForm': {
       event.preventDefault();
       void applyXmlFilters(target);
+      return;
+    }
+    case 'difalReaderForm': {
+      event.preventDefault();
+      void submitDifalReaderForm(target);
       return;
     }
     case 'nfseFiscalDominioExportForm': {
@@ -5310,12 +5327,13 @@ function renderXmlReader30Page() {
 }
 
 function renderXmlReader30Tabs() {
-  const activeTab = state.xmlReader30.activeTab === 'nfse-fiscal' ? 'nfse-fiscal' : 'nfe';
+  const activeTab = ['nfse-fiscal', 'difal'].includes(state.xmlReader30.activeTab) ? state.xmlReader30.activeTab : 'nfe';
   return `
     <article class="card" style="padding-bottom:14px;">
       <div class="tabs" style="margin-bottom:0;">
         <button class="tab-btn ${activeTab === 'nfe' ? 'active' : ''}" type="button" data-action="xml-reader30-switch-tab" data-tab="nfe">NF-e</button>
         <button class="tab-btn ${activeTab === 'nfse-fiscal' ? 'active' : ''}" type="button" data-action="xml-reader30-switch-tab" data-tab="nfse-fiscal">NFS-e fiscal</button>
+        <button class="tab-btn ${activeTab === 'difal' ? 'active' : ''}" type="button" data-action="xml-reader30-switch-tab" data-tab="difal">DIFAL</button>
       </div>
     </article>
   `;
@@ -5324,6 +5342,10 @@ function renderXmlReader30Tabs() {
 function renderXmlReader30Section() {
   if (state.xmlReader30.activeTab === 'nfse-fiscal') {
     return renderXmlReader30NfseFiscalSection();
+  }
+
+  if (state.xmlReader30.activeTab === 'difal') {
+    return renderXmlReader30DifalSection();
   }
 
   const reader = state.xmlReader30;
@@ -5455,6 +5477,97 @@ function renderXmlReader30NfseFiscalSection() {
       </form>
 
       ${canShowTable ? `${summary}${renderNfseFiscalReaderCard()}` : renderXmlSearchEmptyState()}
+    </article>
+  `;
+}
+
+function renderXmlReader30DifalSection() {
+  const reader = state.difalReader;
+  const query = reader.lastQuery;
+  const isLoading = state.tableState.difalReader === 'loading';
+  const hasClients = state.clients.length > 0;
+
+  return `
+    <article class="card compare-reader-card">
+      <div class="compare-card-header">
+        <div>
+          <h3 class="card-title">DIFAL das NF-e</h3>
+          <p class="card-subtitle">Leia as NF-e ja armazenadas no Nota Sync no periodo e calcule o DIFAL, o ICMS monofasico, o ICMS proprio e o ICMS 4% por item.</p>
+        </div>
+        ${statusBadge(
+          reader.summary ? `${escapeHtml(String(reader.summary.totalItens))} item(ns)` : '0 item(ns)',
+          reader.summary?.totalItens ? 'success' : 'neutral'
+        )}
+      </div>
+
+      <form id="difalReaderForm" class="form-grid compare-form">
+        <label class="field compare-span-2">
+          Empresa
+          <select name="cliente" required ${hasClients ? '' : 'disabled'}>
+            ${renderOptions(state.clients.map((client) => client.id), query?.cliente || '', mapClientOptions(), 'Selecione a empresa')}
+          </select>
+        </label>
+        <label class="field">
+          Emissao inicio
+          <input name="emissaoInicio" type="date" value="${escapeHtml(query?.emissaoInicio || '')}" />
+        </label>
+        <label class="field">
+          Emissao fim
+          <input name="emissaoFim" type="date" value="${escapeHtml(query?.emissaoFim || '')}" />
+        </label>
+        <label class="field">
+          Aliquota interna (%)
+          <input name="aliquotaInterna" type="number" min="0" max="100" step="0.01" placeholder="Ex.: 18" value="${escapeHtml(query?.aliquotaInterna != null ? String(query.aliquotaInterna) : '')}" />
+        </label>
+        <div class="compare-upload-hint compare-span-4">
+          <span class="compare-upload-dot"></span>
+          <span>DIFAL = Valor da operacao (item) x (Aliquota interna informada - Aliquota do ICMS aplicada na nota). Somado item a item para todas as NF-e do periodo.</span>
+        </div>
+        <div class="stack-actions compare-actions compare-span-4">
+          <button class="btn primary" type="submit" ${hasClients ? '' : 'disabled'}>Calcular DIFAL</button>
+          <button class="btn secondary" type="button" data-action="difalReader-clear" ${reader.hasSearched || query ? '' : 'disabled'}>Limpar</button>
+        </div>
+      </form>
+
+      ${isLoading ? '<p class="row-sub">Lendo as NF-e do periodo...</p>' : renderXmlReader30DifalSummary()}
+    </article>
+  `;
+}
+
+function renderXmlReader30DifalSummary() {
+  const reader = state.difalReader;
+  if (!reader.hasSearched) {
+    return renderXmlReader30EmptyState();
+  }
+
+  if (state.tableState.difalReader === 'error') {
+    return `
+      <div class="compare-history-empty">
+        <div class="compare-history-empty-icon">${icon('alert')}</div>
+        <div>
+          <h4>Nao foi possivel calcular o DIFAL</h4>
+          <p>Revise os filtros e tente novamente.</p>
+        </div>
+      </div>
+    `;
+  }
+
+  const summary = reader.summary;
+  if (!summary) {
+    return renderXmlReader30EmptyState();
+  }
+
+  return `
+    <article class="card" style="box-shadow:none; border-style:dashed; margin-top: 2px;">
+      <div class="xml-reader30-summary-meta">
+        <span>Notas lidas no periodo: <strong>${escapeHtml(String(summary.totalNotas))} nota(s)</strong></span>
+        <span>Itens analisados: <strong>${escapeHtml(String(summary.totalItens))} item(ns)</strong></span>
+        <span>Aliquota interna usada: <strong>${escapeHtml(formatXmlReader30DecimalValue(summary.aliquotaInterna))}%</strong></span>
+        <span>Soma ICMS Monofasico: <strong>${escapeHtml(formatCurrency(summary.totalMonofasico))}</strong></span>
+        <span>Soma ICMS Proprio: <strong>${escapeHtml(formatCurrency(summary.totalIcmsProprio))}</strong></span>
+        <span>Soma ICMS 4%: <strong>${escapeHtml(formatCurrency(summary.totalIcms4))}</strong></span>
+        <span>Valor do DIFAL: <strong>${escapeHtml(formatCurrency(summary.totalDifal))}</strong></span>
+      </div>
     </article>
   `;
 }
@@ -6914,6 +7027,109 @@ function resetXmlReader30Search() {
   };
   state.selectedXmlReaderIds = new Set();
   state.tableState.xmlReader30 = 'data';
+}
+
+function resetDifalReader() {
+  state.difalReader = {
+    hasSearched: false,
+    lastQuery: null,
+    lastLoadedAt: null,
+    summary: null
+  };
+  state.tableState.difalReader = 'data';
+}
+
+async function submitDifalReaderForm(form) {
+  const data = new FormData(form);
+  const cliente = String(data.get('cliente') || '').trim();
+  const emissaoInicio = String(data.get('emissaoInicio') || '').trim();
+  const emissaoFim = String(data.get('emissaoFim') || '').trim();
+  const aliquotaInternaInput = String(data.get('aliquotaInterna') || '').trim();
+
+  if (!cliente) {
+    pushToast('Selecione uma empresa para calcular o DIFAL.', 'error');
+    return;
+  }
+
+  if (emissaoInicio && emissaoFim && Date.parse(emissaoInicio) > Date.parse(emissaoFim)) {
+    pushToast('A data inicial nao pode ser maior que a data final.', 'error');
+    return;
+  }
+
+  const aliquotaInterna = toNumber(aliquotaInternaInput);
+  if (!(aliquotaInterna > 0)) {
+    pushToast('Informe a aliquota interna (%) para calcular o DIFAL.', 'error');
+    return;
+  }
+
+  state.difalReader.hasSearched = true;
+  state.difalReader.lastQuery = { cliente, emissaoInicio, emissaoFim, aliquotaInterna };
+  state.difalReader.summary = null;
+  state.tableState.difalReader = 'loading';
+  render();
+
+  try {
+    const sourceResult = await fetchDifalReaderDocuments({ cliente, emissaoInicio, emissaoFim });
+    const docs = sourceResult.items.map((item) => item?.raw).filter(Boolean);
+    const lineItems = docs.flatMap((doc) => extractNfeLineItems(doc.conteudoXml || ''));
+    state.difalReader.summary = computeDifalReaderTotals(lineItems, aliquotaInterna, docs.length);
+    state.difalReader.lastLoadedAt = new Date().toISOString();
+    state.tableState.difalReader = 'data';
+
+    if (sourceResult.capped) {
+      pushToast(
+        `O leitor trouxe o limite seguro do acervo completo (${sourceResult.loaded} de ${sourceResult.total}). Refine o periodo para ver o restante.`,
+        'info'
+      );
+    }
+  } catch (error) {
+    state.difalReader.summary = null;
+    state.tableState.difalReader = 'error';
+    pushToast(`Falha ao calcular o DIFAL: ${toErrorMessage(error)}`, 'error');
+  }
+
+  render();
+}
+
+async function fetchDifalReaderDocuments(filters) {
+  if (state.dataSource !== 'api') {
+    return createXmlReader30FetchResult('NF-e', buildXmlReader30NfeSourceFromState(filters.cliente, filters.emissaoInicio, filters.emissaoFim));
+  }
+
+  return fetchXmlReader30NfeSource(filters);
+}
+
+function computeDifalReaderTotals(lineItems, aliquotaInterna, totalNotas) {
+  const items = Array.isArray(lineItems) ? lineItems : [];
+  let totalMonofasico = 0;
+  let totalIcmsProprio = 0;
+  let totalIcms4 = 0;
+  let totalDifal = 0;
+
+  items.forEach((item) => {
+    const valorIcms = toNumber(item?.valorIcmsRaw);
+    const aliquotaIcms = toNumber(item?.aliquotaIcmsRaw);
+    const valorOperacao = toNumber(item?.totalValueRaw);
+
+    totalMonofasico += toNumber(item?.vICMSMonoRetRaw);
+    totalIcmsProprio += valorIcms;
+
+    if (Math.abs(aliquotaIcms - 4) < 0.005) {
+      totalIcms4 += valorIcms;
+    }
+
+    totalDifal += valorOperacao * ((aliquotaInterna - aliquotaIcms) / 100);
+  });
+
+  return {
+    totalNotas,
+    totalItens: items.length,
+    aliquotaInterna,
+    totalMonofasico,
+    totalIcmsProprio,
+    totalIcms4,
+    totalDifal
+  };
 }
 
 async function submitXmlReader30Form(form) {
