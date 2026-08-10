@@ -79,6 +79,7 @@ const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
 let dashboardAutoRefreshTimer = null;
 let dashboardAutoRefreshRunning = false;
 let xmlReader30ScrollSyncing = false;
+let lastRenderedRouteKey = null;
 const initialXmlReader30NfeRegime = loadXmlReader30NfeRegimeStore();
 
 const navItems = [
@@ -2398,6 +2399,11 @@ function renderPreservingScroll(selectors = []) {
 }
 
 function render() {
+  const routeKey = JSON.stringify(state.route);
+  const isSameRouteAsLastRender = routeKey === lastRenderedRouteKey;
+  const scrollState = isSameRouteAsLastRender ? captureScrollState() : null;
+  lastRenderedRouteKey = routeKey;
+
   const page = renderCurrentPage();
   const meta = resolvePageMeta();
 
@@ -2426,6 +2432,10 @@ function render() {
   }
   drawerRoot.innerHTML = renderDrawer();
   toastRoot.innerHTML = renderToasts();
+
+  if (scrollState) {
+    restoreScrollState(scrollState);
+  }
 }
 
 async function handleRouteAccess() {
