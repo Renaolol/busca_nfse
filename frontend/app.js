@@ -5536,7 +5536,7 @@ function renderXmlReader30DifalSection() {
         </label>
         <div class="compare-upload-hint compare-span-4">
           <span class="compare-upload-dot"></span>
-          <span>DIFAL = Valor da operacao (item) x (Aliquota interna informada - Aliquota do ICMS aplicada na nota). Calculado apenas para os itens com ICMS a 4% (Resolucao Senado 13/2012); demais itens (incluindo o monofasico) nao entram nessa soma.</span>
+          <span>Calculado apenas para os itens com ICMS a 4% (Resolucao Senado 13/2012): DIFAL = (Base de calculo ICMS - ICMS interestadual) regrossada pela aliquota interna informada, menos o ICMS interestadual. Demais itens (incluindo o monofasico) nao entram nessa soma.</span>
         </div>
         <div class="stack-actions compare-actions compare-span-4">
           <button class="btn primary" type="submit" ${hasClients ? '' : 'disabled'}>Calcular DIFAL</button>
@@ -7283,6 +7283,14 @@ async function submitDifalReaderForm(form) {
         'info'
       );
     }
+
+    const notasSemXml = noteRows.filter((noteRow) => !noteRow?.raw?.conteudoXml).length;
+    if (notasSemXml > 0) {
+      pushToast(
+        `${notasSemXml} de ${noteRows.length} nota(s) do periodo nao tem XML (completo ou resumo) armazenado no Nota Sync e entraram com valores zerados no calculo.`,
+        'info'
+      );
+    }
   } catch (error) {
     state.difalReader.summary = null;
     state.difalReader.itemRows = [];
@@ -7296,10 +7304,60 @@ async function submitDifalReaderForm(form) {
 
 async function fetchDifalReaderDocuments(filters) {
   if (state.dataSource !== 'api') {
-    return createXmlReader30FetchResult('NF-e', buildXmlReader30NfeSourceFromState(filters.cliente, filters.emissaoInicio, filters.emissaoFim));
+    return createXmlReader30FetchResult('NF-e', buildDifalReaderNfeSourceFromState(filters.cliente, filters.emissaoInicio, filters.emissaoFim));
   }
 
-  return fetchXmlReader30NfeSource(filters);
+  return fetchDifalReaderNfeSource(filters);
+}
+
+async function fetchDifalReaderNfeSource(filters) {
+  const query = buildNfeSearchQuery(
+    {
+      cliente: filters.cliente,
+      tipo: 'Todos',
+      cnpj: '',
+      numero: '',
+      chave: '',
+      emissaoInicio: filters.emissaoInicio,
+      emissaoFim: filters.emissaoFim,
+      status: 'Todos',
+      eventos: 'Todos',
+      schemaDoc: 'Todos',
+      valorMin: '',
+      valorMax: '',
+      xmlCompleto: 'Todos',
+      ambiente: 'Todos'
+    },
+    1,
+    SEARCH_PAGE_SIZE,
+    true
+  );
+  const payload = normalizePaginatedResponse(await apiRequest(`/nfe?${query.toString()}`));
+  const docs = buildNfeDocumentsFromApi(payload.items, state.clients);
+  await enrichXmlReader30DocumentsWithContent('nfe', docs);
+  state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, docs);
+  return createXmlReader30FetchResult('NF-e', docs.map((doc) => mapXmlReader30Item('nfe', doc)), payload);
+}
+
+function buildDifalReaderNfeSourceFromState(clienteId, emissaoInicio, emissaoFim) {
+  return (Array.isArray(state.nfeDocuments) ? state.nfeDocuments : [])
+    .filter((doc) => doc.clientId === clienteId)
+    .filter((doc) => matchesDateRange(doc.dataEmissao, emissaoInicio, emissaoFim))
+    .map((doc) => mapXmlReader30Item('nfe', doc));
+}
+
+function computeDifalPorDentro(baseCalculoIcms, aliquotaInterestadual, aliquotaInterna) {
+  const aliquotaInternaFraction = aliquotaInterna / 100;
+  if (!(aliquotaInternaFraction < 1)) {
+    return 0;
+  }
+
+  const icmsInterestadual = baseCalculoIcms * (aliquotaInterestadual / 100);
+  const baseSemInterestadual = baseCalculoIcms - icmsInterestadual;
+  const baseRegrossada = baseSemInterestadual / (1 - aliquotaInternaFraction);
+  const icmsInterno = baseRegrossada * aliquotaInternaFraction;
+  const difal = icmsInterno - icmsInterestadual;
+  return Number.isFinite(difal) ? difal : 0;
 }
 
 function computeDifalReaderTotals(itemRows, aliquotaInterna, totalNotas) {
@@ -7312,9 +7370,9 @@ function computeDifalReaderTotals(itemRows, aliquotaInterna, totalNotas) {
   const decoratedRows = rows.map((row) => {
     const valorIcms = toNumber(row?.valorIcmsRaw);
     const aliquotaIcms = toNumber(row?.aliquotaIcmsRaw);
-    const valorOperacao = toNumber(row?.valorTotal);
+    const baseCalculo = toNumber(row?.baseCalculoIcmsRaw);
     const isIcms4 = Math.abs(aliquotaIcms - 4) < 0.005;
-    const difalRaw = isIcms4 ? valorOperacao * ((aliquotaInterna - aliquotaIcms) / 100) : 0;
+    const difalRaw = isIcms4 ? computeDifalPorDentro(baseCalculo, aliquotaIcms, aliquotaInterna) : 0;
 
     totalMonofasico += toNumber(row?.vICMSMonoRetRaw);
     totalIcmsProprio += valorIcms;
