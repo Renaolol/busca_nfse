@@ -2545,7 +2545,7 @@ function renderHeader(meta) {
 
   return `
     <header class="header">
-      <div style="display:flex; gap:10px; align-items:center; min-width:0; flex:0 1 380px;">
+      <div style="display:flex; gap:10px; align-items:center;">
         <button class="mobile-toggle" type="button" data-action="toggle-sidebar" aria-label="Abrir menu">${icon('menu')}</button>
         <div class="header-left">
           <h1>${escapeHtml(meta.title)}</h1>
@@ -5528,7 +5528,7 @@ function renderXmlReader30DifalSection() {
       <div class="compare-card-header">
         <div>
           <h3 class="card-title">DIFAL das NF-e</h3>
-          <p class="card-subtitle">Leia as NF-e ja armazenadas no Nota Sync no periodo e calcule o DIFAL, o ICMS monofasico, o ICMS proprio e o ICMS 4% por item.</p>
+          <p class="card-subtitle">Leia as NF-e recebidas (compras) ja armazenadas no Nota Sync no periodo e calcule o DIFAL, o ICMS monofasico, o ICMS proprio e o ICMS 4% por item.</p>
         </div>
         ${statusBadge(
           reader.summary ? `${escapeHtml(String(reader.summary.totalItens))} item(ns)` : '0 item(ns)',
@@ -5557,7 +5557,7 @@ function renderXmlReader30DifalSection() {
         </label>
         <div class="compare-upload-hint compare-span-4">
           <span class="compare-upload-dot"></span>
-          <span>Calculado apenas para os itens com ICMS a 4% (Resolucao Senado 13/2012): DIFAL = (Base de calculo ICMS - ICMS interestadual) regrossada pela aliquota interna informada, menos o ICMS interestadual. Demais itens (incluindo o monofasico) nao entram nessa soma.</span>
+          <span>Considera apenas as NF-e recebidas (compras) da empresa no periodo. Calculado apenas para os itens com ICMS a 4% (Resolucao Senado 13/2012): DIFAL = (Base de calculo ICMS - ICMS interestadual) regrossada pela aliquota interna informada, menos o ICMS interestadual. Demais itens (incluindo o monofasico) nao entram nessa soma.</span>
         </div>
         <div class="stack-actions compare-actions compare-span-4">
           <button class="btn primary" type="submit" ${hasClients ? '' : 'disabled'}>Calcular DIFAL</button>
@@ -5742,6 +5742,8 @@ function renderXmlReader30DifalChartSvg(points, grouping) {
 }
 
 const DIFAL_NOTES_COLUMNS = [
+  { label: 'Numero NF', className: 'xml-reader30-number', value: (row) => row.numeroNf || row.numeroLabel || '-' },
+  { label: 'Produto', className: 'xml-reader30-product', value: (row) => row.produto || '-' },
   { label: 'Quantidade', className: 'xml-reader30-quantity', value: (row) => row.quantidade || '-' },
   { label: 'CST', className: 'xml-reader30-icms-code', value: (row) => row.cstCsosn || '-' },
   { label: 'BC ICMS', className: 'xml-reader30-icms-number', value: (row) => row.baseCalculoIcms || '-' },
@@ -7374,7 +7376,7 @@ async function fetchDifalReaderNfeSource(filters) {
   const query = buildNfeSearchQuery(
     {
       cliente: filters.cliente,
-      tipo: 'Todos',
+      tipo: 'Recebida',
       cnpj: '',
       numero: '',
       chave: '',
@@ -7386,7 +7388,7 @@ async function fetchDifalReaderNfeSource(filters) {
       valorMin: '',
       valorMax: '',
       xmlCompleto: 'Todos',
-      ambiente: 'Todos'
+      ambiente: 'producao'
     },
     1,
     SEARCH_PAGE_SIZE,
@@ -7402,6 +7404,8 @@ async function fetchDifalReaderNfeSource(filters) {
 function buildDifalReaderNfeSourceFromState(clienteId, emissaoInicio, emissaoFim) {
   return (Array.isArray(state.nfeDocuments) ? state.nfeDocuments : [])
     .filter((doc) => doc.clientId === clienteId)
+    .filter((doc) => doc.tipo === 'Recebida')
+    .filter((doc) => doc.ambiente === 'producao')
     .filter((doc) => matchesDateRange(doc.dataEmissao, emissaoInicio, emissaoFim))
     .map((doc) => mapXmlReader30Item('nfe', doc));
 }

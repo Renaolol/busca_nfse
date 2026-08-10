@@ -311,27 +311,16 @@ a {
   z-index: 20;
 }
 
-.header-left {
-  min-width: 0;
-  overflow: hidden;
-}
-
 .header-left h1 {
   margin: 0;
   font-family: 'Sora', 'Manrope', sans-serif;
   font-size: 1.06rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .header-left p {
   margin: 3px 0 0;
   color: var(--text-secondary);
   font-size: 0.81rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .header-right {
