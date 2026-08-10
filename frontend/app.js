@@ -2541,6 +2541,7 @@ function renderHeader(meta) {
   const lastRoutineText = latestRun ? `${formatRelativeDate(latestRun.inicio)} as ${formatHour(latestRun.inicio)}` : 'Sem execucao';
   const healthStatus = getSystemHealthStatus();
   const nightlyInfo = getNightlyScheduleInfo();
+  const nightlyTimesText = nightlyInfo.shortLabel.replace(/,\s*/g, ' • ');
 
   return `
     <header class="header">
@@ -2552,14 +2553,24 @@ function renderHeader(meta) {
         </div>
       </div>
       <div class="header-right">
-        <div class="header-meta">
-          <div>Ultima rotina: ${escapeHtml(lastRoutineText)}</div>
-          <div>Rotina noturna: ${escapeHtml(nightlyInfo.shortLabel)}</div>
-          <div>${escapeHtml(healthStatus.description)}</div>
-          <div>Fonte: Banco local</div>
+        <div class="header-meta-groups">
+          <div class="header-status-group" title="Fonte: Banco local">
+            <span class="header-status-icon">${icon('clock')}</span>
+            <div class="header-status-copy">
+              <strong>Rotinas do sistema</strong>
+              <small>Ultima rotina: ${escapeHtml(lastRoutineText)}</small>
+            </div>
+          </div>
+          <span class="header-status-divider" aria-hidden="true"></span>
+          <div class="header-status-group" title="${escapeHtml(nightlyInfo.badgeLabel)}">
+            <span class="header-status-dot header-status-dot-${escapeHtml(nightlyInfo.tone)}"></span>
+            <div class="header-status-copy">
+              <strong>Rotina noturna</strong>
+              <small>${escapeHtml(nightlyTimesText)}</small>
+            </div>
+          </div>
         </div>
-        ${statusBadge(nightlyInfo.badgeLabel, nightlyInfo.tone)}
-        ${statusBadge(healthStatus.label, healthStatus.tone)}
+        <span title="${escapeHtml(healthStatus.description)}">${statusBadge(healthStatus.label, healthStatus.tone)}</span>
         <div class="avatar" aria-label="Usuario GC">GC</div>
       </div>
     </header>
@@ -5730,16 +5741,28 @@ function renderXmlReader30DifalChartSvg(points, grouping) {
   `;
 }
 
+const DIFAL_NOTES_COLUMNS = [
+  { label: 'Quantidade', className: 'xml-reader30-quantity', value: (row) => row.quantidade || '-' },
+  { label: 'CST', className: 'xml-reader30-icms-code', value: (row) => row.cstCsosn || '-' },
+  { label: 'BC ICMS', className: 'xml-reader30-icms-number', value: (row) => row.baseCalculoIcms || '-' },
+  { label: 'ICMS (%)', className: 'xml-reader30-icms-number', value: (row) => row.aliquotaIcms || '-' },
+  { label: 'Valor ICMS', className: 'xml-reader30-icms-number', value: (row) => row.valorIcms || '-' },
+  { label: 'BC Mono', className: 'xml-reader30-icms-number', value: (row) => row.qBCMonoRet || '-' },
+  { label: 'Aliq NF', className: 'xml-reader30-icms-number', value: (row) => row.adRemICMSRet || '-' },
+  { label: 'Valor Mono', className: 'xml-reader30-icms-number', value: (row) => row.vICMSMonoRet || '-' },
+  { label: 'Aliq Vigente', className: 'xml-reader30-icms-number', value: (row) => row.aliqVigente || '-' },
+  { label: 'Valor Correto', className: 'xml-reader30-money xml-reader30-icms-currency', value: (row) => row.valorCorreto || '-' }
+];
+
 function renderXmlReader30DifalNotesCard() {
   const itemRows = Array.isArray(state.difalReader.itemRows) ? state.difalReader.itemRows : [];
-  const columns = getXmlReader30NfeColumnDefinitions().filter((column) => column.key !== 'select');
 
   return `
     <article class="card difal-notes-card">
       <div class="compare-card-header">
         <div>
           <h3 class="card-title">Notas do periodo</h3>
-          <p class="card-subtitle">Mesmas informacoes do leitor de NF-e do lucro real, com o DIFAL calculado por item apenas para o ICMS a 4%.</p>
+          <p class="card-subtitle">Informacoes de ICMS e monofasico por item das NF-e do periodo.</p>
         </div>
         ${statusBadge(`${escapeHtml(String(itemRows.length))} item(ns)`, itemRows.length ? 'success' : 'neutral')}
       </div>
@@ -5747,8 +5770,7 @@ function renderXmlReader30DifalNotesCard() {
         <table class="xml-reader30-table">
           <thead>
             <tr>
-              ${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('')}
-              <th>DIFAL</th>
+              ${DIFAL_NOTES_COLUMNS.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('')}
             </tr>
           </thead>
           <tbody>
@@ -5758,13 +5780,12 @@ function renderXmlReader30DifalNotesCard() {
                     .map(
                       (row) => `
                         <tr>
-                          ${columns.map((column) => renderXmlReader30NfeColumnCell(column, row, row.statusTone)).join('')}
-                          <td class="xml-reader30-money xml-reader30-icms-currency">${escapeHtml(row.difalLabel || '-')}</td>
+                          ${DIFAL_NOTES_COLUMNS.map((column) => `<td class="${escapeHtml(column.className)}">${escapeHtml(String(column.value(row)))}</td>`).join('')}
                         </tr>
                       `
                     )
                     .join('')
-                : `<tr><td colspan="${columns.length + 1}" class="row-sub">Nenhum item encontrado para os filtros informados.</td></tr>`
+                : `<tr><td colspan="${DIFAL_NOTES_COLUMNS.length}" class="row-sub">Nenhum item encontrado para os filtros informados.</td></tr>`
             }
           </tbody>
         </table>
@@ -7277,7 +7298,10 @@ async function submitDifalReaderForm(form) {
 
   try {
     const sourceResult = await fetchDifalReaderDocuments({ cliente, emissaoInicio, emissaoFim });
-    const noteRows = Array.isArray(sourceResult.items) ? sourceResult.items : [];
+    const fetchedNoteRows = Array.isArray(sourceResult.items) ? sourceResult.items : [];
+    const noteRows = fetchedNoteRows
+      .filter((noteRow) => matchesDateRange(noteRow?.dataEmissao, emissaoInicio, emissaoFim))
+      .filter((noteRow) => !noteRow?.raw?.cancelada);
     const lineItems = noteRows.flatMap((noteRow) => buildXmlReader30NfeItemRows(noteRow, { includeFallback: true }));
     const { rows: decoratedItemRows, summary } = computeDifalReaderTotals(lineItems, aliquotaInterna, noteRows.length);
 
@@ -7301,6 +7325,14 @@ async function submitDifalReaderForm(form) {
         'info'
       );
     }
+
+    const notasCanceladasExcluidas = fetchedNoteRows.length - noteRows.length;
+    if (notasCanceladasExcluidas > 0) {
+      pushToast(
+        `${notasCanceladasExcluidas} nota(s) cancelada(s) ou fora do periodo exato foram excluidas do calculo do DIFAL.`,
+        'info'
+      );
+    }
   } catch (error) {
     state.difalReader.summary = null;
     state.difalReader.itemRows = [];
@@ -7320,6 +7352,24 @@ async function fetchDifalReaderDocuments(filters) {
   return fetchDifalReaderNfeSource(filters);
 }
 
+function shiftDateOnlyString(value, days) {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return normalized;
+  }
+
+  const timestamp = Date.parse(`${normalized}T00:00:00`);
+  if (!Number.isFinite(timestamp)) {
+    return normalized;
+  }
+
+  const shifted = new Date(timestamp + days * 86400000);
+  const year = shifted.getFullYear();
+  const month = String(shifted.getMonth() + 1).padStart(2, '0');
+  const day = String(shifted.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 async function fetchDifalReaderNfeSource(filters) {
   const query = buildNfeSearchQuery(
     {
@@ -7328,8 +7378,8 @@ async function fetchDifalReaderNfeSource(filters) {
       cnpj: '',
       numero: '',
       chave: '',
-      emissaoInicio: filters.emissaoInicio,
-      emissaoFim: filters.emissaoFim,
+      emissaoInicio: shiftDateOnlyString(filters.emissaoInicio, -1),
+      emissaoFim: shiftDateOnlyString(filters.emissaoFim, 1),
       status: 'Todos',
       eventos: 'Todos',
       schemaDoc: 'Todos',
