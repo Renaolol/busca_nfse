@@ -11182,7 +11182,10 @@ function renderXmlStatusBadges(xml) {
     return `<div class="status-stack">${badges.join('')}</div>`;
   }
 
-  const badges = [statusBadge(xml.statusArmazenamento, toneFromStorageStatus(xml.statusArmazenamento))];
+  const badges = [];
+  if (xml.statusArmazenamento !== 'Armazenado') {
+    badges.push(statusBadge(xml.statusArmazenamento, toneFromStorageStatus(xml.statusArmazenamento)));
+  }
   if (xml.ignorarNumeracaoValidacao) {
     badges.push(statusBadge('Fora da numeracao', 'warning'));
   }
