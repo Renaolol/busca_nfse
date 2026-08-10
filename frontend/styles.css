@@ -2354,44 +2354,48 @@ textarea {
 .difal-resumo-rows {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 16px;
   margin-top: 14px;
 }
 
 .difal-resumo-row {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
+  padding: 18px;
+  background: var(--surface);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-soft);
 }
 
 .difal-resumo-icon {
-  width: 40px;
-  height: 40px;
+  width: 52px;
+  height: 52px;
   flex: none;
   display: grid;
   place-items: center;
-  border-radius: 12px;
+  border-radius: 14px;
   background: #f4f4f6;
   color: var(--text-secondary);
 }
 
 .difal-resumo-icon svg {
-  width: 20px;
-  height: 20px;
+  width: 26px;
+  height: 26px;
 }
 
 .difal-resumo-copy {
   display: grid;
-  gap: 2px;
+  gap: 4px;
 }
 
 .difal-resumo-copy small {
   color: var(--text-secondary);
-  font-size: 0.78rem;
+  font-size: 0.82rem;
 }
 
 .difal-resumo-copy strong {
-  font-size: 1.3rem;
+  font-size: 1.7rem;
   font-family: 'Sora', 'Manrope', sans-serif;
 }
 

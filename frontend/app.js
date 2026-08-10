@@ -5536,7 +5536,7 @@ function renderXmlReader30DifalSection() {
         </label>
         <div class="compare-upload-hint compare-span-4">
           <span class="compare-upload-dot"></span>
-          <span>DIFAL = Valor da operacao (item) x (Aliquota interna informada - Aliquota do ICMS aplicada na nota). Somado item a item para todas as NF-e do periodo.</span>
+          <span>DIFAL = Valor da operacao (item) x (Aliquota interna informada - Aliquota do ICMS aplicada na nota). Calculado apenas para os itens com ICMS a 4% (Resolucao Senado 13/2012); demais itens (incluindo o monofasico) nao entram nessa soma.</span>
         </div>
         <div class="stack-actions compare-actions compare-span-4">
           <button class="btn primary" type="submit" ${hasClients ? '' : 'disabled'}>Calcular DIFAL</button>
@@ -5729,7 +5729,7 @@ function renderXmlReader30DifalNotesCard() {
       <div class="compare-card-header">
         <div>
           <h3 class="card-title">Notas do periodo</h3>
-          <p class="card-subtitle">Mesmas informacoes do leitor de NF-e do lucro real, com o DIFAL calculado por item.</p>
+          <p class="card-subtitle">Mesmas informacoes do leitor de NF-e do lucro real, com o DIFAL calculado por item apenas para o ICMS a 4%.</p>
         </div>
         ${statusBadge(`${escapeHtml(String(itemRows.length))} item(ns)`, itemRows.length ? 'success' : 'neutral')}
       </div>
@@ -7313,18 +7313,19 @@ function computeDifalReaderTotals(itemRows, aliquotaInterna, totalNotas) {
     const valorIcms = toNumber(row?.valorIcmsRaw);
     const aliquotaIcms = toNumber(row?.aliquotaIcmsRaw);
     const valorOperacao = toNumber(row?.valorTotal);
-    const difalRaw = valorOperacao * ((aliquotaInterna - aliquotaIcms) / 100);
+    const isIcms4 = Math.abs(aliquotaIcms - 4) < 0.005;
+    const difalRaw = isIcms4 ? valorOperacao * ((aliquotaInterna - aliquotaIcms) / 100) : 0;
 
     totalMonofasico += toNumber(row?.vICMSMonoRetRaw);
     totalIcmsProprio += valorIcms;
 
-    if (Math.abs(aliquotaIcms - 4) < 0.005) {
+    if (isIcms4) {
       totalIcms4 += valorIcms;
     }
 
     totalDifal += difalRaw;
 
-    return { ...row, difalRaw, difalLabel: formatCurrency(difalRaw) };
+    return { ...row, difalRaw, difalLabel: isIcms4 ? formatCurrency(difalRaw) : '-' };
   });
 
   return {
