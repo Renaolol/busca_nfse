@@ -5,14 +5,21 @@ const { resolve } = require('node:path');
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /**
- * Diagnostica e (opcionalmente) corrige NfseDocumento com "dataCancelamento" preenchido sem
- * nenhum NfseEvento de cancelamento correspondente para a MESMA chave de acesso.
+ * Diagnostica e (opcionalmente) corrige NfseDocumento que aparecem como cancelados sem motivo
+ * genuino. O front/back decidem "cancelado" (hasCancelamento) se QUALQUER uma destas for verdade:
+ *   - status === 'cancelada'
+ *   - dataCancelamento preenchido
+ *   - existe NfseEvento vinculado (pela FK nfseDocumentoId) que parece cancelamento
  *
- * Esse estado surge quando a reconciliacao por NSU (sync.service.ts) reaproveitava a linha de um
- * documento antigo para representar uma chave nova: o campo dataCancelamento antigo sobrevivia
- * porque o Prisma trata "undefined" como "nao altere este campo". O bug de origem ja foi corrigido
- * no codigo (sync.service.ts agora zera dataCancelamento e remove eventos orfaos ao reconciliar por
- * NSU) - este script serve para higienizar documentos que ja foram corrompidos ANTES da correcao.
+ * O bug de reconciliacao por NSU (corrigido em sync.service.ts) podia deixar UM DESSES sinais
+ * "sobrando" numa linha que passou a representar uma chave de acesso diferente:
+ *   - dataCancelamento antigo sobrevivia (Prisma trata undefined como "nao altere")
+ *   - o NfseEvento continuava vinculado pela FK, mesmo com evento.chaveAcesso != documento.chaveAcesso
+ *
+ * Este script varre TODOS os documentos (nao so os com status/dataCancelamento marcados, porque o
+ * terceiro sinal - evento orfao pela FK - pode marcar um documento como cancelado mesmo com
+ * status/dataCancelamento limpos) e usa a chaveAcesso do PROPRIO evento (campo independente da FK)
+ * como fonte da verdade para saber se o cancelamento e genuino.
  *
  * Uso:
  *   node scripts/fix-nfse-stale-cancelamento.js                       # dry-run, todos os clientes
@@ -20,8 +27,14 @@ const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-
  *   node scripts/fix-nfse-stale-cancelamento.js --apply               # aplica a correcao
  *
  * O script NUNCA altera o campo "status" automaticamente. Quando o documento tem status='cancelada'
- * SEM evento correspondente, ele so aparece no relatorio para revisao manual (pode ser um
- * cancelamento real que ainda nao teve o evento sincronizado - nao e necessariamente o bug).
+ * sem NENHUMA evidencia (nem evento proprio, nem orfao), ele so aparece no relatorio para revisao
+ * manual - pode ser um cancelamento real cujo evento ainda nao foi sincronizado.
+ *
+ * Correcao aplicada (--apply) para os casos de alta confianca:
+ *   - dataCancelamento preenchido sem evidencia genuina -> zerado.
+ *   - NfseEvento de cancelamento vinculado por FG com chaveAcesso diferente da do documento -> o
+ *     evento e realocado para o documento real (mesma chaveAcesso, se existir) ou removido (se o
+ *     documento real nao existir localmente).
  */
 
 function loadEnvFile() {
@@ -111,11 +124,13 @@ async function main() {
     summary: {
       processed: 0,
       confirmedCancelled: 0,
-      fixedDataCancelamentoOnly: 0,
+      highConfidenceBug: 0,
       needsManualReviewStatusCancelada: 0,
-      fixed: 0
+      fixedDocuments: 0,
+      orphanEventsRelinked: 0,
+      orphanEventsDeleted: 0
     },
-    fixedDataCancelamentoOnly: [],
+    highConfidenceBug: [],
     needsManualReviewStatusCancelada: []
   };
 
@@ -132,8 +147,7 @@ async function main() {
             }
           : {}),
         where: {
-          ...(clienteId ? { clienteId } : {}),
-          OR: [{ dataCancelamento: { not: null } }, { status: 'cancelada' }]
+          ...(clienteId ? { clienteId } : {})
         },
         orderBy: { id: 'asc' },
         select: {
@@ -147,7 +161,15 @@ async function main() {
           dataCancelamento: true,
           valorServico: true,
           cnpjPrestador: true,
-          cnpjTomador: true
+          cnpjTomador: true,
+          eventos: {
+            select: {
+              id: true,
+              chaveAcesso: true,
+              tipoEvento: true,
+              descricao: true
+            }
+          }
         }
       });
 
@@ -158,15 +180,22 @@ async function main() {
       for (const document of documents) {
         report.summary.processed += 1;
 
-        const eventos = await prisma.nfseEvento.findMany({
-          where: { chaveAcesso: document.chaveAcesso },
-          select: { tipoEvento: true, descricao: true }
-        });
+        const eventosProprios = document.eventos.filter((evento) => evento.chaveAcesso === document.chaveAcesso);
+        const eventosOrfaos = document.eventos.filter((evento) => evento.chaveAcesso !== document.chaveAcesso);
 
-        if (eventos.some(isEventoCancelamento)) {
+        const pareceCancelado =
+          document.status === 'cancelada' || Boolean(document.dataCancelamento) || document.eventos.some(isEventoCancelamento);
+
+        if (!pareceCancelado) {
+          continue;
+        }
+
+        if (eventosProprios.some(isEventoCancelamento)) {
           report.summary.confirmedCancelled += 1;
           continue;
         }
+
+        const orphanCancelEvents = eventosOrfaos.filter(isEventoCancelamento);
 
         const item = {
           id: document.id,
@@ -179,7 +208,12 @@ async function main() {
           dataCancelamentoAtual: document.dataCancelamento,
           valorServico: document.valorServico ? document.valorServico.toString() : null,
           cnpjPrestador: document.cnpjPrestador,
-          cnpjTomador: document.cnpjTomador
+          cnpjTomador: document.cnpjTomador,
+          eventosOrfaosDeCancelamento: orphanCancelEvents.map((evento) => ({
+            id: evento.id,
+            chaveAcesso: evento.chaveAcesso,
+            tipoEvento: evento.tipoEvento
+          }))
         };
 
         if (document.status === 'cancelada') {
@@ -190,17 +224,39 @@ async function main() {
           continue;
         }
 
-        // status != 'cancelada' mas dataCancelamento preenchido: assinatura de alta confianca do
-        // bug de reconciliacao por NSU (o campo sobrou de uma linha reaproveitada).
-        report.summary.fixedDataCancelamentoOnly += 1;
-        report.fixedDataCancelamentoOnly.push(item);
+        // status != 'cancelada', mas o documento aparenta estar cancelado por dataCancelamento
+        // preenchido e/ou por um evento de cancelamento vinculado que na verdade pertence a outra
+        // chave de acesso: assinatura de alta confianca do bug de reconciliacao por NSU.
+        report.summary.highConfidenceBug += 1;
+        report.highConfidenceBug.push(item);
 
         if (apply) {
-          await prisma.nfseDocumento.update({
-            where: { id: document.id },
-            data: { dataCancelamento: null }
-          });
-          report.summary.fixed += 1;
+          if (document.dataCancelamento) {
+            await prisma.nfseDocumento.update({
+              where: { id: document.id },
+              data: { dataCancelamento: null }
+            });
+          }
+
+          for (const evento of orphanCancelEvents) {
+            const donoReal = await prisma.nfseDocumento.findFirst({
+              where: { ambiente: document.ambiente, chaveAcesso: evento.chaveAcesso },
+              select: { id: true }
+            });
+
+            if (donoReal && donoReal.id !== document.id) {
+              await prisma.nfseEvento.update({
+                where: { id: evento.id },
+                data: { nfseDocumentoId: donoReal.id }
+              });
+              report.summary.orphanEventsRelinked += 1;
+            } else {
+              await prisma.nfseEvento.delete({ where: { id: evento.id } });
+              report.summary.orphanEventsDeleted += 1;
+            }
+          }
+
+          report.summary.fixedDocuments += 1;
         }
       }
 
@@ -214,11 +270,11 @@ async function main() {
       [
         'Diagnostico de cancelamento indevido em NFS-e concluido.',
         `Processados: ${report.summary.processed}.`,
-        `Confirmados como realmente cancelados (evento correspondente encontrado): ${report.summary.confirmedCancelled}.`,
-        `Assinatura de alta confianca do bug (dataCancelamento sem evento, status normal): ${report.summary.fixedDataCancelamentoOnly}.`,
-        `Precisam de revisao manual (status='cancelada' sem evento - pode ser cancelamento real pendente de sync): ${report.summary.needsManualReviewStatusCancelada}.`,
+        `Confirmados como realmente cancelados (evento proprio encontrado): ${report.summary.confirmedCancelled}.`,
+        `Assinatura de alta confianca do bug (dataCancelamento e/ou evento orfao, status normal): ${report.summary.highConfidenceBug}.`,
+        `Precisam de revisao manual (status='cancelada' sem evidencia - pode ser cancelamento real pendente de sync): ${report.summary.needsManualReviewStatusCancelada}.`,
         apply
-          ? `Corrigidos automaticamente (dataCancelamento limpo): ${report.summary.fixed}. Documentos com status='cancelada' NUNCA sao alterados automaticamente.`
+          ? `Documentos corrigidos: ${report.summary.fixedDocuments}. Eventos orfaos realocados: ${report.summary.orphanEventsRelinked}. Eventos orfaos removidos: ${report.summary.orphanEventsDeleted}. Documentos com status='cancelada' NUNCA sao alterados automaticamente.`
           : 'Nenhuma alteracao aplicada (dry-run). Revise o relatorio antes de rodar novamente com --apply.',
         `Relatorio completo: ${reportPath}.`
       ].join(' ')
