@@ -2136,7 +2136,9 @@ export class NfseService {
     }
     this.assertNfseClientScope(found, clienteId);
 
-    return this.enrichDocumentoDetails(found);
+    const enriched = await this.enrichDocumentoDetails(found);
+    const [withSubstituicaoLinks] = await this.attachSubstituicaoLinks([enriched]);
+    return withSubstituicaoLinks;
   }
 
   async getXml(id: string, clienteId: string) {
