@@ -2545,7 +2545,7 @@ function renderHeader(meta) {
 
   return `
     <header class="header">
-      <div style="display:flex; gap:10px; align-items:center; min-width:0; flex:1 1 auto;">
+      <div style="display:flex; gap:10px; align-items:center; min-width:0; flex:0 1 380px;">
         <button class="mobile-toggle" type="button" data-action="toggle-sidebar" aria-label="Abrir menu">${icon('menu')}</button>
         <div class="header-left">
           <h1>${escapeHtml(meta.title)}</h1>
