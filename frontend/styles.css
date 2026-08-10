@@ -971,6 +971,9 @@ textarea:focus-visible,
 .compare-history-list {
   display: grid;
   gap: 12px;
+  max-height: min(60vh, 560px);
+  overflow-y: auto;
+  padding-right: 4px;
 }
 
 .compare-history-item {

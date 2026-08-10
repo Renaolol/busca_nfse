@@ -5351,7 +5351,7 @@ function renderXmlReader30Page() {
     <section class="page-section compare-page">
       ${renderPageHeader({
         title: 'Leitor XML 3.0',
-        badgeText: 'Em desenvolvimento',
+        badgeText: 'Funcional',
         description: 'Consulte e abra XMLs ja armazenados no Nota Sync.',
         actions: []
       })}
@@ -5743,6 +5743,12 @@ function renderXmlReader30DifalChartSvg(points, grouping) {
 
 const DIFAL_NOTES_COLUMNS = [
   { label: 'Numero NF', className: 'xml-reader30-number', value: (row) => row.numeroNf || row.numeroLabel || '-' },
+  {
+    label: 'Status',
+    className: 'xml-reader30-status',
+    html: true,
+    value: (row) => statusBadge(row.statusLabel || 'Ativa', row.isCancelada ? 'danger' : 'success')
+  },
   { label: 'Produto', className: 'xml-reader30-product', value: (row) => row.produto || '-' },
   { label: 'Quantidade', className: 'xml-reader30-quantity', value: (row) => row.quantidade || '-' },
   { label: 'CST', className: 'xml-reader30-icms-code', value: (row) => row.cstCsosn || '-' },
@@ -5782,7 +5788,11 @@ function renderXmlReader30DifalNotesCard() {
                     .map(
                       (row) => `
                         <tr>
-                          ${DIFAL_NOTES_COLUMNS.map((column) => `<td class="${escapeHtml(column.className)}">${escapeHtml(String(column.value(row)))}</td>`).join('')}
+                          ${DIFAL_NOTES_COLUMNS.map((column) => {
+                            const rawValue = column.value(row);
+                            const cellContent = column.html ? rawValue : escapeHtml(String(rawValue));
+                            return `<td class="${escapeHtml(column.className)}">${cellContent}</td>`;
+                          }).join('')}
                         </tr>
                       `
                     )
@@ -7301,9 +7311,7 @@ async function submitDifalReaderForm(form) {
   try {
     const sourceResult = await fetchDifalReaderDocuments({ cliente, emissaoInicio, emissaoFim });
     const fetchedNoteRows = Array.isArray(sourceResult.items) ? sourceResult.items : [];
-    const noteRows = fetchedNoteRows
-      .filter((noteRow) => matchesDateRange(noteRow?.dataEmissao, emissaoInicio, emissaoFim))
-      .filter((noteRow) => !noteRow?.raw?.cancelada);
+    const noteRows = fetchedNoteRows.filter((noteRow) => matchesDateRange(noteRow?.dataEmissao, emissaoInicio, emissaoFim));
     const lineItems = noteRows.flatMap((noteRow) => buildXmlReader30NfeItemRows(noteRow, { includeFallback: true }));
     const { rows: decoratedItemRows, summary } = computeDifalReaderTotals(lineItems, aliquotaInterna, noteRows.length);
 
@@ -7328,10 +7336,15 @@ async function submitDifalReaderForm(form) {
       );
     }
 
-    const notasCanceladasExcluidas = fetchedNoteRows.length - noteRows.length;
-    if (notasCanceladasExcluidas > 0) {
+    const notasForaDoPeriodo = fetchedNoteRows.length - noteRows.length;
+    if (notasForaDoPeriodo > 0) {
+      pushToast(`${notasForaDoPeriodo} nota(s) fora do periodo exato foram excluidas da consulta.`, 'info');
+    }
+
+    const notasCanceladasNaLista = noteRows.filter((noteRow) => noteRow?.raw?.cancelada).length;
+    if (notasCanceladasNaLista > 0) {
       pushToast(
-        `${notasCanceladasExcluidas} nota(s) cancelada(s) ou fora do periodo exato foram excluidas do calculo do DIFAL.`,
+        `${notasCanceladasNaLista} nota(s) cancelada(s) aparecem na lista (status "Cancelada"), mas nao entram nas somas do DIFAL.`,
         'info'
       );
     }
@@ -7432,22 +7445,31 @@ function computeDifalReaderTotals(itemRows, aliquotaInterna, totalNotas) {
   let totalDifal = 0;
 
   const decoratedRows = rows.map((row) => {
+    const isCancelada = Boolean(row?.raw?.cancelada);
     const valorIcms = toNumber(row?.valorIcmsRaw);
     const aliquotaIcms = toNumber(row?.aliquotaIcmsRaw);
     const baseCalculo = toNumber(row?.baseCalculoIcmsRaw);
     const isIcms4 = Math.abs(aliquotaIcms - 4) < 0.005;
     const difalRaw = isIcms4 ? computeDifalPorDentro(baseCalculo, aliquotaIcms, aliquotaInterna) : 0;
 
-    totalMonofasico += toNumber(row?.vICMSMonoRetRaw);
-    totalIcmsProprio += valorIcms;
+    if (!isCancelada) {
+      totalMonofasico += toNumber(row?.vICMSMonoRetRaw);
+      totalIcmsProprio += valorIcms;
 
-    if (isIcms4) {
-      totalIcms4 += valorIcms;
+      if (isIcms4) {
+        totalIcms4 += valorIcms;
+      }
+
+      totalDifal += difalRaw;
     }
 
-    totalDifal += difalRaw;
-
-    return { ...row, difalRaw, difalLabel: isIcms4 ? formatCurrency(difalRaw) : '-' };
+    return {
+      ...row,
+      isCancelada,
+      statusLabel: isCancelada ? 'Cancelada' : 'Ativa',
+      difalRaw,
+      difalLabel: isIcms4 ? formatCurrency(difalRaw) : '-'
+    };
   });
 
   return {
