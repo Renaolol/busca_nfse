@@ -26,6 +26,8 @@ export interface ParsedNfse {
   codigoServicoNacional?: string;
   itemListaServico?: string;
   descricaoServico?: string;
+  chaveSubstituida?: string;
+  motivoSubstituicao?: string;
 }
 
 export interface ParsedNfseEvento {
@@ -125,7 +127,9 @@ export class NfseXmlParserService {
       aliquotaIss: this.extract(xml, ['aliquotaIss', 'aliquotaISS', 'pAliqAplic', 'pAliq', 'pAliquota']),
       codigoServicoNacional: this.extract(xml, ['codigoServicoNacional', 'cTribNac']),
       itemListaServico: this.extract(xml, ['itemListaServico', 'ItemListaServico', 'cItemListaServ']),
-      descricaoServico: this.extract(xml, ['descricaoServico', 'Discriminacao', 'xDescServ'])
+      descricaoServico: this.extract(xml, ['descricaoServico', 'Discriminacao', 'xDescServ']),
+      chaveSubstituida: this.normalizeChaveAcesso(this.extractNestedAny(xml, ['subst'], ['chSubstda'])),
+      motivoSubstituicao: this.extractNestedAny(xml, ['subst'], ['xMotivo'])
     };
   }
 

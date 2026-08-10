@@ -371,6 +371,16 @@ a {
   border-color: #c3d8ff;
 }
 
+.chip-link {
+  cursor: pointer;
+  font-family: inherit;
+  appearance: none;
+}
+
+.chip-link:hover {
+  filter: brightness(0.95);
+}
+
 .chip.neutral {
   color: #4f4f53;
   background: #efeff1;

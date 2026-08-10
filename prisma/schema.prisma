@@ -198,6 +198,7 @@ model NfseDocumento {
   xmlPath                  String?          @map("xml_path") @db.Text
   danfsePath               String?          @map("danfse_path") @db.Text
   hashXml                  String?          @map("hash_xml") @db.VarChar(128)
+  chaveSubstituida         String?          @map("chave_substituida") @db.VarChar(100)
   ignorarNumeracaoValidacao Boolean         @default(false) @map("ignorar_numeracao_validacao")
   ignorarNumeracaoObservacao String?        @map("ignorar_numeracao_observacao") @db.Text
   origem                   DocumentoOrigem?
@@ -210,6 +211,7 @@ model NfseDocumento {
 
   @@unique([ambiente, chaveAcesso], map: "nfse_documentos_ambiente_chave_acesso_key")
   @@unique([clienteId, ambiente, nsu], map: "nfse_documentos_cliente_id_ambiente_nsu_key")
+  @@index([ambiente, chaveSubstituida], map: "nfse_documentos_ambiente_chave_substituida_idx")
   @@map("nfse_documentos")
 }
 
