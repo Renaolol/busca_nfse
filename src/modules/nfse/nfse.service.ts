@@ -37,6 +37,12 @@ import { SincronizarNfseEventosDto } from './dto/sincronizar-eventos.dto';
 import { UpdateNfseDocumentNumberingValidationDto } from './dto/update-document-numbering-validation.dto';
 import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from './nfse-xml-parser.service';
 
+type NfseSubstituicaoLink = {
+  id: string;
+  numeroNfse: string | null;
+  chaveAcesso: string;
+};
+
 type NfseNumeracaoGap = {
   ambiente: Ambiente;
   serie: string | null;
@@ -156,7 +162,8 @@ export class NfseService {
       }
 
       const total = uniqueItems.length;
-      const items = await Promise.all(uniqueItems.map((item) => this.enrichDocumentoSummary(item)));
+      const enriched = await Promise.all(uniqueItems.map((item) => this.enrichDocumentoSummary(item)));
+      const items = await this.attachSubstituicaoLinks(enriched);
       const validacaoNumeracao = shouldValidateNumbering
         ? await this.resolveEmitidasNumberingValidation(query, cnpjConsulta)
         : this.buildSkippedNumberingValidationNotApplied(query, cnpjConsulta);
@@ -186,7 +193,8 @@ export class NfseService {
       this.logger.warn(`Listagem de NFS-e ocultou ${duplicatesRemoved} duplicata(s) legada(s) por ambiente + chave_acesso.`);
     }
 
-    const items = await Promise.all(uniqueItems.map((item) => this.enrichDocumentoSummary(item)));
+    const enriched = await Promise.all(uniqueItems.map((item) => this.enrichDocumentoSummary(item)));
+    const items = await this.attachSubstituicaoLinks(enriched);
     const validacaoNumeracao = shouldValidateNumbering
       ? await this.resolveEmitidasNumberingValidation(query, cnpjConsulta)
       : this.buildSkippedNumberingValidationNotApplied(query, cnpjConsulta);
@@ -1969,6 +1977,57 @@ export class NfseService {
     return normalized || null;
   }
 
+  /**
+   * Resolve, em uma unica consulta em lote, os vinculos de substituicao de NFS-e (bloco <subst> da
+   * DPS): para cada documento, encontra a nota que ele substitui (se existir localmente) e a nota
+   * que o substitui (busca reversa por chaveSubstituida). Usado apenas para exibicao/navegacao -
+   * nao altera status, dataCancelamento nem qualquer outro campo fiscal do documento.
+   */
+  private async attachSubstituicaoLinks<T extends { ambiente: Ambiente; chaveAcesso: string; chaveSubstituida?: string | null }>(
+    items: T[]
+  ): Promise<Array<T & { substitui: NfseSubstituicaoLink | null; substituidaPor: NfseSubstituicaoLink | null }>> {
+    const chavesSubstituidas = [...new Set(items.map((item) => item.chaveSubstituida).filter((value): value is string => Boolean(value)))];
+    const chavesProprias = [...new Set(items.map((item) => item.chaveAcesso))];
+
+    if (!chavesSubstituidas.length && !chavesProprias.length) {
+      return items.map((item) => ({ ...item, substitui: null, substituidaPor: null }));
+    }
+
+    const relacionados = await this.prisma.nfseDocumento.findMany({
+      where: {
+        OR: [
+          ...(chavesSubstituidas.length ? [{ chaveAcesso: { in: chavesSubstituidas } }] : []),
+          { chaveSubstituida: { in: chavesProprias } }
+        ]
+      },
+      select: { id: true, ambiente: true, chaveAcesso: true, chaveSubstituida: true, numeroNfse: true }
+    });
+
+    const porChave = new Map(relacionados.map((doc) => [`${doc.ambiente}:${doc.chaveAcesso}`, doc]));
+    const porChaveSubstituida = new Map<string, (typeof relacionados)[number]>();
+    relacionados.forEach((doc) => {
+      if (!doc.chaveSubstituida) {
+        return;
+      }
+      porChaveSubstituida.set(`${doc.ambiente}:${doc.chaveSubstituida}`, doc);
+    });
+
+    return items.map((item) => {
+      const substituiDoc = item.chaveSubstituida ? porChave.get(`${item.ambiente}:${item.chaveSubstituida}`) : undefined;
+      const substituidaPorDoc = porChaveSubstituida.get(`${item.ambiente}:${item.chaveAcesso}`);
+
+      return {
+        ...item,
+        substitui: substituiDoc
+          ? { id: substituiDoc.id, numeroNfse: substituiDoc.numeroNfse, chaveAcesso: substituiDoc.chaveAcesso }
+          : null,
+        substituidaPor: substituidaPorDoc
+          ? { id: substituidaPorDoc.id, numeroNfse: substituidaPorDoc.numeroNfse, chaveAcesso: substituidaPorDoc.chaveAcesso }
+          : null
+      };
+    });
+  }
+
   private async enrichDocumentoSummary(
     doc: NfseDocumento & {
       eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
@@ -2556,6 +2615,7 @@ export class NfseService {
             codigoServicoNacional: parsed.codigoServicoNacional,
             itemListaServico: parsed.itemListaServico,
             descricaoServico: parsed.descricaoServico,
+            chaveSubstituida: parsed.chaveSubstituida ?? null,
             xmlPath: xmlKey,
             danfsePath: danfseKey,
             hashXml: hash,
@@ -2588,6 +2648,7 @@ export class NfseService {
             codigoServicoNacional: parsed.codigoServicoNacional,
             itemListaServico: parsed.itemListaServico,
             descricaoServico: parsed.descricaoServico,
+            chaveSubstituida: parsed.chaveSubstituida ?? null,
             xmlPath: xmlKey,
             danfsePath: danfseKey,
             hashXml: hash,
@@ -2972,6 +3033,7 @@ export class NfseService {
             codigoServicoNacional: parsed.codigoServicoNacional ?? doc.codigoServicoNacional,
             itemListaServico: parsed.itemListaServico ?? doc.itemListaServico,
             descricaoServico: parsed.descricaoServico ?? doc.descricaoServico,
+            chaveSubstituida: parsed.chaveSubstituida ?? doc.chaveSubstituida,
             hashXml: hash,
             danfsePath: regenerarDanfse ? danfseKey : doc.danfsePath
           }

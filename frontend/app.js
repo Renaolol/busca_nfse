@@ -3027,7 +3027,7 @@ function renderClientDetailsPage(clientId) {
                             { label: 'Baixar XML', action: 'xml-download', attrs: { 'xml-id': xml.id } },
                             { label: 'Baixar DANFSE', action: 'xml-download-danfse', attrs: { 'xml-id': xml.id } }
                           ];
-                          return `<tr class="${xml.cancelada ? 'xml-row-cancelled' : ''}" data-row-actions-menu-id="${escapeHtml(clientXmlMenuId)}">
+                          return `<tr class="${xml.cancelada && !xml.substitui ? 'xml-row-cancelled' : ''}" data-row-actions-menu-id="${escapeHtml(clientXmlMenuId)}">
                             <td>${renderNfseNumber(xml)}</td>
                             <td>${escapeHtml(formatDate(xml.dataEmissao))}</td>
                             <td>${escapeHtml(`${xml.prestador} / ${xml.tomador}`)}</td>
@@ -4907,7 +4907,7 @@ function renderXmlsTableCard(xmls) {
                         { label: 'Baixar XML', action: 'xml-download', attrs: { 'xml-id': xml.id } },
                         { label: 'Baixar DANFSE', action: 'xml-download-danfse', attrs: { 'xml-id': xml.id } }
                       ];
-                  return `<tr class="${xml.cancelada ? 'xml-row-cancelled' : ''}" ${xml.isNumberingException ? '' : `data-row-actions-menu-id="${escapeHtml(xmlMenuId)}"`}>
+                  return `<tr class="${xml.cancelada && !xml.substitui ? 'xml-row-cancelled' : ''}" ${xml.isNumberingException ? '' : `data-row-actions-menu-id="${escapeHtml(xmlMenuId)}"`}>
                     <td><input type="checkbox" data-action="xml-select" data-xml-id="${escapeHtml(xml.id)}" ${state.selectedXmlIds.has(xml.id) ? 'checked' : ''} ${xml.apiNfseId ? '' : 'disabled'} aria-label="Selecionar NFS-e ${escapeHtml(xml.numeroNfse || '-')}" /></td>
                     <td>${renderNfseNumber(xml)}</td>
                     <td>${escapeHtml(xml.cliente)}</td>
@@ -11266,7 +11266,7 @@ function statusBadge(text, tone, extraClass = '') {
 
 function renderNfseNumber(xml) {
   const numero = escapeHtml(xml.numeroNfse || '-');
-  const cancelBadge = xml.cancelada ? statusBadge('Cancelada', 'danger', 'nfse-cancel-chip') : '';
+  const cancelBadge = xml.cancelada && !xml.substitui ? statusBadge('Cancelada', 'danger', 'nfse-cancel-chip') : '';
   const exceptionBadge = xml.isNumberingException ? statusBadge('Excecao', 'warning', 'nfse-cancel-chip') : '';
   return `<div class="nfse-number-cell"><strong>${numero}</strong>${cancelBadge}${exceptionBadge}</div>`;
 }
@@ -11287,13 +11287,28 @@ function renderXmlStatusBadges(xml) {
   if (xml.ignorarNumeracaoValidacao) {
     badges.push(statusBadge('Fora da numeracao', 'warning'));
   }
-  if (xml.cancelada) {
+  if (xml.substitui) {
+    badges.push(renderXmlLinkChip(`Substitui NF ${xml.substitui.numeroNfse || ''}`.trim(), 'info', xml.substitui.linkedXmlId));
+  } else if (xml.cancelada) {
     badges.push(statusBadge('Cancelada', 'danger', 'nfse-cancel-chip'));
   } else if (xml.statusFiscal && xml.statusFiscal !== '-') {
     badges.push(statusBadge(xml.statusFiscal, toneFromFiscalStatus(xml.statusFiscal)));
   }
 
+  if (xml.substituidaPor) {
+    badges.push(renderXmlLinkChip(`Substituida (NF ${xml.substituidaPor.numeroNfse || ''})`.trim(), 'warning', xml.substituidaPor.linkedXmlId));
+  }
+
   return `<div class="status-stack">${badges.join('')}</div>`;
+}
+
+function renderXmlLinkChip(label, tone, linkedXmlId) {
+  const normalizedTone = ['success', 'warning', 'danger', 'info', 'neutral'].includes(tone) ? tone : 'neutral';
+  if (!linkedXmlId) {
+    return `<span class="chip ${normalizedTone}">${escapeHtml(label)}</span>`;
+  }
+
+  return `<button type="button" class="chip chip-link ${normalizedTone}" data-action="xml-details" data-xml-id="${escapeHtml(linkedXmlId)}" title="Abrir detalhes desta NFS-e">${escapeHtml(label)}</button>`;
 }
 
 function renderNfeStorageBadges(doc) {
@@ -17793,7 +17808,9 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
         conteudoXml: null,
         leituraFiscal: doc.leituraFiscal || null,
         ignorarNumeracaoValidacao: Boolean(doc.ignorarNumeracaoValidacao),
-        ignorarNumeracaoObservacao: doc.ignorarNumeracaoObservacao || ''
+        ignorarNumeracaoObservacao: doc.ignorarNumeracaoObservacao || '',
+        substitui: doc.substitui ? { ...doc.substitui, linkedXmlId: `xml-${doc.substitui.id}` } : null,
+        substituidaPor: doc.substituidaPor ? { ...doc.substituidaPor, linkedXmlId: `xml-${doc.substituidaPor.id}` } : null
       };
     })
     .sort((a, b) => Date.parse(b.dataDownload || 0) - Date.parse(a.dataDownload || 0));
