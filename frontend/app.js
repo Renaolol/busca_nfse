@@ -304,7 +304,12 @@ const state = {
     hasSearched: false,
     lastQuery: null,
     lastLoadedAt: null,
-    summary: null
+    summary: null,
+    itemRows: [],
+    chartGrouping: 'dia',
+    chartPoints: [],
+    chartRenderPoints: [],
+    chartViewBox: null
   },
   alerts: [],
   serverResolvedAlerts: {},
@@ -2046,6 +2051,14 @@ function onDocumentChange(event) {
     return;
   }
 
+  if (action === 'difal-chart-grouping') {
+    const grouping = target.value === 'mes' ? 'mes' : 'dia';
+    state.difalReader.chartGrouping = grouping;
+    state.difalReader.chartPoints = buildDifalReaderChartPoints(state.difalReader.itemRows, grouping);
+    renderPreservingScroll();
+    return;
+  }
+
   if (action === 'nfse-retention-company-filter' && state.modal?.kind === 'nfse-retention-alerts') {
     state.modal = {
       ...state.modal,
@@ -2107,6 +2120,8 @@ function onDocumentMouseDown(event) {
 }
 
 function onDocumentMouseMove(event) {
+  handleDifalChartHover(event);
+
   const scrollDrag = state.xmlReader30.scrollDrag;
   if (!scrollDrag?.active) {
     return;
@@ -5529,12 +5544,12 @@ function renderXmlReader30DifalSection() {
         </div>
       </form>
 
-      ${isLoading ? '<p class="row-sub">Lendo as NF-e do periodo...</p>' : renderXmlReader30DifalSummary()}
+      ${isLoading ? '<p class="row-sub">Lendo as NF-e do periodo...</p>' : renderXmlReader30DifalResults()}
     </article>
   `;
 }
 
-function renderXmlReader30DifalSummary() {
+function renderXmlReader30DifalResults() {
   const reader = state.difalReader;
   if (!reader.hasSearched) {
     return renderXmlReader30EmptyState();
@@ -5558,15 +5573,191 @@ function renderXmlReader30DifalSummary() {
   }
 
   return `
+    <div class="difal-summary-grid">
+      ${renderXmlReader30DifalResumoCard(summary)}
+      ${renderXmlReader30DifalChartCard()}
+    </div>
     <article class="card" style="box-shadow:none; border-style:dashed; margin-top: 2px;">
       <div class="xml-reader30-summary-meta">
-        <span>Notas lidas no periodo: <strong>${escapeHtml(String(summary.totalNotas))} nota(s)</strong></span>
         <span>Itens analisados: <strong>${escapeHtml(String(summary.totalItens))} item(ns)</strong></span>
-        <span>Aliquota interna usada: <strong>${escapeHtml(formatXmlReader30DecimalValue(summary.aliquotaInterna))}%</strong></span>
         <span>Soma ICMS Monofasico: <strong>${escapeHtml(formatCurrency(summary.totalMonofasico))}</strong></span>
         <span>Soma ICMS Proprio: <strong>${escapeHtml(formatCurrency(summary.totalIcmsProprio))}</strong></span>
         <span>Soma ICMS 4%: <strong>${escapeHtml(formatCurrency(summary.totalIcms4))}</strong></span>
-        <span>Valor do DIFAL: <strong>${escapeHtml(formatCurrency(summary.totalDifal))}</strong></span>
+      </div>
+    </article>
+    ${renderXmlReader30DifalNotesCard()}
+  `;
+}
+
+function renderXmlReader30DifalResumoCard(summary) {
+  return `
+    <article class="card difal-resumo-card">
+      <h3 class="card-title">Resumo do periodo</h3>
+      <div class="difal-resumo-rows">
+        <div class="difal-resumo-row">
+          <span class="difal-resumo-icon">${icon('file')}</span>
+          <div class="difal-resumo-copy">
+            <small>Notas fiscais analisadas</small>
+            <strong>${escapeHtml(String(summary.totalNotas))} nota(s)</strong>
+          </div>
+        </div>
+        <div class="difal-resumo-row">
+          <span class="difal-resumo-icon">${icon('pie')}</span>
+          <div class="difal-resumo-copy">
+            <small>Aliquota interna usada</small>
+            <strong>${escapeHtml(formatXmlReader30DecimalValue(summary.aliquotaInterna))}%</strong>
+          </div>
+        </div>
+        <div class="difal-resumo-row">
+          <span class="difal-resumo-icon">${icon('coin')}</span>
+          <div class="difal-resumo-copy">
+            <small>Valor total do DIFAL</small>
+            <strong>${escapeHtml(formatCurrency(summary.totalDifal))}</strong>
+          </div>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+function renderXmlReader30DifalChartCard() {
+  const points = Array.isArray(state.difalReader.chartPoints) ? state.difalReader.chartPoints : [];
+  const grouping = state.difalReader.chartGrouping === 'mes' ? 'mes' : 'dia';
+
+  return `
+    <article class="card difal-chart-card">
+      <div class="difal-chart-card-header">
+        <h3 class="card-title">Evolucao do DIFAL no periodo</h3>
+        <label class="field difal-chart-grouping-field">
+          <select data-action="difal-chart-grouping" aria-label="Agrupar grafico">
+            ${renderOptions(['dia', 'mes'], grouping, { dia: 'Por dia', mes: 'Por mes' })}
+          </select>
+        </label>
+      </div>
+      ${points.length ? renderXmlReader30DifalChartSvg(points, grouping) : '<div class="difal-chart-empty">Sem dados suficientes para o grafico.</div>'}
+    </article>
+  `;
+}
+
+function renderXmlReader30DifalChartSvg(points, grouping) {
+  const layout = computeDifalChartLayout(points);
+  state.difalReader.chartRenderPoints = layout.points;
+  state.difalReader.chartViewBox = { width: layout.width, height: layout.height };
+
+  const linePath = layout.points.map((point, index) => `${index === 0 ? 'M' : 'L'} ${point.x.toFixed(2)} ${point.y.toFixed(2)}`).join(' ');
+  const firstPoint = layout.points[0];
+  const lastPoint = layout.points[layout.points.length - 1];
+  const areaPath = `${linePath} L ${lastPoint.x.toFixed(2)} ${layout.baselineY.toFixed(2)} L ${firstPoint.x.toFixed(2)} ${layout.baselineY.toFixed(2)} Z`;
+  const labelStep = Math.max(1, Math.ceil(layout.points.length / 12));
+
+  const gridLines = layout.gridTicks
+    .map(
+      (tick) => `
+        <line x1="${layout.padding.left}" x2="${layout.width - layout.padding.right}" y1="${tick.y.toFixed(2)}" y2="${tick.y.toFixed(2)}" class="difal-chart-grid"></line>
+        <text x="${layout.padding.left - 8}" y="${tick.y.toFixed(2)}" class="difal-chart-axis-label difal-chart-axis-label-y">${escapeHtml(formatCurrency(tick.value))}</text>
+      `
+    )
+    .join('');
+
+  const xLabels = layout.points
+    .map((point, index) =>
+      index % labelStep === 0 || index === layout.points.length - 1
+        ? `<text x="${point.x.toFixed(2)}" y="${layout.height - 8}" class="difal-chart-axis-label difal-chart-axis-label-x">${escapeHtml(point.label)}</text>`
+        : ''
+    )
+    .join('');
+
+  const dots = layout.points
+    .map((point) => `<circle cx="${point.x.toFixed(2)}" cy="${point.y.toFixed(2)}" r="3" class="difal-chart-dot"></circle>`)
+    .join('');
+
+  return `
+    <div class="difal-chart-wrap" data-difal-chart>
+      <svg viewBox="0 0 ${layout.width} ${layout.height}" preserveAspectRatio="none" role="img" aria-label="Evolucao do DIFAL no periodo">
+        <defs>
+          <linearGradient id="difalAreaFill" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.28"></stop>
+            <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"></stop>
+          </linearGradient>
+        </defs>
+        ${gridLines}
+        <path d="${areaPath}" fill="url(#difalAreaFill)" stroke="none"></path>
+        <path d="${linePath}" fill="none" class="difal-chart-line"></path>
+        ${dots}
+        <circle cx="${lastPoint.x.toFixed(2)}" cy="${lastPoint.y.toFixed(2)}" r="4" class="difal-chart-end-dot"></circle>
+        <line data-difal-chart-crosshair x1="0" x2="0" y1="${layout.padding.top}" y2="${layout.height - layout.padding.bottom}" class="difal-chart-crosshair" style="display:none;"></line>
+        <circle data-difal-chart-active-dot cx="0" cy="0" r="4.5" class="difal-chart-active-dot" style="display:none;"></circle>
+        ${xLabels}
+      </svg>
+      <div class="difal-chart-tooltip" data-difal-chart-tooltip>
+        <span data-tooltip-date></span>
+        <strong data-tooltip-value></strong>
+      </div>
+    </div>
+    <details class="difal-chart-table-toggle">
+      <summary>Ver dados em tabela</summary>
+      <table>
+        <thead>
+          <tr>
+            <th>${grouping === 'mes' ? 'Mes' : 'Dia'}</th>
+            <th>Valor do DIFAL</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${points
+            .map(
+              (point) => `
+                <tr>
+                  <td>${escapeHtml(point.label)}</td>
+                  <td>${escapeHtml(formatCurrency(point.value))}</td>
+                </tr>
+              `
+            )
+            .join('')}
+        </tbody>
+      </table>
+    </details>
+  `;
+}
+
+function renderXmlReader30DifalNotesCard() {
+  const itemRows = Array.isArray(state.difalReader.itemRows) ? state.difalReader.itemRows : [];
+  const columns = getXmlReader30NfeColumnDefinitions().filter((column) => column.key !== 'select');
+
+  return `
+    <article class="card difal-notes-card">
+      <div class="compare-card-header">
+        <div>
+          <h3 class="card-title">Notas do periodo</h3>
+          <p class="card-subtitle">Mesmas informacoes do leitor de NF-e do lucro real, com o DIFAL calculado por item.</p>
+        </div>
+        ${statusBadge(`${escapeHtml(String(itemRows.length))} item(ns)`, itemRows.length ? 'success' : 'neutral')}
+      </div>
+      <div class="table-wrap difal-notes-scroll">
+        <table class="xml-reader30-table">
+          <thead>
+            <tr>
+              ${columns.map((column) => `<th>${escapeHtml(column.label)}</th>`).join('')}
+              <th>DIFAL</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              itemRows.length
+                ? itemRows
+                    .map(
+                      (row) => `
+                        <tr>
+                          ${columns.map((column) => renderXmlReader30NfeColumnCell(column, row, row.statusTone)).join('')}
+                          <td class="xml-reader30-money xml-reader30-icms-currency">${escapeHtml(row.difalLabel || '-')}</td>
+                        </tr>
+                      `
+                    )
+                    .join('')
+                : `<tr><td colspan="${columns.length + 1}" class="row-sub">Nenhum item encontrado para os filtros informados.</td></tr>`
+            }
+          </tbody>
+        </table>
       </div>
     </article>
   `;
@@ -7034,7 +7225,12 @@ function resetDifalReader() {
     hasSearched: false,
     lastQuery: null,
     lastLoadedAt: null,
-    summary: null
+    summary: null,
+    itemRows: [],
+    chartGrouping: state.difalReader?.chartGrouping || 'dia',
+    chartPoints: [],
+    chartRenderPoints: [],
+    chartViewBox: null
   };
   state.tableState.difalReader = 'data';
 }
@@ -7065,14 +7261,19 @@ async function submitDifalReaderForm(form) {
   state.difalReader.hasSearched = true;
   state.difalReader.lastQuery = { cliente, emissaoInicio, emissaoFim, aliquotaInterna };
   state.difalReader.summary = null;
+  state.difalReader.itemRows = [];
   state.tableState.difalReader = 'loading';
   render();
 
   try {
     const sourceResult = await fetchDifalReaderDocuments({ cliente, emissaoInicio, emissaoFim });
-    const docs = sourceResult.items.map((item) => item?.raw).filter(Boolean);
-    const lineItems = docs.flatMap((doc) => extractNfeLineItems(doc.conteudoXml || ''));
-    state.difalReader.summary = computeDifalReaderTotals(lineItems, aliquotaInterna, docs.length);
+    const noteRows = Array.isArray(sourceResult.items) ? sourceResult.items : [];
+    const lineItems = noteRows.flatMap((noteRow) => buildXmlReader30NfeItemRows(noteRow, { includeFallback: true }));
+    const { rows: decoratedItemRows, summary } = computeDifalReaderTotals(lineItems, aliquotaInterna, noteRows.length);
+
+    state.difalReader.itemRows = decoratedItemRows;
+    state.difalReader.summary = summary;
+    state.difalReader.chartPoints = buildDifalReaderChartPoints(decoratedItemRows, state.difalReader.chartGrouping);
     state.difalReader.lastLoadedAt = new Date().toISOString();
     state.tableState.difalReader = 'data';
 
@@ -7084,6 +7285,8 @@ async function submitDifalReaderForm(form) {
     }
   } catch (error) {
     state.difalReader.summary = null;
+    state.difalReader.itemRows = [];
+    state.difalReader.chartPoints = [];
     state.tableState.difalReader = 'error';
     pushToast(`Falha ao calcular o DIFAL: ${toErrorMessage(error)}`, 'error');
   }
@@ -7099,37 +7302,213 @@ async function fetchDifalReaderDocuments(filters) {
   return fetchXmlReader30NfeSource(filters);
 }
 
-function computeDifalReaderTotals(lineItems, aliquotaInterna, totalNotas) {
-  const items = Array.isArray(lineItems) ? lineItems : [];
+function computeDifalReaderTotals(itemRows, aliquotaInterna, totalNotas) {
+  const rows = Array.isArray(itemRows) ? itemRows : [];
   let totalMonofasico = 0;
   let totalIcmsProprio = 0;
   let totalIcms4 = 0;
   let totalDifal = 0;
 
-  items.forEach((item) => {
-    const valorIcms = toNumber(item?.valorIcmsRaw);
-    const aliquotaIcms = toNumber(item?.aliquotaIcmsRaw);
-    const valorOperacao = toNumber(item?.totalValueRaw);
+  const decoratedRows = rows.map((row) => {
+    const valorIcms = toNumber(row?.valorIcmsRaw);
+    const aliquotaIcms = toNumber(row?.aliquotaIcmsRaw);
+    const valorOperacao = toNumber(row?.valorTotal);
+    const difalRaw = valorOperacao * ((aliquotaInterna - aliquotaIcms) / 100);
 
-    totalMonofasico += toNumber(item?.vICMSMonoRetRaw);
+    totalMonofasico += toNumber(row?.vICMSMonoRetRaw);
     totalIcmsProprio += valorIcms;
 
     if (Math.abs(aliquotaIcms - 4) < 0.005) {
       totalIcms4 += valorIcms;
     }
 
-    totalDifal += valorOperacao * ((aliquotaInterna - aliquotaIcms) / 100);
+    totalDifal += difalRaw;
+
+    return { ...row, difalRaw, difalLabel: formatCurrency(difalRaw) };
   });
 
   return {
-    totalNotas,
-    totalItens: items.length,
-    aliquotaInterna,
-    totalMonofasico,
-    totalIcmsProprio,
-    totalIcms4,
-    totalDifal
+    rows: decoratedRows,
+    summary: {
+      totalNotas,
+      totalItens: decoratedRows.length,
+      aliquotaInterna,
+      totalMonofasico,
+      totalIcmsProprio,
+      totalIcms4,
+      totalDifal
+    }
   };
+}
+
+function buildDifalReaderChartPoints(itemRows, grouping) {
+  const normalizedGrouping = grouping === 'mes' ? 'mes' : 'dia';
+  const buckets = new Map();
+
+  (Array.isArray(itemRows) ? itemRows : []).forEach((row) => {
+    const timestamp = Date.parse(row?.dataEmissao || row?.raw?.dataEmissao || '');
+    if (!Number.isFinite(timestamp)) {
+      return;
+    }
+
+    const date = new Date(timestamp);
+    const key =
+      normalizedGrouping === 'mes'
+        ? `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`
+        : `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+    buckets.set(key, (buckets.get(key) || 0) + (Number(row?.difalRaw) || 0));
+  });
+
+  return [...buckets.entries()]
+    .sort((left, right) => (left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : 0))
+    .map(([key, value]) => ({
+      key,
+      label: formatDifalChartBucketLabel(key, normalizedGrouping),
+      value
+    }));
+}
+
+function formatDifalChartBucketLabel(key, grouping) {
+  const parts = String(key || '').split('-').map(Number);
+  if (grouping === 'mes') {
+    const [year, month] = parts;
+    const monthLabels = ['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'];
+    return `${monthLabels[(month || 1) - 1] || '-'}/${String(year || '').slice(-2)}`;
+  }
+
+  const [, month, day] = parts;
+  return `${String(day || 0).padStart(2, '0')}/${String(month || 0).padStart(2, '0')}`;
+}
+
+function computeNiceAxisMax(value) {
+  if (!(value > 0)) {
+    return 1;
+  }
+
+  const exponent = Math.floor(Math.log10(value));
+  const magnitude = 10 ** exponent;
+  const fraction = value / magnitude;
+  let niceFraction;
+  if (fraction <= 1) {
+    niceFraction = 1;
+  } else if (fraction <= 2) {
+    niceFraction = 2;
+  } else if (fraction <= 2.5) {
+    niceFraction = 2.5;
+  } else if (fraction <= 5) {
+    niceFraction = 5;
+  } else {
+    niceFraction = 10;
+  }
+
+  return niceFraction * magnitude;
+}
+
+function computeDifalChartLayout(points) {
+  const width = 640;
+  const height = 220;
+  const padding = { left: 56, right: 12, top: 16, bottom: 30 };
+  const plotWidth = width - padding.left - padding.right;
+  const plotHeight = height - padding.top - padding.bottom;
+  const sourcePoints = Array.isArray(points) ? points : [];
+
+  if (!sourcePoints.length) {
+    return { width, height, padding, plotWidth, plotHeight, points: [], gridTicks: [], baselineY: height - padding.bottom };
+  }
+
+  const rawValues = sourcePoints.map((point) => Number(point.value) || 0);
+  const maxValue = Math.max(0, ...rawValues);
+  const minValue = Math.min(0, ...rawValues);
+  const niceMax = computeNiceAxisMax(maxValue);
+  const niceMin = minValue < 0 ? -computeNiceAxisMax(Math.abs(minValue)) : 0;
+  const domain = niceMax - niceMin || 1;
+
+  const positionedPoints = sourcePoints.map((point, index) => {
+    const x =
+      sourcePoints.length > 1 ? padding.left + (index / (sourcePoints.length - 1)) * plotWidth : padding.left + plotWidth / 2;
+    const normalized = ((Number(point.value) || 0) - niceMin) / domain;
+    const y = padding.top + (1 - normalized) * plotHeight;
+    return { ...point, x, y };
+  });
+
+  const tickCount = 4;
+  const gridTicks = Array.from({ length: tickCount + 1 }, (_, index) => {
+    const value = niceMin + (domain * index) / tickCount;
+    const y = padding.top + (1 - index / tickCount) * plotHeight;
+    return { value, y };
+  }).reverse();
+
+  const baselineY = padding.top + (1 - (0 - niceMin) / domain) * plotHeight;
+
+  return { width, height, padding, plotWidth, plotHeight, points: positionedPoints, gridTicks, baselineY };
+}
+
+function handleDifalChartHover(event) {
+  const tooltip = document.querySelector('[data-difal-chart-tooltip]');
+  const crosshair = document.querySelector('[data-difal-chart-crosshair]');
+  const activeDot = document.querySelector('[data-difal-chart-active-dot]');
+  if (!tooltip && !crosshair && !activeDot) {
+    return;
+  }
+
+  const chart = event.target.closest?.('[data-difal-chart]');
+  if (!chart) {
+    if (tooltip) tooltip.style.display = 'none';
+    if (crosshair) crosshair.style.display = 'none';
+    if (activeDot) activeDot.style.display = 'none';
+    return;
+  }
+
+  const points = Array.isArray(state.difalReader.chartRenderPoints) ? state.difalReader.chartRenderPoints : [];
+  const viewBox = state.difalReader.chartViewBox;
+  const rect = chart.getBoundingClientRect();
+  if (!points.length || !viewBox || !rect.width) {
+    return;
+  }
+
+  const relativeX = event.clientX - rect.left;
+  const viewBoxX = (relativeX / rect.width) * viewBox.width;
+
+  let nearest = points[0];
+  let nearestDistance = Math.abs(points[0].x - viewBoxX);
+  for (let index = 1; index < points.length; index += 1) {
+    const distance = Math.abs(points[index].x - viewBoxX);
+    if (distance < nearestDistance) {
+      nearest = points[index];
+      nearestDistance = distance;
+    }
+  }
+
+  if (crosshair) {
+    crosshair.setAttribute('x1', String(nearest.x));
+    crosshair.setAttribute('x2', String(nearest.x));
+    crosshair.style.display = 'block';
+  }
+
+  if (activeDot) {
+    activeDot.setAttribute('cx', String(nearest.x));
+    activeDot.setAttribute('cy', String(nearest.y));
+    activeDot.style.display = 'block';
+  }
+
+  if (tooltip) {
+    const percentX = (nearest.x / viewBox.width) * 100;
+    const percentY = (nearest.y / viewBox.height) * 100;
+    const flip = percentX > 65;
+    tooltip.style.display = 'block';
+    tooltip.style.left = `${percentX}%`;
+    tooltip.style.top = `${percentY}%`;
+    tooltip.style.transform = flip ? 'translate(calc(-100% - 10px), -100%)' : 'translate(10px, -100%)';
+    const dateNode = tooltip.querySelector('[data-tooltip-date]');
+    const valueNode = tooltip.querySelector('[data-tooltip-value]');
+    if (dateNode) {
+      dateNode.textContent = nearest.label || '-';
+    }
+    if (valueNode) {
+      valueNode.textContent = formatCurrency(nearest.value);
+    }
+  }
 }
 
 async function submitXmlReader30Form(form) {
@@ -23427,7 +23806,11 @@ function icon(name) {
     info:
       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><circle cx="12" cy="8" r="1"></circle></svg>',
     check:
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6L9 17l-5-5"></path></svg>'
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M20 6L9 17l-5-5"></path></svg>',
+    pie:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v9l7 4.5"></path><circle cx="12" cy="12" r="9"></circle></svg>',
+    coin:
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"></circle><path d="M12 7.5v9"></path><path d="M15 9.8c0-1.3-1.3-2.3-3-2.3s-3 .9-3 2.1c0 2.7 6 1.3 6 4 0 1.3-1.3 2.3-3 2.3s-3-1-3-2.3"></path></svg>'
   };
 
   return icons[name] || icons.info;
