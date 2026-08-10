@@ -272,6 +272,10 @@ const state = {
   nfseGapAuditRecoverAll: {
     active: false
   },
+  rowActionsMenu: {
+    openId: null,
+    anchor: null
+  },
   xmlReader30: {
     activeTab: 'nfe',
     hasSearched: false,
@@ -610,6 +614,7 @@ function wireGlobalEvents() {
   });
 
   document.addEventListener('click', onDocumentClick);
+  document.addEventListener('contextmenu', onDocumentContextMenu);
   document.addEventListener('submit', onDocumentSubmit);
   document.addEventListener('change', onDocumentChange);
   document.addEventListener('scroll', onDocumentScroll, true);
@@ -623,6 +628,60 @@ function wireGlobalEvents() {
   document.addEventListener('dragend', onDocumentDragEnd);
 }
 
+function onDocumentContextMenu(event) {
+  const rowNode = event.target.closest('[data-row-actions-menu-id]');
+  if (!rowNode) {
+    return;
+  }
+
+  const menuId = rowNode.getAttribute('data-row-actions-menu-id') || '';
+  if (!menuId) {
+    return;
+  }
+
+  event.preventDefault();
+  const estimatedWidth = 200;
+  const left = Math.min(window.innerWidth - estimatedWidth - 8, Math.max(8, event.clientX));
+  const top = Math.min(window.innerHeight - 12, event.clientY);
+  openRowActionsMenuAt(menuId, { left, top });
+}
+
+function computeMenuAnchorFromRect(rect, estimatedWidth = 200) {
+  const left = Math.min(window.innerWidth - estimatedWidth - 8, Math.max(8, rect.right - estimatedWidth));
+  const top = Math.min(window.innerHeight - 12, rect.bottom + 6);
+  return { left, top };
+}
+
+function openRowActionsMenuAt(menuId, anchor) {
+  state.rowActionsMenu.openId = menuId;
+  state.rowActionsMenu.anchor = anchor;
+  renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
+}
+
+function closeRowActionsMenu() {
+  if (!state.rowActionsMenu.openId) {
+    return;
+  }
+  state.rowActionsMenu.openId = null;
+  state.rowActionsMenu.anchor = null;
+}
+
+function toggleRowActionsMenu(menuId, anchorNode) {
+  const normalizedId = String(menuId || '').trim();
+  if (!normalizedId) {
+    return;
+  }
+
+  if (state.rowActionsMenu.openId === normalizedId) {
+    closeRowActionsMenu();
+    renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
+    return;
+  }
+
+  const rect = anchorNode instanceof HTMLElement ? anchorNode.getBoundingClientRect() : null;
+  openRowActionsMenuAt(normalizedId, rect ? computeMenuAnchorFromRect(rect) : { left: 8, top: 8 });
+}
+
 function onDocumentClick(event) {
   const actionNode = event.target.closest('[data-action]');
   if (!actionNode) {
@@ -633,6 +692,10 @@ function onDocumentClick(event) {
     }
     if (state.nfseFiscalReader.columnMenuOpenKey) {
       closeNfseFiscalReaderColumnMenu();
+      shouldRender = true;
+    }
+    if (state.rowActionsMenu.openId) {
+      closeRowActionsMenu();
       shouldRender = true;
     }
     if (shouldRender) {
@@ -666,10 +729,18 @@ function onDocumentClick(event) {
   if (state.nfseFiscalReader.columnMenuOpenKey && !isNfseFiscalColumnMenuAction && !event.target.closest('[data-nfse-fiscal-column-menu-wrap]')) {
     closeNfseFiscalReaderColumnMenu();
   }
+  if (state.rowActionsMenu.openId && action !== 'row-actions-menu-toggle') {
+    closeRowActionsMenu();
+  }
 
   event.preventDefault();
 
   switch (action) {
+    case 'row-actions-menu-toggle': {
+      const menuId = actionNode.getAttribute('data-menu-id') || '';
+      toggleRowActionsMenu(menuId, actionNode);
+      return;
+    }
     case 'navigate': {
       const route = actionNode.getAttribute('data-route');
       if (route) {
@@ -2755,8 +2826,24 @@ function renderClientsPage() {
                   .map((client) => {
                     const establishmentSummary = getClientEstablishmentSummary(client.id);
                     const nfeBaseSummary = getClientNfeBaseSummary(client.id);
+                    const clientMenuId = `client:${client.id}`;
+                    const clientMenuItems = [
+                      { label: 'Ver detalhes', action: 'client-details', attrs: { 'client-id': client.id } },
+                      { label: 'Editar', action: 'client-edit', attrs: { 'client-id': client.id } },
+                      { label: 'Reprocessar busca', action: 'client-reprocess', attrs: { 'client-id': client.id } },
+                      {
+                        label: client.buscaAtiva ? 'Pausar busca' : 'Habilitar busca',
+                        action: 'client-toggle-search',
+                        attrs: { 'client-id': client.id }
+                      },
+                      {
+                        label: client.buscaNfeAtiva !== false ? 'Pausar NF-e' : 'Habilitar NF-e',
+                        action: 'client-toggle-nfe-search',
+                        attrs: { 'client-id': client.id }
+                      }
+                    ];
                     return `
-                      <tr>
+                      <tr data-row-actions-menu-id="${escapeHtml(clientMenuId)}">
                         <td><input type="checkbox" data-action="client-select" data-client-id="${client.id}" ${state.selectedClientIds.has(client.id) ? 'checked' : ''} aria-label="Selecionar ${escapeHtml(client.razaoSocial)}" /></td>
                         <td>
                           <span class="row-title">${escapeHtml(client.razaoSocial)}</span>
@@ -2780,15 +2867,7 @@ function renderClientsPage() {
                         <td>${escapeHtml(formatDateTime(client.ultimaBusca))}</td>
                         <td>${escapeHtml(String(client.xmlsEncontrados))}</td>
                         <td>${statusBadge(client.statusOperacional, toneFromStatus(client.statusOperacional))}</td>
-                        <td>
-                          <div class="table-actions">
-                            <button class="icon-btn" data-action="client-details" data-client-id="${client.id}">Ver detalhes</button>
-                            <button class="icon-btn" data-action="client-edit" data-client-id="${client.id}">Editar</button>
-                            <button class="icon-btn" data-action="client-reprocess" data-client-id="${client.id}">Reprocessar busca</button>
-                            <button class="icon-btn" data-action="client-toggle-search" data-client-id="${client.id}">${client.buscaAtiva ? 'Pausar busca' : 'Habilitar busca'}</button>
-                            <button class="icon-btn" data-action="client-toggle-nfe-search" data-client-id="${client.id}">${client.buscaNfeAtiva !== false ? 'Pausar NF-e' : 'Habilitar NF-e'}</button>
-                          </div>
-                        </td>
+                        <td>${renderRowActionsMenu(clientMenuId, clientMenuItems)}</td>
                       </tr>
                     `;
                   })
@@ -2912,18 +2991,18 @@ function renderClientDetailsPage(clientId) {
                   ${clientXmls.length
                     ? clientXmls
                         .map((xml) => {
-                          return `<tr class="${xml.cancelada ? 'xml-row-cancelled' : ''}">
+                          const clientXmlMenuId = `client-xml:${xml.id}`;
+                          const clientXmlMenuItems = [
+                            { label: 'Visualizar', action: 'xml-details', attrs: { 'xml-id': xml.id } },
+                            { label: 'Baixar XML', action: 'xml-download', attrs: { 'xml-id': xml.id } },
+                            { label: 'Baixar DANFSE', action: 'xml-download-danfse', attrs: { 'xml-id': xml.id } }
+                          ];
+                          return `<tr class="${xml.cancelada ? 'xml-row-cancelled' : ''}" data-row-actions-menu-id="${escapeHtml(clientXmlMenuId)}">
                             <td>${renderNfseNumber(xml)}</td>
                             <td>${escapeHtml(formatDate(xml.dataEmissao))}</td>
                             <td>${escapeHtml(`${xml.prestador} / ${xml.tomador}`)}</td>
                             <td>${escapeHtml(formatCurrency(xml.valor))}</td>
-                            <td>
-                              <div class="table-actions">
-                                <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar</button>
-                                <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
-                                <button class="icon-btn" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
-                              </div>
-                            </td>
+                            <td>${renderRowActionsMenu(clientXmlMenuId, clientXmlMenuItems)}</td>
                           </tr>`;
                         })
                         .join('')
@@ -3081,7 +3160,19 @@ function renderCertificatesPage() {
                   .map((cert) => {
                     const rowClass = cert.status === 'Vencido' ? ' style="background:#fff5f5;"' : cert.status === 'A vencer' ? ' style="background:#fffbf0;"' : '';
                     const canDelete = state.dataSource !== 'api' || !cert.ativo;
-                    return `<tr${rowClass}>
+                    const certMenuId = `cert:${cert.id}`;
+                    const certMenuItems = [
+                      { label: 'Ver cliente', action: 'certificate-view-client', attrs: { 'client-id': cert.clientId || '' }, disabled: !cert.clientId },
+                      { label: 'Testar certificado', action: 'certificate-test', attrs: { 'cert-id': cert.id } },
+                      { label: 'Baixar', action: 'certificate-download', attrs: { 'cert-id': cert.id } },
+                      { label: 'Ver senha', action: 'certificate-password', attrs: { 'cert-id': cert.id } },
+                      { label: 'Editar', action: 'certificate-edit', attrs: { 'cert-id': cert.id } },
+                      { label: 'Anotacoes', action: 'certificate-notes', attrs: { 'cert-id': cert.id } },
+                      { label: 'Substituir', action: 'certificate-replace', attrs: { 'cert-id': cert.id } },
+                      { label: 'Remover vinculo', action: 'certificate-unlink', attrs: { 'cert-id': cert.id }, disabled: !(cert.clientId || cert.ativo) },
+                      { label: 'Excluir certificado', action: 'certificate-delete', attrs: { 'cert-id': cert.id }, disabled: !canDelete, variant: 'danger' }
+                    ];
+                    return `<tr${rowClass} data-row-actions-menu-id="${escapeHtml(certMenuId)}">
                       <td>${escapeHtml(cert.cliente)}</td>
                       <td>${escapeHtml(formatCnpj(cert.cnpj))}</td>
                       <td>${escapeHtml(cert.tipo)}</td>
@@ -3091,19 +3182,7 @@ function renderCertificatesPage() {
                       <td>${statusBadge(cert.status, toneFromCertificateStatus(cert.status))}</td>
                       <td>${escapeHtml(cert.ultimaValidacao ? formatDateTime(cert.ultimaValidacao) : '-')}</td>
                       <td>${escapeHtml(truncateText(cert.anotacoes || '-', 72))}</td>
-                      <td>
-                        <div class="table-actions">
-                          <button class="icon-btn" data-action="certificate-view-client" data-client-id="${escapeHtml(cert.clientId || '')}" ${cert.clientId ? '' : 'disabled'}>Ver cliente</button>
-                          <button class="icon-btn" data-action="certificate-test" data-cert-id="${escapeHtml(cert.id)}">Testar certificado</button>
-                          <button class="icon-btn" data-action="certificate-download" data-cert-id="${escapeHtml(cert.id)}">Baixar</button>
-                          <button class="icon-btn" data-action="certificate-password" data-cert-id="${escapeHtml(cert.id)}">Ver senha</button>
-                          <button class="icon-btn" data-action="certificate-edit" data-cert-id="${escapeHtml(cert.id)}">Editar</button>
-                          <button class="icon-btn" data-action="certificate-notes" data-cert-id="${escapeHtml(cert.id)}">Anotacoes</button>
-                          <button class="icon-btn" data-action="certificate-replace" data-cert-id="${escapeHtml(cert.id)}">Substituir</button>
-                          <button class="icon-btn" data-action="certificate-unlink" data-cert-id="${escapeHtml(cert.id)}" ${cert.clientId || cert.ativo ? '' : 'disabled'}>Remover vinculo</button>
-                          <button class="icon-btn" data-action="certificate-delete" data-cert-id="${escapeHtml(cert.id)}" ${canDelete ? '' : 'disabled'}>Excluir certificado</button>
-                        </div>
-                      </td>
+                      <td>${renderRowActionsMenu(certMenuId, certMenuItems)}</td>
                     </tr>`;
                   })
                   .join(''),
@@ -3199,7 +3278,13 @@ function renderSearchRunsPage() {
                 colSpan: 11,
                 rowsHtml: runs
                   .map((run) => {
-                    return `<tr>
+                    const runMenuId = `run:${run.id}`;
+                    const runMenuItems = [
+                      { label: 'Ver detalhes', action: 'open-run-details', attrs: { 'run-id': run.id } },
+                      { label: 'Exportar relatorio', action: 'run-export', attrs: { 'run-id': run.id } },
+                      { label: 'Reprocessar falhas', action: 'run-reprocess-failures', attrs: { 'run-id': run.id } }
+                    ];
+                    return `<tr data-row-actions-menu-id="${escapeHtml(runMenuId)}">
                       <td><strong>${escapeHtml(run.codigo)}</strong></td>
                       <td>${escapeHtml(run.tipo)}</td>
                       <td>${escapeHtml(formatDate(run.inicio))}</td>
@@ -3210,13 +3295,7 @@ function renderSearchRunsPage() {
                       <td>${escapeHtml(String(run.xmlsArmazenados))}</td>
                       <td>${escapeHtml(String(run.falhas))}</td>
                       <td>${statusBadge(run.status, toneFromRunStatus(run.status))}</td>
-                      <td>
-                        <div class="table-actions">
-                          <button class="icon-btn" data-action="open-run-details" data-run-id="${run.id}">Ver detalhes</button>
-                          <button class="icon-btn" data-action="run-export" data-run-id="${run.id}">Exportar relatorio</button>
-                          <button class="icon-btn" data-action="run-reprocess-failures" data-run-id="${run.id}">Reprocessar falhas</button>
-                        </div>
-                      </td>
+                      <td>${renderRowActionsMenu(runMenuId, runMenuItems)}</td>
                     </tr>`;
                   })
                   .join(''),
@@ -3475,7 +3554,13 @@ function renderNfeSyncPage() {
             colSpan: 8,
             rowsHtml: clientRows
               .map((row) => {
-                return `<tr>
+                const nfeSyncClientMenuId = `nfe-sync-client:${row.clientId}`;
+                const nfeSyncClientMenuItems = [
+                  { label: clientEnableLabel, action: 'nfe-client-enable', attrs: { 'client-id': row.clientId } },
+                  { label: 'Pausar', action: 'nfe-client-pause', attrs: { 'client-id': row.clientId } },
+                  { label: 'Ver XMLs', action: 'nfe-open-client-xmls', attrs: { 'client-id': row.clientId } }
+                ];
+                return `<tr data-row-actions-menu-id="${escapeHtml(nfeSyncClientMenuId)}">
                   <td>${escapeHtml(row.cliente)}</td>
                   <td>${escapeHtml(formatCnpj(row.cnpj))}</td>
                   <td>${escapeHtml(String(row.totalControles))}</td>
@@ -3486,13 +3571,7 @@ function renderNfeSyncPage() {
                     ${statusBadge(row.statusLabel, row.statusTone)}
                     <span class="row-sub">${escapeHtml(row.statusDetail)}</span>
                   </td>
-                  <td>
-                    <div class="table-actions">
-                      <button class="icon-btn" data-action="nfe-client-enable" data-client-id="${row.clientId}">${escapeHtml(clientEnableLabel)}</button>
-                      <button class="icon-btn" data-action="nfe-client-pause" data-client-id="${row.clientId}">Pausar</button>
-                      <button class="icon-btn" data-action="nfe-open-client-xmls" data-client-id="${row.clientId}">Ver XMLs</button>
-                    </div>
-                  </td>
+                  <td>${renderRowActionsMenu(nfeSyncClientMenuId, nfeSyncClientMenuItems)}</td>
                 </tr>`;
               })
               .join(''),
@@ -3526,7 +3605,23 @@ function renderNfeSyncPage() {
             colSpan: 11,
             rowsHtml: controls
               .map((control) => {
-                return `<tr>
+                const nfeControlMenuId = `nfe-sync-control:${control.clientId}:${control.estabelecimentoId}:${control.ambiente}`;
+                const nfeControlMenuItems = [
+                  {
+                    label: rowRunLabel,
+                    action: rowRunAction,
+                    attrs: { 'client-id': control.clientId, 'estabelecimento-id': control.estabelecimentoId, ambiente: control.ambiente }
+                  },
+                  canUseManualDownloadByKey && sourceMode !== 'dominio_chave'
+                    ? {
+                        label: 'Download por chave',
+                        action: 'nfe-download-by-key-control',
+                        attrs: { 'client-id': control.clientId, 'estabelecimento-id': control.estabelecimentoId, ambiente: control.ambiente }
+                      }
+                    : null,
+                  { label: 'Pausar', action: 'nfe-sync-pause-control', attrs: { 'client-id': control.clientId, ambiente: control.ambiente } }
+                ];
+                return `<tr data-row-actions-menu-id="${escapeHtml(nfeControlMenuId)}">
                   <td>${escapeHtml(control.cliente)}</td>
                   <td>
                     <span class="row-title">${escapeHtml(control.estabelecimento)}</span>
@@ -3543,17 +3638,7 @@ function renderNfeSyncPage() {
                     ${statusBadge(mapNfeSyncStatusLabel(control.status), toneFromNfeSyncStatus(control.status))}
                     <span class="row-sub">${escapeHtml(control.ultimaMensagem || '-')}</span>
                   </td>
-                  <td>
-                    <div class="table-actions">
-                      <button class="icon-btn" data-action="${escapeHtml(rowRunAction)}" data-client-id="${control.clientId}" data-estabelecimento-id="${control.estabelecimentoId}" data-ambiente="${control.ambiente}">${escapeHtml(rowRunLabel)}</button>
-                      ${
-                        canUseManualDownloadByKey && sourceMode !== 'dominio_chave'
-                          ? `<button class="icon-btn" data-action="nfe-download-by-key-control" data-client-id="${control.clientId}" data-estabelecimento-id="${control.estabelecimentoId}" data-ambiente="${control.ambiente}">Download por chave</button>`
-                          : ''
-                      }
-                      <button class="icon-btn" data-action="nfe-sync-pause-control" data-client-id="${control.clientId}" data-ambiente="${control.ambiente}">Pausar</button>
-                    </div>
-                  </td>
+                  <td>${renderRowActionsMenu(nfeControlMenuId, nfeControlMenuItems)}</td>
                 </tr>`;
               })
               .join(''),
@@ -3700,7 +3785,14 @@ function renderNfeLastRunPanel() {
                         row.kind === 'documento' &&
                         Number(row.catalogoId) > 0 &&
                         row.status !== 'ignorado_xml_nao_fiscal';
-                      return `<tr>
+                      const lastRunMenuId = `nfe-last-run:${row.clientId}:${row.catalogoId}`;
+                      const lastRunMenuItems = canHandleXml
+                        ? [
+                            { label: 'Ver XML', action: 'nfe-last-run-view-xml', attrs: { 'client-id': row.clientId, 'catalogo-id': row.catalogoId } },
+                            { label: 'Importar', action: 'nfe-last-run-import-item', attrs: { 'client-id': row.clientId, 'catalogo-id': row.catalogoId } }
+                          ]
+                        : [];
+                      return `<tr ${canHandleXml ? `data-row-actions-menu-id="${escapeHtml(lastRunMenuId)}"` : ''}>
                         <td>${escapeHtml(client?.razaoSocial || row.clientId || '-')}</td>
                         <td>${escapeHtml(
                           establishment?.razaoSocial || establishment?.municipioNome || row.estabelecimentoId || '-'
@@ -3713,14 +3805,7 @@ function renderNfeLastRunPanel() {
                         <td>${escapeHtml(row.kind === 'controle' ? 'Controle' : 'XML')}</td>
                         <td>${escapeHtml(row.mensagem || '-')}</td>
                         <td>
-                          ${
-                            canHandleXml
-                              ? `<div class="table-actions">
-                                  <button class="icon-btn" data-action="nfe-last-run-view-xml" data-client-id="${row.clientId}" data-catalogo-id="${row.catalogoId}">Ver XML</button>
-                                  <button class="icon-btn" data-action="nfe-last-run-import-item" data-client-id="${row.clientId}" data-catalogo-id="${row.catalogoId}">Importar</button>
-                                </div>`
-                              : '<span class="row-sub">-</span>'
-                          }
+                          ${canHandleXml ? renderRowActionsMenu(lastRunMenuId, lastRunMenuItems) : '<span class="row-sub">-</span>'}
                         </td>
                       </tr>`;
                     })
@@ -4001,7 +4086,15 @@ function renderNfeDocumentsTableCard(docs) {
               rowsHtml: docs
                 .map((doc) => {
                   const syncDisabledRow = state.nfeEventsSyncRunning || !canSyncNfeEvents(doc) ? 'disabled' : '';
-                  return `<tr>
+                  const nfeMenuId = `nfe:${doc.id}`;
+                  const nfeMenuItems = [
+                    { label: 'Visualizar detalhes', action: 'nfe-details', attrs: { 'nfe-id': doc.id } },
+                    { label: 'Buscar eventos', action: 'nfe-sync-events', attrs: { 'nfe-id': doc.id }, disabled: Boolean(syncDisabledRow) },
+                    { label: 'Ver XML', action: 'nfe-view', attrs: { 'nfe-id': doc.id } },
+                    doc.xmlCompletoDisponivel ? { label: 'Baixar DANFE', action: 'nfe-download-danfe', attrs: { 'nfe-id': doc.id } } : null,
+                    { label: 'Baixar XML', action: 'nfe-download', attrs: { 'nfe-id': doc.id } }
+                  ];
+                  return `<tr data-row-actions-menu-id="${escapeHtml(nfeMenuId)}">
                     <td><input type="checkbox" data-action="nfe-select" data-nfe-id="${escapeHtml(doc.id)}" ${state.selectedNfeIds.has(doc.id) ? 'checked' : ''} ${doc.apiNfeId ? '' : 'disabled'} aria-label="Selecionar NF-e ${escapeHtml(doc.numeroNfe || '-')}" /></td>
                     <td>${escapeHtml(doc.numeroNfe || '-')}</td>
                     <td>${escapeHtml(doc.cliente)}</td>
@@ -4015,15 +4108,7 @@ function renderNfeDocumentsTableCard(docs) {
                     <td>${statusBadge(mapNfeAmbienteLabel(doc.ambiente), doc.ambiente === 'producao' ? 'success' : 'warning')}</td>
                     <td>${renderNfeStorageBadges(doc)}</td>
                     <td>${renderNfeStatusBadges(doc)}</td>
-                    <td>
-                      <div class="table-actions">
-                        <button class="icon-btn" data-action="nfe-details" data-nfe-id="${doc.id}">Visualizar detalhes</button>
-                        <button class="icon-btn" data-action="nfe-sync-events" data-nfe-id="${doc.id}" ${syncDisabledRow}>Buscar eventos</button>
-                        <button class="icon-btn" data-action="nfe-view" data-nfe-id="${doc.id}">Ver XML</button>
-                        ${doc.xmlCompletoDisponivel ? `<button class="icon-btn" data-action="nfe-download-danfe" data-nfe-id="${doc.id}">Baixar DANFE</button>` : ''}
-                        <button class="icon-btn" data-action="nfe-download" data-nfe-id="${doc.id}">Baixar XML</button>
-                      </div>
-                    </td>
+                    <td>${renderRowActionsMenu(nfeMenuId, nfeMenuItems)}</td>
                   </tr>`;
                 })
                 .join(''),
@@ -4240,7 +4325,14 @@ function renderCteDocumentsTableCard(docs) {
               rowsHtml: docs
                 .map((doc) => {
                   const syncDisabledRow = state.cteEventsSyncRunning || !canSyncCteEvents(doc) ? 'disabled' : '';
-                  return `<tr>
+                  const cteMenuId = `cte:${doc.id}`;
+                  const cteMenuItems = [
+                    { label: 'Visualizar detalhes', action: 'cte-details', attrs: { 'cte-id': doc.id } },
+                    { label: 'Buscar eventos', action: 'cte-sync-events', attrs: { 'cte-id': doc.id }, disabled: Boolean(syncDisabledRow) },
+                    { label: 'Ver XML', action: 'cte-view', attrs: { 'cte-id': doc.id } },
+                    { label: 'Baixar XML', action: 'cte-download', attrs: { 'cte-id': doc.id } }
+                  ];
+                  return `<tr data-row-actions-menu-id="${escapeHtml(cteMenuId)}">
                     <td>${escapeHtml(doc.numeroCte || '-')}</td>
                     <td>${escapeHtml(doc.cliente)}</td>
                     <td>${statusBadge(doc.tipo, doc.tipo === 'Emitido' ? 'success' : doc.tipo === 'Recebido' ? 'info' : 'neutral')}</td>
@@ -4253,14 +4345,7 @@ function renderCteDocumentsTableCard(docs) {
                     <td>${statusBadge(mapNfeAmbienteLabel(doc.ambiente), doc.ambiente === 'producao' ? 'success' : 'warning')}</td>
                     <td>${renderNfeStorageBadges(doc)}</td>
                     <td>${renderCteStatusBadges(doc)}</td>
-                    <td>
-                      <div class="table-actions">
-                        <button class="icon-btn" data-action="cte-details" data-cte-id="${doc.id}">Visualizar detalhes</button>
-                        <button class="icon-btn" data-action="cte-sync-events" data-cte-id="${doc.id}" ${syncDisabledRow}>Buscar eventos</button>
-                        <button class="icon-btn" data-action="cte-view" data-cte-id="${doc.id}">Ver XML</button>
-                        <button class="icon-btn" data-action="cte-download" data-cte-id="${doc.id}">Baixar XML</button>
-                      </div>
-                    </td>
+                    <td>${renderRowActionsMenu(cteMenuId, cteMenuItems)}</td>
                   </tr>`;
                 })
                 .join(''),
@@ -4426,23 +4511,23 @@ function renderNfseGapAuditPage() {
   const rowsHtml = rows
     .map((row) => {
       const preview = renderNfseGapAuditPreview(row.lacunas);
+      const menuId = `gap-audit:${row.clientId}`;
+      const menuItems = [
+        { label: 'Abrir XMLs', action: 'gap-audit-open-xmls', attrs: { 'client-id': row.clientId } },
+        { label: 'Auditar NSU', action: 'gap-audit-run-nsu', attrs: { 'client-id': row.clientId } },
+        { label: 'Recuperar DPS', action: 'gap-audit-recover-dps', attrs: { 'client-id': row.clientId } },
+        { label: 'Recuperar chave', action: 'gap-audit-recover-key', attrs: { 'client-id': row.clientId } },
+        { label: 'Informar excecao', action: 'gap-audit-open-numbering-exception', attrs: { 'client-id': row.clientId } }
+      ];
       return `
-        <tr>
+        <tr data-row-actions-menu-id="${escapeHtml(menuId)}">
           <td><strong>${escapeHtml(row.razaoSocial || 'Sem razao social')}</strong></td>
           <td>${escapeHtml(formatCnpj(row.cnpjConsulta || ''))}</td>
           <td>${escapeHtml(String(row.totalDocumentosAnalisados || 0))}</td>
           <td>${statusBadge(`${Number(row.totalFaixasLacuna || 0)} faixa(s)`, Number(row.totalFaixasLacuna || 0) > 0 ? 'warning' : 'neutral')}</td>
           <td>${escapeHtml(String(row.totalNumerosPulados || 0))}</td>
           <td style="min-width:220px;">${escapeHtml(preview)}</td>
-          <td>
-            <div class="table-actions">
-              <button class="btn secondary" type="button" data-action="gap-audit-open-xmls" data-client-id="${escapeHtml(row.clientId)}">Abrir XMLs</button>
-              <button class="btn secondary" type="button" data-action="gap-audit-run-nsu" data-client-id="${escapeHtml(row.clientId)}">Auditar NSU</button>
-              <button class="btn secondary" type="button" data-action="gap-audit-recover-dps" data-client-id="${escapeHtml(row.clientId)}">Recuperar DPS</button>
-              <button class="btn secondary" type="button" data-action="gap-audit-recover-key" data-client-id="${escapeHtml(row.clientId)}">Recuperar chave</button>
-              <button class="btn secondary" type="button" data-action="gap-audit-open-numbering-exception" data-client-id="${escapeHtml(row.clientId)}">Informar excecao</button>
-            </div>
-          </td>
+          <td>${renderRowActionsMenu(menuId, menuItems)}</td>
         </tr>
       `;
     })
@@ -4777,7 +4862,22 @@ function renderXmlsTableCard(xmls) {
                     !canSyncXmlEvents(xml)
                       ? 'disabled'
                       : '';
-                  return `<tr class="${xml.cancelada ? 'xml-row-cancelled' : ''}">
+                  const xmlMenuId = `xml:${xml.id}`;
+                  const xmlActionsItems = xml.isNumberingException
+                    ? []
+                    : [
+                        { label: 'Visualizar detalhes', action: 'xml-details', attrs: { 'xml-id': xml.id } },
+                        {
+                          label: xml.ignorarNumeracaoValidacao ? 'Voltar numeracao' : 'Desconsiderar numeracao',
+                          action: 'xml-toggle-numbering-validation',
+                          attrs: { 'xml-id': xml.id }
+                        },
+                        { label: 'Buscar eventos', action: 'xml-sync-events', attrs: { 'xml-id': xml.id }, disabled: Boolean(xmlSyncDisabled) },
+                        { label: 'Ver XML', action: 'xml-view', attrs: { 'xml-id': xml.id } },
+                        { label: 'Baixar XML', action: 'xml-download', attrs: { 'xml-id': xml.id } },
+                        { label: 'Baixar DANFSE', action: 'xml-download-danfse', attrs: { 'xml-id': xml.id } }
+                      ];
+                  return `<tr class="${xml.cancelada ? 'xml-row-cancelled' : ''}" ${xml.isNumberingException ? '' : `data-row-actions-menu-id="${escapeHtml(xmlMenuId)}"`}>
                     <td><input type="checkbox" data-action="xml-select" data-xml-id="${escapeHtml(xml.id)}" ${state.selectedXmlIds.has(xml.id) ? 'checked' : ''} ${xml.apiNfseId ? '' : 'disabled'} aria-label="Selecionar NFS-e ${escapeHtml(xml.numeroNfse || '-')}" /></td>
                     <td>${renderNfseNumber(xml)}</td>
                     <td>${escapeHtml(xml.cliente)}</td>
@@ -4792,14 +4892,7 @@ function renderXmlsTableCard(xmls) {
                       ${
                         xml.isNumberingException
                           ? '<span class="row-sub">Somente informativo</span>'
-                          : `<div class="table-actions">
-                              <button class="icon-btn" data-action="xml-details" data-xml-id="${xml.id}">Visualizar detalhes</button>
-                              <button class="icon-btn" data-action="xml-toggle-numbering-validation" data-xml-id="${xml.id}">${escapeHtml(xml.ignorarNumeracaoValidacao ? 'Voltar numeracao' : 'Desconsiderar numeracao')}</button>
-                              <button class="icon-btn" data-action="xml-sync-events" data-xml-id="${xml.id}" ${xmlSyncDisabled}>Buscar eventos</button>
-                              <button class="icon-btn" data-action="xml-view" data-xml-id="${xml.id}">Ver XML</button>
-                              <button class="icon-btn" data-action="xml-download" data-xml-id="${xml.id}">Baixar XML</button>
-                              <button class="icon-btn" data-action="xml-download-danfse" data-xml-id="${xml.id}">Baixar DANFSE</button>
-                            </div>`
+                          : renderRowActionsMenu(xmlMenuId, xmlActionsItems)
                       }
                     </td>
                   </tr>`;
@@ -5416,8 +5509,9 @@ function renderXmlReader30ResultsTable(results) {
                     .map((row) => {
                       const actions = renderXmlReader30Actions(row);
                       const selectionKey = getXmlReader30SelectionKey(row);
+                      const rowMenuId = getXmlReader30ActionsMenuId(row);
                       return `
-                        <tr>
+                        <tr data-row-actions-menu-id="${escapeHtml(rowMenuId)}">
                           <td class="xml-reader30-check">
                             <input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Selecionar ${escapeHtml(row.documentLabel)} ${escapeHtml(row.numeroLabel)}" />
                           </td>
@@ -5441,9 +5535,7 @@ function renderXmlReader30ResultsTable(results) {
                               ${statusBadge(row.storageLabel, row.storageTone)}
                             </div>
                           </td>
-                          <td>
-                            <div class="table-actions">${actions}</div>
-                          </td>
+                          <td>${actions}</td>
                         </tr>
                       `;
                     })
@@ -6684,25 +6776,30 @@ function renderXmlReader30ResultsTableLegacyUnusedOld2(results) {
   `;
 }
 
+function getXmlReader30ActionsMenuId(row) {
+  return `xml-reader30:${row.documentType}:${row.rowId}`;
+}
+
 function renderXmlReader30Actions(row) {
+  const menuId = getXmlReader30ActionsMenuId(row);
   if (row.documentType === 'nfse') {
-    return `
-      <button class="icon-btn" data-action="xml-details" data-xml-id="${escapeHtml(row.rowId)}">Detalhes</button>
-      <button class="icon-btn" data-action="xml-view" data-xml-id="${escapeHtml(row.rowId)}">Ver XML</button>
-    `;
+    return renderRowActionsMenu(menuId, [
+      { label: 'Detalhes', action: 'xml-details', attrs: { 'xml-id': row.rowId } },
+      { label: 'Ver XML', action: 'xml-view', attrs: { 'xml-id': row.rowId } }
+    ]);
   }
 
   if (row.documentType === 'nfe') {
-    return `
-      <button class="icon-btn" data-action="nfe-details" data-nfe-id="${escapeHtml(row.rowId)}">Detalhes</button>
-      <button class="icon-btn" data-action="nfe-view" data-nfe-id="${escapeHtml(row.rowId)}">Ver XML</button>
-    `;
+    return renderRowActionsMenu(menuId, [
+      { label: 'Detalhes', action: 'nfe-details', attrs: { 'nfe-id': row.rowId } },
+      { label: 'Ver XML', action: 'nfe-view', attrs: { 'nfe-id': row.rowId } }
+    ]);
   }
 
-  return `
-    <button class="icon-btn" data-action="cte-details" data-cte-id="${escapeHtml(row.rowId)}">Detalhes</button>
-    <button class="icon-btn" data-action="cte-view" data-cte-id="${escapeHtml(row.rowId)}">Ver XML</button>
-  `;
+  return renderRowActionsMenu(menuId, [
+    { label: 'Detalhes', action: 'cte-details', attrs: { 'cte-id': row.rowId } },
+    { label: 'Ver XML', action: 'cte-view', attrs: { 'cte-id': row.rowId } }
+  ]);
 }
 
 function renderXmlReader30ActionsLegacyUnused(row) {
@@ -10859,6 +10956,61 @@ function renderPageHeader({ title, description, actions, badgeText = '' }) {
 
 function actionButton(label, action, variant, disabled = false) {
   return `<button class="btn ${variant}" type="button" data-action="${action}"${disabled ? ' disabled' : ''}>${escapeHtml(label)}</button>`;
+}
+
+function renderRowActionsMenuItem(item) {
+  const attrs = Object.entries(item.attrs || {})
+    .map(([key, value]) => ` data-${key}="${escapeHtml(String(value))}"`)
+    .join('');
+  return `
+    <button
+      type="button"
+      class="row-actions-menu-item${item.variant === 'danger' ? ' danger' : ''}"
+      data-action="${escapeHtml(item.action)}"
+      role="menuitem"
+      ${item.disabled ? 'disabled' : ''}${attrs}
+    >${escapeHtml(item.label)}</button>
+  `;
+}
+
+function renderRowActionsMenu(menuId, items) {
+  const normalizedId = String(menuId || '');
+  const visibleItems = (Array.isArray(items) ? items : []).filter(Boolean);
+  const isOpen = Boolean(normalizedId) && state.rowActionsMenu.openId === normalizedId;
+  const anchor = state.rowActionsMenu.anchor || { top: 8, left: 8 };
+
+  if (!visibleItems.length) {
+    return '';
+  }
+
+  return `
+    <div class="row-actions-menu-wrap" data-row-actions-menu-wrap>
+      <button
+        class="row-actions-menu-trigger"
+        type="button"
+        data-action="row-actions-menu-toggle"
+        data-menu-id="${escapeHtml(normalizedId)}"
+        aria-haspopup="true"
+        aria-expanded="${isOpen ? 'true' : 'false'}"
+        aria-label="Abrir menu de acoes"
+        title="Acoes"
+      >&#8942;</button>
+      ${
+        isOpen
+          ? `
+            <div
+              class="row-actions-menu-panel"
+              role="menu"
+              aria-label="Menu de acoes"
+              style="top:${escapeHtml(String(anchor.top))}px; left:${escapeHtml(String(anchor.left))}px;"
+            >
+              ${visibleItems.map((item) => renderRowActionsMenuItem(item)).join('')}
+            </div>
+          `
+          : ''
+      }
+    </div>
+  `;
 }
 
 function statCard(iconKey, label, value, caption, tone) {

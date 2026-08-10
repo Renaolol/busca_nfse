@@ -1491,6 +1491,87 @@ tbody tr:hover {
   flex-wrap: wrap;
 }
 
+.row-actions-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.row-actions-menu-trigger {
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  color: #52596b;
+  cursor: pointer;
+  height: 30px;
+  width: 34px;
+  font-size: 1rem;
+  line-height: 1;
+  border-radius: 8px;
+}
+
+.row-actions-menu-trigger:hover {
+  background: #f8f8fa;
+  color: var(--accent);
+}
+
+.row-actions-menu-trigger[aria-expanded="true"] {
+  background: rgba(97, 124, 255, 0.1);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.row-actions-menu-panel {
+  position: fixed;
+  z-index: 999;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgba(17, 24, 39, 0.14);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.row-actions-menu-item {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  border-radius: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #243041;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.row-actions-menu-item:hover {
+  background: #eef3ff;
+  color: var(--accent);
+}
+
+.row-actions-menu-item.danger {
+  color: #c1362f;
+}
+
+.row-actions-menu-item.danger:hover {
+  background: #fdecea;
+  color: #c1362f;
+}
+
+.row-actions-menu-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.row-actions-menu-item:disabled:hover {
+  background: transparent;
+  color: #243041;
+}
+
 .xml-reader30-table {
   min-width: 980px;
 }
