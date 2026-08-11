@@ -2086,7 +2086,21 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     ambiente: Ambiente;
     nsu: bigint;
   }): Promise<boolean> {
-    const document = await this.prisma.nfseDocumento.findFirst({
+    const document = await this.findClienteNsuReference(params);
+    return Boolean(document && this.hasDocumentoFiscalData(document));
+  }
+
+  /**
+   * O NSU de uma nota e por cliente consultante, nao por documento: quando este cliente e o
+   * tomador (ou emissor) de uma nota cuja custodia pertence a outro cliente, o NSU dele fica
+   * registrado no NfseDocumentoVinculo, nao na linha principal de NfseDocumento.
+   */
+  private async findClienteNsuReference(params: {
+    clienteId: string;
+    ambiente: Ambiente;
+    nsu: bigint;
+  }): Promise<{ xmlPath: string | null; numeroNfse: string | null; dataEmissao: Date | null } | null> {
+    const ownDocumento = await this.prisma.nfseDocumento.findFirst({
       where: {
         clienteId: params.clienteId,
         ambiente: params.ambiente,
@@ -2098,8 +2112,100 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         dataEmissao: true
       }
     });
+    if (ownDocumento) {
+      return ownDocumento;
+    }
 
-    return Boolean(document && this.hasDocumentoFiscalData(document));
+    const vinculo = await this.prisma.nfseDocumentoVinculo.findUnique({
+      where: {
+        clienteId_ambiente_nsu: {
+          clienteId: params.clienteId,
+          ambiente: params.ambiente,
+          nsu: params.nsu
+        }
+      },
+      select: {
+        documento: {
+          select: { xmlPath: true, numeroNfse: true, dataEmissao: true }
+        }
+      }
+    });
+
+    return vinculo?.documento ?? null;
+  }
+
+  /**
+   * Mesma ideia de findClienteNsuReference, mas indexado por chaveAcesso em vez de nsu: usado ao
+   * decidir se um documento recebido via ADN ja foi processado por este cliente, mesmo quando a
+   * custodia da linha principal pertence a outro cliente (prestador/tomador da mesma nota).
+   */
+  private async findClienteReferenceForChave(params: {
+    clienteId: string;
+    chaveAcesso: string;
+  }): Promise<{
+    ambiente: Ambiente;
+    status: string | null;
+    dataCancelamento: Date | null;
+    nsu: bigint | null;
+    xmlPath: string | null;
+    numeroNfse: string | null;
+    dataEmissao: Date | null;
+    hashXml: string | null;
+  } | null> {
+    const ownDocumento = await this.prisma.nfseDocumento.findFirst({
+      where: {
+        clienteId: params.clienteId,
+        chaveAcesso: params.chaveAcesso
+      },
+      select: {
+        ambiente: true,
+        status: true,
+        dataCancelamento: true,
+        nsu: true,
+        xmlPath: true,
+        numeroNfse: true,
+        dataEmissao: true,
+        hashXml: true
+      }
+    });
+    if (ownDocumento) {
+      return ownDocumento;
+    }
+
+    const vinculo = await this.prisma.nfseDocumentoVinculo.findFirst({
+      where: {
+        clienteId: params.clienteId,
+        documento: { chaveAcesso: params.chaveAcesso }
+      },
+      select: {
+        nsu: true,
+        documento: {
+          select: {
+            ambiente: true,
+            status: true,
+            dataCancelamento: true,
+            xmlPath: true,
+            numeroNfse: true,
+            dataEmissao: true,
+            hashXml: true
+          }
+        }
+      }
+    });
+    if (!vinculo) {
+      return null;
+    }
+
+    return {
+      ambiente: vinculo.documento.ambiente,
+      status: vinculo.documento.status,
+      dataCancelamento: vinculo.documento.dataCancelamento,
+      nsu: vinculo.nsu,
+      xmlPath: vinculo.documento.xmlPath,
+      numeroNfse: vinculo.documento.numeroNfse,
+      dataEmissao: vinculo.documento.dataEmissao,
+      hashXml: vinculo.documento.hashXml
+    };
   }
 
   private async updateControlAfterPastNsuReprocess(
@@ -2206,22 +2312,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     const hash = this.parser.getHash(params.document.xml);
     const effectiveAmbiente = this.resolveNfseAmbienteFromParsed(parsedXml, params.control.ambiente);
-    const existingDocument = await this.prisma.nfseDocumento.findFirst({
-      where: {
-        clienteId: params.control.clienteId,
-        chaveAcesso: chave
-      },
-      select: {
-        id: true,
-        ambiente: true,
-        status: true,
-        dataCancelamento: true,
-        nsu: true,
-        xmlPath: true,
-        numeroNfse: true,
-        dataEmissao: true,
-        hashXml: true
-      }
+    const existingDocument = await this.findClienteReferenceForChave({
+      clienteId: params.control.clienteId,
+      chaveAcesso: chave
     });
     const hadPersistedFiscalData = Boolean(existingDocument && this.hasDocumentoFiscalData(existingDocument));
     if (this.shouldSkipPersistedDocumento(existingDocument, hash, params.document.nsu)) {
@@ -2619,6 +2712,16 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     updateData: Prisma.NfseDocumentoUncheckedUpdateInput;
     createData: Prisma.NfseDocumentoUncheckedCreateInput;
   }): Promise<NfseDocumento | null> {
+    const documentoSelect = {
+      id: true,
+      chaveAcesso: true,
+      clienteId: true,
+      estabelecimentoId: true,
+      ambiente: true,
+      cnpjPrestador: true,
+      cnpjTomador: true
+    } as const;
+
     const existingByChave = await this.prisma.nfseDocumento.findUnique({
       where: {
         ambiente_chaveAcesso: {
@@ -2626,11 +2729,16 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           chaveAcesso: params.chaveAcesso
         }
       },
-      select: {
-        id: true,
-        chaveAcesso: true
-      }
+      select: documentoSelect
     });
+
+    // A nota ja pertence (por custodia) a outro cliente cadastrado -- tipicamente o prestador ou
+    // o tomador da mesma NFS-e, cujo proprio ciclo de sync ja trouxe o documento primeiro. Nesse
+    // caso NAO reatribuimos a linha principal: apenas garantimos o vinculo (emissao/tomada) deste
+    // cliente, preservando a custodia original e o NSU de cada cliente de forma independente.
+    if (existingByChave && existingByChave.clienteId !== params.clienteId) {
+      return this.linkDocumentoAsVinculo(existingByChave, params);
+    }
 
     if (params.nsu === undefined) {
       if (!existingByChave) {
@@ -2648,10 +2756,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           nsu: params.nsu
         }
       },
-      select: {
-        id: true,
-        chaveAcesso: true
-      }
+      select: documentoSelect
     });
 
     if (!existingByChave && !existingByNsu) {
@@ -2659,6 +2764,15 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (existingByChave && existingByNsu && existingByChave.id !== existingByNsu.id) {
+      // Ambos os candidatos, se existirem aqui, pertencem a params.clienteId: existingByChave ja
+      // foi filtrado acima (cross-cliente delega para linkDocumentoAsVinculo) e existingByNsu vem
+      // de uma busca cuja propria chave composta exige clienteId = params.clienteId.
+      if (existingByChave.clienteId !== existingByNsu.clienteId) {
+        throw new Error(
+          `Reconciliacao por NSU ${params.nsu.toString()} encontrou clientes divergentes (${existingByChave.clienteId} vs ${existingByNsu.clienteId}); abortando merge para evitar mesclar documentos de clientes diferentes.`
+        );
+      }
+
       await this.mergeDocumentoDuplicates({
         canonicalId: existingByChave.id,
         duplicateId: existingByNsu.id,
@@ -2685,6 +2799,54 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     return this.updateDocumentoById(target.id, params);
+  }
+
+  /**
+   * A nota ja esta armazenada sob a custodia de outro cliente (prestador/tomador cadastrado da
+   * mesma NFS-e). Registra apenas o NfseDocumentoVinculo do cliente atual (com papel resolvido
+   * por CNPJ e o NSU deste cliente), sem tocar clienteId/estabelecimentoId/nsu da linha principal.
+   */
+  private async linkDocumentoAsVinculo(
+    existingByChave: {
+      id: string;
+      chaveAcesso: string;
+      clienteId: string;
+      estabelecimentoId: string;
+      ambiente: Ambiente;
+      cnpjPrestador: string | null;
+      cnpjTomador: string | null;
+    },
+    params: {
+      ambiente: Ambiente;
+      clienteId: string;
+      nsu?: bigint;
+      updateData: Prisma.NfseDocumentoUncheckedUpdateInput;
+      createData: Prisma.NfseDocumentoUncheckedCreateInput;
+    }
+  ): Promise<NfseDocumento> {
+    this.logger.log(
+      `NFS-e ${existingByChave.chaveAcesso} ja pertence ao cliente ${existingByChave.clienteId}; registrando vinculo adicional para o cliente ${params.clienteId} sem alterar a custodia original.`
+    );
+
+    const cnpjPrestador = (params.createData.cnpjPrestador as string | null | undefined) ?? existingByChave.cnpjPrestador;
+    const cnpjTomador = (params.createData.cnpjTomador as string | null | undefined) ?? existingByChave.cnpjTomador;
+
+    await this.nfseService.syncDocumentoVinculos(
+      existingByChave.id,
+      existingByChave.ambiente,
+      cnpjPrestador,
+      cnpjTomador,
+      existingByChave.clienteId,
+      existingByChave.estabelecimentoId,
+      params.nsu !== undefined ? { clienteId: params.clienteId, nsu: params.nsu } : undefined
+    );
+
+    // O valor de retorno nao e usado pelos chamadores (upsertDocumentoResolvingNsuConflict /
+    // persistDfeDocumentFromNsu descartam o resultado) -- so precisa ser truthy para que o
+    // chamador nao interprete "nada encontrado" e caia no upsert bruto, recriando/reatribuindo a
+    // nota. A linha principal nao foi alterada aqui, entao devolver o proprio existingByChave e
+    // seguro (evita um round-trip extra ao banco so para reconstruir o mesmo objeto).
+    return existingByChave as unknown as NfseDocumento;
   }
 
   private async tryReconcileDocumentoByNsu(params: {
@@ -2765,6 +2927,24 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     },
     options: { identityChanged?: boolean } = {}
   ): Promise<NfseDocumento> {
+    // Defesa contra regressao: esta funcao reatribui a custodia (clienteId/estabelecimentoId/nsu)
+    // da linha principal, o que so e seguro quando o chamador ja confirmou que o documento
+    // pertence (ou nao pertence a ninguem ainda) ao cliente do proprio params.createData.clienteId.
+    // resolveExistingDocumentoBeforeUpsert intercepta o caso cross-cliente antes de chegar aqui
+    // (delegando para linkDocumentoAsVinculo); se essa invariante for violada por uma mudanca
+    // futura, prefira falhar alto a silenciosamente roubar a posse do documento de outro cliente.
+    const current = await this.prisma.nfseDocumento.findUnique({
+      where: { id: documentoId },
+      select: { clienteId: true }
+    });
+    if (current && params.createData.clienteId && current.clienteId !== params.createData.clienteId) {
+      throw new Error(
+        `Tentativa de reatribuir a custodia da NFS-e ${params.chaveAcesso} do cliente ${current.clienteId} para ${String(
+          params.createData.clienteId
+        )} bloqueada; use syncDocumentoVinculos para vincular outro cliente sem alterar a custodia.`
+      );
+    }
+
     return this.prisma.nfseDocumento.update({
       where: { id: documentoId },
       data: {

@@ -46,6 +46,10 @@ describe('SyncService', () => {
       findFirst: jest.fn(),
       findMany: jest.fn()
     },
+    nfseDocumentoVinculo: {
+      findUnique: jest.fn(),
+      findFirst: jest.fn()
+    },
     nfseEvento: {
       upsert: jest.fn(),
       updateMany: jest.fn()
@@ -71,7 +75,8 @@ describe('SyncService', () => {
     getHash: jest.fn().mockReturnValue('hash')
   };
   const nfseService = {
-    sincronizarEventos: jest.fn()
+    sincronizarEventos: jest.fn(),
+    syncDocumentoVinculos: jest.fn()
   };
 
   let service: SyncService;
@@ -139,6 +144,8 @@ describe('SyncService', () => {
     prisma.nfseDocumento.findUnique.mockResolvedValue(null);
     prisma.nfseDocumento.findFirst.mockResolvedValue(null);
     prisma.nfseDocumento.findMany.mockResolvedValue([]);
+    prisma.nfseDocumentoVinculo.findUnique.mockResolvedValue(null);
+    prisma.nfseDocumentoVinculo.findFirst.mockResolvedValue(null);
     prisma.nfseEvento.upsert.mockResolvedValue({});
     prisma.nfseEvento.updateMany.mockResolvedValue({ count: 0 });
     storage.getObject.mockRejectedValue(new Error('ENOENT: no such file or directory'));
@@ -151,6 +158,7 @@ describe('SyncService', () => {
       falhas: 0,
       detalhes: []
     });
+    nfseService.syncDocumentoVinculos.mockResolvedValue(undefined);
 
     service = buildService();
   });
@@ -370,6 +378,66 @@ describe('SyncService', () => {
           descricaoServico: 'consultoria'
         })
       })
+    );
+  });
+
+  it('registra vinculo em vez de reatribuir custodia quando a chave ja pertence a outro cliente', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 8n
+      }
+    ]);
+
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 9n,
+      hasDocument: true,
+      chaveAcesso: '42110092206960810000176000000000000926062205552016',
+      xml: '<NFSe>ok</NFSe>',
+      statusCode: 200,
+      message: null,
+      rawResponse: {}
+    });
+
+    parser.parse.mockReturnValue({
+      chaveAcesso: '42110092206960810000176000000000000926062205552016',
+      numeroNfse: '9',
+      status: '100',
+      cnpjPrestador: '44454248000106',
+      cnpjTomador: '12345678000199'
+    });
+
+    prisma.nfseDocumento.findUnique.mockImplementation((args: { where: { ambiente_chaveAcesso?: unknown; id?: string } }) => {
+      if (args.where.ambiente_chaveAcesso) {
+        return Promise.resolve({
+          id: 'doc-outro-cliente',
+          chaveAcesso: '42110092206960810000176000000000000926062205552016',
+          clienteId: 'cliente-outro',
+          estabelecimentoId: 'estab-outro',
+          ambiente: Ambiente.producao,
+          cnpjPrestador: '44454248000106',
+          cnpjTomador: '12345678000199'
+        });
+      }
+      return Promise.resolve(null);
+    });
+
+    await service.runNow();
+
+    expect(prisma.nfseDocumento.upsert).not.toHaveBeenCalled();
+    expect(prisma.nfseDocumento.update).not.toHaveBeenCalled();
+    expect(nfseService.syncDocumentoVinculos).toHaveBeenCalledWith(
+      'doc-outro-cliente',
+      Ambiente.producao,
+      '44454248000106',
+      '12345678000199',
+      'cliente-outro',
+      'estab-outro',
+      { clienteId: 'cliente-1', nsu: 9n }
     );
   });
 

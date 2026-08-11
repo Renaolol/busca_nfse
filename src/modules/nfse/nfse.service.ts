@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
-import { Ambiente, DocumentoOrigem, NfseDocumento, Prisma } from '@prisma/client';
+import { Ambiente, DocumentoOrigem, NfseDocumento, NfseDocumentoVinculo, NfseDocumentoVinculoPapel, Prisma } from '@prisma/client';
 import JSZip from 'jszip';
 import { NfseAmbiente } from '../../common/enums/nfse-ambiente.enum';
 import { resolveDominioPythonBin } from '../../integrations/dominio-nfe/python-bin';
@@ -210,11 +210,7 @@ export class NfseService {
   }
 
   async getDashboardStats(query: DashboardStatsQueryDto) {
-    const where: Prisma.NfseDocumentoWhereInput = {};
-
-    if (query.clienteId) {
-      where.clienteId = query.clienteId;
-    }
+    const where: Prisma.NfseDocumentoWhereInput = query.clienteId ? this.buildClienteVinculoCondition(query.clienteId) : {};
 
     const storedXmlWhere: Prisma.NfseDocumentoWhereInput = {
       ...where,
@@ -223,53 +219,59 @@ export class NfseService {
       }
     };
 
-    const [totalNfse, storedXmls, totalByClientRows, storedByClientRows] = await Promise.all([
+    // "byClient" conta cada nota tanto para o cliente-emissao quanto para o cliente-tomada quando
+    // a nota estiver vinculada aos dois (NfseDocumentoVinculo). Documentos sem nenhum vinculo por
+    // CNPJ (ex.: legado antes do backfill, ou CNPJ sem cliente cadastrado) continuam contando para
+    // o cliente de custodia (NfseDocumento.clienteId), preservando o comportamento anterior.
+    const vinculoScope: Prisma.NfseDocumentoVinculoWhereInput = query.clienteId ? { clienteId: query.clienteId } : {};
+    const vinculoStoredScope: Prisma.NfseDocumentoVinculoWhereInput = {
+      ...vinculoScope,
+      documento: { xmlPath: { not: null } }
+    };
+    const orphanCustodyWhere: Prisma.NfseDocumentoWhereInput = { ...where, vinculos: { none: {} } };
+    const orphanCustodyStoredWhere: Prisma.NfseDocumentoWhereInput = { ...orphanCustodyWhere, xmlPath: { not: null } };
+
+    const [totalNfse, storedXmls, vinculoTotalRows, vinculoStoredRows, orphanTotalRows, orphanStoredRows] = await Promise.all([
       this.prisma.nfseDocumento.count({ where }),
       this.prisma.nfseDocumento.count({ where: storedXmlWhere }),
-      this.prisma.nfseDocumento.groupBy({
+      this.prisma.nfseDocumentoVinculo.groupBy({
         by: ['clienteId'],
-        where,
-        _count: {
-          _all: true
-        }
+        where: vinculoScope,
+        _count: { _all: true }
+      }),
+      this.prisma.nfseDocumentoVinculo.groupBy({
+        by: ['clienteId'],
+        where: vinculoStoredScope,
+        _count: { _all: true }
       }),
       this.prisma.nfseDocumento.groupBy({
         by: ['clienteId'],
-        where: storedXmlWhere,
-        _count: {
-          _all: true
-        }
+        where: orphanCustodyWhere,
+        _count: { _all: true }
+      }),
+      this.prisma.nfseDocumento.groupBy({
+        by: ['clienteId'],
+        where: orphanCustodyStoredWhere,
+        _count: { _all: true }
       })
     ]);
 
     const byClient = new Map<string, { clienteId: string; totalNfse: number; storedXmls: number }>();
 
-    totalByClientRows.forEach((row) => {
-      if (!row.clienteId) {
+    const addCount = (clienteId: string | null | undefined, field: 'totalNfse' | 'storedXmls', count: number) => {
+      if (!clienteId) {
         return;
       }
 
-      byClient.set(row.clienteId, {
-        clienteId: row.clienteId,
-        totalNfse: row._count._all,
-        storedXmls: 0
-      });
-    });
+      const current = byClient.get(clienteId) ?? { clienteId, totalNfse: 0, storedXmls: 0 };
+      current[field] += count;
+      byClient.set(clienteId, current);
+    };
 
-    storedByClientRows.forEach((row) => {
-      if (!row.clienteId) {
-        return;
-      }
-
-      const current = byClient.get(row.clienteId) ?? {
-        clienteId: row.clienteId,
-        totalNfse: 0,
-        storedXmls: 0
-      };
-
-      current.storedXmls = row._count._all;
-      byClient.set(row.clienteId, current);
-    });
+    vinculoTotalRows.forEach((row) => addCount(row.clienteId, 'totalNfse', row._count._all));
+    orphanTotalRows.forEach((row) => addCount(row.clienteId, 'totalNfse', row._count._all));
+    vinculoStoredRows.forEach((row) => addCount(row.clienteId, 'storedXmls', row._count._all));
+    orphanStoredRows.forEach((row) => addCount(row.clienteId, 'storedXmls', row._count._all));
 
     return {
       totalNfse,
@@ -1326,7 +1328,8 @@ export class NfseService {
     return {
       eventos: {
         orderBy: [{ dataEvento: 'desc' }, { createdAt: 'desc' }]
-      }
+      },
+      vinculos: true
     };
   }
 
@@ -1562,7 +1565,7 @@ export class NfseService {
     const andConditions = this.getAndConditions(where);
 
     if (query.clienteId) {
-      andConditions.push({ clienteId: query.clienteId });
+      andConditions.push(this.buildClienteVinculoCondition(query.clienteId));
     }
 
     const cnpjPrestador = this.normalizeCnpj(query.cnpjPrestador);
@@ -1675,6 +1678,77 @@ export class NfseService {
       pageSize,
       skip: (page - 1) * pageSize
     };
+  }
+
+  private buildClienteVinculoCondition(clienteId: string): Prisma.NfseDocumentoWhereInput {
+    return {
+      OR: [{ clienteId }, { vinculos: { some: { clienteId } } }]
+    };
+  }
+
+  /**
+   * Garante que a nota fique vinculada tanto ao cliente-prestador (papel emissao) quanto ao
+   * cliente-tomador (papel tomada) quando ambos os CNPJs baterem com um ClienteEstabelecimento
+   * cadastrado, sem depender de qual dos dois foi importado/sincronizado primeiro.
+   */
+  async syncDocumentoVinculos(
+    nfseDocumentoId: string,
+    ambiente: Ambiente,
+    cnpjPrestador: string | null | undefined,
+    cnpjTomador: string | null | undefined,
+    custodiaClienteId?: string,
+    custodiaEstabelecimentoId?: string,
+    nsuPorCliente?: { clienteId: string; nsu: bigint | null }
+  ): Promise<void> {
+    const papeis: Array<{ papel: NfseDocumentoVinculoPapel; cnpj: string | null | undefined }> = [
+      { papel: NfseDocumentoVinculoPapel.emissao, cnpj: cnpjPrestador },
+      { papel: NfseDocumentoVinculoPapel.tomada, cnpj: cnpjTomador }
+    ];
+
+    for (const { papel, cnpj } of papeis) {
+      const cnpjNormalizado = this.normalizeCnpj(cnpj);
+      if (!cnpjNormalizado) {
+        continue;
+      }
+
+      const candidatos = await this.prisma.clienteEstabelecimento.findMany({
+        where: { cnpj: cnpjNormalizado },
+        orderBy: { id: 'asc' }
+      });
+      if (candidatos.length === 0) {
+        continue;
+      }
+
+      const estabelecimento =
+        candidatos.find((candidato) => candidato.id === custodiaEstabelecimentoId) ??
+        candidatos.find((candidato) => candidato.clienteId === custodiaClienteId) ??
+        candidatos[0];
+
+      const nsu = nsuPorCliente && nsuPorCliente.clienteId === estabelecimento.clienteId ? nsuPorCliente.nsu : undefined;
+
+      await this.prisma.nfseDocumentoVinculo.upsert({
+        where: {
+          nfseDocumentoId_papel: {
+            nfseDocumentoId,
+            papel
+          }
+        },
+        update: {
+          clienteId: estabelecimento.clienteId,
+          estabelecimentoId: estabelecimento.id,
+          ambiente,
+          ...(nsu !== undefined ? { nsu } : {})
+        },
+        create: {
+          nfseDocumentoId,
+          clienteId: estabelecimento.clienteId,
+          estabelecimentoId: estabelecimento.id,
+          papel,
+          ambiente,
+          ...(nsu !== undefined ? { nsu } : {})
+        }
+      });
+    }
   }
 
   private normalizeCnpj(value?: string | null): string | undefined {
@@ -2591,12 +2665,15 @@ export class NfseService {
 
     const competencia = parsed.competencia ?? new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1));
 
+    const custodiaClienteId = existingForUpdate?.clienteId ?? dto.clienteId;
+    const custodiaEstabelecimentoId = existingForUpdate?.estabelecimentoId ?? dto.estabelecimentoId;
+
     const nfse = existingId
       ? await this.prisma.nfseDocumento.update({
           where: { id: existingId },
           data: {
-            clienteId: dto.clienteId,
-            estabelecimentoId: dto.estabelecimentoId,
+            clienteId: custodiaClienteId,
+            estabelecimentoId: custodiaEstabelecimentoId,
             ambiente,
             nsu: null,
             numeroNfse: parsed.numeroNfse,
@@ -2627,8 +2704,8 @@ export class NfseService {
         })
       : await this.prisma.nfseDocumento.create({
           data: {
-            clienteId: dto.clienteId,
-            estabelecimentoId: dto.estabelecimentoId,
+            clienteId: custodiaClienteId,
+            estabelecimentoId: custodiaEstabelecimentoId,
             ambiente,
             nsu: null,
             chaveAcesso: parsed.chaveAcesso,
@@ -2659,6 +2736,15 @@ export class NfseService {
           }
         });
 
+    await this.syncDocumentoVinculos(
+      nfse.id,
+      nfse.ambiente,
+      parsed.cnpjPrestador,
+      parsed.cnpjTomador,
+      nfse.clienteId,
+      nfse.estabelecimentoId
+    );
+
     return {
       id: nfse.id,
       chaveAcesso: nfse.chaveAcesso,
@@ -2677,30 +2763,45 @@ export class NfseService {
     origem: DocumentoOrigem;
   }) {
     const cancelamentoData = this.buildCancelamentoDocumentoData(params.evento);
+    const existing = await this.findDocumentoByChaveAnyAmbiente(params.evento.chaveAcesso, params.ambiente);
 
-    return this.prisma.nfseDocumento.upsert({
-      where: {
-        ambiente_chaveAcesso: {
-          ambiente: params.ambiente,
-          chaveAcesso: params.evento.chaveAcesso
-        }
-      },
-      update: {
-        clienteId: params.clienteId,
-        estabelecimentoId: params.estabelecimentoId,
-        nsu: null,
-        ...cancelamentoData
-      },
-      create: {
-        clienteId: params.clienteId,
-        estabelecimentoId: params.estabelecimentoId,
-        ambiente: params.ambiente,
-        nsu: null,
-        chaveAcesso: params.evento.chaveAcesso,
-        ...cancelamentoData,
-        origem: params.origem
-      }
-    });
+    // Preserva a custodia original do documento (quem tem o XML/DANFSE) mesmo que o evento esteja
+    // sendo importado no contexto de outro cliente vinculado a mesma nota (prestador/tomador).
+    const custodiaClienteId = existing?.clienteId ?? params.clienteId;
+    const custodiaEstabelecimentoId = existing?.estabelecimentoId ?? params.estabelecimentoId;
+
+    const nfse = existing
+      ? await this.prisma.nfseDocumento.update({
+          where: { id: existing.id },
+          data: {
+            clienteId: custodiaClienteId,
+            estabelecimentoId: custodiaEstabelecimentoId,
+            nsu: null,
+            ...cancelamentoData
+          }
+        })
+      : await this.prisma.nfseDocumento.create({
+          data: {
+            clienteId: custodiaClienteId,
+            estabelecimentoId: custodiaEstabelecimentoId,
+            ambiente: params.ambiente,
+            nsu: null,
+            chaveAcesso: params.evento.chaveAcesso,
+            ...cancelamentoData,
+            origem: params.origem
+          }
+        });
+
+    await this.syncDocumentoVinculos(
+      nfse.id,
+      nfse.ambiente,
+      nfse.cnpjPrestador,
+      nfse.cnpjTomador,
+      custodiaClienteId,
+      custodiaEstabelecimentoId
+    );
+
+    return nfse;
   }
 
   private async findDocumentoForEvento(params: {
@@ -3040,6 +3141,15 @@ export class NfseService {
             danfsePath: regenerarDanfse ? danfseKey : doc.danfsePath
           }
         });
+
+        await this.syncDocumentoVinculos(
+          doc.id,
+          doc.ambiente,
+          parsed.cnpjPrestador ?? doc.cnpjPrestador,
+          parsed.cnpjTomador ?? doc.cnpjTomador,
+          doc.clienteId,
+          doc.estabelecimentoId
+        );
 
         atualizados += 1;
       } catch (error) {
@@ -4723,12 +4833,16 @@ export class NfseService {
     return String(error);
   }
 
-  private assertNfseClientScope(doc: NfseDocumento, clienteId: string): void {
+  private assertNfseClientScope(
+    doc: NfseDocumento & { vinculos?: Pick<NfseDocumentoVinculo, 'clienteId'>[] },
+    clienteId: string
+  ): void {
     if (!clienteId) {
       throw new BadRequestException('clienteId obrigatorio para operacao de NFS-e');
     }
 
-    if (doc.clienteId !== clienteId) {
+    const temVinculo = doc.clienteId === clienteId || (doc.vinculos ?? []).some((vinculo) => vinculo.clienteId === clienteId);
+    if (!temVinculo) {
       throw new NotFoundException('NFS-e nao encontrada');
     }
   }
