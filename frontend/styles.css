@@ -3124,6 +3124,23 @@ tbody tr.cert-row-a-vencer:hover {
   --shadow-soft: 0 8px 28px rgba(0, 0, 0, 0.55);
 }
 
+[data-theme='Escuro'] .page-loading-overlay {
+  background:
+    radial-gradient(circle at top left, rgba(250, 211, 43, 0.14), transparent 32%),
+    rgba(0, 0, 0, 0.72);
+}
+
+[data-theme='Escuro'] .page-loading-card {
+  background: var(--surface);
+  border-color: var(--line);
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.5);
+}
+
+[data-theme='Escuro'] .page-loading-spinner {
+  border-color: var(--line-strong);
+  border-top-color: var(--accent-dark);
+}
+
 [data-theme='Escuro'] .page-loading-status,
 [data-theme='Escuro'] .page-loading-task {
   background: var(--surface-alt);
