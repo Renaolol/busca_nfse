@@ -5,6 +5,7 @@ const toastRoot = document.getElementById('toastRoot');
 const API_TIMEOUT_MS = 20000;
 const SEARCH_PAGE_SIZE = 100;
 const DASHBOARD_AUTO_REFRESH_INTERVAL_MS = 60000;
+const THEME_STORAGE_KEY = 'gcont:theme:v1';
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
 const COMPARE_SPED_HISTORY_LIMIT = 10;
@@ -336,7 +337,8 @@ const state = {
     geral: {
       nomeAmbiente: 'GCONT - Ambiente Interno',
       modoOperacao: 'Producao',
-      statusSistema: 'Operacional'
+      statusSistema: 'Operacional',
+      tema: readStoredTheme()
     },
     rotina: {
       ativa: true,
@@ -490,6 +492,7 @@ function boot() {
     state.route = parseRoute(window.location.hash);
   }
 
+  applyTheme(state.settings.geral.tema);
   wireGlobalEvents();
   render();
   void initializeData();
@@ -664,15 +667,26 @@ function onDocumentContextMenu(event) {
 
   event.preventDefault();
   const estimatedWidth = 200;
+  const estimatedMenuHeight = 220;
   const left = Math.min(window.innerWidth - estimatedWidth - 8, Math.max(8, event.clientX));
-  const top = Math.min(window.innerHeight - 12, event.clientY);
-  openRowActionsMenuAt(menuId, { left, top });
+  const spaceBelow = window.innerHeight - event.clientY;
+  const anchor =
+    spaceBelow < estimatedMenuHeight && event.clientY > spaceBelow
+      ? { left, bottom: Math.max(8, window.innerHeight - event.clientY) }
+      : { left, top: Math.min(window.innerHeight - 12, event.clientY) };
+  openRowActionsMenuAt(menuId, anchor);
 }
 
 function computeMenuAnchorFromRect(rect, estimatedWidth = 200) {
+  const estimatedMenuHeight = 220;
   const left = Math.min(window.innerWidth - estimatedWidth - 8, Math.max(8, rect.right - estimatedWidth));
-  const top = Math.min(window.innerHeight - 12, rect.bottom + 6);
-  return { left, top };
+  const spaceBelow = window.innerHeight - rect.bottom;
+
+  if (spaceBelow < estimatedMenuHeight && rect.top > spaceBelow) {
+    return { left, bottom: Math.max(8, window.innerHeight - rect.top + 6) };
+  }
+
+  return { left, top: Math.min(window.innerHeight - 12, rect.bottom + 6) };
 }
 
 function openRowActionsMenuAt(menuId, anchor) {
@@ -2049,6 +2063,13 @@ function onDocumentChange(event) {
 
   if (action === 'xml-reader30-nfe-regime') {
     void applyXmlReader30NfeRegimeWithLoading(target.value);
+    return;
+  }
+
+  if (action === 'settings-tema-change') {
+    setTheme(target.value);
+    pushToast(`Tema ${target.value.toLowerCase()} aplicado.`, 'success');
+    render();
     return;
   }
 
@@ -8659,6 +8680,10 @@ function renderSettingsTabPanel() {
             Status do sistema
             <input name="statusSistema" value="${escapeHtml(state.settings.geral.statusSistema)}" />
           </label>
+          <label class="field">
+            Tema do NotaSync
+            <select name="tema" data-action="settings-tema-change">${renderOptions(['Claro', 'Escuro'], state.settings.geral.tema)}</select>
+          </label>
           <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start;">
             <button class="btn primary" type="submit">Salvar alteracoes</button>
           </div>
@@ -11818,6 +11843,8 @@ function renderRowActionsMenu(menuId, items) {
   const visibleItems = (Array.isArray(items) ? items : []).filter(Boolean);
   const isOpen = Boolean(normalizedId) && state.rowActionsMenu.openId === normalizedId;
   const anchor = state.rowActionsMenu.anchor || { top: 8, left: 8 };
+  const verticalStyle =
+    anchor.bottom !== undefined ? `bottom:${escapeHtml(String(anchor.bottom))}px;` : `top:${escapeHtml(String(anchor.top))}px;`;
 
   if (!visibleItems.length) {
     return '';
@@ -11842,7 +11869,7 @@ function renderRowActionsMenu(menuId, items) {
               class="row-actions-menu-panel"
               role="menu"
               aria-label="Menu de acoes"
-              style="top:${escapeHtml(String(anchor.top))}px; left:${escapeHtml(String(anchor.left))}px;"
+              style="${verticalStyle} left:${escapeHtml(String(anchor.left))}px;"
             >
               ${visibleItems.map((item) => renderRowActionsMenuItem(item)).join('')}
             </div>
@@ -19461,6 +19488,31 @@ function toggleAlertResolved(alertId, resolved) {
     }
     render();
   })();
+}
+
+function readStoredTheme() {
+  try {
+    const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return raw === 'Escuro' ? 'Escuro' : 'Claro';
+  } catch (error) {
+    return 'Claro';
+  }
+}
+
+function applyTheme(tema) {
+  const normalized = tema === 'Escuro' ? 'Escuro' : 'Claro';
+  document.documentElement.setAttribute('data-theme', normalized);
+}
+
+function setTheme(tema) {
+  const normalized = tema === 'Escuro' ? 'Escuro' : 'Claro';
+  state.settings.geral.tema = normalized;
+  applyTheme(normalized);
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, normalized);
+  } catch (error) {
+    console.warn('Falha ao salvar o tema no navegador.', error);
+  }
 }
 
 function loadResolvedAlertsStore() {
