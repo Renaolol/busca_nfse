@@ -2626,6 +2626,16 @@ textarea {
   z-index: 1;
 }
 
+.difal-notes-scroll tr.row-icms4 {
+  background: rgba(226, 161, 8, 0.14);
+}
+
+.difal-notes-scroll tr.row-icms4 td.row-icms4-cell {
+  font-weight: 600;
+  color: var(--warning);
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+
 @media (max-width: 960px) {
   .difal-summary-grid {
     grid-template-columns: 1fr;

@@ -5787,11 +5787,12 @@ function renderXmlReader30DifalNotesCard() {
                 ? itemRows
                     .map(
                       (row) => `
-                        <tr>
+                        <tr class="${row.isIcms4 ? 'row-icms4' : ''}">
                           ${DIFAL_NOTES_COLUMNS.map((column) => {
                             const rawValue = column.value(row);
                             const cellContent = column.html ? rawValue : escapeHtml(String(rawValue));
-                            return `<td class="${escapeHtml(column.className)}">${cellContent}</td>`;
+                            const highlightClass = row.isIcms4 && (column.className === 'xml-reader30-number' || column.className === 'xml-reader30-product') ? ' row-icms4-cell' : '';
+                            return `<td class="${escapeHtml(column.className)}${highlightClass}">${cellContent}</td>`;
                           }).join('')}
                         </tr>
                       `
@@ -7466,6 +7467,7 @@ function computeDifalReaderTotals(itemRows, aliquotaInterna, totalNotas) {
     return {
       ...row,
       isCancelada,
+      isIcms4,
       statusLabel: isCancelada ? 'Cancelada' : 'Ativa',
       difalRaw,
       difalLabel: isIcms4 ? formatCurrency(difalRaw) : '-'
