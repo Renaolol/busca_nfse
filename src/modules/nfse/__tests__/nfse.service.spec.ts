@@ -14,7 +14,8 @@ describe('NfseService', () => {
       update: jest.fn()
     },
     clienteEstabelecimento: {
-      findFirst: jest.fn()
+      findFirst: jest.fn(),
+      findMany: jest.fn()
     },
     nfseDocumento: {
       count: jest.fn(),
@@ -24,6 +25,13 @@ describe('NfseService', () => {
       update: jest.fn(),
       upsert: jest.fn(),
       findMany: jest.fn(),
+      groupBy: jest.fn()
+    },
+    nfseDocumentoVinculo: {
+      upsert: jest.fn(),
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      findFirst: jest.fn(),
       groupBy: jest.fn()
     },
     nfseEvento: {
@@ -76,6 +84,8 @@ describe('NfseService', () => {
   beforeEach(() => {
     jest.resetAllMocks();
     prisma.clienteEstabelecimento.findFirst.mockResolvedValue(undefined);
+    prisma.clienteEstabelecimento.findMany.mockResolvedValue([]);
+    prisma.nfseDocumentoVinculo.upsert.mockResolvedValue(undefined);
     prisma.cliente.findMany.mockResolvedValue([]);
     prisma.cliente.findUnique.mockResolvedValue(undefined);
     prisma.nfseNumeracaoExcecao.findMany.mockResolvedValue([]);
@@ -96,7 +106,7 @@ describe('NfseService', () => {
 
     expect(prisma.nfseDocumento.count).toHaveBeenCalledWith({
       where: expect.objectContaining({
-        AND: expect.arrayContaining([{ clienteId: 'cliente-1' }])
+        AND: expect.arrayContaining([{ OR: [{ clienteId: 'cliente-1' }, { vinculos: { some: { clienteId: 'cliente-1' } } }] }])
       })
     });
     expect(prisma.nfseDocumento.findMany).toHaveBeenCalledWith(
@@ -1160,7 +1170,7 @@ describe('NfseService', () => {
 
   it('retorna estatisticas agregadas do dashboard por cliente', async () => {
     prisma.nfseDocumento.count.mockResolvedValueOnce(512).mockResolvedValueOnce(492);
-    prisma.nfseDocumento.groupBy
+    prisma.nfseDocumentoVinculo.groupBy
       .mockResolvedValueOnce([
         {
           clienteId: 'cliente-1',
@@ -1189,6 +1199,7 @@ describe('NfseService', () => {
           }
         }
       ]);
+    prisma.nfseDocumento.groupBy.mockResolvedValueOnce([]).mockResolvedValueOnce([]);
 
     const result = await service.getDashboardStats({});
 
@@ -1200,20 +1211,32 @@ describe('NfseService', () => {
         }
       }
     });
-    expect(prisma.nfseDocumento.groupBy).toHaveBeenNthCalledWith(1, {
+    expect(prisma.nfseDocumentoVinculo.groupBy).toHaveBeenNthCalledWith(1, {
       by: ['clienteId'],
       where: {},
       _count: {
         _all: true
       }
     });
-    expect(prisma.nfseDocumento.groupBy).toHaveBeenNthCalledWith(2, {
+    expect(prisma.nfseDocumentoVinculo.groupBy).toHaveBeenNthCalledWith(2, {
       by: ['clienteId'],
       where: {
-        xmlPath: {
-          not: null
-        }
+        documento: { xmlPath: { not: null } }
       },
+      _count: {
+        _all: true
+      }
+    });
+    expect(prisma.nfseDocumento.groupBy).toHaveBeenNthCalledWith(1, {
+      by: ['clienteId'],
+      where: { vinculos: { none: {} } },
+      _count: {
+        _all: true
+      }
+    });
+    expect(prisma.nfseDocumento.groupBy).toHaveBeenNthCalledWith(2, {
+      by: ['clienteId'],
+      where: { vinculos: { none: {} }, xmlPath: { not: null } },
       _count: {
         _all: true
       }
@@ -1234,6 +1257,20 @@ describe('NfseService', () => {
         }
       ]
     });
+  });
+
+  it('soma vinculo e custodia orfa (sem vinculo) no total por cliente do dashboard', async () => {
+    prisma.nfseDocumento.count.mockResolvedValueOnce(10).mockResolvedValueOnce(8);
+    prisma.nfseDocumentoVinculo.groupBy
+      .mockResolvedValueOnce([{ clienteId: 'cliente-1', _count: { _all: 3 } }])
+      .mockResolvedValueOnce([{ clienteId: 'cliente-1', _count: { _all: 2 } }]);
+    prisma.nfseDocumento.groupBy
+      .mockResolvedValueOnce([{ clienteId: 'cliente-1', _count: { _all: 5 } }])
+      .mockResolvedValueOnce([{ clienteId: 'cliente-1', _count: { _all: 4 } }]);
+
+    const result = await service.getDashboardStats({});
+
+    expect(result.byClient).toEqual([{ clienteId: 'cliente-1', totalNfse: 8, storedXmls: 6 }]);
   });
 
   it('retorna leitura fiscal consolidada das NFS-e filtradas', async () => {
@@ -1323,7 +1360,7 @@ describe('NfseService', () => {
     expect(prisma.nfseDocumento.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          AND: expect.arrayContaining([{ clienteId: 'cliente-1' }])
+          AND: expect.arrayContaining([{ OR: [{ clienteId: 'cliente-1' }, { vinculos: { some: { clienteId: 'cliente-1' } } }] }])
         })
       })
     );
@@ -2582,7 +2619,19 @@ describe('NfseService', () => {
         updatedAt: new Date('2026-06-03T12:00:00.000Z')
       }
     ]);
-    prisma.nfseDocumento.upsert.mockResolvedValue({
+    prisma.nfseDocumento.findUnique.mockResolvedValue({
+      id: 'doc-original',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: Ambiente.producao_restrita,
+      chaveAcesso: '42110092206960810000176000000000033326062205552016',
+      origem: 'importacao_xml',
+      xmlPath: 'nfse/producao_restrita/06960810000176/2026/06/xml/42110092206960810000176000000000033326062205552016.xml',
+      danfsePath: null,
+      cnpjPrestador: '06960810000176',
+      cnpjTomador: null
+    });
+    prisma.nfseDocumento.update.mockResolvedValue({
       id: 'doc-original',
       clienteId: 'cliente-1',
       estabelecimentoId: 'estab-1',
@@ -2616,22 +2665,16 @@ describe('NfseService', () => {
       ),
       eventXml
     );
-    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledWith(
+    expect(prisma.nfseDocumento.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: {
-          ambiente_chaveAcesso: {
-            ambiente: Ambiente.producao_restrita,
-            chaveAcesso: '42110092206960810000176000000000033326062205552016'
-          }
-        },
-        update: expect.objectContaining({
+        where: { id: 'doc-original' },
+        data: expect.objectContaining({
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
           nsu: null,
           status: 'cancelada',
           dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
           danfsePath: null
-        }),
-        create: expect.objectContaining({
-          nsu: null
         })
       })
     );
@@ -3069,7 +3112,19 @@ describe('NfseService', () => {
         ]
       }
     });
-    prisma.nfseDocumento.upsert.mockResolvedValue({
+    prisma.nfseDocumento.findUnique.mockResolvedValue({
+      id: 'doc-original-json',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: Ambiente.producao,
+      chaveAcesso: '42110092206960810000176000000000033326062205552016',
+      origem: 'importacao_xml',
+      xmlPath: 'nfse/producao/06960810000176/2026/06/xml/42110092206960810000176000000000033326062205552016.xml',
+      danfsePath: null,
+      cnpjPrestador: '06960810000176',
+      cnpjTomador: null
+    });
+    prisma.nfseDocumento.update.mockResolvedValue({
       id: 'doc-original-json',
       clienteId: 'cliente-1',
       estabelecimentoId: 'estab-1',
@@ -3100,9 +3155,10 @@ describe('NfseService', () => {
       ),
       expect.stringContaining('<e101101><xDesc>Cancelamento de NFS-e - erro de digitacao</xDesc><xMotivo>erro de digitacao</xMotivo></e101101>')
     );
-    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledWith(
+    expect(prisma.nfseDocumento.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        update: expect.objectContaining({
+        where: { id: 'doc-original-json' },
+        data: expect.objectContaining({
           status: 'cancelada',
           dataCancelamento: new Date('2026-06-03T18:43:08.000Z'),
           danfsePath: null
@@ -3466,5 +3522,210 @@ describe('NfseService', () => {
     });
 
     expect(result.idsNaoEncontrados).toEqual(['550e8400-e29b-41d4-a716-446655440012']);
+  });
+
+  it('permite leitura da NFS-e quando o cliente tem vinculo (mesmo sem ser o dono de custodia)', async () => {
+    prisma.nfseDocumento.findUnique.mockResolvedValue({
+      id: 'doc-6',
+      clienteId: 'cliente-2',
+      chaveAcesso: '42110092206960810000176000000000000526016992784183',
+      xmlPath: null,
+      ambiente: Ambiente.producao,
+      vinculos: [{ clienteId: 'cliente-1', papel: 'tomada' }]
+    });
+    prisma.nfseDocumento.findMany.mockResolvedValue([]);
+
+    const result = await service.findOne('doc-6', 'cliente-1');
+
+    expect(result.id).toBe('doc-6');
+  });
+
+  it('syncDocumentoVinculos cria vinculo de emissao e de tomada quando prestador e tomador sao clientes distintos', async () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse>
+    <InfNfse>
+      <Numero>300</Numero>
+      <CodigoVerificacao>42110092206960810000176000000000030026041826944060</CodigoVerificacao>
+      <DataEmissao>2026-04-29T16:00:58-03:00</DataEmissao>
+      <PrestadorServico>
+        <IdentificacaoPrestador>
+          <CpfCnpj>
+            <Cnpj>06960810000176</Cnpj>
+          </CpfCnpj>
+        </IdentificacaoPrestador>
+        <RazaoSocial>GCONT GESTAO CONTABIL E EMPRESARIAL LTDA</RazaoSocial>
+      </PrestadorServico>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <Competencia>2026-04-29T00:00:00</Competencia>
+          <Servico>
+            <Valores>
+              <ValorServicos>8890.00</ValorServicos>
+            </Valores>
+            <ItemListaServico>1719</ItemListaServico>
+            <Discriminacao>HONORARIOS</Discriminacao>
+          </Servico>
+          <Tomador>
+            <IdentificacaoTomador>
+              <CpfCnpj>
+                <Cnpj>20714171000190</Cnpj>
+              </CpfCnpj>
+            </IdentificacaoTomador>
+            <RazaoSocial>P2 PRE FABRICADOS LTDA</RazaoSocial>
+          </Tomador>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`;
+
+    prisma.nfseDocumento.findUnique.mockResolvedValue(null);
+    prisma.nfseDocumento.findFirst.mockResolvedValue(null);
+    prisma.nfseDocumento.create.mockResolvedValue({
+      id: 'doc-300',
+      clienteId: 'cliente-prestador',
+      estabelecimentoId: 'estab-prestador',
+      ambiente: Ambiente.producao,
+      nsu: null,
+      chaveAcesso: '42110092206960810000176000000000030026041826944060',
+      cnpjPrestador: '06960810000176',
+      cnpjTomador: '20714171000190'
+    });
+    storage.putObject.mockResolvedValue('/tmp/nfse-file');
+    prisma.clienteEstabelecimento.findMany.mockImplementation(({ where }: { where: { cnpj: string } }) => {
+      if (where.cnpj === '06960810000176') {
+        return Promise.resolve([{ id: 'estab-prestador', clienteId: 'cliente-prestador', cnpj: where.cnpj }]);
+      }
+      if (where.cnpj === '20714171000190') {
+        return Promise.resolve([{ id: 'estab-tomador', clienteId: 'cliente-tomador', cnpj: where.cnpj }]);
+      }
+      return Promise.resolve([]);
+    });
+
+    await service.importXml({
+      clienteId: 'cliente-prestador',
+      estabelecimentoId: 'estab-prestador',
+      xml,
+      ambiente: 'producao'
+    });
+
+    expect(prisma.nfseDocumentoVinculo.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { nfseDocumentoId_papel: { nfseDocumentoId: 'doc-300', papel: 'emissao' } },
+        create: expect.objectContaining({ clienteId: 'cliente-prestador', estabelecimentoId: 'estab-prestador', papel: 'emissao' })
+      })
+    );
+    expect(prisma.nfseDocumentoVinculo.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { nfseDocumentoId_papel: { nfseDocumentoId: 'doc-300', papel: 'tomada' } },
+        create: expect.objectContaining({ clienteId: 'cliente-tomador', estabelecimentoId: 'estab-tomador', papel: 'tomada' })
+      })
+    );
+  });
+
+  it('preserva a custodia original quando outro cliente importa a mesma chave de acesso', async () => {
+    const chaveAcesso = '42110092206960810000176000000000050026041826944060';
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse>
+    <InfNfse>
+      <Numero>500</Numero>
+      <CodigoVerificacao>${chaveAcesso}</CodigoVerificacao>
+      <DataEmissao>2026-04-29T16:00:58-03:00</DataEmissao>
+      <PrestadorServico>
+        <IdentificacaoPrestador>
+          <CpfCnpj>
+            <Cnpj>06960810000176</Cnpj>
+          </CpfCnpj>
+        </IdentificacaoPrestador>
+        <RazaoSocial>GCONT GESTAO CONTABIL E EMPRESARIAL LTDA</RazaoSocial>
+      </PrestadorServico>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <Competencia>2026-04-29T00:00:00</Competencia>
+          <Servico>
+            <Valores>
+              <ValorServicos>8890.00</ValorServicos>
+            </Valores>
+            <ItemListaServico>1719</ItemListaServico>
+            <Discriminacao>HONORARIOS</Discriminacao>
+          </Servico>
+          <Tomador>
+            <IdentificacaoTomador>
+              <CpfCnpj>
+                <Cnpj>20714171000190</Cnpj>
+              </CpfCnpj>
+            </IdentificacaoTomador>
+            <RazaoSocial>P2 PRE FABRICADOS LTDA</RazaoSocial>
+          </Tomador>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`;
+
+    prisma.nfseDocumento.findUnique.mockImplementation(({ where }: { where: { ambiente_chaveAcesso?: unknown; id?: string } }) => {
+      if (where.ambiente_chaveAcesso || where.id === 'doc-500') {
+        return Promise.resolve({
+          id: 'doc-500',
+          clienteId: 'cliente-A',
+          estabelecimentoId: 'estab-A',
+          ambiente: Ambiente.producao,
+          chaveAcesso,
+          status: 'autorizada',
+          dataCancelamento: null,
+          eventos: []
+        });
+      }
+      return Promise.resolve(null);
+    });
+    prisma.nfseDocumento.update.mockResolvedValue({
+      id: 'doc-500',
+      clienteId: 'cliente-A',
+      estabelecimentoId: 'estab-A',
+      ambiente: Ambiente.producao,
+      chaveAcesso,
+      cnpjPrestador: '06960810000176',
+      cnpjTomador: '20714171000190'
+    });
+    storage.putObject.mockResolvedValue('/tmp/nfse-file');
+
+    await service.importXml({
+      clienteId: 'cliente-B',
+      estabelecimentoId: 'estab-B',
+      xml,
+      ambiente: 'producao'
+    });
+
+    expect(prisma.nfseDocumento.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'doc-500' },
+        data: expect.objectContaining({
+          clienteId: 'cliente-A',
+          estabelecimentoId: 'estab-A'
+        })
+      })
+    );
+  });
+
+  it('gera vinculo de emissao e de tomada para o mesmo cliente em caso de autofaturamento', async () => {
+    prisma.clienteEstabelecimento.findMany.mockResolvedValue([
+      { id: 'estab-unico', clienteId: 'cliente-unico', cnpj: '06960810000176' }
+    ]);
+
+    await service.syncDocumentoVinculos('doc-700', Ambiente.producao, '06960810000176', '06960810000176');
+
+    expect(prisma.nfseDocumentoVinculo.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { nfseDocumentoId_papel: { nfseDocumentoId: 'doc-700', papel: 'emissao' } }
+      })
+    );
+    expect(prisma.nfseDocumentoVinculo.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { nfseDocumentoId_papel: { nfseDocumentoId: 'doc-700', papel: 'tomada' } }
+      })
+    );
+    expect(prisma.nfseDocumentoVinculo.upsert).toHaveBeenCalledTimes(2);
   });
 });
