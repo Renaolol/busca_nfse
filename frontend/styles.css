@@ -1,6 +1,8 @@
 :root {
   --bg: #fefefe;
   --surface: #ffffff;
+  --surface-alt: #f6f6f8;
+  --surface-hover: #eef3ff;
   --sidebar: #201e1e;
   --sidebar-soft: #2a2727;
   --sidebar-border: #343232;
@@ -2325,6 +2327,18 @@ textarea {
   box-shadow: inset 3px 0 0 var(--danger);
 }
 
+.cert-row-vencido,
+tbody tr.cert-row-vencido:hover {
+  background: #fff5f5;
+  box-shadow: inset 3px 0 0 var(--danger);
+}
+
+.cert-row-a-vencer,
+tbody tr.cert-row-a-vencer:hover {
+  background: #fffbf0;
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+
 .nfse-number-cell {
   display: flex;
   align-items: center;
@@ -3330,8 +3344,15 @@ textarea {
   background: var(--surface-hover);
 }
 
-[data-theme='Escuro'] .xml-row-cancelled {
+[data-theme='Escuro'] .xml-row-cancelled,
+[data-theme='Escuro'] .cert-row-vencido,
+[data-theme='Escuro'] tbody tr.cert-row-vencido:hover {
   background: rgba(226, 99, 95, 0.12);
+}
+
+[data-theme='Escuro'] .cert-row-a-vencer,
+[data-theme='Escuro'] tbody tr.cert-row-a-vencer:hover {
+  background: rgba(240, 180, 41, 0.12);
 }
 
 [data-theme='Escuro'] .nfse-cancel-chip {
@@ -3364,4 +3385,20 @@ textarea {
 
 [data-theme='Escuro'] .xml-reader30-fullscreen-overlay {
   background: rgba(0, 0, 0, 0.55);
+}
+
+[data-theme='Escuro'] .compare-upload-hint,
+[data-theme='Escuro'] .difal-resumo-icon {
+  background: var(--surface-alt);
+}
+
+[data-theme='Escuro'] .page-title-badge {
+  color: #86e3b4;
+  background: rgba(51, 194, 133, 0.16);
+  border-color: rgba(51, 194, 133, 0.35);
+}
+
+[data-theme='Escuro'] .schedule-slot-option span,
+[data-theme='Escuro'] .row-actions-menu-item:disabled:hover {
+  color: var(--text-primary);
 }
