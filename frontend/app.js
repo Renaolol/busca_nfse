@@ -18555,15 +18555,13 @@ function buildXmlFilesFromApi(nfseDocs, clients, contextClienteId) {
       const vinculoClienteIds = Array.isArray(doc.vinculos)
         ? doc.vinculos.map((vinculo) => vinculo.clienteId).filter(Boolean)
         : [];
-      // Uma nota vinculada a dois clientes (prestador/tomador) pertence, na custodia
-      // (doc.clienteId), a apenas um deles. Quando a busca foi feita pelo OUTRO cliente
-      // vinculado, usamos o cliente pesquisado como referencia (nome/CNPJ/tipo) em vez da
-      // custodia, senao a linha "desaparece" dos filtros client-side e mostra dados do dono
-      // errado.
-      const effectiveClienteId =
-        contextClienteId && (doc.clienteId === contextClienteId || vinculoClienteIds.includes(contextClienteId))
-          ? contextClienteId
-          : doc.clienteId;
+      // O documento so chega aqui porque o backend ja o retornou para uma consulta
+      // escopada em contextClienteId (via NfseDocumento.clienteId OU NfseDocumentoVinculo),
+      // ou porque foi buscado individualmente com esse clienteId autorizado. Por isso
+      // confiamos direto no contexto da busca em vez de reconferir localmente contra
+      // doc.clienteId/vinculos (cuja presenca no payload pode variar) - senao a nota some
+      // dos filtros client-side mesmo tendo sido retornada corretamente pela API.
+      const effectiveClienteId = contextClienteId || doc.clienteId;
       const client = clientById[effectiveClienteId] || null;
       const clientCnpj = normalizeDigits(client?.cnpj || '');
       const cnpjPrestador = normalizeDigits(doc.cnpjPrestador || '');
