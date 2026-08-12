@@ -8232,7 +8232,7 @@ function setXmlReader30Selection(selectionKey, checked) {
   }
 
   if (checked) {
-    state.selectedXmlReaderIds = new Set([normalizedKey]);
+    state.selectedXmlReaderIds.add(normalizedKey);
     return;
   }
 
