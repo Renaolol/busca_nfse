@@ -2,11 +2,11 @@
   "app": "notasync-gcont",
   "channel": "stable",
   "version": "0.1.3",
-  "publishedAt": "2026-08-11T19:07:26.6589012Z",
+  "publishedAt": "2026-08-12T11:43:54.3148391Z",
   "windows": {
     "packageUrl": "https://github.com/Renaolol/busca_nfse/releases/download/v0.1.3/notasync-0.1.3-windows.zip",
-    "sha256": "07a5f1edf2bc6bbdf06881d7e45b7dba45e4c3b1979317b6cbc2ac450aa34e74",
-    "sizeBytes": 2115627
+    "sha256": "e329f8eee6db98c1baa48e520231a8c7102fce9360d23f0443779ea5b768f7dd",
+    "sizeBytes": 2116136
   },
   "docker": {}
 }
