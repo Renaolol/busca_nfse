@@ -1,4 +1,12 @@
-ALTER TYPE "UsuarioRole" ADD VALUE IF NOT EXISTS 'comum';
+CREATE TYPE "UsuarioRole_new" AS ENUM ('admin', 'comum', 'cliente');
+
+ALTER TABLE "usuarios"
+ALTER COLUMN "role" TYPE "UsuarioRole_new"
+USING ("role"::text::"UsuarioRole_new");
+
+DROP TYPE "UsuarioRole";
+
+ALTER TYPE "UsuarioRole_new" RENAME TO "UsuarioRole";
 
 INSERT INTO "usuarios" (
   "id",
