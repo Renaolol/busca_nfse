@@ -82,6 +82,12 @@ enum EventoAcessoTipo {
   acesso_negado
 }
 
+enum DocumentoConferenciaTipo {
+  nfse
+  nfe
+  cte
+}
+
 model Cliente {
   id                 String   @id @default(uuid()) @db.Uuid
   razaoSocial        String   @map("razao_social") @db.VarChar(255)
@@ -111,6 +117,7 @@ model Cliente {
   compareSpedHistoricos CompareSpedHistorico[]
   usuarios         Usuario[]
   eventosAcesso    EventoAcesso[]
+  conferenciasDocumentos DocumentoConferencia[]
 
   @@map("clientes")
 }
@@ -459,9 +466,30 @@ model Usuario {
   sessoes       SessaoUsuario[]
   eventosAcesso EventoAcesso[]
   auditorias    AuditoriaUsuario[]
+  conferenciasDocumentos DocumentoConferencia[]
 
   @@index([clienteId, ativo], map: "usuarios_cliente_id_ativo_idx")
   @@map("usuarios")
+}
+
+model DocumentoConferencia {
+  id            String                  @id @default(uuid()) @db.Uuid
+  usuarioId     String                  @map("usuario_id") @db.Uuid
+  clienteId     String?                 @map("cliente_id") @db.Uuid
+  tipoDocumento DocumentoConferenciaTipo @map("tipo_documento")
+  documentoId   String                  @map("documento_id") @db.Uuid
+  conferido     Boolean                 @default(true)
+  conferidoEm   DateTime?               @map("conferido_em")
+  createdAt     DateTime                @default(now()) @map("created_at")
+  updatedAt     DateTime                @updatedAt @map("updated_at")
+
+  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  cliente Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+
+  @@unique([usuarioId, tipoDocumento, documentoId], map: "documento_conferencias_usuario_tipo_documento_key")
+  @@index([usuarioId, tipoDocumento, conferido], map: "documento_conferencias_usuario_tipo_conferido_idx")
+  @@index([clienteId, tipoDocumento], map: "documento_conferencias_cliente_tipo_idx")
+  @@map("documento_conferencias")
 }
 
 model SessaoUsuario {

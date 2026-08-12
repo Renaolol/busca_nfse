@@ -1878,6 +1878,13 @@ tbody tr:hover {
   flex: 0 0 auto;
 }
 
+.xml-reader30-column-header-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+
 .xml-reader30-column-menu {
   border: 0;
   background: transparent;
@@ -1893,6 +1900,32 @@ tbody tr:hover {
 .xml-reader30-column-menu:hover {
   background: rgba(97, 124, 255, 0.08);
   color: var(--accent);
+}
+
+.xml-reader30-column-resizer {
+  display: inline-flex;
+  align-self: stretch;
+  width: 10px;
+  min-width: 10px;
+  cursor: col-resize;
+  position: relative;
+  touch-action: none;
+}
+
+.xml-reader30-column-resizer::before {
+  content: '';
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 50%;
+  width: 2px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: rgba(119, 129, 153, 0.45);
+}
+
+.xml-reader30-column-resizer:hover::before {
+  background: var(--accent);
 }
 
 .xml-reader30-column-menu-panel {
@@ -1927,6 +1960,12 @@ tbody tr:hover {
 .xml-reader30-column-header.is-dragging {
   opacity: 0.55;
   cursor: grabbing;
+}
+
+body.xml-reader30-resizing,
+body.xml-reader30-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 .xml-reader30-column-header.drop-before::before,

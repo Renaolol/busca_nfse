@@ -9,6 +9,7 @@ import { CertificatesModule } from './modules/certificates/certificates.module';
 import { CompareSpedModule } from './modules/compare-sped/compare-sped.module';
 import { ClientsModule } from './modules/clients/clients.module';
 import { CteModule } from './modules/cte/cte.module';
+import { DocumentChecksModule } from './modules/document-checks/document-checks.module';
 import { EstablishmentsModule } from './modules/establishments/establishments.module';
 import { HealthModule } from './modules/health/health.module';
 import { NfeModule } from './modules/nfe/nfe.module';
@@ -25,6 +26,7 @@ import { PrismaModule } from './prisma/prisma.module';
     AuthModule,
     HealthModule,
     AlertsModule,
+    DocumentChecksModule,
     ClientsModule,
     CteModule,
     EstablishmentsModule,
