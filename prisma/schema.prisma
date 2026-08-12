@@ -67,6 +67,21 @@ enum NfseDocumentoVinculoPapel {
   tomada
 }
 
+enum UsuarioRole {
+  admin
+  comum
+  cliente
+}
+
+enum EventoAcessoTipo {
+  login_sucesso
+  login_falha
+  logout
+  token_renovado
+  sessao_expirada
+  acesso_negado
+}
+
 model Cliente {
   id                 String   @id @default(uuid()) @db.Uuid
   razaoSocial        String   @map("razao_social") @db.VarChar(255)
@@ -94,6 +109,8 @@ model Cliente {
   auditorias       AuditoriaUsuario[]
   alertResolutions AlertResolution[]
   compareSpedHistoricos CompareSpedHistorico[]
+  usuarios         Usuario[]
+  eventosAcesso    EventoAcesso[]
 
   @@map("clientes")
 }
@@ -419,9 +436,76 @@ model AuditoriaUsuario {
   userAgent  String?  @map("user_agent") @db.Text
   createdAt  DateTime @default(now()) @map("created_at")
 
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
   cliente Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
 
   @@map("auditoria_usuario")
+}
+
+model Usuario {
+  id                String      @id @default(uuid()) @db.Uuid
+  username          String      @unique @db.VarChar(80)
+  nome              String?     @db.VarChar(255)
+  passwordHash      String      @map("password_hash") @db.Text
+  role              UsuarioRole
+  clienteId         String?     @map("cliente_id") @db.Uuid
+  ativo             Boolean     @default(true)
+  ultimoLoginAt     DateTime?   @map("ultimo_login_at")
+  passwordChangedAt DateTime?   @map("password_changed_at")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  cliente       Cliente?          @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  sessoes       SessaoUsuario[]
+  eventosAcesso EventoAcesso[]
+  auditorias    AuditoriaUsuario[]
+
+  @@index([clienteId, ativo], map: "usuarios_cliente_id_ativo_idx")
+  @@map("usuarios")
+}
+
+model SessaoUsuario {
+  id               String    @id @default(uuid()) @db.Uuid
+  usuarioId        String    @map("usuario_id") @db.Uuid
+  refreshTokenHash String    @map("refresh_token_hash") @db.Text
+  loginAt          DateTime  @default(now()) @map("login_at")
+  lastSeenAt       DateTime  @default(now()) @map("last_seen_at")
+  logoutAt         DateTime? @map("logout_at")
+  expiresAt        DateTime  @map("expires_at")
+  revokedAt        DateTime? @map("revoked_at")
+  ip               String?   @db.VarChar(100)
+  userAgent        String?   @map("user_agent") @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  usuario       Usuario        @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  eventosAcesso EventoAcesso[]
+
+  @@index([usuarioId, revokedAt], map: "sessoes_usuario_usuario_id_revoked_at_idx")
+  @@index([expiresAt], map: "sessoes_usuario_expires_at_idx")
+  @@map("sessoes_usuario")
+}
+
+model EventoAcesso {
+  id         String           @id @default(uuid()) @db.Uuid
+  usuarioId  String?          @map("usuario_id") @db.Uuid
+  sessaoId   String?          @map("sessao_id") @db.Uuid
+  clienteId  String?          @map("cliente_id") @db.Uuid
+  username   String?          @db.VarChar(80)
+  tipo       EventoAcessoTipo
+  detalhes   Json?
+  ip         String?          @db.VarChar(100)
+  userAgent  String?          @map("user_agent") @db.Text
+  createdAt  DateTime         @default(now()) @map("created_at")
+
+  usuario Usuario?       @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  sessao  SessaoUsuario? @relation(fields: [sessaoId], references: [id], onDelete: SetNull)
+  cliente Cliente?       @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt], map: "eventos_acesso_created_at_idx")
+  @@index([tipo, createdAt], map: "eventos_acesso_tipo_created_at_idx")
+  @@index([clienteId, createdAt], map: "eventos_acesso_cliente_id_created_at_idx")
+  @@map("eventos_acesso")
 }
 
 model AlertResolution {

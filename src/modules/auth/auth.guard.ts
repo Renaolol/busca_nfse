@@ -1,9 +1,16 @@
-import { BadRequestException, CanActivate, ExecutionContext, ForbiddenException, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  BadRequestException,
+  CanActivate,
+  ExecutionContext,
+  ForbiddenException,
+  Injectable,
+  UnauthorizedException
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { IS_PUBLIC_KEY } from './decorators/public.decorator';
 import { ROLES_KEY } from './decorators/roles.decorator';
 import { TENANT_SCOPE_KEY, TenantScopeRule } from './decorators/tenant-scope.decorator';
-import { AppRole, AuthenticatedRequest } from './auth.types';
+import { AppRole, AuthenticatedRequest, AuthenticatedUser } from './auth.types';
 import { AuthService } from './auth.service';
 
 @Injectable()
@@ -13,7 +20,7 @@ export class AuthGuard implements CanActivate {
     private readonly authService: AuthService
   ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [context.getHandler(), context.getClass()]);
     if (isPublic) {
       return true;
@@ -22,30 +29,62 @@ export class AuthGuard implements CanActivate {
     const request = context.switchToHttp().getRequest<AuthenticatedRequest>();
     const accessToken = this.extractBearerToken(request.headers.authorization);
     if (!accessToken) {
+      await this.authService.registerAccessDenied(this.toRequestContext(request), {
+        motivo: 'token_bearer_ausente'
+      });
       throw new UnauthorizedException('Token Bearer obrigatorio');
     }
 
-    const authUser = this.authService.verifyAccessToken(accessToken);
+    let authUser: AuthenticatedUser;
+    try {
+      authUser = await this.authService.verifyAccessToken(accessToken, this.toRequestContext(request));
+    } catch (error) {
+      await this.authService.registerAccessDenied(this.toRequestContext(request), {
+        motivo: error instanceof Error ? error.message : 'token_invalido'
+      });
+      throw error;
+    }
+
     request.authUser = authUser;
 
     const allowedRoles =
-      this.reflector.getAllAndOverride<AppRole[]>(ROLES_KEY, [context.getHandler(), context.getClass()]) ?? ['admin', 'cliente'];
+      this.reflector.getAllAndOverride<AppRole[]>(ROLES_KEY, [context.getHandler(), context.getClass()]) ?? ['admin', 'comum', 'cliente'];
 
     if (!allowedRoles.includes(authUser.role)) {
+      await this.authService.registerAccessDenied(this.toRequestContext(request), {
+        motivo: 'role_sem_permissao',
+        usuarioId: authUser.userId,
+        clienteId: authUser.clienteId,
+        sessaoId: authUser.sessionId,
+        username: authUser.username
+      });
       throw new ForbiddenException('Perfil sem permissao para esta rota');
     }
 
-    if (authUser.role === 'admin') {
+    if (authUser.role === 'admin' || authUser.role === 'comum') {
       return true;
     }
 
     if (!authUser.clienteId) {
+      await this.authService.registerAccessDenied(this.toRequestContext(request), {
+        motivo: 'cliente_sem_cliente_id',
+        usuarioId: authUser.userId,
+        sessaoId: authUser.sessionId,
+        username: authUser.username
+      });
       throw new ForbiddenException('Usuario de cliente sem clienteId no token');
     }
 
     const scopeRules = this.reflector.getAllAndOverride<TenantScopeRule[]>(TENANT_SCOPE_KEY, [context.getHandler(), context.getClass()]) ?? [];
 
     if (scopeRules.length === 0) {
+      await this.authService.registerAccessDenied(this.toRequestContext(request), {
+        motivo: 'rota_sem_escopo_cliente',
+        usuarioId: authUser.userId,
+        clienteId: authUser.clienteId,
+        sessaoId: authUser.sessionId,
+        username: authUser.username
+      });
       throw new ForbiddenException('Rota nao disponivel para usuario de cliente');
     }
 
@@ -60,6 +99,13 @@ export class AuthGuard implements CanActivate {
         }
 
         if (rule.required) {
+          await this.authService.registerAccessDenied(this.toRequestContext(request), {
+            motivo: `escopo_obrigatorio_ausente:${rule.key}`,
+            usuarioId: authUser.userId,
+            clienteId: authUser.clienteId,
+            sessaoId: authUser.sessionId,
+            username: authUser.username
+          });
           throw new BadRequestException(`${rule.key} obrigatorio para operacao de cliente`);
         }
 
@@ -67,6 +113,13 @@ export class AuthGuard implements CanActivate {
       }
 
       if (scopeValue !== authUser.clienteId) {
+        await this.authService.registerAccessDenied(this.toRequestContext(request), {
+          motivo: `escopo_invalido:${rule.key}`,
+          usuarioId: authUser.userId,
+          clienteId: authUser.clienteId,
+          sessaoId: authUser.sessionId,
+          username: authUser.username
+        });
         throw new ForbiddenException('Escopo de cliente invalido para esta operacao');
       }
     }
@@ -127,5 +180,20 @@ export class AuthGuard implements CanActivate {
     }
 
     return null;
+  }
+
+  private toRequestContext(request: AuthenticatedRequest) {
+    const userAgentHeader = request.headers?.['user-agent'];
+    const userAgent = Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader;
+    const base = request.baseUrl ?? '';
+    const path = request.route?.path ?? '';
+    const routePath = base || path ? `${base}${path || ''}` : (request.originalUrl ?? '').split('?')[0] || '/';
+
+    return {
+      ip: request.ip,
+      userAgent,
+      method: request.method,
+      path: routePath
+    };
   }
 }

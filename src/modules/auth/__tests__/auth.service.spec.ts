@@ -1,113 +1,303 @@
 import { UnauthorizedException } from '@nestjs/common';
+import { createHash } from 'node:crypto';
 import { AuthService } from '../auth.service';
+import { PasswordHashService } from '../password-hash.service';
+import { PrismaService } from '../../../prisma/prisma.service';
 
 describe('AuthService', () => {
   const originalEnv = process.env;
+
+  let prisma: jest.Mocked<PrismaService>;
+  let passwordHashService: jest.Mocked<PasswordHashService>;
+  let service: AuthService;
+
+  const baseUser = {
+    id: '550e8400-e29b-41d4-a716-446655440123',
+    username: 'admin',
+    nome: 'Administrador',
+    passwordHash: 'hash-existente',
+    role: 'admin' as const,
+    clienteId: null,
+    ativo: true,
+    ultimoLoginAt: null,
+    passwordChangedAt: null,
+    createdAt: new Date('2026-08-12T10:00:00.000Z'),
+    updatedAt: new Date('2026-08-12T10:00:00.000Z')
+  };
 
   beforeEach(() => {
     process.env = {
       ...originalEnv,
       JWT_SECRET: 'super-secret-key-for-tests',
       JWT_EXPIRES_IN_SECONDS: '3600',
-      AUTH_USERS_JSON: JSON.stringify([
-        {
-          username: 'admin',
-          password: 'admin123',
-          role: 'admin'
-        },
-        {
-          username: 'cliente1',
-          password: 'cliente123',
-          role: 'cliente',
-          clienteId: '550e8400-e29b-41d4-a716-446655440000'
-        }
-      ])
+      JWT_REFRESH_EXPIRES_IN_SECONDS: '7200'
     };
+
+    prisma = {
+      usuario: {
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        create: jest.fn(),
+        findMany: jest.fn()
+      },
+      sessaoUsuario: {
+        create: jest.fn(),
+        update: jest.fn(),
+        findUnique: jest.fn(),
+        updateMany: jest.fn(),
+        findMany: jest.fn()
+      },
+      eventoAcesso: {
+        create: jest.fn(),
+        findMany: jest.fn()
+      },
+      $transaction: jest.fn(async (input: unknown) => {
+        if (Array.isArray(input)) {
+          return Promise.all(input as Promise<unknown>[]);
+        }
+
+        return (input as (tx: PrismaService) => Promise<unknown>)(prisma);
+      })
+    } as unknown as jest.Mocked<PrismaService>;
+
+    passwordHashService = {
+      verify: jest.fn(),
+      hash: jest.fn()
+    } as unknown as jest.Mocked<PasswordHashService>;
+
+    service = new AuthService(prisma, passwordHashService);
   });
 
   afterAll(() => {
     process.env = originalEnv;
   });
 
-  it('gera token JWT no login valido', () => {
-    const service = new AuthService();
+  it('gera token JWT e refresh token no login valido', async () => {
+    prisma.usuario.findUnique.mockResolvedValue(baseUser as never);
+    passwordHashService.verify.mockResolvedValue(true);
+    prisma.sessaoUsuario.create.mockResolvedValue({
+      id: '550e8400-e29b-41d4-a716-446655440124',
+      usuarioId: baseUser.id,
+      refreshTokenHash: '',
+      loginAt: new Date('2026-08-12T10:01:00.000Z'),
+      lastSeenAt: new Date('2026-08-12T10:01:00.000Z'),
+      logoutAt: null,
+      expiresAt: new Date('2026-08-12T12:01:00.000Z'),
+      revokedAt: null,
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date('2026-08-12T10:01:00.000Z'),
+      updatedAt: new Date('2026-08-12T10:01:00.000Z')
+    } as never);
+    prisma.sessaoUsuario.update.mockImplementation(async ({ where }) => ({
+      id: String(where.id),
+      usuarioId: baseUser.id,
+      refreshTokenHash: 'hash-atualizado',
+      loginAt: new Date('2026-08-12T10:01:00.000Z'),
+      lastSeenAt: new Date('2026-08-12T10:01:00.000Z'),
+      logoutAt: null,
+      expiresAt: new Date('2026-08-12T12:01:00.000Z'),
+      revokedAt: null,
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date('2026-08-12T10:01:00.000Z'),
+      updatedAt: new Date('2026-08-12T10:01:00.000Z')
+    }) as never);
+    prisma.usuario.update.mockResolvedValue({
+      ...baseUser,
+      ultimoLoginAt: new Date('2026-08-12T10:01:00.000Z')
+    } as never);
+    prisma.eventoAcesso.create.mockResolvedValue({ id: 'evt-1' } as never);
 
-    const result = service.login({ username: 'admin', password: 'admin123' });
+    const result = await service.login(
+      { username: 'ADMIN', password: 'admin123' },
+      { ip: '127.0.0.1', userAgent: 'jest', path: '/auth/login', method: 'POST' }
+    );
 
     expect(result.tokenType).toBe('Bearer');
     expect(result.expiresIn).toBe(3600);
+    expect(result.refreshExpiresIn).toBe(7200);
     expect(result.user).toEqual({
-      userId: undefined,
+      userId: baseUser.id,
       username: 'admin',
+      nome: 'Administrador',
       role: 'admin',
-      clienteId: undefined
+      clienteId: undefined,
+      sessionId: '550e8400-e29b-41d4-a716-446655440124',
+      sessionExpiresAt: result.sessionExpiresAt
     });
-    expect(typeof result.accessToken).toBe('string');
     expect(result.accessToken.split('.')).toHaveLength(3);
+    expect(result.refreshToken).toMatch(/^550e8400-e29b-41d4-a716-446655440124\./);
   });
 
-  it('rejeita credenciais invalidas', () => {
-    const service = new AuthService();
+  it('rejeita credenciais invalidas', async () => {
+    prisma.usuario.findUnique.mockResolvedValue(baseUser as never);
+    passwordHashService.verify.mockResolvedValue(false);
+    prisma.eventoAcesso.create.mockResolvedValue({ id: 'evt-2' } as never);
 
-    expect(() => service.login({ username: 'admin', password: 'senha-errada' })).toThrow(UnauthorizedException);
+    await expect(
+      service.login(
+        { username: 'admin', password: 'senha-errada' },
+        { ip: '127.0.0.1', userAgent: 'jest', path: '/auth/login', method: 'POST' }
+      )
+    ).rejects.toThrow(UnauthorizedException);
   });
 
-  it('valida token de cliente e extrai escopo', () => {
-    const service = new AuthService();
+  it('valida token de acesso ativo e extrai sessao', async () => {
+    prisma.usuario.findUnique.mockResolvedValue(baseUser as never);
+    passwordHashService.verify.mockResolvedValue(true);
+    prisma.sessaoUsuario.create.mockResolvedValue({
+      id: '550e8400-e29b-41d4-a716-446655440124',
+      usuarioId: baseUser.id,
+      refreshTokenHash: '',
+      loginAt: new Date(),
+      lastSeenAt: new Date(),
+      logoutAt: null,
+      expiresAt: new Date(Date.now() + 7200_000),
+      revokedAt: null,
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as never);
+    prisma.sessaoUsuario.update.mockResolvedValue({
+      id: '550e8400-e29b-41d4-a716-446655440124',
+      usuarioId: baseUser.id,
+      refreshTokenHash: '',
+      loginAt: new Date(),
+      lastSeenAt: new Date(),
+      logoutAt: null,
+      expiresAt: new Date(Date.now() + 7200_000),
+      revokedAt: null,
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as never);
+    prisma.usuario.update.mockResolvedValue({
+      ...baseUser,
+      ultimoLoginAt: new Date()
+    } as never);
+    prisma.eventoAcesso.create.mockResolvedValue({ id: 'evt-3' } as never);
 
-    const login = service.login({ username: 'cliente1', password: 'cliente123' });
-    const user = service.verifyAccessToken(login.accessToken);
+    const login = await service.login(
+      { username: 'admin', password: 'admin123' },
+      { ip: '127.0.0.1', userAgent: 'jest', path: '/auth/login', method: 'POST' }
+    );
 
-    expect(user).toEqual({
-      userId: undefined,
-      username: 'cliente1',
-      role: 'cliente',
-      clienteId: '550e8400-e29b-41d4-a716-446655440000'
+    prisma.sessaoUsuario.findUnique.mockResolvedValue({
+      id: '550e8400-e29b-41d4-a716-446655440124',
+      usuarioId: baseUser.id,
+      refreshTokenHash: createHash('sha256').update(login.refreshToken).digest('hex'),
+      loginAt: new Date(),
+      lastSeenAt: new Date(),
+      logoutAt: null,
+      expiresAt: new Date(Date.now() + 7200_000),
+      revokedAt: null,
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      usuario: baseUser
+    } as never);
+
+    const user = await service.verifyAccessToken(login.accessToken, {
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      path: '/clientes',
+      method: 'GET'
     });
+
+    expect(user.userId).toBe(baseUser.id);
+    expect(user.sessionId).toBe('550e8400-e29b-41d4-a716-446655440124');
   });
 
-  it('rejeita token adulterado', () => {
-    const service = new AuthService();
-    const login = service.login({ username: 'admin', password: 'admin123' });
-    const tampered = `${login.accessToken}x`;
+  it('rejeita token adulterado', async () => {
+    prisma.usuario.findUnique.mockResolvedValue(baseUser as never);
+    passwordHashService.verify.mockResolvedValue(true);
+    prisma.sessaoUsuario.create.mockResolvedValue({
+      id: '550e8400-e29b-41d4-a716-446655440124',
+      usuarioId: baseUser.id,
+      refreshTokenHash: '',
+      loginAt: new Date(),
+      lastSeenAt: new Date(),
+      logoutAt: null,
+      expiresAt: new Date(Date.now() + 7200_000),
+      revokedAt: null,
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as never);
+    prisma.sessaoUsuario.update.mockResolvedValue({
+      id: '550e8400-e29b-41d4-a716-446655440124',
+      usuarioId: baseUser.id,
+      refreshTokenHash: '',
+      loginAt: new Date(),
+      lastSeenAt: new Date(),
+      logoutAt: null,
+      expiresAt: new Date(Date.now() + 7200_000),
+      revokedAt: null,
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as never);
+    prisma.usuario.update.mockResolvedValue({
+      ...baseUser,
+      ultimoLoginAt: new Date()
+    } as never);
+    prisma.eventoAcesso.create.mockResolvedValue({ id: 'evt-4' } as never);
 
-    expect(() => service.verifyAccessToken(tampered)).toThrow(UnauthorizedException);
+    const login = await service.login(
+      { username: 'admin', password: 'admin123' },
+      { ip: '127.0.0.1', userAgent: 'jest', path: '/auth/login', method: 'POST' }
+    );
+
+    await expect(service.verifyAccessToken(`${login.accessToken}x`)).rejects.toThrow(UnauthorizedException);
   });
 
-  it('propaga userId quando configurado', () => {
-    process.env.AUTH_USERS_JSON = JSON.stringify([
-      {
-        userId: '550e8400-e29b-41d4-a716-446655440123',
-        username: 'admin',
-        password: 'admin123',
-        role: 'admin'
-      }
-    ]);
+  it('renova refresh token de sessao ativa', async () => {
+    prisma.sessaoUsuario.findUnique.mockResolvedValue({
+      id: '550e8400-e29b-41d4-a716-446655440124',
+      usuarioId: baseUser.id,
+      refreshTokenHash: createHash('sha256')
+        .update('550e8400-e29b-41d4-a716-446655440124.segredo-antigo')
+        .digest('hex'),
+      loginAt: new Date(),
+      lastSeenAt: new Date(),
+      logoutAt: null,
+      expiresAt: new Date(Date.now() + 7200_000),
+      revokedAt: null,
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date(),
+      updatedAt: new Date(),
+      usuario: baseUser
+    } as never);
+    prisma.sessaoUsuario.update.mockResolvedValue({
+      id: '550e8400-e29b-41d4-a716-446655440124',
+      usuarioId: baseUser.id,
+      refreshTokenHash: 'hash-novo',
+      loginAt: new Date(),
+      lastSeenAt: new Date(),
+      logoutAt: null,
+      expiresAt: new Date(Date.now() + 7200_000),
+      revokedAt: null,
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    } as never);
+    prisma.eventoAcesso.create.mockResolvedValue({ id: 'evt-5' } as never);
 
-    const service = new AuthService();
-    const login = service.login({ username: 'admin', password: 'admin123' });
-    const user = service.verifyAccessToken(login.accessToken);
+    const result = await service.refresh(
+      { refreshToken: '550e8400-e29b-41d4-a716-446655440124.segredo-antigo' },
+      { ip: '127.0.0.1', userAgent: 'jest', path: '/auth/refresh', method: 'POST' }
+    );
 
-    expect(login.user.userId).toBe('550e8400-e29b-41d4-a716-446655440123');
-    expect(user.userId).toBe('550e8400-e29b-41d4-a716-446655440123');
-  });
-
-  it('falha ao iniciar quando userId nao e UUID valido', () => {
-    process.env.AUTH_USERS_JSON = JSON.stringify([
-      {
-        userId: 'invalido',
-        username: 'admin',
-        password: 'admin123',
-        role: 'admin'
-      }
-    ]);
-
-    expect(() => new AuthService()).toThrow('AUTH_USERS_JSON usuario admin com userId invalido');
-  });
-
-  it('falha ao iniciar quando AUTH_USERS_JSON nao esta configurado', () => {
-    delete process.env.AUTH_USERS_JSON;
-
-    expect(() => new AuthService()).toThrow('AUTH_USERS_JSON obrigatoria');
+    expect(result.accessToken.split('.')).toHaveLength(3);
+    expect(result.refreshToken).toMatch(/^550e8400-e29b-41d4-a716-446655440124\./);
+    expect(result.refreshToken).not.toBe('550e8400-e29b-41d4-a716-446655440124.segredo-antigo');
   });
 });

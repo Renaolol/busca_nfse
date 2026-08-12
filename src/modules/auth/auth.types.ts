@@ -1,27 +1,30 @@
-export type AppRole = 'admin' | 'cliente';
+export type AppRole = 'admin' | 'comum' | 'cliente';
 
 export interface AuthenticatedUser {
-  userId?: string;
+  userId: string;
   username: string;
+  nome?: string;
   role: AppRole;
   clienteId?: string;
+  sessionId: string;
+  sessionExpiresAt: string;
 }
 
 export interface AuthTokenPayload {
-  uid?: string;
+  uid: string;
   sub: string;
   role: AppRole;
   clienteId?: string;
+  sid: string;
   iat: number;
   exp: number;
 }
 
-export interface AuthUserConfig {
-  userId?: string;
-  username: string;
-  password: string;
-  role: AppRole;
-  clienteId?: string;
+export interface AccessRequestContext {
+  ip?: string;
+  userAgent?: string;
+  path?: string;
+  method?: string;
 }
 
 export interface AuthenticatedRequest {
@@ -31,5 +34,11 @@ export interface AuthenticatedRequest {
   body: Record<string, unknown>;
   headers: {
     authorization?: string;
+    'user-agent'?: string | string[];
   };
+  ip?: string;
+  originalUrl?: string;
+  baseUrl?: string;
+  route?: { path?: string };
+  method?: string;
 }

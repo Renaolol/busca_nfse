@@ -55,6 +55,7 @@ function validateRequiredEnvironment(): void {
   const adnClientMode = (process.env.NFSE_ADN_CLIENT_MODE ?? '').trim().toLowerCase();
   const certMasterKey = process.env.CERT_MASTER_KEY?.trim();
   const databaseUrl = process.env.DATABASE_URL?.trim();
+  const jwtSecret = process.env.JWT_SECRET?.trim();
   const storageRootPath = process.env.STORAGE_ROOT_PATH?.trim();
   const nfseApiBaseProducao = process.env.NFSE_API_BASE_URL_PRODUCAO?.trim();
   const nfseApiBaseRestrita = process.env.NFSE_API_BASE_URL_RESTRITA?.trim();
@@ -65,6 +66,10 @@ function validateRequiredEnvironment(): void {
 
   if (!databaseUrl) {
     throw new Error('DATABASE_URL obrigatoria');
+  }
+
+  if (!jwtSecret) {
+    throw new Error('JWT_SECRET obrigatoria');
   }
 
   if (!storageRootPath) {

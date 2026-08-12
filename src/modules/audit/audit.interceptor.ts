@@ -32,7 +32,7 @@ export class AuditInterceptor implements NestInterceptor {
     }
 
     const routePath = this.resolveRoutePath(request);
-    if (routePath.startsWith('/auth/login')) {
+    if (routePath.startsWith('/auth/login') || routePath.startsWith('/auth/refresh') || routePath.startsWith('/auth/logout')) {
       return next.handle();
     }
 

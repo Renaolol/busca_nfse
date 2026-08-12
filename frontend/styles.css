@@ -332,6 +332,27 @@ a {
   flex-shrink: 0;
 }
 
+.header-user-block {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.header-user-copy {
+  display: grid;
+  gap: 2px;
+  text-align: right;
+}
+
+.header-user-copy strong {
+  font-size: 0.8rem;
+}
+
+.header-user-copy small {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+}
+
 .header-meta-groups {
   display: flex;
   align-items: center;

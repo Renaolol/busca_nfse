@@ -5,6 +5,7 @@ const toastRoot = document.getElementById('toastRoot');
 const API_TIMEOUT_MS = 20000;
 const SEARCH_PAGE_SIZE = 100;
 const DASHBOARD_AUTO_REFRESH_INTERVAL_MS = 60000;
+const AUTH_STORAGE_KEY = 'gcont:auth:v1';
 const THEME_STORAGE_KEY = 'gcont:theme:v1';
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
@@ -81,6 +82,7 @@ let dashboardAutoRefreshTimer = null;
 let dashboardAutoRefreshRunning = false;
 let xmlReader30ScrollSyncing = false;
 let lastRenderedRouteKey = null;
+let authRefreshPromise = null;
 const initialXmlReader30NfeRegime = loadXmlReader30NfeRegimeStore();
 
 const navItems = [
@@ -160,6 +162,21 @@ const state = {
   mobileSidebarOpen: false,
   dataReady: false,
   dataSource: 'api',
+  auth: {
+    initialized: false,
+    authenticating: false,
+    accessToken: '',
+    refreshToken: '',
+    sessionExpiresAt: '',
+    user: null,
+    adminData: {
+      loading: false,
+      users: [],
+      sessions: [],
+      events: [],
+      lastLoadedAt: null
+    }
+  },
   pageLoading: {
     active: false,
     title: '',
@@ -368,6 +385,9 @@ const state = {
       saving: false,
       errorMessage: ''
     },
+    acessos: {
+      creatingUser: false
+    },
     danfseReprocessRunning: false
   },
   filters: {
@@ -493,9 +513,22 @@ function boot() {
   }
 
   applyTheme(state.settings.geral.tema);
+  restoreAuthState();
   wireGlobalEvents();
   render();
-  void initializeData();
+  void initializeApp();
+}
+
+async function initializeApp() {
+  const authenticated = await ensureAuthenticatedSession();
+  state.auth.initialized = true;
+  render();
+
+  if (!authenticated) {
+    return;
+  }
+
+  await initializeData();
 }
 
 async function initializeData() {
@@ -528,6 +561,14 @@ async function initializeData() {
 
 async function hydrateFromApi(options = {}) {
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+  onProgress?.('Validando usuario autenticado');
+  const me = await apiRequest('/auth/me');
+  if (!me?.user) {
+    throw new Error('Resposta inesperada em /auth/me');
+  }
+  state.auth.user = me.user;
+  persistAuthState();
+
   onProgress?.('Carregando clientes');
   const apiClientsRaw = await apiRequest('/clientes');
   if (!Array.isArray(apiClientsRaw)) {
@@ -1819,6 +1860,34 @@ function onDocumentClick(event) {
       }
       state.settings.tab = tab;
       render();
+      if (tab === 'acessos' && state.auth.user?.role === 'admin') {
+        void loadAuthAdminData();
+      }
+      return;
+    }
+    case 'settings-auth-reload': {
+      void loadAuthAdminData();
+      return;
+    }
+    case 'auth-user-toggle-active': {
+      const userId = actionNode.getAttribute('data-user-id');
+      const nextActive = actionNode.getAttribute('data-next-active') === 'true';
+      if (!userId) {
+        return;
+      }
+      void toggleAuthUserActive(userId, nextActive);
+      return;
+    }
+    case 'auth-user-reset-password': {
+      const userId = actionNode.getAttribute('data-user-id');
+      if (!userId) {
+        return;
+      }
+      void promptAndResetAuthUserPassword(userId);
+      return;
+    }
+    case 'auth-logout': {
+      void performLogout();
       return;
     }
     case 'settings-aliquota-add-periodo': {
@@ -1889,6 +1958,11 @@ function onDocumentSubmit(event) {
   }
 
   switch (target.id) {
+    case 'authLoginForm': {
+      event.preventDefault();
+      void submitAuthLoginForm(target);
+      return;
+    }
     case 'clientsFilterForm': {
       event.preventDefault();
       applyClientsFilters(target);
@@ -2022,6 +2096,11 @@ function onDocumentSubmit(event) {
     case 'settingsAliquotasForm': {
       event.preventDefault();
       void submitSettingsAliquotasForm(target);
+      return;
+    }
+    case 'settingsAuthUserForm': {
+      event.preventDefault();
+      void submitSettingsAuthUserForm(target);
       return;
     }
     default:
@@ -2421,6 +2500,14 @@ function renderPreservingScroll(selectors = []) {
 }
 
 function render() {
+  if (!state.auth.initialized || !state.auth.user) {
+    appRoot.innerHTML = renderUnauthenticatedShell();
+    modalRoot.innerHTML = '';
+    drawerRoot.innerHTML = '';
+    toastRoot.innerHTML = renderToasts();
+    return;
+  }
+
   const routeKey = JSON.stringify(state.route);
   const isSameRouteAsLastRender = routeKey === lastRenderedRouteKey;
   const scrollState = isSameRouteAsLastRender ? captureScrollState() : null;
@@ -2461,6 +2548,10 @@ function render() {
 }
 
 async function handleRouteAccess() {
+  if (!state.auth.user) {
+    return;
+  }
+
   const needsRouteLoad = shouldLoadRouteData(state.route);
   if (!needsRouteLoad) {
     stopPageLoading();
@@ -2565,6 +2656,9 @@ function renderHeader(meta) {
   const nightlyInfo = getNightlyScheduleInfo();
   const nightlyTimesText = nightlyInfo.shortLabel.replace(/,\s*/g, ' • ');
 
+  const authUser = state.auth.user;
+  const avatarLabel = buildUserInitials(authUser?.nome || authUser?.username || 'NS');
+
   return `
     <header class="header">
       <div style="display:flex; gap:10px; align-items:center;">
@@ -2593,10 +2687,84 @@ function renderHeader(meta) {
           </div>
         </div>
         <span title="${escapeHtml(healthStatus.description)}">${statusBadge(healthStatus.label, healthStatus.tone)}</span>
-        <div class="avatar" aria-label="Usuario GC">GC</div>
+        <div class="header-user-block">
+          <div class="header-user-copy">
+            <strong>${escapeHtml(authUser?.nome || authUser?.username || 'Usuario')}</strong>
+            <small>${escapeHtml(formatAuthRoleLabel(authUser?.role))}</small>
+          </div>
+          <div class="avatar" aria-label="${escapeHtml(authUser?.username || 'Usuario')}">${escapeHtml(avatarLabel)}</div>
+          <button class="btn ghost" type="button" data-action="auth-logout">Sair</button>
+        </div>
       </div>
     </header>
   `;
+}
+
+function renderUnauthenticatedShell() {
+  const loading = state.auth.authenticating;
+
+  return `
+    <section class="page-section" style="min-height:100vh; display:flex; align-items:center; justify-content:center; padding:32px;">
+      <article class="card" style="width:min(460px, 100%);">
+        <div class="brand" style="margin-bottom:24px;">
+          <div class="brand-card" aria-label="NotaSync">
+            <div class="brand-logo-frame">
+              <img class="brand-logo" src="/app/assets/notasync-logo-horizontal.png" alt="NotaSync" />
+            </div>
+          </div>
+          <p class="brand-subtitle">GCONT Gestao Contabil</p>
+        </div>
+        <h2 class="card-title">Acesso ao painel</h2>
+        <p class="card-subtitle">Entre com o usuario interno para acessar clientes, buscas, XMLs e auditoria.</p>
+        ${
+          loading
+            ? '<div class="table-state loading" style="margin-top:16px;">Validando sessao...</div>'
+            : `
+              <form id="authLoginForm" class="form-grid" style="margin-top:16px;">
+                <label class="field">
+                  Usuario
+                  <input name="username" autocomplete="username" />
+                </label>
+                <label class="field">
+                  Senha
+                  <input name="password" type="password" autocomplete="current-password" />
+                </label>
+                <div class="stack-actions" style="justify-content:flex-start;">
+                  <button class="btn primary" type="submit">Entrar</button>
+                </div>
+              </form>
+            `
+        }
+      </article>
+    </section>
+  `;
+}
+
+function buildUserInitials(value) {
+  const parts = String(value || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (!parts.length) {
+    return 'NS';
+  }
+
+  return parts.map((part) => part.charAt(0).toUpperCase()).join('');
+}
+
+function formatAuthRoleLabel(role) {
+  if (role === 'admin') {
+    return 'Administrador';
+  }
+  if (role === 'comum') {
+    return 'Usuario comum';
+  }
+  if (role === 'cliente') {
+    return 'Usuario cliente';
+  }
+  return 'Usuario';
 }
 
 function renderCurrentPage() {
@@ -5140,6 +5308,8 @@ function renderAlertCards(alerts) {
 }
 
 function renderSettingsPage() {
+  const authTab = state.auth.user?.role === 'admin' ? renderTabButton('acessos', 'Acessos') : '';
+
   return `
     <section class="page-section">
       ${renderPageHeader({
@@ -5155,6 +5325,7 @@ function renderSettingsPage() {
           ${renderTabButton('servidor', 'Servidor de XMLs')}
           ${renderTabButton('notificacoes', 'Notificacoes')}
           ${renderTabButton('aliquotas', 'Aliquotas')}
+          ${authTab}
           ${renderTabButton('manutencao', 'Manutencao')}
         </div>
         ${renderSettingsTabPanel()}
@@ -8832,6 +9003,8 @@ function renderSettingsTabPanel() {
         </form>
       `;
     }
+    case 'acessos':
+      return renderAuthAccessSettingsPanel();
     case 'manutencao': {
       const running = state.settings.danfseReprocessRunning;
       return `
@@ -17907,6 +18080,221 @@ async function refreshApiData(options = {}) {
   render();
 }
 
+async function loadAuthAdminData(options = {}) {
+  if (state.auth.user?.role !== 'admin') {
+    return;
+  }
+
+  state.auth.adminData.loading = true;
+  render();
+
+  try {
+    const [users, sessions, events] = await Promise.all([
+      apiRequest('/auth/usuarios'),
+      apiRequest('/auth/sessoes?limit=100'),
+      apiRequest('/auth/eventos-acesso?limit=100')
+    ]);
+
+    state.auth.adminData.users = Array.isArray(users) ? users : [];
+    state.auth.adminData.sessions = Array.isArray(sessions) ? sessions : [];
+    state.auth.adminData.events = Array.isArray(events) ? events : [];
+    state.auth.adminData.lastLoadedAt = new Date().toISOString();
+  } catch (error) {
+    if (!options.silent) {
+      pushToast(`Falha ao carregar administracao de acessos: ${toErrorMessage(error)}`, 'error');
+    }
+  } finally {
+    state.auth.adminData.loading = false;
+    render();
+  }
+}
+
+function renderAuthAccessSettingsPanel() {
+  if (state.auth.user?.role !== 'admin') {
+    return '<div class="table-state error">Apenas administradores podem gerenciar usuarios e acessos.</div>';
+  }
+
+  const adminData = state.auth.adminData;
+  const loading = adminData.loading;
+  const users = Array.isArray(adminData.users) ? adminData.users : [];
+  const sessions = Array.isArray(adminData.sessions) ? adminData.sessions : [];
+  const events = Array.isArray(adminData.events) ? adminData.events : [];
+
+  return `
+    <div class="stack" style="gap:16px;">
+      <div class="kpi-grid">
+        ${kpiItem('Usuarios', users.length)}
+        ${kpiItem('Sessoes ativas', sessions.filter((session) => session.ativa).length)}
+        ${kpiItem('Eventos recentes', events.length)}
+        ${kpiItem('Ultima carga', adminData.lastLoadedAt ? formatDateTime(adminData.lastLoadedAt) : '-')}
+      </div>
+
+      <div class="stack-actions" style="justify-content:flex-start;">
+        <button class="btn secondary" type="button" data-action="settings-auth-reload" ${loading ? 'disabled' : ''}>
+          ${loading ? 'Atualizando...' : 'Atualizar acessos'}
+        </button>
+      </div>
+
+      <form id="settingsAuthUserForm" class="form-grid four">
+        <label class="field">
+          Usuario
+          <input name="username" required />
+        </label>
+        <label class="field">
+          Nome
+          <input name="nome" />
+        </label>
+        <label class="field">
+          Perfil
+          <select name="role">${renderOptions(['admin', 'comum', 'cliente'], 'comum', { admin: 'Administrador', comum: 'Comum', cliente: 'Cliente' })}</select>
+        </label>
+        <label class="field">
+          Cliente vinculado
+          <select name="clienteId">${renderClientOptionsForAuthUser()}</select>
+        </label>
+        <label class="field" style="grid-column: span 2;">
+          Senha inicial
+          <input name="password" type="password" minlength="1" required />
+        </label>
+        <label class="field-inline" style="align-self:end;">
+          <input name="ativo" type="checkbox" checked />
+          <span>Usuario ativo</span>
+        </label>
+        <div class="stack-actions" style="grid-column: span 4; justify-content:flex-start;">
+          <button class="btn primary" type="submit" ${state.settings.acessos.creatingUser ? 'disabled' : ''}>
+            ${state.settings.acessos.creatingUser ? 'Criando...' : 'Criar usuario'}
+          </button>
+        </div>
+      </form>
+
+      <div class="card" style="padding:0; overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th>Perfil</th>
+              <th>Cliente</th>
+              <th>Ultimo login</th>
+              <th>Status</th>
+              <th style="width:200px;">Acoes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              users.length
+                ? users
+                    .map(
+                      (user) => `
+                        <tr>
+                          <td>
+                            <strong>${escapeHtml(user.nome || user.username)}</strong>
+                            <div class="row-sub">${escapeHtml(user.username)}</div>
+                          </td>
+                          <td>${statusBadge(formatAuthRoleLabel(user.role), user.role === 'admin' ? 'info' : user.role === 'comum' ? 'success' : 'neutral')}</td>
+                          <td>${escapeHtml(resolveClientName(user.clienteId))}</td>
+                          <td>${escapeHtml(user.ultimoLoginAt ? formatDateTime(user.ultimoLoginAt) : '-')}</td>
+                          <td>${statusBadge(user.ativo ? 'Ativo' : 'Inativo', user.ativo ? 'success' : 'neutral')}</td>
+                          <td>
+                            <div class="stack-actions" style="justify-content:flex-start;">
+                              <button class="btn secondary" type="button" data-action="auth-user-reset-password" data-user-id="${escapeHtml(user.id)}">Resetar senha</button>
+                              <button class="btn ${user.ativo ? 'secondary' : 'primary'}" type="button" data-action="auth-user-toggle-active" data-user-id="${escapeHtml(user.id)}" data-next-active="${user.ativo ? 'false' : 'true'}">
+                                ${user.ativo ? 'Desativar' : 'Ativar'}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      `
+                    )
+                    .join('')
+                : '<tr><td colspan="6"><div class="table-state">Nenhum usuario cadastrado.</div></td></tr>'
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card" style="padding:0; overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th>Inicio</th>
+              <th>Ultima atividade</th>
+              <th>Duracao</th>
+              <th>Origem</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              sessions.length
+                ? sessions
+                    .map(
+                      (session) => `
+                        <tr>
+                          <td>${escapeHtml(session.nome || session.username)}</td>
+                          <td>${escapeHtml(formatDateTime(session.loginAt))}</td>
+                          <td>${escapeHtml(formatDateTime(session.lastSeenAt))}</td>
+                          <td>${escapeHtml(formatDurationMs(session.durationMs))}</td>
+                          <td>${escapeHtml(session.ip || '-')}</td>
+                          <td>${statusBadge(session.ativa ? 'Ativa' : session.logoutAt ? 'Logout' : session.revokedAt ? 'Revogada' : 'Expirada', session.ativa ? 'success' : 'neutral')}</td>
+                        </tr>
+                      `
+                    )
+                    .join('')
+                : '<tr><td colspan="6"><div class="table-state">Nenhuma sessao registrada.</div></td></tr>'
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <div class="card" style="padding:0; overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Quando</th>
+              <th>Tipo</th>
+              <th>Usuario</th>
+              <th>IP</th>
+              <th>Detalhes</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              events.length
+                ? events
+                    .map(
+                      (event) => `
+                        <tr>
+                          <td>${escapeHtml(formatDateTime(event.createdAt))}</td>
+                          <td>${statusBadge(formatAccessEventLabel(event.tipo), toneFromAccessEvent(event.tipo))}</td>
+                          <td>${escapeHtml(event.username || '-')}</td>
+                          <td>${escapeHtml(event.ip || '-')}</td>
+                          <td>${escapeHtml(formatAccessEventDetails(event.detalhes))}</td>
+                        </tr>
+                      `
+                    )
+                    .join('')
+                : '<tr><td colspan="5"><div class="table-state">Nenhum evento de acesso registrado.</div></td></tr>'
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+function renderClientOptionsForAuthUser() {
+  const options = [''];
+  const labels = { '': 'Sem vinculo de cliente' };
+
+  state.clients.forEach((client) => {
+    options.push(client.id);
+    labels[client.id] = client.razaoSocial;
+  });
+
+  return renderOptions(options, '', labels);
+}
+
 function syncDashboardAutoRefresh() {
   if (dashboardAutoRefreshTimer) {
     window.clearInterval(dashboardAutoRefreshTimer);
@@ -17945,6 +18333,12 @@ async function ensureRouteDataLoaded(options = {}) {
   if (state.route.name === 'auditoria-lacunas') {
     onProgress?.('Carregando auditoria de lacunas');
     await loadNfseGapAuditOverview(options);
+    return;
+  }
+
+  if (state.route.name === 'configuracoes' && state.settings.tab === 'acessos' && state.auth.user?.role === 'admin') {
+    onProgress?.('Carregando usuarios, sessoes e eventos de acesso');
+    await loadAuthAdminData({ silent: options.silent });
   }
 }
 
@@ -17957,6 +18351,10 @@ function shouldLoadRouteData(route = state.route) {
     return !state.nfseGapAuditOverview.lastLoadedAt;
   }
 
+  if (route?.name === 'configuracoes' && state.settings.tab === 'acessos' && state.auth.user?.role === 'admin') {
+    return !state.auth.adminData.lastLoadedAt;
+  }
+
   return false;
 }
 
@@ -17966,6 +18364,139 @@ async function refreshExecutionMonitorNow() {
   }
   syncExecutionMonitorWithData();
   render();
+}
+
+async function submitAuthLoginForm(form) {
+  const formData = new FormData(form);
+  const username = String(formData.get('username') || '').trim();
+  const password = String(formData.get('password') || '');
+
+  if (!username || !password) {
+    pushToast('Informe usuario e senha para entrar.', 'error');
+    return;
+  }
+
+  state.auth.authenticating = true;
+  render();
+
+  try {
+    const payload = await apiRequest('/auth/login', {
+      method: 'POST',
+      body: { username, password },
+      skipAuth: true,
+      skipAuthRefresh: true
+    });
+
+    applyAuthPayload(payload);
+    state.auth.initialized = true;
+    render();
+    await initializeData();
+    pushToast(`Sessao iniciada para ${state.auth.user?.nome || state.auth.user?.username || username}.`, 'success');
+  } catch (error) {
+    pushToast(`Falha no login: ${toErrorMessage(error)}`, 'error');
+  } finally {
+    state.auth.authenticating = false;
+    render();
+  }
+}
+
+async function performLogout() {
+  try {
+    if (state.auth.accessToken) {
+      await apiRequest('/auth/logout', {
+        method: 'POST',
+        suppressAuthFailureToast: true
+      });
+    }
+  } catch {}
+
+  clearAuthState();
+  state.dataReady = false;
+  stopPageLoading();
+  syncDashboardAutoRefresh();
+  render();
+}
+
+async function submitSettingsAuthUserForm(form) {
+  state.settings.acessos.creatingUser = true;
+  render();
+
+  try {
+    const formData = new FormData(form);
+    const role = String(formData.get('role') || 'admin');
+    const clienteId = String(formData.get('clienteId') || '').trim();
+
+    await apiRequest('/auth/usuarios', {
+      method: 'POST',
+      body: {
+        username: String(formData.get('username') || '').trim(),
+        nome: String(formData.get('nome') || '').trim() || undefined,
+        password: String(formData.get('password') || ''),
+        role,
+        clienteId: role === 'cliente' && clienteId ? clienteId : undefined,
+        ativo: formData.get('ativo') === 'on'
+      }
+    });
+
+    form.reset();
+    pushToast('Usuario criado com sucesso.', 'success');
+    await loadAuthAdminData();
+  } catch (error) {
+    pushToast(`Falha ao criar usuario: ${toErrorMessage(error)}`, 'error');
+  } finally {
+    state.settings.acessos.creatingUser = false;
+    render();
+  }
+}
+
+async function toggleAuthUserActive(userId, ativo) {
+  const user = state.auth.adminData.users.find((item) => item.id === userId);
+  if (!user) {
+    return;
+  }
+
+  try {
+    await apiRequest(`/auth/usuarios/${encodeURIComponent(userId)}`, {
+      method: 'PATCH',
+      body: {
+        ativo
+      }
+    });
+    pushToast(`Usuario ${ativo ? 'ativado' : 'desativado'} com sucesso.`, 'success');
+    await loadAuthAdminData();
+  } catch (error) {
+    pushToast(`Falha ao atualizar usuario: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function promptAndResetAuthUserPassword(userId) {
+  const user = state.auth.adminData.users.find((item) => item.id === userId);
+  if (!user) {
+    return;
+  }
+
+  const password = window.prompt(`Defina a nova senha para ${user.username}:`, '');
+  if (!password) {
+    return;
+  }
+
+  if (password.length < 1) {
+    pushToast('Informe a nova senha do usuario.', 'error');
+    return;
+  }
+
+  try {
+    await apiRequest(`/auth/usuarios/${encodeURIComponent(userId)}/reset-password`, {
+      method: 'POST',
+      body: {
+        password
+      }
+    });
+    pushToast('Senha redefinida e sessoes antigas revogadas.', 'success');
+    await loadAuthAdminData();
+  } catch (error) {
+    pushToast(`Falha ao redefinir senha: ${toErrorMessage(error)}`, 'error');
+  }
 }
 
 async function submitSettingsRotinaForm(form) {
@@ -19930,18 +20461,163 @@ function mapLogToRunStatus(logStatus) {
   };
 }
 
+function restoreAuthState() {
+  try {
+    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+    if (!raw) {
+      return;
+    }
+
+    const parsed = JSON.parse(raw);
+    state.auth.accessToken = String(parsed?.accessToken || '').trim();
+    state.auth.refreshToken = String(parsed?.refreshToken || '').trim();
+    state.auth.sessionExpiresAt = String(parsed?.sessionExpiresAt || '').trim();
+    state.auth.user = parsed?.user && typeof parsed.user === 'object' ? parsed.user : null;
+  } catch {
+    clearStoredAuthState();
+  }
+}
+
+function persistAuthState() {
+  try {
+    window.localStorage.setItem(
+      AUTH_STORAGE_KEY,
+      JSON.stringify({
+        accessToken: state.auth.accessToken,
+        refreshToken: state.auth.refreshToken,
+        sessionExpiresAt: state.auth.sessionExpiresAt,
+        user: state.auth.user
+      })
+    );
+  } catch {}
+}
+
+function clearStoredAuthState() {
+  try {
+    window.localStorage.removeItem(AUTH_STORAGE_KEY);
+  } catch {}
+}
+
+function clearAuthState() {
+  state.auth.accessToken = '';
+  state.auth.refreshToken = '';
+  state.auth.sessionExpiresAt = '';
+  state.auth.user = null;
+  state.auth.adminData = {
+    loading: false,
+    users: [],
+    sessions: [],
+    events: [],
+    lastLoadedAt: null
+  };
+  clearStoredAuthState();
+}
+
+function applyAuthPayload(payload) {
+  state.auth.accessToken = String(payload?.accessToken || '').trim();
+  state.auth.refreshToken = String(payload?.refreshToken || '').trim();
+  state.auth.sessionExpiresAt = String(payload?.sessionExpiresAt || '').trim();
+  state.auth.user = payload?.user && typeof payload.user === 'object' ? payload.user : null;
+  persistAuthState();
+}
+
+async function ensureAuthenticatedSession() {
+  if (!state.auth.accessToken && !state.auth.refreshToken) {
+    return false;
+  }
+
+  state.auth.authenticating = true;
+  render();
+
+  try {
+    if (state.auth.accessToken) {
+      const me = await apiRequest('/auth/me', {
+        skipAuthRefresh: false,
+        suppressAuthFailureToast: true
+      });
+      state.auth.user = me?.user || null;
+      persistAuthState();
+      return Boolean(state.auth.user);
+    }
+
+    return await refreshAccessSession({ silent: true });
+  } catch {
+    clearAuthState();
+    return false;
+  } finally {
+    state.auth.authenticating = false;
+  }
+}
+
+async function refreshAccessSession(options = {}) {
+  if (authRefreshPromise) {
+    return authRefreshPromise;
+  }
+
+  const refreshToken = String(state.auth.refreshToken || '').trim();
+  if (!refreshToken) {
+    return false;
+  }
+
+  authRefreshPromise = (async () => {
+    try {
+      const payload = await performApiRequest('/auth/refresh', {
+        method: 'POST',
+        body: { refreshToken },
+        skipAuth: true,
+        skipAuthRefresh: true,
+        suppressAuthFailureToast: options.silent
+      });
+      applyAuthPayload(payload);
+      return true;
+    } catch {
+      clearAuthState();
+      return false;
+    } finally {
+      authRefreshPromise = null;
+    }
+  })();
+
+  return authRefreshPromise;
+}
+
 async function apiRequest(path, options = {}) {
-  const { method = 'GET', body, timeoutMs = API_TIMEOUT_MS } = options;
+  const { skipAuth = false, skipAuthRefresh = false } = options;
+
+  try {
+    return await performApiRequest(path, options);
+  } catch (error) {
+    if (!skipAuth && !skipAuthRefresh && shouldAttemptAuthRefresh(path, error)) {
+      const refreshed = await refreshAccessSession({ silent: true });
+      if (refreshed) {
+        return performApiRequest(path, { ...options, skipAuthRefresh: true });
+      }
+
+      if (!options.suppressAuthFailureToast) {
+        pushToast('Sua sessao expirou. Entre novamente para continuar.', 'error');
+      }
+    }
+
+    throw error;
+  }
+}
+
+async function performApiRequest(path, options = {}) {
+  const { method = 'GET', body, timeoutMs = API_TIMEOUT_MS, skipAuth = false, headers: extraHeaders = {} } = options;
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const headers = {};
+    const headers = { ...extraHeaders };
     const init = {
       method,
       headers,
       signal: controller.signal
     };
+
+    if (!skipAuth && state.auth.accessToken) {
+      headers.Authorization = `Bearer ${state.auth.accessToken}`;
+    }
 
     if (body !== undefined) {
       headers['Content-Type'] = 'application/json';
@@ -19951,7 +20627,9 @@ async function apiRequest(path, options = {}) {
     const response = await fetch(path, init);
     if (!response.ok) {
       const errorText = await safeReadResponseText(response);
-      throw new Error(`HTTP ${response.status}${errorText ? ` - ${errorText}` : ''}`);
+      const error = new Error(`HTTP ${response.status}${errorText ? ` - ${errorText}` : ''}`);
+      error.status = response.status;
+      throw error;
     }
 
     if (response.status === 204) {
@@ -19980,6 +20658,19 @@ async function safeReadResponseText(response) {
   } catch {
     return '';
   }
+}
+
+function shouldAttemptAuthRefresh(path, error) {
+  const status = Number(error?.status || 0);
+  if (status !== 401) {
+    return false;
+  }
+
+  if (!state.auth.refreshToken) {
+    return false;
+  }
+
+  return path !== '/auth/login' && path !== '/auth/refresh';
 }
 
 function sanitizeEmail(value) {
@@ -20094,6 +20785,11 @@ function findClientById(clientId) {
     return null;
   }
   return state.clients.find((client) => client.id === clientId) || null;
+}
+
+function resolveClientName(clientId) {
+  const client = findClientById(clientId);
+  return client?.razaoSocial || '-';
 }
 
 function findEstablishmentById(establishmentId) {
@@ -20551,6 +21247,40 @@ function formatDurationMs(value) {
   const hours = Math.floor(minutes / 60);
   const remainingMinutes = minutes % 60;
   return remainingMinutes ? `${hours}h ${remainingMinutes}min` : `${hours}h`;
+}
+
+function formatAccessEventLabel(value) {
+  const map = {
+    login_sucesso: 'Login ok',
+    login_falha: 'Login falhou',
+    logout: 'Logout',
+    token_renovado: 'Sessao renovada',
+    sessao_expirada: 'Sessao expirada',
+    acesso_negado: 'Acesso negado'
+  };
+
+  return map[value] || value || '-';
+}
+
+function formatAccessEventDetails(value) {
+  if (!value || typeof value !== 'object') {
+    return '-';
+  }
+
+  const motivo = value.motivo ? String(value.motivo) : '';
+  const path = value.path ? String(value.path) : '';
+  const metodo = value.metodo ? String(value.metodo) : '';
+  return [motivo, metodo, path].filter(Boolean).join(' • ') || '-';
+}
+
+function toneFromAccessEvent(value) {
+  if (value === 'login_falha' || value === 'acesso_negado' || value === 'sessao_expirada') {
+    return 'danger';
+  }
+  if (value === 'login_sucesso' || value === 'token_renovado') {
+    return 'success';
+  }
+  return 'neutral';
 }
 
 function formatCurrency(value) {

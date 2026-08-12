@@ -21,7 +21,8 @@ describe('AuthGuard', () => {
     } as unknown as jest.Mocked<Reflector>;
 
     authService = {
-      verifyAccessToken: jest.fn()
+      verifyAccessToken: jest.fn(),
+      registerAccessDenied: jest.fn().mockResolvedValue(undefined)
     } as unknown as jest.Mocked<AuthService>;
 
     guard = new AuthGuard(reflector, authService);
@@ -32,6 +33,7 @@ describe('AuthGuard', () => {
     params?: Record<string, string | undefined>;
     query?: Record<string, unknown>;
     body?: Record<string, unknown>;
+    method?: string;
   }): ExecutionContext {
     return {
       getHandler: () => handler,
@@ -43,7 +45,10 @@ describe('AuthGuard', () => {
           },
           params: request.params ?? {},
           query: request.query ?? {},
-          body: request.body ?? {}
+          body: request.body ?? {},
+          method: request.method ?? 'GET',
+          baseUrl: '/clientes',
+          route: { path: '' }
         })
       })
     } as unknown as ExecutionContext;
@@ -70,39 +75,45 @@ describe('AuthGuard', () => {
     });
   }
 
-  it('libera rota publica sem token', () => {
+  const clienteUser = {
+    userId: '550e8400-e29b-41d4-a716-446655440010',
+    username: 'cliente1',
+    role: 'cliente' as const,
+    clienteId: 'cliente-id-1',
+    sessionId: '550e8400-e29b-41d4-a716-446655440011',
+    sessionExpiresAt: '2026-08-12T23:59:59.000Z'
+  };
+
+  it('libera rota publica sem token', async () => {
     setupMetadata({ isPublic: true });
 
-    const canActivate = guard.canActivate(createContext({}));
+    const canActivate = await guard.canActivate(createContext({}));
 
     expect(canActivate).toBe(true);
     expect(authService.verifyAccessToken).not.toHaveBeenCalled();
   });
 
-  it('exige token bearer em rota protegida', () => {
+  it('exige token bearer em rota protegida', async () => {
     setupMetadata();
 
-    expect(() => guard.canActivate(createContext({}))).toThrow(UnauthorizedException);
+    await expect(guard.canActivate(createContext({}))).rejects.toThrow(UnauthorizedException);
+    expect(authService.registerAccessDenied).toHaveBeenCalled();
   });
 
-  it('bloqueia role nao permitida', () => {
+  it('bloqueia role nao permitida', async () => {
     setupMetadata({ roles: ['admin'] });
-    authService.verifyAccessToken.mockReturnValue({ username: 'cliente1', role: 'cliente', clienteId: 'cliente-id-1' });
+    authService.verifyAccessToken.mockResolvedValue(clienteUser);
 
-    expect(() => guard.canActivate(createContext({ authorization: 'Bearer token' }))).toThrow(ForbiddenException);
+    await expect(guard.canActivate(createContext({ authorization: 'Bearer token' }))).rejects.toThrow(ForbiddenException);
   });
 
-  it('valida escopo de cliente na query', () => {
+  it('valida escopo de cliente na query', async () => {
     setupMetadata({
       scopes: [{ source: 'query', key: 'clienteId', required: true }]
     });
-    authService.verifyAccessToken.mockReturnValue({
-      username: 'cliente1',
-      role: 'cliente',
-      clienteId: 'cliente-id-1'
-    });
+    authService.verifyAccessToken.mockResolvedValue(clienteUser);
 
-    const canActivate = guard.canActivate(
+    const canActivate = await guard.canActivate(
       createContext({
         authorization: 'Bearer token',
         query: {
@@ -114,21 +125,20 @@ describe('AuthGuard', () => {
     expect(canActivate).toBe(true);
   });
 
-  it('preenche clienteId quando regra de injecao estiver habilitada', () => {
+  it('preenche clienteId quando regra de injecao estiver habilitada', async () => {
     setupMetadata({
       scopes: [{ source: 'query', key: 'clienteId', injectWhenMissing: true }]
     });
-    authService.verifyAccessToken.mockReturnValue({
-      username: 'cliente1',
-      role: 'cliente',
-      clienteId: 'cliente-id-1'
-    });
+    authService.verifyAccessToken.mockResolvedValue(clienteUser);
 
     const request = {
       headers: { authorization: 'Bearer token' },
       params: {},
       query: {} as Record<string, unknown>,
-      body: {}
+      body: {},
+      method: 'GET',
+      baseUrl: '/clientes',
+      route: { path: '' }
     };
 
     const context = {
@@ -139,40 +149,32 @@ describe('AuthGuard', () => {
       })
     } as unknown as ExecutionContext;
 
-    const canActivate = guard.canActivate(context);
+    const canActivate = await guard.canActivate(context);
 
     expect(canActivate).toBe(true);
     expect(request.query.clienteId).toBe('cliente-id-1');
   });
 
-  it('retorna 400 quando clienteId obrigatorio estiver ausente', () => {
+  it('retorna 400 quando clienteId obrigatorio estiver ausente', async () => {
     setupMetadata({
       scopes: [{ source: 'body', key: 'clienteId', required: true }]
     });
-    authService.verifyAccessToken.mockReturnValue({
-      username: 'cliente1',
-      role: 'cliente',
-      clienteId: 'cliente-id-1'
-    });
+    authService.verifyAccessToken.mockResolvedValue(clienteUser);
 
-    expect(() =>
+    await expect(
       guard.canActivate(
         createContext({
           authorization: 'Bearer token',
           body: {}
         })
       )
-    ).toThrow(BadRequestException);
+    ).rejects.toThrow(BadRequestException);
   });
 
-  it('bloqueia cliente quando rota nao define escopo', () => {
+  it('bloqueia cliente quando rota nao define escopo', async () => {
     setupMetadata();
-    authService.verifyAccessToken.mockReturnValue({
-      username: 'cliente1',
-      role: 'cliente',
-      clienteId: 'cliente-id-1'
-    });
+    authService.verifyAccessToken.mockResolvedValue(clienteUser);
 
-    expect(() => guard.canActivate(createContext({ authorization: 'Bearer token' }))).toThrow(ForbiddenException);
+    await expect(guard.canActivate(createContext({ authorization: 'Bearer token' }))).rejects.toThrow(ForbiddenException);
   });
 });
