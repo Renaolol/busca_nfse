@@ -7805,7 +7805,9 @@ async function fetchXmlReader30NfseSource(filters) {
     true
   );
   const payload = normalizePaginatedResponse(await apiRequest(`/nfse?${query.toString()}`));
-  const xmls = buildXmlFilesFromApi(payload.items, state.clients).filter((xml) => xml.statusArmazenamento === 'Armazenado');
+  const xmls = buildXmlFilesFromApi(payload.items, state.clients, filters.cliente).filter(
+    (xml) => xml.statusArmazenamento === 'Armazenado'
+  );
   state.xmlFiles = mergeXmlFilesById(state.xmlFiles, xmls);
   return createXmlReader30FetchResult('NFS-e', xmls.map((xml) => mapXmlReader30Item('nfse', xml)), payload);
 }
@@ -14847,7 +14849,12 @@ function getFilteredXmlsFromSource(source) {
   const xmlSource = Array.isArray(source) ? source : [];
 
   return xmlSource.filter((xml) => {
-    const matchesClient = filters.cliente === 'Todos' || !filters.cliente || xml.clientId === filters.cliente;
+    const matchesClient =
+      filters.cliente === 'Todos' ||
+      !filters.cliente ||
+      xml.clientId === filters.cliente ||
+      xml.custodiaClienteId === filters.cliente ||
+      (Array.isArray(xml.vinculoClienteIds) && xml.vinculoClienteIds.includes(filters.cliente));
     const matchesCnpj = !filters.cnpj || normalizeDigits(xml.cnpj).includes(filters.cnpj);
     const matchesNumero = !filters.numero || String(xml.numeroNfse).includes(filters.numero);
 
@@ -15319,7 +15326,7 @@ async function executeXmlSearch() {
       throw payloadRaw.reason;
     }
     const payload = normalizePaginatedResponse(payloadRaw.value);
-    const xmls = buildXmlFilesFromApi(payload.items, state.clients);
+    const xmls = buildXmlFilesFromApi(payload.items, state.clients, state.filters.xmls.cliente);
     state.xmlFiles = mergeXmlFilesById(state.xmlFiles, xmls);
     const filteredXmls = getFilteredXmlsFromSource(xmls);
     const informativeRows = await loadXmlNumberingExceptionRowsForSearch(state.filters.xmls, filteredXmls);
@@ -16135,7 +16142,7 @@ async function openAlertDocument(alertId, options = {}) {
     if (!doc && state.dataSource === 'api' && alert.documentoId && alert.clientId) {
       try {
         const raw = await apiRequest(`/nfse/${encodeURIComponent(alert.documentoId)}?clienteId=${encodeURIComponent(alert.clientId)}`);
-        const mapped = buildXmlFilesFromApi([raw], state.clients)[0] || null;
+        const mapped = buildXmlFilesFromApi([raw], state.clients, alert.clientId)[0] || null;
         if (mapped) {
           state.xmlFiles = mergeXmlFilesById(state.xmlFiles, [mapped]);
           doc = mapped;
@@ -18487,13 +18494,25 @@ function mapCertificateFromApi(cert, clientById, fallbackClientId = null) {
   };
 }
 
-function buildXmlFilesFromApi(nfseDocs, clients) {
+function buildXmlFilesFromApi(nfseDocs, clients, contextClienteId) {
   const docs = Array.isArray(nfseDocs) ? nfseDocs : [];
   const clientById = Object.fromEntries(clients.map((client) => [client.id, client]));
 
   return docs
     .map((doc) => {
-      const client = clientById[doc.clienteId] || null;
+      const vinculoClienteIds = Array.isArray(doc.vinculos)
+        ? doc.vinculos.map((vinculo) => vinculo.clienteId).filter(Boolean)
+        : [];
+      // Uma nota vinculada a dois clientes (prestador/tomador) pertence, na custodia
+      // (doc.clienteId), a apenas um deles. Quando a busca foi feita pelo OUTRO cliente
+      // vinculado, usamos o cliente pesquisado como referencia (nome/CNPJ/tipo) em vez da
+      // custodia, senao a linha "desaparece" dos filtros client-side e mostra dados do dono
+      // errado.
+      const effectiveClienteId =
+        contextClienteId && (doc.clienteId === contextClienteId || vinculoClienteIds.includes(contextClienteId))
+          ? contextClienteId
+          : doc.clienteId;
+      const client = clientById[effectiveClienteId] || null;
       const clientCnpj = normalizeDigits(client?.cnpj || '');
       const cnpjPrestador = normalizeDigits(doc.cnpjPrestador || '');
       const cnpjTomador = normalizeDigits(doc.cnpjTomador || '');
@@ -18521,7 +18540,9 @@ function buildXmlFilesFromApi(nfseDocs, clients) {
       return {
         id: `xml-${doc.id}`,
         apiNfseId: doc.id,
-        clientId: doc.clienteId,
+        clientId: effectiveClienteId,
+        custodiaClienteId: doc.clienteId,
+        vinculoClienteIds,
         estabelecimentoId: doc.estabelecimentoId || null,
         cliente: client?.razaoSocial || 'Cliente nao identificado',
         cnpj: normalizeDigits(client?.cnpj || doc.cnpjPrestador || doc.cnpjTomador || ''),
@@ -21521,7 +21542,7 @@ async function fetchUpdatedNfseDocumentAfterEventSync(target) {
   }
 
   const raw = await apiRequest(`/nfse/${target.apiNfseId}?clienteId=${encodeURIComponent(target.clientId)}`);
-  const mapped = buildXmlFilesFromApi([raw], state.clients)[0] || null;
+  const mapped = buildXmlFilesFromApi([raw], state.clients, target.clientId)[0] || null;
   if (mapped) {
     replaceDocumentInStateCollections('nfse', mapped);
   }
@@ -21980,7 +22001,7 @@ async function ensureNfseDetailsLoaded(xml) {
   }
 
   const raw = await apiRequest(`/nfse/${xml.apiNfseId}?clienteId=${encodeURIComponent(xml.clientId)}`);
-  const mapped = buildXmlFilesFromApi([raw], state.clients)[0] || null;
+  const mapped = buildXmlFilesFromApi([raw], state.clients, xml.clientId)[0] || null;
   if (!mapped) {
     return xml;
   }
