@@ -6943,7 +6943,7 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
   const baseNumero = row?.numeroLabel || '-';
   const baseValorTotal = row?.valorLabel || formatOptionalCurrency(row?.raw?.valor) || '-';
   const baseEvento = normalizeXmlReader30InlineText(row?.raw?.eventosResumo || '-');
-  const selectionKey = `${row?.documentType || 'nfe'}:${row?.rowId || row?.raw?.id || row?.raw?.apiNfeId || row?.raw?.chaveAcesso || baseNumero}`;
+  const baseSelectionKey = `${row?.documentType || 'nfe'}:${row?.rowId || row?.raw?.id || row?.raw?.apiNfeId || row?.raw?.chaveAcesso || baseNumero}`;
 
   if (!items.length) {
     if (!includeFallback) {
@@ -6954,7 +6954,7 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
     return [
       {
         ...row,
-        selectionKey,
+        selectionKey: `${baseSelectionKey}:fallback`,
         numeroNf: baseNumero,
         statusNf: baseStatusLabel,
         statusTone: baseStatusTone,
@@ -6990,9 +6990,9 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
     ];
   }
 
-  return items.map((item) => ({
+  return items.map((item, itemIndex) => ({
     ...row,
-    selectionKey,
+    selectionKey: `${baseSelectionKey}:item:${itemIndex}`,
     numeroNf: baseNumero,
     statusNf: baseStatusLabel,
     statusTone: baseStatusTone,

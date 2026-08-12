@@ -3191,13 +3191,14 @@ tbody tr.cert-row-a-vencer:hover {
 }
 
 [data-theme='Escuro'] .xml-reader30-check input[data-action="xml-reader30-select"] {
-  background: var(--surface-alt);
+  background: #2a2832;
   border-color: var(--line-strong);
 }
 
 [data-theme='Escuro'] .xml-reader30-check input[data-action="xml-reader30-select"]:checked {
-  background-color: var(--accent);
-  border-color: var(--accent);
+  background-color: var(--accent-dark);
+  border-color: var(--accent-dark);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23201e1e' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round' d='M3.25 8.5l3 3 6.5-7'/%3E%3C/svg%3E");
 }
 
 [data-theme='Escuro'] .header {
