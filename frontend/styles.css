@@ -1681,7 +1681,35 @@ tbody tr:hover {
 .xml-reader30-check input[data-action="xml-reader30-select"] {
   width: 18px;
   height: 18px;
+  margin: 0;
   cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: var(--surface);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 12px 12px;
+  display: inline-grid;
+  place-content: center;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.xml-reader30-check input[data-action="xml-reader30-select"]:checked {
+  background-color: var(--accent-dark);
+  border-color: var(--accent-dark);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath fill='none' stroke='%23fff' stroke-width='2.25' stroke-linecap='round' stroke-linejoin='round' d='M3.25 8.5l3 3 6.5-7'/%3E%3C/svg%3E");
+}
+
+.xml-reader30-check input[data-action="xml-reader30-select"]:focus-visible {
+  outline: 2px solid rgba(250, 211, 43, 0.38);
+  outline-offset: 2px;
+}
+
+.xml-reader30-check input[data-action="xml-reader30-select"]:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .xml-reader30-doc {
@@ -2257,6 +2285,13 @@ textarea {
   min-height: 92px;
   padding-top: 10px;
   resize: vertical;
+}
+
+input[type='checkbox'] {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent-dark);
 }
 
 .field-inline {
@@ -3148,6 +3183,21 @@ tbody tr.cert-row-a-vencer:hover {
 
 [data-theme='Escuro'] .page-loading-task-active {
   background: rgba(240, 180, 41, 0.16);
+}
+
+[data-theme='Escuro'] input[type='checkbox'] {
+  color-scheme: dark;
+  accent-color: var(--accent);
+}
+
+[data-theme='Escuro'] .xml-reader30-check input[data-action="xml-reader30-select"] {
+  background: var(--surface-alt);
+  border-color: var(--line-strong);
+}
+
+[data-theme='Escuro'] .xml-reader30-check input[data-action="xml-reader30-select"]:checked {
+  background-color: var(--accent);
+  border-color: var(--accent);
 }
 
 [data-theme='Escuro'] .header {

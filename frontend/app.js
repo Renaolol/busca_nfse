@@ -2135,10 +2135,7 @@ function onDocumentMouseDown(event) {
     return;
   }
 
-  state.xmlReader30.selectionDrag = {
-    active: true,
-    checked: !target.checked
-  };
+  return;
 }
 
 function onDocumentMouseMove(event) {
@@ -2171,6 +2168,8 @@ function onDocumentMouseOver(event) {
     return;
   }
 
+  return;
+
   const target = event.target.closest?.('[data-action="xml-reader30-select"]');
   if (!(target instanceof HTMLInputElement) || target.disabled) {
     return;
@@ -2181,8 +2180,10 @@ function onDocumentMouseOver(event) {
     return;
   }
 
+  const previousSelectionKey = state.selectedXmlReaderIds.size ? [...state.selectedXmlReaderIds][0] : '';
   target.checked = dragState.checked;
   setXmlReader30Selection(selectionKey, dragState.checked);
+  syncXmlReader30SelectionCheckboxes(selectionKey, previousSelectionKey);
 }
 
 function onDocumentMouseUp() {
@@ -8229,11 +8230,35 @@ function setXmlReader30Selection(selectionKey, checked) {
   }
 
   if (checked) {
-    state.selectedXmlReaderIds.add(normalizedKey);
+    state.selectedXmlReaderIds = new Set([normalizedKey]);
     return;
   }
 
   state.selectedXmlReaderIds.delete(normalizedKey);
+}
+
+function syncXmlReader30SelectionCheckboxes(nextSelectionKey, previousSelectionKey) {
+  const nextKey = String(nextSelectionKey || '').trim();
+  const previousKey = String(previousSelectionKey || '').trim();
+
+  document.querySelectorAll('[data-action="xml-reader30-select"]').forEach((node) => {
+    if (!(node instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const nodeSelectionKey = String(node.getAttribute('data-selection-key') || '').trim();
+    if (!nodeSelectionKey) {
+      return;
+    }
+
+    if (previousKey && previousKey !== nextKey && nodeSelectionKey === previousKey) {
+      node.checked = false;
+    }
+
+    if (nextKey && nodeSelectionKey === nextKey) {
+      node.checked = true;
+    }
+  });
 }
 
 function getXmlReader30SelectionRows() {
