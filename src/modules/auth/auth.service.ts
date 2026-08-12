@@ -183,7 +183,7 @@ export class AuthService {
         tipo: EventoAcessoTipo.acesso_negado,
         usuarioId: session.usuarioId,
         sessaoId: session.id,
-        clienteId: session.usuario.clienteId,
+        clienteId: session.usuario.clienteId ?? undefined,
         username: session.usuario.username,
         ip: context.ip,
         userAgent: context.userAgent,
@@ -603,10 +603,10 @@ export class AuthService {
       tipo: EventoAcessoTipo.sessao_expirada,
       usuarioId: session.usuarioId,
       sessaoId: session.id,
-      clienteId: session.usuario.clienteId,
+      clienteId: session.usuario.clienteId ?? undefined,
       username: session.usuario.username,
-      ip: context?.ip ?? session.ip,
-      userAgent: context?.userAgent ?? session.userAgent,
+      ip: (context?.ip ?? session.ip) ?? undefined,
+      userAgent: (context?.userAgent ?? session.userAgent) ?? undefined,
       detalhes: {
         metodo: context?.method,
         path: context?.path
@@ -716,7 +716,10 @@ export class AuthService {
         username: data.username,
         ip: data.ip,
         userAgent: data.userAgent,
-        detalhes: data.detalhes ?? undefined
+        detalhes:
+          data.detalhes === undefined
+            ? undefined
+            : (JSON.parse(JSON.stringify(data.detalhes)) as Prisma.InputJsonValue)
       }
     });
   }
