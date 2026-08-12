@@ -8676,12 +8676,40 @@ function matchesDateRange(value, start, end) {
   return true;
 }
 
-function getXmlReader30DocumentCheckKey(row) {
-  if (!row?.documentType || !row?.rowId) {
+function getXmlReader30PersistedDocumentId(row) {
+  if (!row) {
     return '';
   }
 
-  return `${row.documentType}:${row.rowId}`;
+  const directApiId = String(row.apiId || '').trim();
+  if (directApiId) {
+    return directApiId;
+  }
+
+  const raw = row.raw || {};
+  const fallbackApiId =
+    row.documentType === 'nfse'
+      ? raw.apiNfseId || raw.id
+      : row.documentType === 'nfe'
+        ? raw.apiNfeId || raw.id
+        : row.documentType === 'cte'
+          ? raw.apiCteId || raw.id
+          : raw.id;
+
+  return String(fallbackApiId || row.rowId || '').trim();
+}
+
+function getXmlReader30DocumentCheckKey(row) {
+  if (!row?.documentType) {
+    return '';
+  }
+
+  const persistedDocumentId = getXmlReader30PersistedDocumentId(row);
+  if (!persistedDocumentId) {
+    return '';
+  }
+
+  return `${row.documentType}:${persistedDocumentId}`;
 }
 
 function getXmlReader30DocumentCheckTypeFromKey(selectionKey) {
