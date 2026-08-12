@@ -28,6 +28,6 @@ export class ListDocumentChecksQueryDto {
   @IsArray()
   @ArrayUnique()
   @ArrayMaxSize(1000)
-  @IsUUID('4', { each: true })
+  @IsUUID('all', { each: true })
   documentoIds?: string[];
 }
