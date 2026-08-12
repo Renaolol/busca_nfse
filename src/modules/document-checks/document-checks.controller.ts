@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Put, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Post, Put, Query, Req } from '@nestjs/common';
 import { ApiOkResponse, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { AuthenticatedRequest } from '../auth/auth.types';
@@ -17,6 +17,13 @@ export class DocumentChecksController {
   @ApiOkResponse({ type: DocumentCheckResponseDto, isArray: true })
   list(@Req() request: AuthenticatedRequest, @Query() query: ListDocumentChecksQueryDto) {
     return this.documentChecksService.listForUser(request.authUser!, query);
+  }
+
+  @Post('consulta')
+  @Roles('admin', 'comum', 'cliente')
+  @ApiOkResponse({ type: DocumentCheckResponseDto, isArray: true })
+  listByBody(@Req() request: AuthenticatedRequest, @Body() dto: ListDocumentChecksQueryDto) {
+    return this.documentChecksService.listForUser(request.authUser!, dto);
   }
 
   @Put()

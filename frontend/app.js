@@ -8189,7 +8189,12 @@ async function executeXmlReader30Search(form) {
     });
     const filtered = filterXmlReader30Results(sourceResponse.items, texto);
     state.xmlReader30.results = filtered;
-    await loadXmlReader30DocumentChecks(filtered);
+    try {
+      await loadXmlReader30DocumentChecks(filtered);
+    } catch (error) {
+      state.selectedXmlReaderIds = new Set();
+      pushToast(`Nao foi possivel carregar as conferencias salvas: ${toErrorMessage(error)}`, 'error');
+    }
     state.xmlReader30.total = countXmlReader30NfeNotes(filtered);
     state.xmlReader30.sourceTotals = sourceResponse.sourceTotals;
     state.xmlReader30.lastSearchedAt = new Date().toISOString();
@@ -8811,11 +8816,23 @@ async function loadXmlReader30DocumentChecks(rows) {
     return;
   }
 
-  const responses = await Promise.all(
-    types.map(([tipo, ids]) =>
-      apiRequest(`/conferencias-documentos?tipo=${encodeURIComponent(tipo)}&documentoIds=${encodeURIComponent([...new Set(ids)].join(','))}`)
-    )
-  );
+  const requests = [];
+  types.forEach(([tipo, ids]) => {
+    const uniqueIds = [...new Set(ids)];
+    for (let index = 0; index < uniqueIds.length; index += 500) {
+      requests.push(
+        apiRequest('/conferencias-documentos/consulta', {
+          method: 'POST',
+          body: {
+            tipo,
+            documentoIds: uniqueIds.slice(index, index + 500)
+          }
+        })
+      );
+    }
+  });
+
+  const responses = await Promise.all(requests);
 
   const nextSelection = new Set();
   responses.forEach((items) => {
@@ -9123,7 +9140,12 @@ async function executeXmlReader30SearchLegacyUnused(form) {
     });
     const filtered = filterXmlReader30Results(sourceResponse.items, texto);
     state.xmlReader30.results = filtered;
-    await loadXmlReader30DocumentChecks(filtered);
+    try {
+      await loadXmlReader30DocumentChecks(filtered);
+    } catch (error) {
+      state.selectedXmlReaderIds = new Set();
+      pushToast(`Nao foi possivel carregar as conferencias salvas: ${toErrorMessage(error)}`, 'error');
+    }
     state.xmlReader30.total = filtered.length;
     state.xmlReader30.sourceTotals = sourceResponse.sourceTotals;
     state.xmlReader30.lastSearchedAt = new Date().toISOString();
