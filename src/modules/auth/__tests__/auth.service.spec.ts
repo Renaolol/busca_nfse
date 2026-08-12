@@ -300,4 +300,55 @@ describe('AuthService', () => {
     expect(result.refreshToken).toMatch(/^550e8400-e29b-41d4-a716-446655440124\./);
     expect(result.refreshToken).not.toBe('550e8400-e29b-41d4-a716-446655440124.segredo-antigo');
   });
+
+  it('agrega tempo de acesso por usuario dentro do periodo informado', async () => {
+    prisma.sessaoUsuario.findMany.mockResolvedValue([
+      {
+        id: 'sess-1',
+        usuarioId: baseUser.id,
+        refreshTokenHash: 'hash-1',
+        loginAt: new Date('2026-08-10T08:00:00.000Z'),
+        lastSeenAt: new Date('2026-08-10T10:30:00.000Z'),
+        logoutAt: new Date('2026-08-10T10:30:00.000Z'),
+        expiresAt: new Date('2026-08-10T12:00:00.000Z'),
+        revokedAt: null,
+        ip: '127.0.0.1',
+        userAgent: 'jest',
+        createdAt: new Date('2026-08-10T08:00:00.000Z'),
+        updatedAt: new Date('2026-08-10T10:30:00.000Z'),
+        usuario: baseUser
+      },
+      {
+        id: 'sess-2',
+        usuarioId: baseUser.id,
+        refreshTokenHash: 'hash-2',
+        loginAt: new Date('2026-08-11T09:00:00.000Z'),
+        lastSeenAt: new Date('2026-08-11T09:45:00.000Z'),
+        logoutAt: null,
+        expiresAt: new Date('2026-08-11T09:45:00.000Z'),
+        revokedAt: new Date('2026-08-11T09:45:00.000Z'),
+        ip: '127.0.0.1',
+        userAgent: 'jest',
+        createdAt: new Date('2026-08-11T09:00:00.000Z'),
+        updatedAt: new Date('2026-08-11T09:45:00.000Z'),
+        usuario: baseUser
+      }
+    ] as never);
+
+    const result = await service.listAccessTimeReport({
+      periodoInicio: '2026-08-10',
+      periodoFim: '2026-08-11'
+    });
+
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({
+      usuarioId: baseUser.id,
+      username: 'admin',
+      role: 'admin',
+      totalSessions: 2,
+      activeSessions: 0
+    });
+    expect(result[0].totalDurationMs).toBe(11_700_000);
+    expect(result[0].lastActivityAt).toBe('2026-08-11T09:45:00.000Z');
+  });
 });

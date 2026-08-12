@@ -5,8 +5,10 @@ import { Roles } from './decorators/roles.decorator';
 import { Public } from './decorators/public.decorator';
 import { AuthService } from './auth.service';
 import { AccessEventResponseDto } from './dto/access-event-response.dto';
+import { AccessTimeReportResponseDto } from './dto/access-time-report-response.dto';
 import { CreateUserDto } from './dto/create-user.dto';
 import { ListAccessEventsQueryDto } from './dto/list-access-events-query.dto';
+import { ListAccessTimeReportQueryDto } from './dto/list-access-time-report-query.dto';
 import { ListSessionsQueryDto } from './dto/list-sessions-query.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { LoginDto } from './dto/login.dto';
@@ -94,6 +96,13 @@ export class AuthController {
   @ApiOkResponse({ type: AccessEventResponseDto, isArray: true })
   listAccessEvents(@Query() query: ListAccessEventsQueryDto): Promise<AccessEventResponseDto[]> {
     return this.authService.listAccessEvents(query);
+  }
+
+  @Get('relatorio-tempo-acesso')
+  @Roles('admin')
+  @ApiOkResponse({ type: AccessTimeReportResponseDto, isArray: true })
+  listAccessTimeReport(@Query() query: ListAccessTimeReportQueryDto): Promise<AccessTimeReportResponseDto[]> {
+    return this.authService.listAccessTimeReport(query);
   }
 
   private toRequestContext(request: AuthenticatedRequest): AccessRequestContext {

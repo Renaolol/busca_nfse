@@ -85,6 +85,32 @@ let lastRenderedRouteKey = null;
 let authRefreshPromise = null;
 const initialXmlReader30NfeRegime = loadXmlReader30NfeRegimeStore();
 
+function buildDefaultAccessReportRange() {
+  const end = new Date();
+  const start = new Date(end);
+  start.setDate(start.getDate() - 6);
+  return {
+    periodoInicio: extractCalendarDateKey(start) || '',
+    periodoFim: extractCalendarDateKey(end) || ''
+  };
+}
+
+function createEmptyAuthAdminData() {
+  const range = buildDefaultAccessReportRange();
+  return {
+    loading: false,
+    users: [],
+    sessions: [],
+    events: [],
+    report: {
+      periodoInicio: range.periodoInicio,
+      periodoFim: range.periodoFim,
+      rows: []
+    },
+    lastLoadedAt: null
+  };
+}
+
 const navItems = [
   { key: 'dashboard', label: 'Dashboard', icon: 'dashboard', route: '/dashboard' },
   { key: 'clientes', label: 'Clientes', icon: 'users', route: '/clientes' },
@@ -169,13 +195,7 @@ const state = {
     refreshToken: '',
     sessionExpiresAt: '',
     user: null,
-    adminData: {
-      loading: false,
-      users: [],
-      sessions: [],
-      events: [],
-      lastLoadedAt: null
-    }
+    adminData: createEmptyAuthAdminData()
   },
   pageLoading: {
     active: false,
@@ -2103,6 +2123,11 @@ function onDocumentSubmit(event) {
       void submitSettingsAuthUserForm(target);
       return;
     }
+    case 'settingsAuthReportForm': {
+      event.preventDefault();
+      void submitSettingsAuthReportForm(target);
+      return;
+    }
     default:
       return;
   }
@@ -2658,6 +2683,7 @@ function renderHeader(meta) {
 
   const authUser = state.auth.user;
   const avatarLabel = buildUserInitials(authUser?.nome || authUser?.username || 'NS');
+  const roleLabel = authUser?.role === 'comum' ? '' : formatAuthRoleLabel(authUser?.role);
 
   return `
     <header class="header">
@@ -2690,7 +2716,7 @@ function renderHeader(meta) {
         <div class="header-user-block">
           <div class="header-user-copy">
             <strong>${escapeHtml(authUser?.nome || authUser?.username || 'Usuario')}</strong>
-            <small>${escapeHtml(formatAuthRoleLabel(authUser?.role))}</small>
+            ${roleLabel ? `<small>${escapeHtml(roleLabel)}</small>` : ''}
           </div>
           <div class="avatar" aria-label="${escapeHtml(authUser?.username || 'Usuario')}">${escapeHtml(avatarLabel)}</div>
           <button class="btn ghost" type="button" data-action="auth-logout">Sair</button>
@@ -18089,15 +18115,31 @@ async function loadAuthAdminData(options = {}) {
   render();
 
   try {
-    const [users, sessions, events] = await Promise.all([
+    const defaultReport = createEmptyAuthAdminData().report;
+    const currentReport = state.auth.adminData.report || defaultReport;
+    const report = {
+      periodoInicio: String(currentReport.periodoInicio || defaultReport.periodoInicio),
+      periodoFim: String(currentReport.periodoFim || defaultReport.periodoFim)
+    };
+    const reportParams = new URLSearchParams({
+      periodoInicio: report.periodoInicio,
+      periodoFim: report.periodoFim
+    });
+    const [users, sessions, events, reportRows] = await Promise.all([
       apiRequest('/auth/usuarios'),
       apiRequest('/auth/sessoes?limit=100'),
-      apiRequest('/auth/eventos-acesso?limit=100')
+      apiRequest('/auth/eventos-acesso?limit=100'),
+      apiRequest(`/auth/relatorio-tempo-acesso?${reportParams.toString()}`)
     ]);
 
     state.auth.adminData.users = Array.isArray(users) ? users : [];
     state.auth.adminData.sessions = Array.isArray(sessions) ? sessions : [];
     state.auth.adminData.events = Array.isArray(events) ? events : [];
+    state.auth.adminData.report = {
+      periodoInicio: report.periodoInicio,
+      periodoFim: report.periodoFim,
+      rows: Array.isArray(reportRows) ? reportRows : []
+    };
     state.auth.adminData.lastLoadedAt = new Date().toISOString();
   } catch (error) {
     if (!options.silent) {
@@ -18119,6 +18161,9 @@ function renderAuthAccessSettingsPanel() {
   const users = Array.isArray(adminData.users) ? adminData.users : [];
   const sessions = Array.isArray(adminData.sessions) ? adminData.sessions : [];
   const events = Array.isArray(adminData.events) ? adminData.events : [];
+  const report = adminData.report || createEmptyAuthAdminData().report;
+  const reportRows = Array.isArray(report.rows) ? report.rows : [];
+  const reportTotalDurationMs = reportRows.reduce((total, row) => total + Number(row?.totalDurationMs || 0), 0);
 
   return `
     <div class="stack" style="gap:16px;">
@@ -18126,6 +18171,7 @@ function renderAuthAccessSettingsPanel() {
         ${kpiItem('Usuarios', users.length)}
         ${kpiItem('Sessoes ativas', sessions.filter((session) => session.ativa).length)}
         ${kpiItem('Eventos recentes', events.length)}
+        ${kpiItem('Tempo no periodo', formatDurationMs(reportTotalDurationMs))}
         ${kpiItem('Ultima carga', adminData.lastLoadedAt ? formatDateTime(adminData.lastLoadedAt) : '-')}
       </div>
 
@@ -18166,6 +18212,68 @@ function renderAuthAccessSettingsPanel() {
           </button>
         </div>
       </form>
+
+      <div class="card">
+        <div class="card-header" style="margin-bottom:12px;">
+          <div>
+            <h3 style="margin:0;">Relatorio de tempo por usuario</h3>
+            <p class="card-subtitle" style="margin:6px 0 0 0;">Soma o tempo logado por usuario dentro do periodo selecionado.</p>
+          </div>
+        </div>
+        <form id="settingsAuthReportForm" class="form-grid four">
+          <label class="field">
+            Periodo inicial
+            <input name="periodoInicio" type="date" value="${escapeHtml(report.periodoInicio || '')}" required />
+          </label>
+          <label class="field">
+            Periodo final
+            <input name="periodoFim" type="date" value="${escapeHtml(report.periodoFim || '')}" required />
+          </label>
+          <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-self:end;">
+            <button class="btn secondary" type="submit" ${loading ? 'disabled' : ''}>
+              ${loading ? 'Atualizando...' : 'Gerar relatorio'}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      <div class="card" style="padding:0; overflow:auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Usuario</th>
+              <th>Perfil</th>
+              <th>Sessoes no periodo</th>
+              <th>Sessoes ativas</th>
+              <th>Tempo total</th>
+              <th>Ultima atividade</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${
+              reportRows.length
+                ? reportRows
+                    .map(
+                      (row) => `
+                        <tr>
+                          <td>
+                            <strong>${escapeHtml(row.nome || row.username)}</strong>
+                            <div class="row-sub">${escapeHtml(row.username)}</div>
+                          </td>
+                          <td>${statusBadge(formatAuthRoleLabel(row.role), row.role === 'admin' ? 'info' : row.role === 'comum' ? 'success' : 'neutral')}</td>
+                          <td>${escapeHtml(String(row.totalSessions || 0))}</td>
+                          <td>${escapeHtml(String(row.activeSessions || 0))}</td>
+                          <td>${escapeHtml(formatDurationMs(row.totalDurationMs))}</td>
+                          <td>${escapeHtml(row.lastActivityAt ? formatDateTime(row.lastActivityAt) : '-')}</td>
+                        </tr>
+                      `
+                    )
+                    .join('')
+                : '<tr><td colspan="6"><div class="table-state">Nenhum acesso encontrado no periodo informado.</div></td></tr>'
+            }
+          </tbody>
+        </table>
+      </div>
 
       <div class="card" style="padding:0; overflow:auto;">
         <table>
@@ -18337,7 +18445,7 @@ async function ensureRouteDataLoaded(options = {}) {
   }
 
   if (state.route.name === 'configuracoes' && state.settings.tab === 'acessos' && state.auth.user?.role === 'admin') {
-    onProgress?.('Carregando usuarios, sessoes e eventos de acesso');
+    onProgress?.('Carregando usuarios, sessoes, eventos e relatorio de acesso');
     await loadAuthAdminData({ silent: options.silent });
   }
 }
@@ -18447,6 +18555,31 @@ async function submitSettingsAuthUserForm(form) {
     state.settings.acessos.creatingUser = false;
     render();
   }
+}
+
+async function submitSettingsAuthReportForm(form) {
+  const formData = new FormData(form);
+  const periodoInicio = String(formData.get('periodoInicio') || '').trim();
+  const periodoFim = String(formData.get('periodoFim') || '').trim();
+
+  if (!periodoInicio || !periodoFim) {
+    pushToast('Informe o periodo inicial e final do relatorio.', 'error');
+    return;
+  }
+
+  if (periodoInicio > periodoFim) {
+    pushToast('O periodo inicial nao pode ser maior que o periodo final.', 'error');
+    return;
+  }
+
+  state.auth.adminData.report = {
+    ...(state.auth.adminData.report || {}),
+    periodoInicio,
+    periodoFim,
+    rows: Array.isArray(state.auth.adminData.report?.rows) ? state.auth.adminData.report.rows : []
+  };
+  render();
+  await loadAuthAdminData();
 }
 
 async function toggleAuthUserActive(userId, ativo) {
@@ -20503,13 +20636,7 @@ function clearAuthState() {
   state.auth.refreshToken = '';
   state.auth.sessionExpiresAt = '';
   state.auth.user = null;
-  state.auth.adminData = {
-    loading: false,
-    users: [],
-    sessions: [],
-    events: [],
-    lastLoadedAt: null
-  };
+  state.auth.adminData = createEmptyAuthAdminData();
   clearStoredAuthState();
 }
 

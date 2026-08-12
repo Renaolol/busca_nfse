@@ -8,6 +8,7 @@ import {
 import { EventoAcessoTipo, Prisma, SessaoUsuario, Usuario } from '@prisma/client';
 import { createHmac, createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { ListAccessEventsQueryDto } from './dto/list-access-events-query.dto';
+import { ListAccessTimeReportQueryDto } from './dto/list-access-time-report-query.dto';
 import { ListSessionsQueryDto } from './dto/list-sessions-query.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { CreateUserDto } from './dto/create-user.dto';
@@ -530,6 +531,117 @@ export class AuthService {
     }));
   }
 
+  async listAccessTimeReport(filters: ListAccessTimeReportQueryDto) {
+    const { start, end } = this.parseCalendarDateRange(filters.periodoInicio, filters.periodoFim);
+    const where: Prisma.SessaoUsuarioWhereInput = {
+      loginAt: {
+        lte: end
+      },
+      OR: [
+        {
+          logoutAt: {
+            gte: start
+          }
+        },
+        {
+          revokedAt: {
+            gte: start
+          }
+        },
+        {
+          logoutAt: null,
+          revokedAt: null,
+          expiresAt: {
+            gte: start
+          }
+        }
+      ]
+    };
+
+    if (filters.usuarioId) {
+      where.usuarioId = filters.usuarioId;
+    }
+
+    if (filters.clienteId) {
+      where.usuario = {
+        clienteId: filters.clienteId
+      };
+    }
+
+    const sessions = await this.prisma.sessaoUsuario.findMany({
+      where,
+      include: { usuario: true },
+      orderBy: { loginAt: 'desc' }
+    });
+
+    const now = new Date();
+    const grouped = new Map<
+      string,
+      {
+        usuarioId: string;
+        username: string;
+        nome?: string;
+        role: 'admin' | 'comum' | 'cliente';
+        clienteId?: string;
+        totalSessions: number;
+        activeSessions: number;
+        totalDurationMs: number;
+        lastLoginAt?: string | null;
+        lastActivityAt?: string | null;
+      }
+    >();
+
+    sessions.forEach((session) => {
+      const sessionEnd = this.resolveSessionTerminalDate(session, now);
+      const overlapStartMs = Math.max(session.loginAt.getTime(), start.getTime());
+      const overlapEndMs = Math.min(sessionEnd.getTime(), end.getTime());
+
+      if (overlapEndMs <= overlapStartMs) {
+        return;
+      }
+
+      const overlapDurationMs = overlapEndMs - overlapStartMs;
+      const active = this.isSessionActive(session, now);
+      const previous = grouped.get(session.usuarioId);
+      const lastLoginAt = session.loginAt.toISOString();
+      const lastActivityAt = new Date(overlapEndMs).toISOString();
+
+      if (!previous) {
+        grouped.set(session.usuarioId, {
+          usuarioId: session.usuarioId,
+          username: session.usuario.username,
+          nome: session.usuario.nome ?? undefined,
+          role: session.usuario.role,
+          clienteId: session.usuario.clienteId ?? undefined,
+          totalSessions: 1,
+          activeSessions: active ? 1 : 0,
+          totalDurationMs: overlapDurationMs,
+          lastLoginAt,
+          lastActivityAt
+        });
+        return;
+      }
+
+      previous.totalSessions += 1;
+      previous.totalDurationMs += overlapDurationMs;
+      previous.activeSessions += active ? 1 : 0;
+      if (!previous.lastLoginAt || new Date(previous.lastLoginAt).getTime() < session.loginAt.getTime()) {
+        previous.lastLoginAt = lastLoginAt;
+      }
+      if (!previous.lastActivityAt || new Date(previous.lastActivityAt).getTime() < overlapEndMs) {
+        previous.lastActivityAt = lastActivityAt;
+      }
+    });
+
+    return Array.from(grouped.values()).sort((left, right) => {
+      if (right.totalDurationMs !== left.totalDurationMs) {
+        return right.totalDurationMs - left.totalDurationMs;
+      }
+
+      return left.username.localeCompare(right.username, 'pt-BR');
+    });
+  }
+
   private async findUserOrThrow(id: string): Promise<Usuario> {
     const user = await this.prisma.usuario.findUnique({
       where: { id }
@@ -628,6 +740,65 @@ export class AuthService {
     });
   }
 
+  private parseCalendarDateRange(
+    periodoInicio: string,
+    periodoFim: string
+  ): {
+    start: Date;
+    end: Date;
+  } {
+    const start = this.parseCalendarDate(periodoInicio, false);
+    const end = this.parseCalendarDate(periodoFim, true);
+
+    if (start.getTime() > end.getTime()) {
+      throw new BadRequestException('periodoInicio nao pode ser maior que periodoFim');
+    }
+
+    return { start, end };
+  }
+
+  private parseCalendarDate(value: string, endOfDay: boolean): Date {
+    const normalized = String(value || '').trim();
+    const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+      throw new BadRequestException('Data invalida. Use o formato YYYY-MM-DD');
+    }
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const date = endOfDay
+      ? new Date(year, month - 1, day, 23, 59, 59, 999)
+      : new Date(year, month - 1, day, 0, 0, 0, 0);
+
+    if (
+      Number.isNaN(date.getTime()) ||
+      date.getFullYear() !== year ||
+      date.getMonth() !== month - 1 ||
+      date.getDate() !== day
+    ) {
+      throw new BadRequestException('Data invalida. Use o formato YYYY-MM-DD');
+    }
+
+    return date;
+  }
+
+  private isSessionActive(session: Pick<SessaoUsuario, 'logoutAt' | 'revokedAt' | 'expiresAt'>, now: Date): boolean {
+    return !session.logoutAt && !session.revokedAt && session.expiresAt.getTime() > now.getTime();
+  }
+
+  private resolveSessionTerminalDate(session: Pick<SessaoUsuario, 'logoutAt' | 'revokedAt' | 'expiresAt'>, now: Date): Date {
+    if (session.logoutAt) {
+      return session.logoutAt;
+    }
+
+    if (session.revokedAt) {
+      return session.revokedAt;
+    }
+
+    return session.expiresAt.getTime() < now.getTime() ? session.expiresAt : now;
+  }
+
   private buildAuthResponse(usuario: Usuario, sessionId: string, sessionExpiresAt: Date, refreshToken: string) {
     return {
       accessToken: this.signToken({
@@ -674,9 +845,10 @@ export class AuthService {
   }
 
   private mapSessionResponse(session: SessionWithUser) {
-    const terminalDate = session.logoutAt ?? session.revokedAt ?? (session.expiresAt.getTime() < Date.now() ? session.expiresAt : null);
-    const durationMs = Math.max(0, (terminalDate ?? new Date()).getTime() - session.loginAt.getTime());
-    const active = !session.logoutAt && !session.revokedAt && session.expiresAt.getTime() > Date.now();
+    const now = new Date();
+    const terminalDate = this.resolveSessionTerminalDate(session, now);
+    const durationMs = Math.max(0, terminalDate.getTime() - session.loginAt.getTime());
+    const active = this.isSessionActive(session, now);
 
     return {
       id: session.id,
