@@ -5,6 +5,9 @@ const toastRoot = document.getElementById('toastRoot');
 const API_TIMEOUT_MS = 20000;
 const SEARCH_PAGE_SIZE = 100;
 const DASHBOARD_AUTO_REFRESH_INTERVAL_MS = 60000;
+const AUTH_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+const AUTH_ACTIVE_REQUEST_WINDOW_MS = 30 * 1000;
+const AUTH_ACTIVITY_PING_INTERVAL_MS = 60 * 1000;
 const AUTH_STORAGE_KEY = 'gcont:auth:v1';
 const THEME_STORAGE_KEY = 'gcont:theme:v1';
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
@@ -83,6 +86,10 @@ let dashboardAutoRefreshRunning = false;
 let xmlReader30ScrollSyncing = false;
 let lastRenderedRouteKey = null;
 let authRefreshPromise = null;
+let authInactivityTimer = null;
+let lastAuthInteractionAt = 0;
+let lastAuthActivityPingAt = 0;
+let authActivityPingPromise = null;
 const initialXmlReader30NfeRegime = loadXmlReader30NfeRegimeStore();
 
 function buildDefaultAccessReportRange() {
@@ -109,6 +116,94 @@ function createEmptyAuthAdminData() {
     },
     lastLoadedAt: null
   };
+}
+
+function clearAuthInactivityTimer() {
+  if (authInactivityTimer) {
+    window.clearTimeout(authInactivityTimer);
+    authInactivityTimer = null;
+  }
+}
+
+function finalizeLoggedOutState() {
+  clearAuthState();
+  state.dataReady = false;
+  stopPageLoading();
+  syncDashboardAutoRefresh();
+  render();
+}
+
+function handleAuthIdleTimeout() {
+  if (!state.auth.accessToken && !state.auth.refreshToken) {
+    clearAuthInactivityTimer();
+    return;
+  }
+
+  finalizeLoggedOutState();
+  pushToast('Sessao encerrada por 10 minutos de inatividade. Entre novamente para continuar.', 'info');
+}
+
+async function syncAuthSessionActivity() {
+  if (authActivityPingPromise || (!state.auth.accessToken && !state.auth.refreshToken)) {
+    return authActivityPingPromise;
+  }
+
+  const now = Date.now();
+  if (now - lastAuthActivityPingAt < AUTH_ACTIVITY_PING_INTERVAL_MS) {
+    return null;
+  }
+
+  lastAuthActivityPingAt = now;
+  authActivityPingPromise = (async () => {
+    try {
+      const payload = await apiRequest('/auth/me', {
+        suppressAuthFailureToast: true,
+        sessionActivity: 'active'
+      });
+      if (payload?.user) {
+        state.auth.user = payload.user;
+        persistAuthState();
+      }
+      return payload;
+    } catch {
+      return null;
+    } finally {
+      authActivityPingPromise = null;
+    }
+  })();
+
+  return authActivityPingPromise;
+}
+
+function scheduleAuthInactivityTimeout() {
+  clearAuthInactivityTimer();
+
+  if ((!state.auth.accessToken && !state.auth.refreshToken) || !lastAuthInteractionAt) {
+    return;
+  }
+
+  const remainingMs = Math.max(0, AUTH_IDLE_TIMEOUT_MS - (Date.now() - lastAuthInteractionAt));
+  authInactivityTimer = window.setTimeout(handleAuthIdleTimeout, remainingMs);
+}
+
+function registerAuthInteraction(options = {}) {
+  lastAuthInteractionAt = Date.now();
+  scheduleAuthInactivityTimeout();
+  if (!options.skipPing && (state.auth.accessToken || state.auth.refreshToken)) {
+    void syncAuthSessionActivity();
+  }
+}
+
+function resolveAuthSessionActivityHeader(options = {}) {
+  if (options.sessionActivity === 'active' || options.sessionActivity === 'passive') {
+    return options.sessionActivity;
+  }
+
+  if (document.visibilityState === 'hidden') {
+    return 'passive';
+  }
+
+  return Date.now() - lastAuthInteractionAt <= AUTH_ACTIVE_REQUEST_WINDOW_MS ? 'active' : 'passive';
 }
 
 const navItems = [
@@ -704,6 +799,18 @@ function wireGlobalEvents() {
   document.addEventListener('contextmenu', onDocumentContextMenu);
   document.addEventListener('submit', onDocumentSubmit);
   document.addEventListener('change', onDocumentChange);
+  document.addEventListener('keydown', registerAuthInteraction, true);
+  document.addEventListener('pointerdown', registerAuthInteraction, true);
+  document.addEventListener('touchstart', registerAuthInteraction, true);
+  document.addEventListener(
+    'visibilitychange',
+    () => {
+      if (document.visibilityState === 'visible') {
+        registerAuthInteraction();
+      }
+    },
+    true
+  );
   document.addEventListener('scroll', onDocumentScroll, true);
   document.addEventListener('mousedown', onDocumentMouseDown);
   document.addEventListener('mousemove', onDocumentMouseMove);
@@ -18513,16 +18620,13 @@ async function performLogout() {
     if (state.auth.accessToken) {
       await apiRequest('/auth/logout', {
         method: 'POST',
+        sessionActivity: 'passive',
         suppressAuthFailureToast: true
       });
     }
   } catch {}
 
-  clearAuthState();
-  state.dataReady = false;
-  stopPageLoading();
-  syncDashboardAutoRefresh();
-  render();
+  finalizeLoggedOutState();
 }
 
 async function submitSettingsAuthUserForm(form) {
@@ -20637,14 +20741,23 @@ function clearAuthState() {
   state.auth.sessionExpiresAt = '';
   state.auth.user = null;
   state.auth.adminData = createEmptyAuthAdminData();
+  lastAuthInteractionAt = 0;
+  lastAuthActivityPingAt = 0;
+  authActivityPingPromise = null;
+  clearAuthInactivityTimer();
   clearStoredAuthState();
 }
 
-function applyAuthPayload(payload) {
+function applyAuthPayload(payload, options = {}) {
   state.auth.accessToken = String(payload?.accessToken || '').trim();
   state.auth.refreshToken = String(payload?.refreshToken || '').trim();
   state.auth.sessionExpiresAt = String(payload?.sessionExpiresAt || '').trim();
   state.auth.user = payload?.user && typeof payload.user === 'object' ? payload.user : null;
+  if (options.trackInteraction === false) {
+    scheduleAuthInactivityTimeout();
+  } else {
+    registerAuthInteraction({ skipPing: true });
+  }
   persistAuthState();
 }
 
@@ -20663,13 +20776,14 @@ async function ensureAuthenticatedSession() {
         suppressAuthFailureToast: true
       });
       state.auth.user = me?.user || null;
+      scheduleAuthInactivityTimeout();
       persistAuthState();
       return Boolean(state.auth.user);
     }
 
     return await refreshAccessSession({ silent: true });
   } catch {
-    clearAuthState();
+    finalizeLoggedOutState();
     return false;
   } finally {
     state.auth.authenticating = false;
@@ -20686,19 +20800,22 @@ async function refreshAccessSession(options = {}) {
     return false;
   }
 
+  const sessionActivity = resolveAuthSessionActivityHeader(options);
+
   authRefreshPromise = (async () => {
     try {
       const payload = await performApiRequest('/auth/refresh', {
         method: 'POST',
         body: { refreshToken },
+        sessionActivity,
         skipAuth: true,
         skipAuthRefresh: true,
         suppressAuthFailureToast: options.silent
       });
-      applyAuthPayload(payload);
+      applyAuthPayload(payload, { trackInteraction: sessionActivity === 'active' });
       return true;
     } catch {
-      clearAuthState();
+      finalizeLoggedOutState();
       return false;
     } finally {
       authRefreshPromise = null;
@@ -20736,6 +20853,7 @@ async function performApiRequest(path, options = {}) {
 
   try {
     const headers = { ...extraHeaders };
+    headers['X-Session-Activity'] = resolveAuthSessionActivityHeader(options);
     const init = {
       method,
       headers,

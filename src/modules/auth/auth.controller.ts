@@ -107,11 +107,14 @@ export class AuthController {
 
   private toRequestContext(request: AuthenticatedRequest): AccessRequestContext {
     const userAgentHeader = request.headers?.['user-agent'];
+    const sessionActivityHeader = request.headers?.['x-session-activity'];
+    const sessionActivity = Array.isArray(sessionActivityHeader) ? sessionActivityHeader[0] : sessionActivityHeader;
     return {
       ip: request.ip,
       userAgent: Array.isArray(userAgentHeader) ? userAgentHeader[0] : userAgentHeader,
       path: this.resolveRoutePath(request),
-      method: request.method
+      method: request.method,
+      interactive: sessionActivity !== 'passive'
     };
   }
 

@@ -25,6 +25,7 @@ export interface AccessRequestContext {
   userAgent?: string;
   path?: string;
   method?: string;
+  interactive?: boolean;
 }
 
 export interface AuthenticatedRequest {
@@ -35,6 +36,7 @@ export interface AuthenticatedRequest {
   headers: {
     authorization?: string;
     'user-agent'?: string | string[];
+    'x-session-activity'?: string | string[];
   };
   ip?: string;
   originalUrl?: string;

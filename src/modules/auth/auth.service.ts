@@ -23,6 +23,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 const DEFAULT_ACCESS_EXPIRES_IN_SECONDS = 12 * 60 * 60;
 const DEFAULT_REFRESH_EXPIRES_IN_SECONDS = 7 * 24 * 60 * 60;
 const DEFAULT_SESSION_TOUCH_INTERVAL_SECONDS = 60;
+const DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS = 10 * 60;
 
 type SessionWithUser = SessaoUsuario & {
   usuario: Usuario;
@@ -34,6 +35,7 @@ export class AuthService {
   private readonly expiresInSeconds: number;
   private readonly refreshExpiresInSeconds: number;
   private readonly sessionTouchIntervalSeconds: number;
+  private readonly sessionIdleTimeoutSeconds: number;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -48,6 +50,10 @@ export class AuthService {
     this.sessionTouchIntervalSeconds = this.readPositiveIntegerEnv(
       'AUTH_SESSION_TOUCH_INTERVAL_SECONDS',
       DEFAULT_SESSION_TOUCH_INTERVAL_SECONDS
+    );
+    this.sessionIdleTimeoutSeconds = this.readPositiveIntegerEnv(
+      'AUTH_SESSION_IDLE_TIMEOUT_SECONDS',
+      DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS
     );
   }
 
@@ -195,6 +201,7 @@ export class AuthService {
 
     const nextSessionExpiresAt = new Date(Date.now() + this.refreshExpiresInSeconds * 1000);
     const nextRefreshToken = this.generateRefreshToken(session.id);
+    const nextLastSeenAt = context.interactive === false ? session.lastSeenAt : new Date();
 
     await this.prisma.$transaction([
       this.prisma.sessaoUsuario.update({
@@ -202,7 +209,7 @@ export class AuthService {
         data: {
           refreshTokenHash: this.hashToken(nextRefreshToken),
           expiresAt: nextSessionExpiresAt,
-          lastSeenAt: new Date(),
+          lastSeenAt: nextLastSeenAt,
           ip: context.ip ?? session.ip,
           userAgent: context.userAgent ?? session.userAgent
         }
@@ -463,6 +470,7 @@ export class AuthService {
 
   async listSessions(filters: ListSessionsQueryDto) {
     const where: Prisma.SessaoUsuarioWhereInput = {};
+    const now = new Date();
 
     if (filters.usuarioId) {
       where.usuarioId = filters.usuarioId;
@@ -479,6 +487,9 @@ export class AuthService {
       where.logoutAt = null;
       where.expiresAt = {
         gt: new Date()
+      };
+      where.lastSeenAt = {
+        gt: new Date(now.getTime() - this.sessionIdleTimeoutSeconds * 1000)
       };
     }
 
@@ -684,18 +695,24 @@ export class AuthService {
       throw new UnauthorizedException('Sessao encerrada');
     }
 
-    if (session.expiresAt.getTime() <= now.getTime()) {
-      await this.expireSession(session, context);
+    const sessionTerminalDate = this.resolveSessionValidityLimit(session);
+    const idleExpired = this.getSessionIdleExpiresAt(session).getTime() <= now.getTime();
+    if (sessionTerminalDate.getTime() <= now.getTime()) {
+      await this.expireSession(session, context, sessionTerminalDate, idleExpired ? 'inatividade' : 'expiracao');
       throw new UnauthorizedException('Sessao expirada');
     }
 
-    if (!ignoreTouch) {
+    if (!ignoreTouch && context?.interactive !== false) {
       await this.touchSessionIfNeeded(session);
     }
   }
 
-  private async expireSession(session: SessionWithUser, context?: AccessRequestContext): Promise<void> {
-    const revokedAt = new Date();
+  private async expireSession(
+    session: SessionWithUser,
+    context?: AccessRequestContext,
+    revokedAt = new Date(),
+    motivo: 'inatividade' | 'expiracao' = 'expiracao'
+  ): Promise<void> {
     const updated = await this.prisma.sessaoUsuario.updateMany({
       where: {
         id: session.id,
@@ -720,6 +737,7 @@ export class AuthService {
       ip: (context?.ip ?? session.ip) ?? undefined,
       userAgent: (context?.userAgent ?? session.userAgent) ?? undefined,
       detalhes: {
+        motivo,
         metodo: context?.method,
         path: context?.path
       }
@@ -783,11 +801,26 @@ export class AuthService {
     return date;
   }
 
-  private isSessionActive(session: Pick<SessaoUsuario, 'logoutAt' | 'revokedAt' | 'expiresAt'>, now: Date): boolean {
-    return !session.logoutAt && !session.revokedAt && session.expiresAt.getTime() > now.getTime();
+  private isSessionActive(
+    session: Pick<SessaoUsuario, 'logoutAt' | 'revokedAt' | 'expiresAt' | 'lastSeenAt'>,
+    now: Date
+  ): boolean {
+    return this.resolveSessionTerminalDate(session, now).getTime() > now.getTime();
   }
 
-  private resolveSessionTerminalDate(session: Pick<SessaoUsuario, 'logoutAt' | 'revokedAt' | 'expiresAt'>, now: Date): Date {
+  private getSessionIdleExpiresAt(session: Pick<SessaoUsuario, 'lastSeenAt'>): Date {
+    return new Date(session.lastSeenAt.getTime() + this.sessionIdleTimeoutSeconds * 1000);
+  }
+
+  private resolveSessionValidityLimit(session: Pick<SessaoUsuario, 'expiresAt' | 'lastSeenAt'>): Date {
+    const idleExpiresAt = this.getSessionIdleExpiresAt(session);
+    return idleExpiresAt.getTime() < session.expiresAt.getTime() ? idleExpiresAt : session.expiresAt;
+  }
+
+  private resolveSessionTerminalDate(
+    session: Pick<SessaoUsuario, 'logoutAt' | 'revokedAt' | 'expiresAt' | 'lastSeenAt'>,
+    now: Date
+  ): Date {
     if (session.logoutAt) {
       return session.logoutAt;
     }
@@ -796,7 +829,8 @@ export class AuthService {
       return session.revokedAt;
     }
 
-    return session.expiresAt.getTime() < now.getTime() ? session.expiresAt : now;
+    const validityLimit = this.resolveSessionValidityLimit(session);
+    return validityLimit.getTime() < now.getTime() ? validityLimit : now;
   }
 
   private buildAuthResponse(usuario: Usuario, sessionId: string, sessionExpiresAt: Date, refreshToken: string) {

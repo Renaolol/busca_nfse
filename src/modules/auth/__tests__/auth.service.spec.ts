@@ -351,4 +351,75 @@ describe('AuthService', () => {
     expect(result[0].totalDurationMs).toBe(11_700_000);
     expect(result[0].lastActivityAt).toBe('2026-08-11T09:45:00.000Z');
   });
+
+  it('expira sessao apos 10 minutos sem interacao', async () => {
+    prisma.usuario.findUnique.mockResolvedValue(baseUser as never);
+    passwordHashService.verify.mockResolvedValue(true);
+    prisma.sessaoUsuario.create.mockResolvedValue({
+      id: '550e8400-e29b-41d4-a716-446655440124',
+      usuarioId: baseUser.id,
+      refreshTokenHash: '',
+      loginAt: new Date('2026-08-12T10:01:00.000Z'),
+      lastSeenAt: new Date('2026-08-12T10:01:00.000Z'),
+      logoutAt: null,
+      expiresAt: new Date('2026-08-12T12:01:00.000Z'),
+      revokedAt: null,
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date('2026-08-12T10:01:00.000Z'),
+      updatedAt: new Date('2026-08-12T10:01:00.000Z')
+    } as never);
+    prisma.sessaoUsuario.update.mockResolvedValue({
+      id: '550e8400-e29b-41d4-a716-446655440124',
+      usuarioId: baseUser.id,
+      refreshTokenHash: 'hash-atualizado',
+      loginAt: new Date('2026-08-12T10:01:00.000Z'),
+      lastSeenAt: new Date('2026-08-12T10:01:00.000Z'),
+      logoutAt: null,
+      expiresAt: new Date('2026-08-12T12:01:00.000Z'),
+      revokedAt: null,
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date('2026-08-12T10:01:00.000Z'),
+      updatedAt: new Date('2026-08-12T10:01:00.000Z')
+    } as never);
+    prisma.usuario.update.mockResolvedValue({
+      ...baseUser,
+      ultimoLoginAt: new Date('2026-08-12T10:01:00.000Z')
+    } as never);
+    prisma.eventoAcesso.create.mockResolvedValue({ id: 'evt-6' } as never);
+    prisma.sessaoUsuario.findUnique.mockResolvedValue({
+      id: '550e8400-e29b-41d4-a716-446655440124',
+      usuarioId: baseUser.id,
+      refreshTokenHash: createHash('sha256').update('token-refresh').digest('hex'),
+      loginAt: new Date('2026-08-12T10:00:00.000Z'),
+      lastSeenAt: new Date(Date.now() - 11 * 60 * 1000),
+      logoutAt: null,
+      expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+      revokedAt: null,
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      createdAt: new Date('2026-08-12T10:00:00.000Z'),
+      updatedAt: new Date('2026-08-12T10:00:00.000Z'),
+      usuario: baseUser
+    } as never);
+    prisma.sessaoUsuario.updateMany.mockResolvedValue({ count: 1 } as never);
+
+    const login = await service.login(
+      { username: 'admin', password: 'admin123' },
+      { ip: '127.0.0.1', userAgent: 'jest', path: '/auth/login', method: 'POST' }
+    );
+
+    await expect(
+      service.verifyAccessToken(login.accessToken, {
+        ip: '127.0.0.1',
+        userAgent: 'jest',
+        path: '/clientes',
+        method: 'GET',
+        interactive: false
+      })
+    ).rejects.toThrow(UnauthorizedException);
+
+    expect(prisma.sessaoUsuario.updateMany).toHaveBeenCalled();
+  });
 });
