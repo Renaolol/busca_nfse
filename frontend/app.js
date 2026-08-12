@@ -5,6 +5,7 @@ const toastRoot = document.getElementById('toastRoot');
 const API_TIMEOUT_MS = 20000;
 const SEARCH_PAGE_SIZE = 100;
 const DASHBOARD_AUTO_REFRESH_INTERVAL_MS = 60000;
+const THEME_STORAGE_KEY = 'gcont:theme:v1';
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
 const COMPARE_SPED_HISTORY_LIMIT = 10;
@@ -336,7 +337,8 @@ const state = {
     geral: {
       nomeAmbiente: 'GCONT - Ambiente Interno',
       modoOperacao: 'Producao',
-      statusSistema: 'Operacional'
+      statusSistema: 'Operacional',
+      tema: readStoredTheme()
     },
     rotina: {
       ativa: true,
@@ -490,6 +492,7 @@ function boot() {
     state.route = parseRoute(window.location.hash);
   }
 
+  applyTheme(state.settings.geral.tema);
   wireGlobalEvents();
   render();
   void initializeData();
@@ -664,15 +667,26 @@ function onDocumentContextMenu(event) {
 
   event.preventDefault();
   const estimatedWidth = 200;
+  const estimatedMenuHeight = 220;
   const left = Math.min(window.innerWidth - estimatedWidth - 8, Math.max(8, event.clientX));
-  const top = Math.min(window.innerHeight - 12, event.clientY);
-  openRowActionsMenuAt(menuId, { left, top });
+  const spaceBelow = window.innerHeight - event.clientY;
+  const anchor =
+    spaceBelow < estimatedMenuHeight && event.clientY > spaceBelow
+      ? { left, bottom: Math.max(8, window.innerHeight - event.clientY) }
+      : { left, top: Math.min(window.innerHeight - 12, event.clientY) };
+  openRowActionsMenuAt(menuId, anchor);
 }
 
 function computeMenuAnchorFromRect(rect, estimatedWidth = 200) {
+  const estimatedMenuHeight = 220;
   const left = Math.min(window.innerWidth - estimatedWidth - 8, Math.max(8, rect.right - estimatedWidth));
-  const top = Math.min(window.innerHeight - 12, rect.bottom + 6);
-  return { left, top };
+  const spaceBelow = window.innerHeight - rect.bottom;
+
+  if (spaceBelow < estimatedMenuHeight && rect.top > spaceBelow) {
+    return { left, bottom: Math.max(8, window.innerHeight - rect.top + 6) };
+  }
+
+  return { left, top: Math.min(window.innerHeight - 12, rect.bottom + 6) };
 }
 
 function openRowActionsMenuAt(menuId, anchor) {
@@ -2052,6 +2066,13 @@ function onDocumentChange(event) {
     return;
   }
 
+  if (action === 'settings-tema-change') {
+    setTheme(target.value);
+    pushToast(`Tema ${target.value.toLowerCase()} aplicado.`, 'success');
+    render();
+    return;
+  }
+
   if (action === 'difal-chart-grouping') {
     const grouping = target.value === 'mes' ? 'mes' : 'dia';
     state.difalReader.chartGrouping = grouping;
@@ -2114,10 +2135,7 @@ function onDocumentMouseDown(event) {
     return;
   }
 
-  state.xmlReader30.selectionDrag = {
-    active: true,
-    checked: !target.checked
-  };
+  return;
 }
 
 function onDocumentMouseMove(event) {
@@ -2150,6 +2168,8 @@ function onDocumentMouseOver(event) {
     return;
   }
 
+  return;
+
   const target = event.target.closest?.('[data-action="xml-reader30-select"]');
   if (!(target instanceof HTMLInputElement) || target.disabled) {
     return;
@@ -2160,8 +2180,10 @@ function onDocumentMouseOver(event) {
     return;
   }
 
+  const previousSelectionKey = state.selectedXmlReaderIds.size ? [...state.selectedXmlReaderIds][0] : '';
   target.checked = dragState.checked;
   setXmlReader30Selection(selectionKey, dragState.checked);
+  syncXmlReader30SelectionCheckboxes(selectionKey, previousSelectionKey);
 }
 
 function onDocumentMouseUp() {
@@ -3241,7 +3263,7 @@ function renderCertificatesPage() {
                 colSpan: 10,
                 rowsHtml: certificates
                   .map((cert) => {
-                    const rowClass = cert.status === 'Vencido' ? ' style="background:#fff5f5;"' : cert.status === 'A vencer' ? ' style="background:#fffbf0;"' : '';
+                    const rowClass = cert.status === 'Vencido' ? ' class="cert-row-vencido"' : cert.status === 'A vencer' ? ' class="cert-row-a-vencer"' : '';
                     const canDelete = state.dataSource !== 'api' || !cert.ativo;
                     const certMenuId = `cert:${cert.id}`;
                     const certMenuItems = [
@@ -3416,7 +3438,7 @@ function renderExecutionMonitorCard() {
         <span>Sucessos: <strong>${monitor.successful}</strong></span>
         <span>Falhas: <strong>${monitor.failed}</strong></span>
       </div>
-      <div class="card" style="margin-top:12px; border:1px dashed #d8d8de; box-shadow:none;">
+      <div class="card" style="margin-top:12px; border:1px dashed var(--line-strong); box-shadow:none;">
         <h4 class="card-title" style="margin:0 0 6px 0;">Ultimo XML baixado</h4>
         ${
           lastXml
@@ -4750,7 +4772,7 @@ function renderXmlNumberingValidationSummary(query, validation) {
 
   return `
     <div style="display:flex; gap:12px; align-items:flex-start; justify-content:space-between; flex-wrap:wrap; margin-top:12px;">
-      <p class="card-subtitle" style="margin:0; color:#8a5a00;">
+      <p class="card-subtitle" style="margin:0; color:var(--warning);">
         Atencao: a validacao geral da empresa encontrou ${escapeHtml(String(totalNumerosResumo))} numeracao(oes) pulada(s) em ${escapeHtml(String(totalFaixasResumo))} faixa(s), independentemente dos filtros da tabela. ${escapeHtml(preview)}${escapeHtml(suffix)}
       </p>
       ${
@@ -6921,7 +6943,7 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
   const baseNumero = row?.numeroLabel || '-';
   const baseValorTotal = row?.valorLabel || formatOptionalCurrency(row?.raw?.valor) || '-';
   const baseEvento = normalizeXmlReader30InlineText(row?.raw?.eventosResumo || '-');
-  const selectionKey = `${row?.documentType || 'nfe'}:${row?.rowId || row?.raw?.id || row?.raw?.apiNfeId || row?.raw?.chaveAcesso || baseNumero}`;
+  const baseSelectionKey = `${row?.documentType || 'nfe'}:${row?.rowId || row?.raw?.id || row?.raw?.apiNfeId || row?.raw?.chaveAcesso || baseNumero}`;
 
   if (!items.length) {
     if (!includeFallback) {
@@ -6932,7 +6954,7 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
     return [
       {
         ...row,
-        selectionKey,
+        selectionKey: `${baseSelectionKey}:fallback`,
         numeroNf: baseNumero,
         statusNf: baseStatusLabel,
         statusTone: baseStatusTone,
@@ -6968,9 +6990,9 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
     ];
   }
 
-  return items.map((item) => ({
+  return items.map((item, itemIndex) => ({
     ...row,
-    selectionKey,
+    selectionKey: `${baseSelectionKey}:item:${itemIndex}`,
     numeroNf: baseNumero,
     statusNf: baseStatusLabel,
     statusTone: baseStatusTone,
@@ -8210,11 +8232,35 @@ function setXmlReader30Selection(selectionKey, checked) {
   }
 
   if (checked) {
-    state.selectedXmlReaderIds.add(normalizedKey);
+    state.selectedXmlReaderIds = new Set([normalizedKey]);
     return;
   }
 
   state.selectedXmlReaderIds.delete(normalizedKey);
+}
+
+function syncXmlReader30SelectionCheckboxes(nextSelectionKey, previousSelectionKey) {
+  const nextKey = String(nextSelectionKey || '').trim();
+  const previousKey = String(previousSelectionKey || '').trim();
+
+  document.querySelectorAll('[data-action="xml-reader30-select"]').forEach((node) => {
+    if (!(node instanceof HTMLInputElement)) {
+      return;
+    }
+
+    const nodeSelectionKey = String(node.getAttribute('data-selection-key') || '').trim();
+    if (!nodeSelectionKey) {
+      return;
+    }
+
+    if (previousKey && previousKey !== nextKey && nodeSelectionKey === previousKey) {
+      node.checked = false;
+    }
+
+    if (nextKey && nodeSelectionKey === nextKey) {
+      node.checked = true;
+    }
+  });
 }
 
 function getXmlReader30SelectionRows() {
@@ -8661,6 +8707,10 @@ function renderSettingsTabPanel() {
             Status do sistema
             <input name="statusSistema" value="${escapeHtml(state.settings.geral.statusSistema)}" />
           </label>
+          <label class="field">
+            Tema do NotaSync
+            <select name="tema" data-action="settings-tema-change">${renderOptions(['Claro', 'Escuro'], state.settings.geral.tema)}</select>
+          </label>
           <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start;">
             <button class="btn primary" type="submit">Salvar alteracoes</button>
           </div>
@@ -8974,7 +9024,7 @@ function renderNfseRecoverByDpsModal() {
             </div>
             ${
               gapSummary
-                ? `<p class="card-subtitle" style="margin:14px 0 10px; color:#8a5a00;">Lacunas detectadas na busca atual: ${escapeHtml(gapSummary)}</p>`
+                ? `<p class="card-subtitle" style="margin:14px 0 10px; color:var(--warning);">Lacunas detectadas na busca atual: ${escapeHtml(gapSummary)}</p>`
                 : ''
             }
             <p class="card-subtitle" style="margin-top:10px;">
@@ -8999,8 +9049,8 @@ function renderNfseRecoverByDpsModal() {
                   ${
                     details.length
                       ? `
-                        <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(52vh, 520px);">
-                          <div style="display:grid; grid-template-columns:minmax(160px, .8fr) minmax(260px, 1.4fr) minmax(160px, .8fr) minmax(360px, 1.8fr); gap:0; min-width:940px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                        <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(52vh, 520px);">
+                          <div style="display:grid; grid-template-columns:minmax(160px, .8fr) minmax(260px, 1.4fr) minmax(160px, .8fr) minmax(360px, 1.8fr); gap:0; min-width:940px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line);">
                             <div style="padding:12px 14px;">NFS-e faltante</div>
                             <div style="padding:12px 14px;">Id inferido</div>
                             <div style="padding:12px 14px;">Status</div>
@@ -9009,11 +9059,11 @@ function renderNfseRecoverByDpsModal() {
                           ${details
                             .map(
                               (detail) => `
-                                <div style="display:grid; grid-template-columns:minmax(160px, .8fr) minmax(260px, 1.4fr) minmax(160px, .8fr) minmax(360px, 1.8fr); gap:0; min-width:940px; border-bottom:1px solid #eef0f2; align-items:start;">
+                                <div style="display:grid; grid-template-columns:minmax(160px, .8fr) minmax(260px, 1.4fr) minmax(160px, .8fr) minmax(360px, 1.8fr); gap:0; min-width:940px; border-bottom:1px solid var(--line); align-items:start;">
                                   <div style="padding:14px;">${escapeHtml(`${detail?.numeroDps || '-'}${detail?.serie ? ` / serie ${detail.serie}` : ''}`)}</div>
                                   <div style="padding:14px; font-family:monospace; font-size:12px; word-break:break-all;">${escapeHtml(detail?.dpsId || '-')}</div>
                                   <div style="padding:14px;">${statusBadge(detail?.status === 'recuperada' ? 'Recuperada' : 'Falha', detail?.status === 'recuperada' ? 'success' : 'danger')}</div>
-                                  <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(detail?.mensagem || '-')}</div>
+                                  <div style="padding:14px; color:var(--text-secondary); white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(detail?.mensagem || '-')}</div>
                                 </div>
                               `
                             )
@@ -9077,7 +9127,7 @@ function renderNfseRecoverByKeyModal() {
             </div>
             ${
               gapSummary
-                ? `<p class="card-subtitle" style="margin:14px 0 10px; color:#8a5a00;">Lacunas detectadas na busca atual: ${escapeHtml(gapSummary)}</p>`
+                ? `<p class="card-subtitle" style="margin:14px 0 10px; color:var(--warning);">Lacunas detectadas na busca atual: ${escapeHtml(gapSummary)}</p>`
                 : ''
             }
             <label style="display:block; margin-top:12px;">
@@ -9104,8 +9154,8 @@ function renderNfseRecoverByKeyModal() {
                   ${
                     details.length
                       ? `
-                        <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(52vh, 520px);">
-                          <div style="display:grid; grid-template-columns:minmax(260px, 1.4fr) minmax(140px, .7fr) minmax(360px, 1.8fr); gap:0; min-width:760px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                        <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(52vh, 520px);">
+                          <div style="display:grid; grid-template-columns:minmax(260px, 1.4fr) minmax(140px, .7fr) minmax(360px, 1.8fr); gap:0; min-width:760px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line);">
                             <div style="padding:12px 14px;">Chave de acesso</div>
                             <div style="padding:12px 14px;">Status</div>
                             <div style="padding:12px 14px;">Mensagem</div>
@@ -9113,10 +9163,10 @@ function renderNfseRecoverByKeyModal() {
                           ${details
                             .map(
                               (detail) => `
-                                <div style="display:grid; grid-template-columns:minmax(260px, 1.4fr) minmax(140px, .7fr) minmax(360px, 1.8fr); gap:0; min-width:760px; border-bottom:1px solid #eef0f2; align-items:start;">
+                                <div style="display:grid; grid-template-columns:minmax(260px, 1.4fr) minmax(140px, .7fr) minmax(360px, 1.8fr); gap:0; min-width:760px; border-bottom:1px solid var(--line); align-items:start;">
                                   <div style="padding:14px; font-family:monospace; font-size:12px; word-break:break-all;">${escapeHtml(detail?.chaveAcesso || '-')}</div>
                                   <div style="padding:14px;">${statusBadge(detail?.status === 'recuperada' ? 'Recuperada' : 'Falha', detail?.status === 'recuperada' ? 'success' : 'danger')}</div>
-                                  <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(detail?.mensagem || '-')}</div>
+                                  <div style="padding:14px; color:var(--text-secondary); white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(detail?.mensagem || '-')}</div>
                                 </div>
                               `
                             )
@@ -9208,8 +9258,8 @@ function renderNfseNumberingExceptionModal() {
                 ? '<div class="table-state loading">Carregando excecoes...</div>'
                 : exceptions.length
                   ? `
-                    <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(46vh, 420px);">
-                      <div style="display:grid; grid-template-columns:minmax(120px, .8fr) minmax(140px, .9fr) minmax(120px, .8fr) minmax(280px, 1.6fr) minmax(120px, .8fr); gap:0; min-width:760px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                    <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(46vh, 420px);">
+                      <div style="display:grid; grid-template-columns:minmax(120px, .8fr) minmax(140px, .9fr) minmax(120px, .8fr) minmax(280px, 1.6fr) minmax(120px, .8fr); gap:0; min-width:760px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line);">
                         <div style="padding:12px 14px;">Ambiente</div>
                         <div style="padding:12px 14px;">Numero</div>
                         <div style="padding:12px 14px;">Tipo</div>
@@ -9219,11 +9269,11 @@ function renderNfseNumberingExceptionModal() {
                       ${exceptions
                         .map(
                           (row) => `
-                            <div style="display:grid; grid-template-columns:minmax(120px, .8fr) minmax(140px, .9fr) minmax(120px, .8fr) minmax(280px, 1.6fr) minmax(120px, .8fr); gap:0; min-width:760px; border-bottom:1px solid #eef0f2; align-items:start;">
+                            <div style="display:grid; grid-template-columns:minmax(120px, .8fr) minmax(140px, .9fr) minmax(120px, .8fr) minmax(280px, 1.6fr) minmax(120px, .8fr); gap:0; min-width:760px; border-bottom:1px solid var(--line); align-items:start;">
                               <div style="padding:14px;">${escapeHtml(mapNfseAmbienteLabel(row.ambiente || 'producao'))}</div>
                               <div style="padding:14px;"><strong>${escapeHtml(String(row.numeroNfse || '-'))}</strong></div>
                               <div style="padding:14px;">${statusBadge(mapNfseNumberingExceptionTypeLabel(row.tipo), row.tipo === 'inutilizada' ? 'warning' : 'neutral')}</div>
-                              <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.observacao || '-')}</div>
+                              <div style="padding:14px; color:var(--text-secondary); white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.observacao || '-')}</div>
                               <div style="padding:14px;">
                                 <button class="btn secondary" type="button" data-action="nfse-delete-numbering-exception" data-exception-id="${escapeHtml(row.id)}" ${submitting ? 'disabled' : ''}>Remover</button>
                               </div>
@@ -9286,8 +9336,8 @@ function renderNfseContaContabilConfigModal() {
                 ? '<div class="table-state loading">Carregando configuracoes...</div>'
                 : configs.length
                   ? `
-                    <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(46vh, 420px);">
-                      <div style="display:grid; grid-template-columns:minmax(160px, 1fr) minmax(140px, .8fr) minmax(100px, .6fr) minmax(160px, 1fr); gap:0; min-width:600px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7;">
+                    <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(46vh, 420px);">
+                      <div style="display:grid; grid-template-columns:minmax(160px, 1fr) minmax(140px, .8fr) minmax(100px, .6fr) minmax(160px, 1fr); gap:0; min-width:600px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line);">
                         <div style="padding:12px 14px;">Codigo do servico</div>
                         <div style="padding:12px 14px;">Conta contabil</div>
                         <div style="padding:12px 14px;">Status</div>
@@ -9296,7 +9346,7 @@ function renderNfseContaContabilConfigModal() {
                       ${configs
                         .map(
                           (row) => `
-                            <div style="display:grid; grid-template-columns:minmax(160px, 1fr) minmax(140px, .8fr) minmax(100px, .6fr) minmax(160px, 1fr); gap:0; min-width:600px; border-bottom:1px solid #eef0f2; align-items:center;">
+                            <div style="display:grid; grid-template-columns:minmax(160px, 1fr) minmax(140px, .8fr) minmax(100px, .6fr) minmax(160px, 1fr); gap:0; min-width:600px; border-bottom:1px solid var(--line); align-items:center;">
                               <div style="padding:14px;"><strong>${escapeHtml(row.codigoServico || '-')}</strong></div>
                               <div style="padding:14px;">${escapeHtml(row.contaContabil || '-')}</div>
                               <div style="padding:14px;">${statusBadge(row.ativo ? 'Ativa' : 'Inativa', row.ativo ? 'success' : 'neutral')}</div>
@@ -9584,7 +9634,7 @@ function renderNfeDetailsModal(nfeId) {
             ${detailItem('Caminho XML', doc.caminhoServidor || '-')}
           </div>
           <div style="margin-top:18px;">
-            <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
+            <small style="color:var(--text-secondary); display:block; margin-bottom:8px;">Eventos vinculados</small>
             ${renderXmlEventsList(doc.eventos)}
           </div>
         </div>
@@ -9663,7 +9713,7 @@ function renderCteDetailsModal(cteId) {
             ${detailItem('Caminho XML', doc.caminhoServidor || '-')}
           </div>
           <div style="margin-top:18px;">
-            <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
+            <small style="color:var(--text-secondary); display:block; margin-bottom:8px;">Eventos vinculados</small>
             ${renderXmlEventsList(doc.eventos)}
           </div>
         </div>
@@ -9771,7 +9821,7 @@ function renderEventsSyncReportModal() {
         <div class="modal-body">
           ${
             currentMessage
-              ? `<div style="margin-bottom:14px; padding:12px 14px; border:1px solid #d9e7ff; border-radius:12px; background:#f4f8ff; color:#21446b;">${escapeHtml(currentMessage)}</div>`
+              ? `<div style="margin-bottom:14px; padding:12px 14px; border:1px solid var(--info); border-radius:12px; background:var(--surface-alt); color:var(--info);">${escapeHtml(currentMessage)}</div>`
               : ''
           }
           <div class="form-grid four" style="margin-bottom:18px;">
@@ -9789,8 +9839,8 @@ function renderEventsSyncReportModal() {
           ${
             visibleRows.length
               ? `
-                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(68vh, 760px);">
-                  <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:1300px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7; position:sticky; top:0; z-index:1;">
+                <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(68vh, 760px);">
+                  <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:1300px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:1;">
                     <div style="padding:12px 14px;">Documento</div>
                     <div style="padding:12px 14px;">Chave de acesso</div>
                     <div style="padding:12px 14px;">Evento</div>
@@ -9801,25 +9851,25 @@ function renderEventsSyncReportModal() {
                   ${visibleRows
                     .map(
                       (row) => `
-                        <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:1300px; border-bottom:1px solid #eef0f2; align-items:start;">
+                        <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:1300px; border-bottom:1px solid var(--line); align-items:start;">
                           <div style="padding:14px;">
                             <strong>${escapeHtml(row.documentLabel)}</strong>
-                            ${row.secondaryLabel ? `<div style="margin-top:4px; color:#606062;">${escapeHtml(row.secondaryLabel)}</div>` : ''}
+                            ${row.secondaryLabel ? `<div style="margin-top:4px; color:var(--text-secondary);">${escapeHtml(row.secondaryLabel)}</div>` : ''}
                           </div>
                           <div style="padding:14px; font-family:monospace; font-size:12px; word-break:break-all;">${escapeHtml(row.chaveAcesso)}</div>
                           <div style="padding:14px;">
                             <strong>${escapeHtml(row.eventLabel)}</strong>
-                            <div style="margin-top:4px; color:#606062;">${escapeHtml(row.eventCountLabel)}</div>
+                            <div style="margin-top:4px; color:var(--text-secondary);">${escapeHtml(row.eventCountLabel)}</div>
                           </div>
                           <div style="padding:14px;">${statusBadge(row.statusLabel, row.statusTone)}</div>
-                          <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
+                          <div style="padding:14px; color:var(--text-secondary); white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
                           <div style="padding:14px;">
                             ${
                               row.openActionId && !running
                                 ? `<button class="btn secondary small" data-action="events-report-open-document" data-document-type="${escapeHtml(
                                     documentType
                                   )}" data-document-id="${escapeHtml(row.openActionId)}">Ver nota</button>`
-                                : '<span style="color:#9a9ca1;">-</span>'
+                                : '<span style="color:var(--muted);">-</span>'
                             }
                           </div>
                         </div>
@@ -9828,13 +9878,13 @@ function renderEventsSyncReportModal() {
                     .join('')}
                 </div>
               `
-              : `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">${
+              : `<div style="padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface-alt); color:var(--text-secondary);">${
                   showOnlyFailures ? 'Nenhuma falha encontrada para os filtros atuais.' : 'Nenhum retorno disponivel para auditoria.'
                 }</div>`
           }
         </div>
         <div class="modal-footer">
-          ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao da busca manual...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
+          ${running ? '<span style="color:var(--text-secondary); font-size:13px;">Aguarde a conclusao da busca manual...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
         </div>
       </div>
     </div>
@@ -9880,7 +9930,7 @@ function renderPastNsuRecoveryReportModal() {
         <div class="modal-body">
           ${
             currentMessage
-              ? `<div style="margin-bottom:14px; padding:12px 14px; border:1px solid #d9e7ff; border-radius:12px; background:#f4f8ff; color:#21446b;">${escapeHtml(currentMessage)}</div>`
+              ? `<div style="margin-bottom:14px; padding:12px 14px; border:1px solid var(--info); border-radius:12px; background:var(--surface-alt); color:var(--info);">${escapeHtml(currentMessage)}</div>`
               : ''
           }
           <div class="form-grid four" style="margin-bottom:18px;">
@@ -9913,8 +9963,8 @@ function renderPastNsuRecoveryReportModal() {
             visibleRows.length
               ? rowMode === 'nsu'
                 ? `
-                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(68vh, 760px);">
-                  <div style="display:grid; grid-template-columns: minmax(120px, .7fr) minmax(170px, 1fr) minmax(140px, .8fr) minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1160px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7; position:sticky; top:0; z-index:1;">
+                <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(68vh, 760px);">
+                  <div style="display:grid; grid-template-columns: minmax(120px, .7fr) minmax(170px, 1fr) minmax(140px, .8fr) minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1160px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:1;">
                     <div style="padding:12px 14px;">NSU</div>
                     <div style="padding:12px 14px;">CNPJ consulta</div>
                     <div style="padding:12px 14px;">Ambiente</div>
@@ -9925,7 +9975,7 @@ function renderPastNsuRecoveryReportModal() {
                   ${visibleRows
                     .map(
                       (row) => `
-                        <div style="display:grid; grid-template-columns: minmax(120px, .7fr) minmax(170px, 1fr) minmax(140px, .8fr) minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1160px; border-bottom:1px solid #eef0f2; align-items:start;">
+                        <div style="display:grid; grid-template-columns: minmax(120px, .7fr) minmax(170px, 1fr) minmax(140px, .8fr) minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1160px; border-bottom:1px solid var(--line); align-items:start;">
                           <div style="padding:14px; font-family:monospace; font-size:12px;">${escapeHtml(row.nsuLabel || '-')}</div>
                           <div style="padding:14px; font-family:monospace; font-size:12px;">${escapeHtml(row.cnpjConsulta || '-')}</div>
                           <div style="padding:14px;">${escapeHtml(row.ambienteLabel || '-')}</div>
@@ -9933,7 +9983,7 @@ function renderPastNsuRecoveryReportModal() {
                             ${escapeHtml(row.chaveAcesso || '-')}
                           </div>
                           <div style="padding:14px;">${statusBadge(row.statusLabel || '-', row.statusTone || 'neutral')}</div>
-                          <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
+                          <div style="padding:14px; color:var(--text-secondary); white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
                         </div>
                       `
                     )
@@ -9941,8 +9991,8 @@ function renderPastNsuRecoveryReportModal() {
                 </div>
               `
                 : `
-                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(68vh, 760px);">
-                  <div style="display:grid; grid-template-columns: minmax(170px, 1.1fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(240px, 1.4fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1170px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7; position:sticky; top:0; z-index:1;">
+                <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(68vh, 760px);">
+                  <div style="display:grid; grid-template-columns: minmax(170px, 1.1fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(240px, 1.4fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1170px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:1;">
                     <div style="padding:12px 14px;">CNPJ consulta</div>
                     <div style="padding:12px 14px;">Ambiente</div>
                     <div style="padding:12px 14px;">Faixa NSU</div>
@@ -9953,29 +10003,29 @@ function renderPastNsuRecoveryReportModal() {
                   ${visibleRows
                     .map(
                       (row) => `
-                        <div style="display:grid; grid-template-columns: minmax(170px, 1.1fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(240px, 1.4fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1170px; border-bottom:1px solid #eef0f2; align-items:start;">
+                        <div style="display:grid; grid-template-columns: minmax(170px, 1.1fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(240px, 1.4fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1170px; border-bottom:1px solid var(--line); align-items:start;">
                           <div style="padding:14px; font-family:monospace; font-size:12px;">${escapeHtml(row.cnpjConsulta)}</div>
                           <div style="padding:14px;">${escapeHtml(row.ambienteLabel)}</div>
                           <div style="padding:14px; font-family:monospace; font-size:12px;">${escapeHtml(row.nsuRangeLabel)}</div>
                           <div style="padding:14px;">
                             <strong>${escapeHtml(row.resultLabel)}</strong>
-                            <div style="margin-top:4px; color:#606062;">${escapeHtml(row.detailLabel)}</div>
+                            <div style="margin-top:4px; color:var(--text-secondary);">${escapeHtml(row.detailLabel)}</div>
                           </div>
                           <div style="padding:14px;">${statusBadge(row.statusLabel, row.statusTone)}</div>
-                          <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message)}</div>
+                          <div style="padding:14px; color:var(--text-secondary); white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message)}</div>
                         </div>
                       `
                     )
                     .join('')}
                 </div>
               `
-              : `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">${
+              : `<div style="padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface-alt); color:var(--text-secondary);">${
                   showOnlyFailures ? 'Nenhuma falha encontrada para os filtros atuais.' : 'Nenhum detalhe retornado para o reprocessamento.'
                 }</div>`
           }
         </div>
         <div class="modal-footer">
-          ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao da execucao manual...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
+          ${running ? '<span style="color:var(--text-secondary); font-size:13px;">Aguarde a conclusao da execucao manual...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
         </div>
       </div>
     </div>
@@ -10016,7 +10066,7 @@ function renderDownloadByKeyReportModal() {
         <div class="modal-body">
           ${
             currentMessage
-              ? `<div style="margin-bottom:14px; padding:12px 14px; border:1px solid #d9e7ff; border-radius:12px; background:#f4f8ff; color:#21446b;">${escapeHtml(currentMessage)}</div>`
+              ? `<div style="margin-bottom:14px; padding:12px 14px; border:1px solid var(--info); border-radius:12px; background:var(--surface-alt); color:var(--info);">${escapeHtml(currentMessage)}</div>`
               : ''
           }
           <div class="form-grid four" style="margin-bottom:18px;">
@@ -10034,8 +10084,8 @@ function renderDownloadByKeyReportModal() {
           ${
             visibleRows.length
               ? `
-                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(68vh, 760px);">
-                  <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:${showClientColumn ? '1220px' : '1080px'}; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7; position:sticky; top:0; z-index:1;">
+                <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(68vh, 760px);">
+                  <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:${showClientColumn ? '1220px' : '1080px'}; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:1;">
                     ${showClientColumn ? '<div style="padding:12px 14px;">Cliente</div>' : ''}
                     <div style="padding:12px 14px;">Chave de acesso</div>
                     <div style="padding:12px 14px;">Documento</div>
@@ -10045,38 +10095,38 @@ function renderDownloadByKeyReportModal() {
                   ${visibleRows
                     .map(
                       (row) => `
-                        <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:${showClientColumn ? '1220px' : '1080px'}; border-bottom:1px solid #eef0f2; align-items:start;">
+                        <div style="display:grid; grid-template-columns:${gridTemplate}; gap:0; min-width:${showClientColumn ? '1220px' : '1080px'}; border-bottom:1px solid var(--line); align-items:start;">
                           ${
                             showClientColumn
                               ? `<div style="padding:14px;">
                                   <strong>${escapeHtml(row.clientLabel || '-')}</strong>
-                                  ${row.clientDetail ? `<div style="margin-top:4px; color:#606062;">${escapeHtml(row.clientDetail)}</div>` : ''}
+                                  ${row.clientDetail ? `<div style="margin-top:4px; color:var(--text-secondary);">${escapeHtml(row.clientDetail)}</div>` : ''}
                                 </div>`
                               : ''
                           }
                           <div style="padding:14px; font-family:monospace; font-size:12px; word-break:break-all;">
                             ${escapeHtml(row.chaveAcesso || '-')}
-                            ${row.keyDetail ? `<div style="margin-top:4px; color:#606062; font-family:inherit;">${escapeHtml(row.keyDetail)}</div>` : ''}
+                            ${row.keyDetail ? `<div style="margin-top:4px; color:var(--text-secondary); font-family:inherit;">${escapeHtml(row.keyDetail)}</div>` : ''}
                           </div>
                           <div style="padding:14px;">
                             <strong>${escapeHtml(row.documentLabel || '-')}</strong>
-                            ${row.documentDetail ? `<div style="margin-top:4px; color:#606062;">${escapeHtml(row.documentDetail)}</div>` : ''}
+                            ${row.documentDetail ? `<div style="margin-top:4px; color:var(--text-secondary);">${escapeHtml(row.documentDetail)}</div>` : ''}
                           </div>
                           <div style="padding:14px;">${statusBadge(row.statusLabel || '-', row.statusTone || 'neutral')}</div>
-                          <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
+                          <div style="padding:14px; color:var(--text-secondary); white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
                         </div>
                       `
                     )
                     .join('')}
                 </div>
               `
-              : `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">${
+              : `<div style="padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface-alt); color:var(--text-secondary);">${
                   showOnlyFailures ? 'Nenhuma falha encontrada para os filtros atuais.' : 'Nenhuma chave pendente foi encontrada para esta execucao.'
                 }</div>`
           }
         </div>
         <div class="modal-footer">
-          ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao do download manual por chave...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
+          ${running ? '<span style="color:var(--text-secondary); font-size:13px;">Aguarde a conclusao do download manual por chave...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
         </div>
       </div>
     </div>
@@ -10115,7 +10165,7 @@ function renderDominioImportReportModal() {
         <div class="modal-body">
           ${
             currentMessage
-              ? `<div style="margin-bottom:14px; padding:12px 14px; border:1px solid #d9e7ff; border-radius:12px; background:#f4f8ff; color:#21446b;">${escapeHtml(currentMessage)}</div>`
+              ? `<div style="margin-bottom:14px; padding:12px 14px; border:1px solid var(--info); border-radius:12px; background:var(--surface-alt); color:var(--info);">${escapeHtml(currentMessage)}</div>`
               : ''
           }
           <div class="form-grid four" style="margin-bottom:18px;">
@@ -10136,8 +10186,8 @@ function renderDominioImportReportModal() {
           ${
             visibleRows.length
               ? `
-                <div style="border:1px solid #e4e5e7; border-radius:14px; overflow:auto; background:#fff; max-height:min(68vh, 760px);">
-                  <div style="display:grid; grid-template-columns:minmax(220px, 1.2fr) minmax(170px, .9fr) minmax(180px, .9fr) minmax(170px, .8fr) minmax(170px, .8fr) minmax(340px, 1.7fr); gap:0; min-width:1250px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#606062; background:#f6f7f8; border-bottom:1px solid #e4e5e7; position:sticky; top:0; z-index:1;">
+                <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(68vh, 760px);">
+                  <div style="display:grid; grid-template-columns:minmax(220px, 1.2fr) minmax(170px, .9fr) minmax(180px, .9fr) minmax(170px, .8fr) minmax(170px, .8fr) minmax(340px, 1.7fr); gap:0; min-width:1250px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:1;">
                     <div style="padding:12px 14px;">Empresa</div>
                     <div style="padding:12px 14px;">Periodo</div>
                     <div style="padding:12px 14px;">Etapa atual</div>
@@ -10148,17 +10198,17 @@ function renderDominioImportReportModal() {
                   ${visibleRows
                     .map(
                       (row) => `
-                        <div style="display:grid; grid-template-columns:minmax(220px, 1.2fr) minmax(170px, .9fr) minmax(180px, .9fr) minmax(170px, .8fr) minmax(170px, .8fr) minmax(340px, 1.7fr); gap:0; min-width:1250px; border-bottom:1px solid #eef0f2; align-items:start;">
+                        <div style="display:grid; grid-template-columns:minmax(220px, 1.2fr) minmax(170px, .9fr) minmax(180px, .9fr) minmax(170px, .8fr) minmax(170px, .8fr) minmax(340px, 1.7fr); gap:0; min-width:1250px; border-bottom:1px solid var(--line); align-items:start;">
                           <div style="padding:14px;">
                             <strong>${escapeHtml(row.clientLabel || '-')}</strong>
-                            ${row.clientDetail ? `<div style="margin-top:4px; color:#606062;">${escapeHtml(row.clientDetail)}</div>` : ''}
+                            ${row.clientDetail ? `<div style="margin-top:4px; color:var(--text-secondary);">${escapeHtml(row.clientDetail)}</div>` : ''}
                           </div>
-                          <div style="padding:14px; color:#606062;">${escapeHtml(row.periodLabel || '-')}</div>
+                          <div style="padding:14px; color:var(--text-secondary);">${escapeHtml(row.periodLabel || '-')}</div>
                           <div style="padding:14px;">
                             <strong>${escapeHtml(row.stepLabel || '-')}</strong>
                           </div>
                           <div style="padding:14px;">${statusBadge(mapDominioImportOverlayStatusLabel(row.status), toneFromDominioImportOverlayStatus(row.status))}</div>
-                          <div style="padding:14px; color:#606062;">
+                          <div style="padding:14px; color:var(--text-secondary);">
                             XMLs: <strong>${escapeHtml(String(Number(row.importedCount || 0)))}</strong><br />
                             Falhas: <strong>${escapeHtml(String(Number(row.failureCount || 0)))}</strong>
                             ${
@@ -10167,20 +10217,20 @@ function renderDominioImportReportModal() {
                                 : ''
                             }
                           </div>
-                          <div style="padding:14px; color:#606062; white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
+                          <div style="padding:14px; color:var(--text-secondary); white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(row.message || '-')}</div>
                         </div>
                       `
                     )
                     .join('')}
                 </div>
               `
-              : `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">${
+              : `<div style="padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface-alt); color:var(--text-secondary);">${
                   showOnlyFailures ? 'Nenhuma falha encontrada para os filtros atuais.' : 'Nenhuma empresa foi preparada para esta importacao.'
                 }</div>`
           }
         </div>
         <div class="modal-footer">
-          ${running ? '<span style="color:#606062; font-size:13px;">Aguarde a conclusao da importacao manual da Dominio...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
+          ${running ? '<span style="color:var(--text-secondary); font-size:13px;">Aguarde a conclusao da importacao manual da Dominio...</span>' : '<button class="btn secondary" data-action="close-modal">Fechar</button>'}
         </div>
       </div>
     </div>
@@ -10225,7 +10275,7 @@ function renderXmlDetailsModal(xmlId) {
           ${renderNfseRetentionSummarySection(xml, sourceAlert)}
           ${renderDocumentInsightsSection('nfse', xml)}
           <div style="margin-top:18px;">
-            <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
+            <small style="color:var(--text-secondary); display:block; margin-bottom:8px;">Eventos vinculados</small>
             ${renderXmlEventsList(xml.eventos)}
           </div>
         </div>
@@ -10290,7 +10340,7 @@ function renderNfeDetailsModalLegacyUnused(nfeId) {
           </div>
           ${renderDocumentInsightsSection('nfe', doc)}
           <div style="margin-top:18px;">
-            <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
+            <small style="color:var(--text-secondary); display:block; margin-bottom:8px;">Eventos vinculados</small>
             ${renderXmlEventsList(doc.eventos)}
           </div>
         </div>
@@ -10341,7 +10391,7 @@ function renderCteDetailsModalLegacyUnused(cteId) {
           </div>
           ${renderDocumentInsightsSection('cte', doc)}
           <div style="margin-top:18px;">
-            <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
+            <small style="color:var(--text-secondary); display:block; margin-bottom:8px;">Eventos vinculados</small>
             ${renderXmlEventsList(doc.eventos)}
           </div>
         </div>
@@ -10388,7 +10438,7 @@ function renderXmlDetailsModalLegacyUnused(xmlId) {
           </div>
           ${renderDocumentInsightsSection('nfse', xml)}
           <div style="margin-top:18px;">
-            <small style="color:#606062; display:block; margin-bottom:8px;">Eventos vinculados</small>
+            <small style="color:var(--text-secondary); display:block; margin-bottom:8px;">Eventos vinculados</small>
             ${renderXmlEventsList(xml.eventos)}
           </div>
         </div>
@@ -10471,7 +10521,7 @@ function renderDocumentInsightsSection(documentType, doc) {
       : renderDocumentInsightsEmpty('Nenhuma retencao destacada foi encontrada no XML desta NFS-e.');
     const alertBlock =
       leituraFiscal.statusProcessamento === 'Erro'
-        ? `<div style="margin-top:14px; padding:12px 14px; border:1px solid #f0c36d; border-radius:12px; background:#fff7e6; color:#7a4b00;">
+        ? `<div style="margin-top:14px; padding:12px 14px; border:1px solid var(--warning); border-radius:12px; background:var(--surface-alt); color:var(--warning);">
             <strong>Atencao na leitura:</strong> ${escapeHtml(leituraFiscal.erroProcessamento || 'Inconsistencia detectada no XML.')}
             <div style="margin-top:6px;"><strong>Campos com problema:</strong> ${escapeHtml(
               Array.isArray(leituraFiscal.camposComProblema) && leituraFiscal.camposComProblema.length
@@ -10535,7 +10585,7 @@ function renderNfseRetentionSummarySection(xml, alert = null) {
 
   const alertSummary = alert
     ? `
-        <div style="margin-top:14px; padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb;">
+        <div style="margin-top:14px; padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface-alt);">
           <div><strong>Resumo do alerta:</strong> ${escapeHtml(alert.descricao || '-')}</div>
           <div style="margin-top:6px;"><strong>Sugestao:</strong> ${escapeHtml(alert.sugestaoAcao || '-')}</div>
         </div>
@@ -10551,14 +10601,14 @@ function renderNfseRetentionSummarySection(xml, alert = null) {
 function renderDocumentInsightsBlock(title, content) {
   return `
     <div style="margin-top:18px;">
-      <small style="color:#606062; display:block; margin-bottom:8px;">${escapeHtml(title)}</small>
+      <small style="color:var(--text-secondary); display:block; margin-bottom:8px;">${escapeHtml(title)}</small>
       ${content}
     </div>
   `;
 }
 
 function renderDocumentInsightsEmpty(message) {
-  return `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">${escapeHtml(message)}</div>`;
+  return `<div style="padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface-alt); color:var(--text-secondary);">${escapeHtml(message)}</div>`;
 }
 
 function renderDocumentInsightsProductsTable(rows) {
@@ -10935,7 +10985,7 @@ function renderNfseFiscalReaderResumoMunicipioTable(titulo, linhas) {
   const items = Array.isArray(linhas) ? linhas : [];
   if (!items.length) {
     return `
-      <div class="card" style="padding:14px; border:1px solid #e4e5e7; border-radius:14px;">
+      <div class="card" style="padding:14px; border:1px solid var(--line); border-radius:14px;">
         <h4 class="card-title" style="margin-bottom:8px;">${escapeHtml(titulo)}</h4>
         <div class="table-state">Sem dados para somar.</div>
       </div>
@@ -10946,24 +10996,24 @@ function renderNfseFiscalReaderResumoMunicipioTable(titulo, linhas) {
   const totalValorServico = items.reduce((acc, item) => acc + Number(item.valorServicoTotal || 0), 0);
 
   return `
-    <div class="card" style="padding:14px; border:1px solid #e4e5e7; border-radius:14px;">
+    <div class="card" style="padding:14px; border:1px solid var(--line); border-radius:14px;">
       <h4 class="card-title" style="margin-bottom:8px;">${escapeHtml(titulo)}</h4>
-      <div style="overflow:auto; max-height:320px; border:1px solid #eef0f2; border-radius:10px;">
+      <div style="overflow:auto; max-height:320px; border:1px solid var(--line); border-radius:10px;">
         <table style="width:100%; border-collapse:collapse; font-size:13px;">
           <thead>
-            <tr style="background:#f6f7f8; text-align:left;">
-              <th style="padding:8px 10px; border-bottom:1px solid #e4e5e7;">Municipio</th>
-              <th style="padding:8px 10px; border-bottom:1px solid #e4e5e7; text-align:right;">Notas</th>
-              <th style="padding:8px 10px; border-bottom:1px solid #e4e5e7; text-align:right;">Valor servico</th>
-              <th style="padding:8px 10px; border-bottom:1px solid #e4e5e7; text-align:right;">Valor liquido</th>
-              <th style="padding:8px 10px; border-bottom:1px solid #e4e5e7; text-align:right;">ISS</th>
+            <tr style="background:var(--surface-alt); text-align:left;">
+              <th style="padding:8px 10px; border-bottom:1px solid var(--line);">Municipio</th>
+              <th style="padding:8px 10px; border-bottom:1px solid var(--line); text-align:right;">Notas</th>
+              <th style="padding:8px 10px; border-bottom:1px solid var(--line); text-align:right;">Valor servico</th>
+              <th style="padding:8px 10px; border-bottom:1px solid var(--line); text-align:right;">Valor liquido</th>
+              <th style="padding:8px 10px; border-bottom:1px solid var(--line); text-align:right;">ISS</th>
             </tr>
           </thead>
           <tbody>
             ${items
               .map(
                 (item) => `
-                  <tr style="border-bottom:1px solid #f2f3f4;">
+                  <tr style="border-bottom:1px solid var(--line);">
                     <td style="padding:8px 10px;">${escapeHtml(item.municipio)}</td>
                     <td style="padding:8px 10px; text-align:right;">${escapeHtml(String(item.quantidadeNotas || 0))}</td>
                     <td style="padding:8px 10px; text-align:right;">${escapeHtml(formatOptionalCurrency(item.valorServicoTotal))}</td>
@@ -10975,7 +11025,7 @@ function renderNfseFiscalReaderResumoMunicipioTable(titulo, linhas) {
               .join('')}
           </tbody>
           <tfoot>
-            <tr style="background:#f6f7f8; font-weight:600;">
+            <tr style="background:var(--surface-alt); font-weight:600;">
               <td style="padding:8px 10px;">Total (${escapeHtml(String(items.length))} municipio${items.length > 1 ? 's' : ''})</td>
               <td style="padding:8px 10px; text-align:right;">${escapeHtml(String(totalNotas))}</td>
               <td style="padding:8px 10px; text-align:right;">${escapeHtml(formatOptionalCurrency(totalValorServico))}</td>
@@ -11057,8 +11107,8 @@ function renderNfseFiscalReaderCard() {
         />
         ${
           codigoEmpresaCadastrado
-            ? '<span style="color:#606062; font-size:12px;">Preenchido automaticamente a partir do cadastro do cliente.</span>'
-            : '<span style="color:#606062; font-size:12px;">Cliente sem codigo cadastrado; informe manualmente ou cadastre em Clientes.</span>'
+            ? '<span style="color:var(--text-secondary); font-size:12px;">Preenchido automaticamente a partir do cadastro do cliente.</span>'
+            : '<span style="color:var(--text-secondary); font-size:12px;">Cliente sem codigo cadastrado; informe manualmente ou cadastre em Clientes.</span>'
         }
       </label>
       <label class="field">
@@ -11086,7 +11136,7 @@ function renderNfseFiscalReaderCard() {
         >
           Gerenciar contas por codigo de servico
         </button>
-        <span style="color:#606062; font-size:13px;">
+        <span style="color:var(--text-secondary); font-size:13px;">
           ${
             rows.length
               ? `O arquivo segue o padrao do LeitorXML para NFS-e e ignora automaticamente ${escapeHtml(String(rows.length - exportableRows.length))} nota(s) cancelada(s).`
@@ -11820,6 +11870,8 @@ function renderRowActionsMenu(menuId, items) {
   const visibleItems = (Array.isArray(items) ? items : []).filter(Boolean);
   const isOpen = Boolean(normalizedId) && state.rowActionsMenu.openId === normalizedId;
   const anchor = state.rowActionsMenu.anchor || { top: 8, left: 8 };
+  const verticalStyle =
+    anchor.bottom !== undefined ? `bottom:${escapeHtml(String(anchor.bottom))}px;` : `top:${escapeHtml(String(anchor.top))}px;`;
 
   if (!visibleItems.length) {
     return '';
@@ -11844,7 +11896,7 @@ function renderRowActionsMenu(menuId, items) {
               class="row-actions-menu-panel"
               role="menu"
               aria-label="Menu de acoes"
-              style="top:${escapeHtml(String(anchor.top))}px; left:${escapeHtml(String(anchor.left))}px;"
+              style="${verticalStyle} left:${escapeHtml(String(anchor.left))}px;"
             >
               ${visibleItems.map((item) => renderRowActionsMenuItem(item)).join('')}
             </div>
@@ -12112,7 +12164,7 @@ function renderTabButton(tabKey, label) {
 }
 
 function detailItem(label, value) {
-  return `<div><small style="color:#606062; display:block; margin-bottom:4px;">${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
+  return `<div><small style="color:var(--text-secondary); display:block; margin-bottom:4px;">${escapeHtml(label)}</small><strong>${escapeHtml(value)}</strong></div>`;
 }
 
 function kpiItem(label, value) {
@@ -13594,13 +13646,13 @@ function renderDominioImportSummaryPanel(summary, options = {}) {
 
   const extraDocumentLabel = normalized.outrosDocumentos ? ` + ${normalized.outrosDocumentos} outro(s)` : '';
   return `
-    <div style="margin-bottom:18px; padding:14px; border:1px solid #e4e5e7; border-radius:14px; background:#fafafb;">
+    <div style="margin-bottom:18px; padding:14px; border:1px solid var(--line); border-radius:14px; background:var(--surface-alt);">
       <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; align-items:flex-start;">
         <div>
           <strong>Composicao dos XMLs importados</strong>
           ${
             options?.subtitle
-              ? `<div style="margin-top:4px; color:#606062; font-size:13px;">${escapeHtml(options.subtitle)}</div>`
+              ? `<div style="margin-top:4px; color:var(--text-secondary); font-size:13px;">${escapeHtml(options.subtitle)}</div>`
               : ''
           }
         </div>
@@ -17410,7 +17462,7 @@ function formatDominioImportPeriodLabel(dataEmissaoInicio, dataEmissaoFim) {
 function renderOverlayFailureToolbar({ showOnlyFailures, failureRows, visibleRows, totalRows }) {
   return `
     <div style="display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin:-4px 0 14px;">
-      <div style="color:#606062; font-size:13px;">
+      <div style="color:var(--text-secondary); font-size:13px;">
         Exibindo <strong>${escapeHtml(String(visibleRows))}</strong> de <strong>${escapeHtml(String(totalRows))}</strong> linha(s)
         ${failureRows ? ` • <strong>${escapeHtml(String(failureRows))}</strong> com falha` : ''}
       </div>
@@ -18662,7 +18714,7 @@ function buildEventosResumo(eventos) {
 
 function renderXmlEventsList(eventos) {
   if (!Array.isArray(eventos) || eventos.length === 0) {
-    return `<div style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb; color:#606062;">Nenhum evento vinculado.</div>`;
+    return `<div style="padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface-alt); color:var(--text-secondary);">Nenhum evento vinculado.</div>`;
   }
 
   return `
@@ -18674,14 +18726,14 @@ function renderXmlEventsList(eventos) {
           const descricao = evento?.descricao ? String(evento.descricao).trim() : '-';
           const dataEvento = evento?.dataEvento ? formatDateTime(evento.dataEvento) : '-';
           return `
-            <article style="padding:12px 14px; border:1px solid #e4e5e7; border-radius:12px; background:#fafafb;">
+            <article style="padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:var(--surface-alt);">
               <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:6px;">
                 <strong>${escapeHtml(title)}</strong>
                 <span class="chip ${isCancelamentoEventoApi(evento) ? 'danger' : 'info'}">${escapeHtml(tipo)}</span>
               </div>
               <div style="display:grid; gap:4px;">
-                <span><small style="color:#606062;">Data</small> <strong>${escapeHtml(dataEvento)}</strong></span>
-                <span><small style="color:#606062;">Descricao</small> <strong>${escapeHtml(descricao)}</strong></span>
+                <span><small style="color:var(--text-secondary);">Data</small> <strong>${escapeHtml(dataEvento)}</strong></span>
+                <span><small style="color:var(--text-secondary);">Descricao</small> <strong>${escapeHtml(descricao)}</strong></span>
               </div>
             </article>
           `;
@@ -19420,7 +19472,7 @@ function renderAlertResolvedCheckbox(alert, options = {}) {
   }
 
   return `
-    <label style="display:inline-flex; align-items:center; gap:6px; color:#606062; font-size:${options.compact ? '12px' : '13px'};">
+    <label style="display:inline-flex; align-items:center; gap:6px; color:var(--text-secondary); font-size:${options.compact ? '12px' : '13px'};">
       <input type="checkbox" data-action="alert-toggle-resolved" data-alert-id="${escapeHtml(alert.id)}" ${alert.status === 'Resolvido' ? 'checked' : ''} />
       <span>Resolvido</span>
     </label>
@@ -19482,6 +19534,31 @@ function toggleAlertResolved(alertId, resolved) {
     }
     render();
   })();
+}
+
+function readStoredTheme() {
+  try {
+    const raw = window.localStorage.getItem(THEME_STORAGE_KEY);
+    return raw === 'Escuro' ? 'Escuro' : 'Claro';
+  } catch (error) {
+    return 'Claro';
+  }
+}
+
+function applyTheme(tema) {
+  const normalized = tema === 'Escuro' ? 'Escuro' : 'Claro';
+  document.documentElement.setAttribute('data-theme', normalized);
+}
+
+function setTheme(tema) {
+  const normalized = tema === 'Escuro' ? 'Escuro' : 'Claro';
+  state.settings.geral.tema = normalized;
+  applyTheme(normalized);
+  try {
+    window.localStorage.setItem(THEME_STORAGE_KEY, normalized);
+  } catch (error) {
+    console.warn('Falha ao salvar o tema no navegador.', error);
+  }
 }
 
 function loadResolvedAlertsStore() {
