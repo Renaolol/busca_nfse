@@ -73,7 +73,7 @@ export class AuthService {
       await this.recordAccessEvent({
         tipo: EventoAcessoTipo.login_falha,
         username,
-        clienteId: usuario?.clienteId,
+        clienteId: usuario?.clienteId ?? undefined,
         ip: context.ip,
         userAgent: context.userAgent,
         detalhes: { motivo: usuario ? 'usuario_inativo' : 'credenciais_invalidas' }
@@ -87,7 +87,7 @@ export class AuthService {
         tipo: EventoAcessoTipo.login_falha,
         usuarioId: usuario.id,
         username,
-        clienteId: usuario.clienteId,
+        clienteId: usuario.clienteId ?? undefined,
         ip: context.ip,
         userAgent: context.userAgent,
         detalhes: { motivo: 'credenciais_invalidas' }
