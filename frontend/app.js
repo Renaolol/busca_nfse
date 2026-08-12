@@ -2878,16 +2878,18 @@ function renderUnauthenticatedShell() {
           loading
             ? '<div class="table-state loading" style="margin-top:16px;">Validando sessao...</div>'
             : `
-              <form id="authLoginForm" class="form-grid" style="margin-top:16px;">
-                <label class="field">
-                  Usuario
-                  <input name="username" autocomplete="username" />
-                </label>
-                <label class="field">
-                  Senha
-                  <input name="password" type="password" autocomplete="current-password" />
-                </label>
-                <div class="stack-actions" style="justify-content:flex-start;">
+              <form id="authLoginForm" class="auth-login-form" style="margin-top:16px;">
+                <div class="auth-login-fields">
+                  <label class="field">
+                    Usuario
+                    <input name="username" autocomplete="username" />
+                  </label>
+                  <label class="field">
+                    Senha
+                    <input name="password" type="password" autocomplete="current-password" />
+                  </label>
+                </div>
+                <div class="auth-login-actions">
                   <button class="btn primary" type="submit">Entrar</button>
                 </div>
               </form>

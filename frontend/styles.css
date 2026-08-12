@@ -2321,6 +2321,31 @@ body.xml-reader30-resizing * {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.auth-login-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.auth-login-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  min-width: 0;
+}
+
+.auth-login-fields .field {
+  min-width: 0;
+}
+
+.auth-login-actions {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-start;
+  padding-bottom: 1px;
+}
+
 label.field {
   display: grid;
   gap: 6px;
@@ -3126,6 +3151,22 @@ tbody tr.cert-row-a-vencer:hover {
   .form-grid.two,
   .form-grid.three {
     grid-template-columns: 1fr;
+  }
+
+  .auth-login-form {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-login-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-login-actions {
+    width: 100%;
+  }
+
+  .auth-login-actions .btn {
+    width: 100%;
   }
 
   .stack-actions,
