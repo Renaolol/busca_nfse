@@ -6255,7 +6255,11 @@ function renderXmlReader30ResultsTable(results) {
                       return `
                         <tr data-row-actions-menu-id="${escapeHtml(rowMenuId)}">
                           <td class="xml-reader30-check">
-                            <input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Marcar ${escapeHtml(row.documentLabel)} ${escapeHtml(row.numeroLabel)} como conferido" />
+                            ${renderXmlReader30SelectionControl({
+                              selectionKey,
+                              checked: selectionKey && state.selectedXmlReaderIds.has(selectionKey),
+                              label: `Marcar ${row.documentLabel} ${row.numeroLabel} como conferido`
+                            })}
                           </td>
                           <td>${statusBadge(row.documentLabel, row.documentTone)}</td>
                           <td class="xml-reader30-doc">
@@ -6351,7 +6355,11 @@ function renderXmlReader30NfeResultsTable(results) {
                       return `
                         <tr>
                           <td class="xml-reader30-check">
-                            <input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Marcar NF-e como conferida ${escapeHtml(String(numberLabel))}" />
+                            ${renderXmlReader30SelectionControl({
+                              selectionKey,
+                              checked: selectionKey && state.selectedXmlReaderIds.has(selectionKey),
+                              label: `Marcar NF-e como conferida ${String(numberLabel)}`
+                            })}
                           </td>
                           <td>
                             <span class="row-title">${escapeHtml(String(numberLabel))}</span>
@@ -6629,7 +6637,11 @@ function getXmlReader30NfeColumnDefinitions() {
       html: true,
       render: (row) => {
         const selectionKey = getXmlReader30DocumentCheckKey(row);
-        return `<input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${selectionKey && state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${selectionKey ? '' : 'disabled'} aria-label="Marcar NF-e como conferida ${escapeHtml(String(row.numeroNf || row.numeroLabel || '-'))}" />`;
+        return renderXmlReader30SelectionControl({
+          selectionKey,
+          checked: selectionKey && state.selectedXmlReaderIds.has(selectionKey),
+          label: `Marcar NF-e como conferida ${String(row.numeroNf || row.numeroLabel || '-')}`
+        });
       }
     },
     {
@@ -8779,6 +8791,27 @@ function setXmlReader30Selection(selectionKey, checked) {
   state.selectedXmlReaderIds.delete(normalizedKey);
 }
 
+function renderXmlReader30SelectionControl(options = {}) {
+  const selectionKey = String(options.selectionKey || '').trim();
+  const label = String(options.label || 'Selecionar item');
+  const checked = Boolean(options.checked);
+  const disabled = Boolean(options.disabled) || !selectionKey;
+
+  return `
+    <label class="xml-reader30-selection-control${disabled ? ' is-disabled' : ''}">
+      <input
+        type="checkbox"
+        data-action="xml-reader30-select"
+        data-selection-key="${escapeHtml(selectionKey)}"
+        ${checked ? 'checked' : ''}
+        ${disabled ? 'disabled' : ''}
+        aria-label="${escapeHtml(label)}"
+      />
+      <span class="xml-reader30-selection-control-box" aria-hidden="true"></span>
+    </label>
+  `;
+}
+
 function syncXmlReader30SelectionCheckboxes() {
   document.querySelectorAll('[data-action="xml-reader30-select"]').forEach((node) => {
     if (!(node instanceof HTMLInputElement)) {
@@ -9026,7 +9059,14 @@ function renderXmlReader30ResultsTableLegacyUnused(results) {
                       const canDownload = canDownloadXmlReader30Row(row);
                       return `
                         <tr>
-                          <td><input type="checkbox" data-action="xml-reader30-select" data-selection-key="${escapeHtml(selectionKey)}" ${state.selectedXmlReaderIds.has(selectionKey) ? 'checked' : ''} ${canDownload ? '' : 'disabled'} aria-label="Selecionar ${escapeHtml(row.documentLabel)} ${escapeHtml(row.numeroLabel)}" /></td>
+                          <td class="xml-reader30-check">
+                            ${renderXmlReader30SelectionControl({
+                              selectionKey,
+                              checked: state.selectedXmlReaderIds.has(selectionKey),
+                              disabled: !canDownload,
+                              label: `Selecionar ${row.documentLabel} ${row.numeroLabel}`
+                            })}
+                          </td>
                           <td>${statusBadge(row.documentLabel, row.documentTone)}</td>
                           <td>
                             <span class="row-title">${escapeHtml(row.numeroLabel)}</span>
