@@ -8808,14 +8808,6 @@ function setXmlReader30Selection(selectionKey, checked) {
   }
 
   if (checked) {
-    const groupKey = getXmlReader30SelectionGroupKey(normalizedKey);
-    if (groupKey) {
-      [...state.selectedXmlReaderIds].forEach((currentKey) => {
-        if (currentKey !== normalizedKey && getXmlReader30SelectionGroupKey(currentKey) === groupKey) {
-          state.selectedXmlReaderIds.delete(currentKey);
-        }
-      });
-    }
     state.selectedXmlReaderIds.add(normalizedKey);
     return;
   }
@@ -8902,20 +8894,12 @@ async function loadXmlReader30DocumentChecks(rows) {
   const responses = await Promise.all(requests);
 
   const nextSelection = new Set();
-  const seenGroupKeys = new Set();
   responses.forEach((items) => {
     (Array.isArray(items) ? items : []).forEach((item) => {
       if (!item?.conferido || !item?.tipo || !item?.documentoId) {
         return;
       }
       const selectionKey = `${item.tipo}:${item.documentoId}`;
-      const groupKey = getXmlReader30SelectionGroupKey(selectionKey);
-      if (groupKey && seenGroupKeys.has(groupKey)) {
-        return;
-      }
-      if (groupKey) {
-        seenGroupKeys.add(groupKey);
-      }
       nextSelection.add(selectionKey);
     });
   });
