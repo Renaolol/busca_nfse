@@ -8723,6 +8723,11 @@ function getXmlReader30DocumentCheckKey(row) {
     return '';
   }
 
+  const explicitSelectionKey = String(row.selectionKey || '').trim();
+  if (explicitSelectionKey) {
+    return explicitSelectionKey;
+  }
+
   const persistedDocumentId = getXmlReader30PersistedDocumentId(row);
   if (!persistedDocumentId) {
     return '';
@@ -8827,7 +8832,7 @@ function syncXmlReader30SelectionCheckboxes() {
 }
 
 async function loadXmlReader30DocumentChecks(rows) {
-  const sourceRows = Array.isArray(rows) ? rows : [];
+  const sourceRows = expandXmlReader30NfeRows(Array.isArray(rows) ? rows : []);
   const groupedIds = {
     nfse: [],
     nfe: [],
