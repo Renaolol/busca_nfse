@@ -8779,6 +8779,15 @@ function getXmlReader30SelectionGroupKey(selectionKey) {
   return normalizedKey;
 }
 
+function isXmlReader30LocalSelectionKey(selectionKey) {
+  const normalizedKey = String(selectionKey || '').trim();
+  if (!normalizedKey) {
+    return false;
+  }
+
+  return normalizedKey.includes(':item:') || normalizedKey.endsWith(':fallback');
+}
+
 function findXmlReader30RowByDocumentCheckKey(checkKey) {
   const normalizedKey = String(checkKey || '').trim();
   if (!normalizedKey) {
@@ -8852,6 +8861,7 @@ function syncXmlReader30SelectionCheckboxes() {
 
 async function loadXmlReader30DocumentChecks(rows) {
   const sourceRows = expandXmlReader30NfeRows(Array.isArray(rows) ? rows : []);
+  const previousSelection = new Set(state.selectedXmlReaderIds);
   const groupedIds = {
     nfse: [],
     nfe: [],
@@ -8904,7 +8914,7 @@ async function loadXmlReader30DocumentChecks(rows) {
     });
   });
 
-  state.selectedXmlReaderIds = nextSelection;
+  state.selectedXmlReaderIds = new Set([...previousSelection, ...nextSelection]);
 }
 
 async function toggleXmlReader30DocumentCheck(selectionKey, checked) {
@@ -8922,6 +8932,10 @@ async function toggleXmlReader30DocumentCheck(selectionKey, checked) {
   setXmlReader30Selection(normalizedKey, checked);
   syncXmlReader30SelectionCheckboxes();
   renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
+
+  if (isXmlReader30LocalSelectionKey(normalizedKey)) {
+    return;
+  }
 
   try {
     await apiRequest('/conferencias-documentos', {
