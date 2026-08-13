@@ -8760,6 +8760,25 @@ function getXmlReader30UniqueDocumentCheckKeys(rows) {
   return [...new Set((Array.isArray(rows) ? rows : []).map((row) => getXmlReader30DocumentCheckKey(row)).filter(Boolean))];
 }
 
+function getXmlReader30SelectionGroupKey(selectionKey) {
+  const normalizedKey = String(selectionKey || '').trim();
+  if (!normalizedKey) {
+    return '';
+  }
+
+  const itemSuffixIndex = normalizedKey.indexOf(':item:');
+  if (itemSuffixIndex > 0) {
+    return normalizedKey.slice(0, itemSuffixIndex);
+  }
+
+  const fallbackSuffix = ':fallback';
+  if (normalizedKey.endsWith(fallbackSuffix)) {
+    return normalizedKey.slice(0, -fallbackSuffix.length);
+  }
+
+  return normalizedKey;
+}
+
 function findXmlReader30RowByDocumentCheckKey(checkKey) {
   const normalizedKey = String(checkKey || '').trim();
   if (!normalizedKey) {
@@ -8789,6 +8808,14 @@ function setXmlReader30Selection(selectionKey, checked) {
   }
 
   if (checked) {
+    const groupKey = getXmlReader30SelectionGroupKey(normalizedKey);
+    if (groupKey) {
+      [...state.selectedXmlReaderIds].forEach((currentKey) => {
+        if (currentKey !== normalizedKey && getXmlReader30SelectionGroupKey(currentKey) === groupKey) {
+          state.selectedXmlReaderIds.delete(currentKey);
+        }
+      });
+    }
     state.selectedXmlReaderIds.add(normalizedKey);
     return;
   }
@@ -8875,12 +8902,21 @@ async function loadXmlReader30DocumentChecks(rows) {
   const responses = await Promise.all(requests);
 
   const nextSelection = new Set();
+  const seenGroupKeys = new Set();
   responses.forEach((items) => {
     (Array.isArray(items) ? items : []).forEach((item) => {
       if (!item?.conferido || !item?.tipo || !item?.documentoId) {
         return;
       }
-      nextSelection.add(`${item.tipo}:${item.documentoId}`);
+      const selectionKey = `${item.tipo}:${item.documentoId}`;
+      const groupKey = getXmlReader30SelectionGroupKey(selectionKey);
+      if (groupKey && seenGroupKeys.has(groupKey)) {
+        return;
+      }
+      if (groupKey) {
+        seenGroupKeys.add(groupKey);
+      }
+      nextSelection.add(selectionKey);
     });
   });
 
