@@ -57,19 +57,19 @@ export class SyncController {
   }
 
   @Post('sync/reprocessar-nsus-passados')
-  @Roles('admin')
+  @Roles('admin', 'comum')
   reprocessPastNsus(@Body() dto: ReprocessPastNsusDto) {
     return this.syncService.reprocessPastNsus(dto);
   }
 
   @Post('sync/reprocessar-nsus-passados/execucao')
-  @Roles('admin')
+  @Roles('admin', 'comum')
   startPastNsuRecoveryExecution(@Body() dto: StartPastNsuRecoveryExecutionDto) {
     return this.syncService.startPastNsuRecoveryExecution(dto);
   }
 
   @Get('sync/reprocessar-nsus-passados/execucao/:executionId')
-  @Roles('admin')
+  @Roles('admin', 'comum')
   getPastNsuRecoveryExecution(@Param('executionId') executionId: string) {
     return this.syncService.getPastNsuRecoveryExecution(executionId);
   }

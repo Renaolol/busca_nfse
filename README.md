@@ -199,7 +199,7 @@ Para teste real, defina `NFSE_ADN_CLIENT_MODE=real` e use certificado A1 valido 
 Para consultar logs de sync por cliente, use `GET /sync/logs?clienteId=UUID`.
 Para consultar o status do agendador, use `GET /sync/scheduler-status`.
 Para consultar os totais reais do dashboard sem depender da listagem limitada de NFS-e, use `GET /nfse/dashboard-stats`.
-Para recuperar lacunas de notas ja passadas pelo controle de NSU, use `POST /sync/reprocessar-nsus-passados`. Informe `clienteId` no body para limitar a recuperacao a um cliente especifico. A rotina varre do NSU 1 ate `ultimo_nsu_consultado`, pula NSUs com documento fiscal ja salvo, consulta apenas lacunas e nao altera `ultimo_nsu_consultado`.
+Para recuperar lacunas de notas ja passadas pelo controle de NSU, use `POST /sync/reprocessar-nsus-passados`. O endpoint aceita usuarios com perfil `admin` ou `comum`. Informe `clienteId` no body para limitar a recuperacao a um cliente especifico. A rotina varre do NSU 1 ate `ultimo_nsu_consultado`, pula NSUs com documento fiscal ja salvo, consulta apenas lacunas e nao altera `ultimo_nsu_consultado`.
 Para desconsiderar uma numeracao realmente inutilizada ou inexistente nas auditorias de NFS-e emitidas, use:
 
 - `GET /nfse/numeracao-excecoes?clienteId=...&cnpjConsulta=...`
@@ -276,7 +276,7 @@ Valores aceitos:
 
 Use `POST /nfse/importar-xml` para carregar XMLs legados de NFS-e ou XMLs de evento.
 Use `POST /nfse/recuperar-por-chave` para recuperar XMLs faltantes que estejam disponiveis no Portal Nacional/Emissor Publico. O endpoint recebe `clienteId`, `cnpjConsulta`, `ambiente` e a lista `chavesAcesso`; para cada chave, o backend consulta a API oficial e importa o XML retornado.
-Use `POST /sync/reprocessar-nsus-passados/execucao` com `clienteId`, `cnpjConsulta`, `ambiente` e `lacunas` para auditar apenas os NSUs mais provaveis de uma lacuna de numeracao detectada na listagem. O backend usa os XMLs ja armazenados para inferir as faixas de NSU vizinhas e tenta recuperar os documentos faltantes por NSU, sem depender de consulta automatica por DPS.
+Use `POST /sync/reprocessar-nsus-passados/execucao` com `clienteId`, `cnpjConsulta`, `ambiente` e `lacunas` para auditar apenas os NSUs mais provaveis de uma lacuna de numeracao detectada na listagem. O endpoint aceita usuarios com perfil `admin` ou `comum`. O backend usa os XMLs ja armazenados para inferir as faixas de NSU vizinhas e tenta recuperar os documentos faltantes por NSU, sem depender de consulta automatica por DPS.
 Use `GET /nfse/leitura-fiscal` para montar a tabela consolidada de leitura fiscal das NFS-e filtradas na tela `XMLs NFS-e`. O endpoint reutiliza os mesmos filtros de `GET /nfse`, processa apenas documentos com XML salvo e retorna totais de servico/retercoes, mais uma linha por nota com colunas de ISS, PIS, COFINS, INSS, IRRF, CSLL, retencao federal e status de processamento.
 Notas aplicam deduplicacao por `ambiente + chave_acesso` e geram/salvam o DANFSE em PDF.
 Eventos sao vinculados pela chave da NFS-e referenciada (`chNFSe`) e salvos em `nfse_eventos`; evento de cancelamento (`e101101`) marca a nota relacionada como `cancelada`, preenche `data_cancelamento` e forca regeneracao futura do DANFSE.
