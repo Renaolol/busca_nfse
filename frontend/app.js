@@ -16188,27 +16188,13 @@ async function submitNfseFiscalDominioExportForm(form) {
   render();
 
   try {
+    const searchQuery = buildXmlSearchQuery(state.filters.xmls, 1, SEARCH_PAGE_SIZE, true);
+    const requestBody = Object.fromEntries(searchQuery.entries());
+
     const payload = await apiRequest('/nfse/leitura-fiscal/exportar-dominio', {
       method: 'POST',
       body: {
-        clienteId: state.filters.xmls.cliente,
-        cnpj: state.filters.xmls.cnpj || undefined,
-        numeroNfse: state.filters.xmls.numero || undefined,
-        dataInicio: state.filters.xmls.emissaoInicio || undefined,
-        dataFim: state.filters.xmls.emissaoFim || undefined,
-        downloadInicio: state.filters.xmls.downloadInicio || undefined,
-        downloadFim: state.filters.xmls.downloadFim || undefined,
-        municipio: state.filters.xmls.municipio && state.filters.xmls.municipio !== 'Todos' ? state.filters.xmls.municipio : undefined,
-        tipoRelacao:
-          state.filters.xmls.tipo === 'Emitida'
-            ? 'emitidas'
-            : state.filters.xmls.tipo === 'Tomada'
-              ? 'tomadas'
-              : 'ambas',
-        statusArmazenamento:
-          state.filters.xmls.status === 'Armazenado' || state.filters.xmls.status === 'Pendente' || state.filters.xmls.status === 'Erro'
-            ? state.filters.xmls.status
-            : undefined,
+        ...requestBody,
         all: true,
         codigoEmpresa: Number(codigoEmpresa),
         tipoRegistro,
