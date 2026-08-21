@@ -678,7 +678,7 @@ textarea:focus-visible,
 }
 
 .collapse-trigger .card-title {
-  color: var(--accent-dark);
+  color: var(--text-primary);
 }
 
 .collapse-trigger:hover .collapse-indicator {
