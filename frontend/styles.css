@@ -1935,13 +1935,15 @@ tbody tr:hover {
 }
 
 .xml-reader30-column-resizer {
-  display: inline-flex;
-  align-self: stretch;
-  width: 10px;
-  min-width: 10px;
+  display: block;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -8px;
+  width: 16px;
   cursor: col-resize;
-  position: relative;
   touch-action: none;
+  z-index: 3;
 }
 
 .xml-reader30-column-resizer::before {
@@ -1954,9 +1956,12 @@ tbody tr:hover {
   transform: translateX(-50%);
   border-radius: 999px;
   background: rgba(119, 129, 153, 0.45);
+  transition: background-color 0.15s ease, width 0.15s ease;
 }
 
-.xml-reader30-column-resizer:hover::before {
+.xml-reader30-column-resizer:hover::before,
+.xml-reader30-column-resizer:active::before {
+  width: 4px;
   background: var(--accent);
 }
 

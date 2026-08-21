@@ -7016,8 +7016,7 @@ function normalizeXmlReader30InlineText(value) {
 
 function renderXmlReader30ProductLabel(value) {
   const normalized = normalizeXmlReader30InlineText(value);
-  const displayValue = truncateText(normalized, 30);
-  return `<span class="row-title xml-reader30-product-label" title="${escapeHtml(normalized)}">${escapeHtml(displayValue)}</span>`;
+  return `<span class="row-title xml-reader30-product-label" title="${escapeHtml(normalized)}">${escapeHtml(normalized)}</span>`;
 }
 
 function resolveXmlReader30AliqVigente(dataEmissao, cstCsosn) {
