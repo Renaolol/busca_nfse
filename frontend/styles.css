@@ -1940,11 +1940,14 @@ tbody tr:hover {
 .xml-reader30-column-resizer {
   display: inline-flex;
   align-self: stretch;
-  width: 10px;
-  min-width: 10px;
+  flex: 0 0 auto;
+  width: 16px;
+  min-width: 16px;
+  margin-right: -10px;
   cursor: col-resize;
   position: relative;
   touch-action: none;
+  z-index: 3;
 }
 
 .xml-reader30-column-resizer::before {
@@ -1957,9 +1960,12 @@ tbody tr:hover {
   transform: translateX(-50%);
   border-radius: 999px;
   background: rgba(119, 129, 153, 0.45);
+  transition: background-color 0.15s ease, width 0.15s ease;
 }
 
-.xml-reader30-column-resizer:hover::before {
+.xml-reader30-column-resizer:hover::before,
+.xml-reader30-column-resizer:active::before {
+  width: 4px;
   background: var(--accent);
 }
 
@@ -2000,6 +2006,36 @@ tbody tr:hover {
 body.xml-reader30-resizing,
 body.xml-reader30-resizing * {
   cursor: col-resize !important;
+  user-select: none !important;
+}
+
+.xml-reader30-cell {
+  cursor: cell;
+}
+
+.xml-reader30-cell-selected {
+  background: rgba(97, 124, 255, 0.16);
+}
+
+.xml-reader30-cell-selected-top {
+  border-top: 2px solid var(--info);
+}
+
+.xml-reader30-cell-selected-bottom {
+  border-bottom: 2px solid var(--info);
+}
+
+.xml-reader30-cell-selected-left {
+  border-left: 2px solid var(--info);
+}
+
+.xml-reader30-cell-selected-right {
+  border-right: 2px solid var(--info);
+}
+
+body.xml-reader30-cell-selecting,
+body.xml-reader30-cell-selecting * {
+  cursor: cell !important;
   user-select: none !important;
 }
 
