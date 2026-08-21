@@ -436,7 +436,9 @@ const state = {
     columnMenuOpenKey: null,
     columnMenuAnchor: null,
     columnDrag: null,
-    columnResize: null
+    columnResize: null,
+    cellSelection: null,
+    cellSelectDrag: null
   },
   difalReader: {
     hasSearched: false,
@@ -2333,6 +2335,15 @@ function onDocumentMouseDown(event) {
     return;
   }
 
+  const cellTarget = event.target.closest?.('.xml-reader30-nfe-reorderable-table td[data-row-index]');
+  if (cellTarget instanceof HTMLElement && !event.target.closest?.('input, button, a, select, textarea')) {
+    const rowIndex = Number(cellTarget.getAttribute('data-row-index'));
+    const colIndex = Number(cellTarget.getAttribute('data-col-index'));
+    startXmlReader30CellSelection(rowIndex, colIndex);
+    event.preventDefault();
+    return;
+  }
+
   const panWrap = event.target.closest?.('[data-action="xml-reader30-pan-scroll"]');
   if (panWrap instanceof HTMLElement && !event.target.closest?.('input, button, a, select, textarea, [data-action="xml-reader30-column-drag"]')) {
     state.xmlReader30.scrollDrag = {
@@ -2362,6 +2373,22 @@ function onDocumentMouseDown(event) {
 function onDocumentMouseMove(event) {
   if (state.xmlReader30.columnResize?.active) {
     updateXmlReader30NfeColumnResize(event.clientX);
+    event.preventDefault();
+    return;
+  }
+
+  if (state.xmlReader30.cellSelectDrag?.active) {
+    if (event.buttons !== 1) {
+      finishXmlReader30CellSelection();
+      return;
+    }
+
+    const hoveredCell = event.target.closest?.('.xml-reader30-nfe-reorderable-table td[data-row-index]');
+    if (hoveredCell instanceof HTMLElement) {
+      const rowIndex = Number(hoveredCell.getAttribute('data-row-index'));
+      const colIndex = Number(hoveredCell.getAttribute('data-col-index'));
+      updateXmlReader30CellSelection(rowIndex, colIndex);
+    }
     event.preventDefault();
     return;
   }
@@ -2416,6 +2443,10 @@ function onDocumentMouseOver(event) {
 function onDocumentMouseUp() {
   if (state.xmlReader30.columnResize?.active) {
     finishXmlReader30NfeColumnResize();
+  }
+
+  if (state.xmlReader30.cellSelectDrag?.active) {
+    finishXmlReader30CellSelection();
   }
 
   stopXmlReader30ScrollDrag();
@@ -6564,11 +6595,11 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
               colSpan: visibleColumns.length,
               rowsHtml: displayedRows.length
                 ? displayedRows
-                    .map((row) => {
+                    .map((row, rowIndex) => {
                       const statusTone = row.raw?.cancelada ? 'danger' : row.raw?.statusFiscal === 'Autorizada' ? 'success' : row.statusTone || 'info';
                       return `
                         <tr>
-                          ${visibleColumns.map((column) => renderXmlReader30NfeColumnCell(column, row, statusTone)).join('')}
+                          ${visibleColumns.map((column, colIndex) => renderXmlReader30NfeColumnCell(column, row, statusTone, rowIndex, colIndex)).join('')}
                         </tr>
                       `;
                     })
@@ -6794,15 +6825,126 @@ function getXmlReader30NfeColumnDefinitions() {
   ];
 }
 
-function renderXmlReader30NfeColumnCell(column, row, statusTone) {
+function renderXmlReader30NfeColumnCell(column, row, statusTone, rowIndex, colIndex) {
   const value = column.render(row, statusTone);
   const columnWidth = getXmlReader30NfeColumnWidth(column.key);
   const cellStyle = `width:${columnWidth}px; min-width:${columnWidth}px; max-width:${columnWidth}px;`;
+  const selectionClass = getXmlReader30CellSelectionClassNames(rowIndex, colIndex);
+  const className = ['xml-reader30-cell', column.className || '', selectionClass].filter(Boolean).join(' ');
+  const cellAttrs = `class="${escapeHtml(className)}" data-column-key="${escapeHtml(column.key)}" data-row-index="${rowIndex}" data-col-index="${colIndex}" style="${cellStyle}"`;
   if (column.html) {
-    return `<td class="${escapeHtml(column.className || '')}" data-column-key="${escapeHtml(column.key)}" style="${cellStyle}">${value}</td>`;
+    return `<td ${cellAttrs}>${value}</td>`;
   }
 
-  return `<td class="${escapeHtml(column.className || '')}" data-column-key="${escapeHtml(column.key)}" style="${cellStyle}">${escapeHtml(String(value ?? '-'))}</td>`;
+  return `<td ${cellAttrs}>${escapeHtml(String(value ?? '-'))}</td>`;
+}
+
+function getXmlReader30CellSelectionRect() {
+  const selection = state.xmlReader30.cellSelection;
+  if (!selection) {
+    return null;
+  }
+
+  return {
+    minRow: Math.min(selection.anchorRow, selection.focusRow),
+    maxRow: Math.max(selection.anchorRow, selection.focusRow),
+    minCol: Math.min(selection.anchorCol, selection.focusCol),
+    maxCol: Math.max(selection.anchorCol, selection.focusCol)
+  };
+}
+
+function getXmlReader30CellSelectionClassNames(rowIndex, colIndex) {
+  const rect = getXmlReader30CellSelectionRect();
+  if (!rect || rowIndex < rect.minRow || rowIndex > rect.maxRow || colIndex < rect.minCol || colIndex > rect.maxCol) {
+    return '';
+  }
+
+  const classes = ['xml-reader30-cell-selected'];
+  if (rowIndex === rect.minRow) {
+    classes.push('xml-reader30-cell-selected-top');
+  }
+  if (rowIndex === rect.maxRow) {
+    classes.push('xml-reader30-cell-selected-bottom');
+  }
+  if (colIndex === rect.minCol) {
+    classes.push('xml-reader30-cell-selected-left');
+  }
+  if (colIndex === rect.maxCol) {
+    classes.push('xml-reader30-cell-selected-right');
+  }
+  return classes.join(' ');
+}
+
+function applyXmlReader30CellSelectionToDom(anchorRow, anchorCol, focusRow, focusCol) {
+  const minRow = Math.min(anchorRow, focusRow);
+  const maxRow = Math.max(anchorRow, focusRow);
+  const minCol = Math.min(anchorCol, focusCol);
+  const maxCol = Math.max(anchorCol, focusCol);
+
+  document.querySelectorAll('.xml-reader30-nfe-reorderable-table td[data-row-index]').forEach((node) => {
+    if (!(node instanceof HTMLElement)) {
+      return;
+    }
+
+    const rowIndex = Number(node.getAttribute('data-row-index'));
+    const colIndex = Number(node.getAttribute('data-col-index'));
+    const isSelected = rowIndex >= minRow && rowIndex <= maxRow && colIndex >= minCol && colIndex <= maxCol;
+    node.classList.toggle('xml-reader30-cell-selected', isSelected);
+    node.classList.toggle('xml-reader30-cell-selected-top', isSelected && rowIndex === minRow);
+    node.classList.toggle('xml-reader30-cell-selected-bottom', isSelected && rowIndex === maxRow);
+    node.classList.toggle('xml-reader30-cell-selected-left', isSelected && colIndex === minCol);
+    node.classList.toggle('xml-reader30-cell-selected-right', isSelected && colIndex === maxCol);
+  });
+}
+
+function startXmlReader30CellSelection(rowIndex, colIndex) {
+  if (!Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) {
+    return;
+  }
+
+  state.xmlReader30.cellSelectDrag = {
+    active: true,
+    anchorRow: rowIndex,
+    anchorCol: colIndex
+  };
+  state.xmlReader30.cellSelection = {
+    anchorRow: rowIndex,
+    anchorCol: colIndex,
+    focusRow: rowIndex,
+    focusCol: colIndex
+  };
+
+  document.body.classList.add('xml-reader30-cell-selecting');
+  applyXmlReader30CellSelectionToDom(rowIndex, colIndex, rowIndex, colIndex);
+}
+
+function updateXmlReader30CellSelection(rowIndex, colIndex) {
+  const dragState = state.xmlReader30.cellSelectDrag;
+  if (!dragState?.active || !Number.isFinite(rowIndex) || !Number.isFinite(colIndex)) {
+    return;
+  }
+
+  const selection = state.xmlReader30.cellSelection;
+  if (selection && selection.focusRow === rowIndex && selection.focusCol === colIndex) {
+    return;
+  }
+
+  state.xmlReader30.cellSelection = {
+    anchorRow: dragState.anchorRow,
+    anchorCol: dragState.anchorCol,
+    focusRow: rowIndex,
+    focusCol: colIndex
+  };
+  applyXmlReader30CellSelectionToDom(dragState.anchorRow, dragState.anchorCol, rowIndex, colIndex);
+}
+
+function finishXmlReader30CellSelection() {
+  if (!state.xmlReader30.cellSelectDrag?.active) {
+    return;
+  }
+
+  state.xmlReader30.cellSelectDrag = null;
+  document.body.classList.remove('xml-reader30-cell-selecting');
 }
 
 function getXmlReader30NfeColumnMinWidth(columnKey) {
@@ -7751,7 +7893,9 @@ function resetXmlReader30Search() {
     columnMenuOpenKey: null,
     columnMenuAnchor: null,
     columnDrag: null,
-    columnResize: null
+    columnResize: null,
+    cellSelection: null,
+    cellSelectDrag: null
   };
   state.selectedXmlReaderIds = new Set();
   state.tableState.xmlReader30 = 'data';
