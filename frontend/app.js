@@ -7037,7 +7037,7 @@ function applyXmlReader30NfeColumnWidthsToDom() {
 
     visibleColumns.forEach((column) => {
       const columnWidth = getXmlReader30NfeColumnWidth(column.key);
-      table.querySelectorAll(`[data-column-key="${column.key}"]`).forEach((node) => {
+      table.querySelectorAll(`col[data-column-key="${column.key}"], th[data-column-key="${column.key}"], td[data-column-key="${column.key}"]`).forEach((node) => {
         if (!(node instanceof HTMLElement)) {
           return;
         }
