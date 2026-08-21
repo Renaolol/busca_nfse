@@ -677,7 +677,10 @@ textarea:focus-visible,
   min-width: 0;
 }
 
-.collapse-trigger:hover .card-title,
+.collapse-trigger .card-title {
+  color: var(--accent-dark);
+}
+
 .collapse-trigger:hover .collapse-indicator {
   color: var(--accent-dark);
 }
