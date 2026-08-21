@@ -6297,8 +6297,8 @@ function renderXmlReader30ResultsTable(results) {
 }
 
 function renderXmlReader30NfeResultsTable(results) {
-  const sortedRows = sortXmlReader30Results(results, { documentType: 'nfe' });
-  const displayedRows = expandXmlReader30NfeRows(sortedRows);
+  const expandedRows = expandXmlReader30NfeRows(Array.isArray(results) ? results : []);
+  const displayedRows = sortXmlReader30Results(expandedRows);
   const selectedVisibleCount = getXmlReader30UniqueDocumentCheckKeys(displayedRows).filter((key) => state.selectedXmlReaderIds.has(key)).length;
 
   return `
@@ -6418,8 +6418,8 @@ function renderXmlReader30NfeFullscreenIcon() {
 
 function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
   const fullscreen = Boolean(options.fullscreen);
-  const sortedRows = sortXmlReader30Results(results, { documentType: 'nfe' });
-  const allDisplayedRows = expandXmlReader30NfeRows(sortedRows);
+  const expandedRows = expandXmlReader30NfeRows(Array.isArray(results) ? results : []);
+  const allDisplayedRows = sortXmlReader30Results(expandedRows);
   const cstFilter = String(state.xmlReader30.cstFilter || '').trim();
   const cstOptions = uniqueValues(allDisplayedRows.map((row) => String(row.cstCsosn || '').trim()));
   const displayedRows = cstFilter ? allDisplayedRows.filter((row) => String(row.cstCsosn || '').trim() === cstFilter) : allDisplayedRows;
@@ -8201,7 +8201,7 @@ async function executeXmlReader30Search(form) {
       emissaoInicio,
       emissaoFim
     });
-    const filtered = filterXmlReader30Results(sourceResponse.items, texto);
+    const filtered = dedupeXmlReader30Results(filterXmlReader30Results(sourceResponse.items, texto));
     state.xmlReader30.results = filtered;
     try {
       await loadXmlReader30DocumentChecks(filtered);
@@ -8668,6 +8668,53 @@ function filterXmlReader30Results(results, texto) {
       return normalizeSearchText(row.searchText || '').includes(normalizedText);
     })
     .sort((left, right) => Date.parse(right.dataEmissao || 0) - Date.parse(left.dataEmissao || 0));
+}
+
+function getXmlReader30DuplicateIdentityKey(row) {
+  const raw = row?.raw || {};
+  const documentType = row?.documentType || '';
+  const chaveAcesso = normalizeDigits(String(raw.chaveAcesso || row?.chaveLabel || ''));
+  if (chaveAcesso.length === 44) {
+    return `${documentType}:chave:${chaveAcesso}`;
+  }
+
+  const numero = String(raw.numeroNfe || raw.numeroCte || raw.numeroNfse || row?.numeroLabel || '').trim();
+  const serie = String(raw.serie || '').trim();
+  const dataEmissao = String(row?.dataEmissao || raw.dataEmissao || '').trim();
+  const clientId = String(row?.clientId || raw.clientId || '').trim();
+  const emitenteCnpj = normalizeDigits(String(raw.emitenteCnpj || ''));
+  const destinatarioCnpj = normalizeDigits(String(raw.destinatarioCnpj || ''));
+
+  return [documentType, 'snapshot', clientId, numero, serie, dataEmissao, emitenteCnpj, destinatarioCnpj].join(':');
+}
+
+function isXmlReader30PreferredDuplicate(candidate, current) {
+  const candidateScore = candidate?.raw?.xmlCompletoDisponivel ? 1 : 0;
+  const currentScore = current?.raw?.xmlCompletoDisponivel ? 1 : 0;
+  if (candidateScore !== currentScore) {
+    return candidateScore > currentScore;
+  }
+
+  return Date.parse(candidate?.raw?.updatedAt || 0) > Date.parse(current?.raw?.updatedAt || 0);
+}
+
+function dedupeXmlReader30Results(rows) {
+  const sourceRows = Array.isArray(rows) ? rows : [];
+  const byKey = new Map();
+
+  sourceRows.forEach((row) => {
+    const key = getXmlReader30DuplicateIdentityKey(row);
+    if (!key) {
+      return;
+    }
+
+    const current = byKey.get(key);
+    if (!current || isXmlReader30PreferredDuplicate(row, current)) {
+      byKey.set(key, row);
+    }
+  });
+
+  return Array.from(byKey.values());
 }
 
 function buildXmlReader30SearchText(values) {
