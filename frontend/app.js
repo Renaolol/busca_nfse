@@ -2633,18 +2633,15 @@ function captureScrollState(selectors = []) {
   const extras = (Array.isArray(selectors) ? selectors : [])
     .map((selector) => String(selector || '').trim())
     .filter(Boolean)
-    .map((selector) => {
-      const node = document.querySelector(selector);
-      if (!(node instanceof HTMLElement)) {
-        return null;
-      }
+    .flatMap((selector) =>
+      Array.from(document.querySelectorAll(selector)).flatMap((node, index) => {
+        if (!(node instanceof HTMLElement)) {
+          return [];
+        }
 
-      return {
-        selector,
-        top: node.scrollTop,
-        left: node.scrollLeft
-      };
-    })
+        return [{ selector, index, top: node.scrollTop, left: node.scrollLeft }];
+      })
+    )
     .filter(Boolean);
 
   return {
@@ -2671,7 +2668,8 @@ function restoreScrollState(scrollState) {
       return;
     }
 
-    const node = document.querySelector(selector);
+    const index = Number(entry?.index || 0);
+    const node = document.querySelectorAll(selector).item(Number.isInteger(index) && index >= 0 ? index : 0);
     if (!(node instanceof HTMLElement)) {
       return;
     }
@@ -2685,6 +2683,12 @@ function renderPreservingScroll(selectors = []) {
   const scrollState = captureScrollState(selectors);
   render();
   restoreScrollState(scrollState);
+
+  // A tabela do leitor pode levar um frame para recalcular sua altura apos ser recriada.
+  // Reaplicar a rolagem evita que o navegador volte o viewport interno para o inicio.
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => restoreScrollState(scrollState));
+  }
 }
 
 function render() {
