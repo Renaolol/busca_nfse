@@ -309,6 +309,7 @@ const state = {
   selectedXmlIds: new Set(),
   selectedNfeIds: new Set(),
   selectedXmlReaderIds: new Set(),
+  savedXmlReaderIds: new Set(),
   clients: [],
   certificates: [],
   searchRuns: [],
@@ -438,7 +439,8 @@ const state = {
     columnDrag: null,
     columnResize: null,
     cellSelection: null,
-    cellSelectDrag: null
+    cellSelectDrag: null,
+    savingChecks: false
   },
   difalReader: {
     hasSearched: false,
@@ -1029,6 +1031,10 @@ function onDocumentClick(event) {
     }
     case 'xml-reader30-open-fullscreen': {
       void openXmlReader30Fullscreen();
+      return;
+    }
+    case 'xml-reader30-save-checks': {
+      void saveXmlReader30DocumentChecks();
       return;
     }
     case 'nfse-fiscal-sort': {
@@ -6459,6 +6465,7 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
   const cstOptions = uniqueValues(allDisplayedRows.map((row) => String(row.cstCsosn || '').trim()));
   const displayedRows = cstFilter ? allDisplayedRows.filter((row) => String(row.cstCsosn || '').trim() === cstFilter) : allDisplayedRows;
   const selectedVisibleCount = getXmlReader30UniqueDocumentCheckKeys(displayedRows).filter((key) => state.selectedXmlReaderIds.has(key)).length;
+  const pendingChecksCount = getXmlReader30PendingDocumentChecks().length;
   const visibleColumns = getXmlReader30VisibleNfeColumns();
   const tableWidth = getXmlReader30VisibleNfeColumnsTotalWidth();
   const compactMaxHeight = fullscreen ? 'none' : 'min(62vh, 620px)';
@@ -6499,6 +6506,13 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
               </select>
             </label>
             <div class="xml-reader30-selection-badge" data-xml-reader30-selection-badge>${statusBadge(`${selectedVisibleCount} conferido(s)`, selectedVisibleCount ? 'info' : 'neutral')}</div>
+            <button
+              class="btn primary"
+              type="button"
+              data-action="xml-reader30-save-checks"
+              data-xml-reader30-save-checks
+              ${pendingChecksCount || state.xmlReader30.savingChecks ? '' : 'disabled'}
+            >${state.xmlReader30.savingChecks ? 'Salvando...' : pendingChecksCount ? `Salvar (${pendingChecksCount})` : 'Salvar'}</button>
             ${
               fullscreen
                 ? ''
@@ -7899,9 +7913,11 @@ function resetXmlReader30Search() {
     columnDrag: null,
     columnResize: null,
     cellSelection: null,
-    cellSelectDrag: null
+    cellSelectDrag: null,
+    savingChecks: false
   };
   state.selectedXmlReaderIds = new Set();
+  state.savedXmlReaderIds = new Set();
   state.tableState.xmlReader30 = 'data';
 }
 
@@ -8329,6 +8345,7 @@ async function executeXmlReader30Search(form) {
   state.xmlReader30.hasSearched = true;
   state.xmlReader30.results = [];
   state.selectedXmlReaderIds = new Set();
+  state.savedXmlReaderIds = new Set();
   state.xmlReader30.lastQuery = {
     cliente,
     documento,
@@ -8354,6 +8371,7 @@ async function executeXmlReader30Search(form) {
       await loadXmlReader30DocumentChecks(filtered);
     } catch (error) {
       state.selectedXmlReaderIds = new Set();
+      state.savedXmlReaderIds = new Set();
       pushToast(`Nao foi possivel carregar as conferencias salvas: ${toErrorMessage(error)}`, 'error');
     }
     state.xmlReader30.total = countXmlReader30NfeNotes(filtered);
@@ -9066,6 +9084,20 @@ function syncXmlReader30SelectionCheckboxes() {
     const selectedCount = Array.from(selectionKeys).filter((key) => state.selectedXmlReaderIds.has(key)).length;
     badge.innerHTML = statusBadge(`${selectedCount} conferido(s)`, selectedCount ? 'info' : 'neutral');
   });
+
+  const pendingChecksCount = getXmlReader30PendingDocumentChecks().length;
+  document.querySelectorAll('[data-xml-reader30-save-checks]').forEach((button) => {
+    if (!(button instanceof HTMLButtonElement)) {
+      return;
+    }
+
+    button.disabled = !pendingChecksCount || state.xmlReader30.savingChecks;
+    button.textContent = state.xmlReader30.savingChecks
+      ? 'Salvando...'
+      : pendingChecksCount
+        ? `Salvar (${pendingChecksCount})`
+        : 'Salvar';
+  });
 }
 
 async function loadXmlReader30DocumentChecks(rows) {
@@ -9091,6 +9123,7 @@ async function loadXmlReader30DocumentChecks(rows) {
   const types = Object.entries(groupedIds).filter(([, ids]) => ids.length);
   if (!types.length) {
     state.selectedXmlReaderIds = new Set();
+    state.savedXmlReaderIds = new Set();
     return;
   }
 
@@ -9123,43 +9156,105 @@ async function loadXmlReader30DocumentChecks(rows) {
     });
   });
 
+  state.savedXmlReaderIds = new Set(nextSelection);
   state.selectedXmlReaderIds = new Set([...previousSelection, ...nextSelection]);
 }
 
-async function toggleXmlReader30DocumentCheck(selectionKey, checked) {
+function getXmlReader30PendingDocumentChecks() {
+  const seenKeys = new Set();
+  const pendingChecks = [];
+
+  getXmlReader30SelectionRows().forEach((row) => {
+    const selectionKey = getXmlReader30DocumentCheckKey(row);
+    if (!selectionKey || isXmlReader30LocalSelectionKey(selectionKey) || seenKeys.has(selectionKey)) {
+      return;
+    }
+
+    seenKeys.add(selectionKey);
+    const selected = state.selectedXmlReaderIds.has(selectionKey);
+    const saved = state.savedXmlReaderIds.has(selectionKey);
+    if (selected !== saved) {
+      pendingChecks.push({ selectionKey, row, checked: selected });
+    }
+  });
+
+  return pendingChecks;
+}
+
+function toggleXmlReader30DocumentCheck(selectionKey, checked) {
   const normalizedKey = String(selectionKey || '').trim();
   const row = findXmlReader30RowByDocumentCheckKey(normalizedKey);
-  const tipo = getXmlReader30DocumentCheckTypeFromKey(normalizedKey);
-  const documentoId = getXmlReader30DocumentIdFromKey(normalizedKey);
-  if (!row || !tipo || !documentoId) {
+  if (!row) {
     pushToast('Nao foi possivel identificar o documento conferido.', 'error');
     syncXmlReader30SelectionCheckboxes();
     return;
   }
 
-  const previousState = new Set(state.selectedXmlReaderIds);
   setXmlReader30Selection(normalizedKey, checked);
   syncXmlReader30SelectionCheckboxes();
+}
 
-  if (isXmlReader30LocalSelectionKey(normalizedKey)) {
+async function saveXmlReader30DocumentChecks() {
+  const pendingChecks = getXmlReader30PendingDocumentChecks();
+  if (!pendingChecks.length || state.xmlReader30.savingChecks) {
     return;
   }
 
-  try {
-    await apiRequest('/conferencias-documentos', {
-      method: 'PUT',
-      body: {
-        tipo,
-        documentoId,
-        clienteId: row.clientId || row.raw?.clientId || undefined,
-        conferido: checked
+  state.xmlReader30.savingChecks = true;
+  syncXmlReader30SelectionCheckboxes();
+
+  const successfulChecks = [];
+  const failures = [];
+  const batchSize = 10;
+
+  for (let index = 0; index < pendingChecks.length; index += batchSize) {
+    const batch = pendingChecks.slice(index, index + batchSize);
+    const results = await Promise.allSettled(
+      batch.map(async (entry) => {
+        const tipo = getXmlReader30DocumentCheckTypeFromKey(entry.selectionKey);
+        const documentoId = getXmlReader30DocumentIdFromKey(entry.selectionKey);
+        if (!tipo || !documentoId) {
+          throw new Error('Documento de conferencia invalido.');
+        }
+
+        await apiRequest('/conferencias-documentos', {
+          method: 'PUT',
+          body: {
+            tipo,
+            documentoId,
+            clienteId: entry.row.clientId || entry.row.raw?.clientId || undefined,
+            conferido: entry.checked
+          }
+        });
+        return entry;
+      })
+    );
+
+    results.forEach((result, resultIndex) => {
+      if (result.status === 'fulfilled') {
+        successfulChecks.push(result.value);
+        return;
       }
+      failures.push({ entry: batch[resultIndex], error: result.reason });
     });
-  } catch (error) {
-    state.selectedXmlReaderIds = previousState;
-    syncXmlReader30SelectionCheckboxes();
-    pushToast(`Falha ao salvar conferencia do documento: ${toErrorMessage(error)}`, 'error');
   }
+
+  successfulChecks.forEach((entry) => {
+    if (entry.checked) {
+      state.savedXmlReaderIds.add(entry.selectionKey);
+      return;
+    }
+    state.savedXmlReaderIds.delete(entry.selectionKey);
+  });
+  state.xmlReader30.savingChecks = false;
+  syncXmlReader30SelectionCheckboxes();
+
+  if (failures.length) {
+    pushToast(`${failures.length} conferencia(s) nao foram salvas. Elas continuam pendentes para uma nova tentativa.`, 'error');
+    return;
+  }
+
+  pushToast(`${successfulChecks.length} conferencia(s) salva(s) com sucesso.`, 'success');
 }
 
 function getXmlReader30SelectionRows() {
