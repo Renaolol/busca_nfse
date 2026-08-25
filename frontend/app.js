@@ -6258,7 +6258,7 @@ function renderXmlReader30ResultsTable(results) {
           <p class="card-subtitle">Mostrando ${escapeHtml(String(results.length))} XML(s) do acervo interno.</p>
         </div>
         <div class="stack-mini" style="align-items:flex-end;">
-          ${statusBadge(`${selectedVisibleCount} conferido(s)`, selectedVisibleCount ? 'info' : 'neutral')}
+          <span data-xml-reader30-selection-badge>${statusBadge(`${selectedVisibleCount} conferido(s)`, selectedVisibleCount ? 'info' : 'neutral')}</span>
           <span class="row-sub">Use as caixas para acompanhar o que ja conferiu.</span>
         </div>
       </div>
@@ -6344,7 +6344,7 @@ function renderXmlReader30NfeResultsTable(results) {
           <p class="card-subtitle">Mostrando ${escapeHtml(String(displayedRows.length))} linha(s) itemizada(s) da NF-e do acervo interno.</p>
         </div>
         <div class="stack-mini" style="align-items:flex-end;">
-          ${statusBadge(`${selectedVisibleCount} conferido(s)`, selectedVisibleCount ? 'info' : 'neutral')}
+          <span data-xml-reader30-selection-badge>${statusBadge(`${selectedVisibleCount} conferido(s)`, selectedVisibleCount ? 'info' : 'neutral')}</span>
           <span class="row-sub">Cada produto aparece em uma linha para facilitar a conferencia.</span>
         </div>
       </div>
@@ -6498,7 +6498,7 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
                 )}
               </select>
             </label>
-            <div class="xml-reader30-selection-badge">${statusBadge(`${selectedVisibleCount} conferido(s)`, selectedVisibleCount ? 'info' : 'neutral')}</div>
+            <div class="xml-reader30-selection-badge" data-xml-reader30-selection-badge>${statusBadge(`${selectedVisibleCount} conferido(s)`, selectedVisibleCount ? 'info' : 'neutral')}</div>
             ${
               fullscreen
                 ? ''
@@ -9051,6 +9051,21 @@ function syncXmlReader30SelectionCheckboxes() {
     }
     node.checked = state.selectedXmlReaderIds.has(nodeSelectionKey);
   });
+
+  document.querySelectorAll('[data-xml-reader30-selection-badge]').forEach((badge) => {
+    if (!(badge instanceof HTMLElement)) {
+      return;
+    }
+
+    const container = badge.closest('.xml-reader30-results-shell, .card');
+    const selectionKeys = new Set(
+      Array.from(container?.querySelectorAll('[data-action="xml-reader30-select"]') ?? [])
+        .map((node) => String(node.getAttribute('data-selection-key') || '').trim())
+        .filter(Boolean)
+    );
+    const selectedCount = Array.from(selectionKeys).filter((key) => state.selectedXmlReaderIds.has(key)).length;
+    badge.innerHTML = statusBadge(`${selectedCount} conferido(s)`, selectedCount ? 'info' : 'neutral');
+  });
 }
 
 async function loadXmlReader30DocumentChecks(rows) {
@@ -9125,7 +9140,6 @@ async function toggleXmlReader30DocumentCheck(selectionKey, checked) {
   const previousState = new Set(state.selectedXmlReaderIds);
   setXmlReader30Selection(normalizedKey, checked);
   syncXmlReader30SelectionCheckboxes();
-  renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
 
   if (isXmlReader30LocalSelectionKey(normalizedKey)) {
     return;
@@ -9144,7 +9158,6 @@ async function toggleXmlReader30DocumentCheck(selectionKey, checked) {
   } catch (error) {
     state.selectedXmlReaderIds = previousState;
     syncXmlReader30SelectionCheckboxes();
-    renderPreservingScroll(XML_READER30_SCROLL_SELECTORS);
     pushToast(`Falha ao salvar conferencia do documento: ${toErrorMessage(error)}`, 'error');
   }
 }
