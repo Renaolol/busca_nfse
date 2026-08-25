@@ -1101,7 +1101,10 @@ export class NfseService {
 
     const documents = await this.prisma.nfseDocumento.findMany({
       where: {
-        clienteId: { in: clients.map((client) => client.id) },
+        OR: [
+          { clienteId: { in: clients.map((client) => client.id) } },
+          { vinculos: { some: { clienteId: { in: clients.map((client) => client.id) } } } }
+        ],
         xmlPath: { not: null },
         numeroNfse: { not: null }
       },
@@ -1123,7 +1126,12 @@ export class NfseService {
         danfsePath: true,
         ignorarNumeracaoValidacao: true,
         createdAt: true,
-        updatedAt: true
+        updatedAt: true,
+        vinculos: {
+          select: {
+            clienteId: true
+          }
+        }
       }
     });
     const numberingExceptions = await this.prisma.nfseNumeracaoExcecao.findMany({
@@ -1142,7 +1150,10 @@ export class NfseService {
       .map((client) => {
         const cnpjConsulta = this.normalizeCnpj(client.cnpj);
         const filteredDocuments = documents
-          .filter((document) => document.clienteId === client.id)
+          .filter(
+            (document) =>
+              document.clienteId === client.id || (document.vinculos ?? []).some((vinculo) => vinculo.clienteId === client.id)
+          )
           .filter((document) => !cnpjConsulta || document.cnpjPrestador === cnpjConsulta);
         const { items: uniqueDocuments } = this.deduplicateDocumentosForList(filteredDocuments);
         const visibleDocuments = uniqueDocuments
@@ -1811,7 +1822,7 @@ export class NfseService {
     const [documents, numeracaoExcecoes] = await Promise.all([
       this.prisma.nfseDocumento.findMany({
         where: {
-          ...(clienteId ? { clienteId } : {}),
+          ...(clienteId ? this.buildClienteVinculoCondition(clienteId) : {}),
           cnpjPrestador: cnpjConsulta,
           xmlPath: { not: null },
           numeroNfse: { not: null }

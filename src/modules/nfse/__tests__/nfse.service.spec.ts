@@ -788,6 +788,89 @@ describe('NfseService', () => {
     ]);
   });
 
+  it('considera na auditoria a NFS-e vinculada ao cliente mesmo quando a custodia pertence a outro cliente', async () => {
+    prisma.cliente.findMany.mockResolvedValue([
+      {
+        id: 'cliente-1',
+        razaoSocial: 'Empresa A',
+        cnpj: '06960810000176'
+      }
+    ]);
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-720',
+        clienteId: 'cliente-origem',
+        ambiente: Ambiente.producao,
+        chaveAcesso: 'chave-720',
+        hashXml: 'hash-720',
+        serie: '900',
+        numeroNfse: '720',
+        dataEmissao: new Date('2026-08-01T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        cnpjTomador: '11111111000111',
+        valorServico: new Prisma.Decimal('10'),
+        xmlPath: 'nfse/a/720.xml',
+        danfsePath: null,
+        ignorarNumeracaoValidacao: false,
+        createdAt: new Date('2026-08-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-01T00:00:00.000Z'),
+        vinculos: [{ clienteId: 'cliente-1' }]
+      },
+      {
+        id: 'doc-721',
+        clienteId: 'cliente-origem',
+        ambiente: Ambiente.producao,
+        chaveAcesso: 'chave-721',
+        hashXml: 'hash-721',
+        serie: '900',
+        numeroNfse: '721',
+        dataEmissao: new Date('2026-08-02T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        cnpjTomador: '22222222000122',
+        valorServico: new Prisma.Decimal('20'),
+        xmlPath: 'nfse/a/721.xml',
+        danfsePath: null,
+        ignorarNumeracaoValidacao: false,
+        createdAt: new Date('2026-08-02T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-02T00:00:00.000Z'),
+        vinculos: [{ clienteId: 'cliente-1' }]
+      },
+      {
+        id: 'doc-722',
+        clienteId: 'cliente-origem',
+        ambiente: Ambiente.producao,
+        chaveAcesso: 'chave-722',
+        hashXml: 'hash-722',
+        serie: '900',
+        numeroNfse: '722',
+        dataEmissao: new Date('2026-08-03T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        cnpjTomador: '33333333000133',
+        valorServico: new Prisma.Decimal('30'),
+        xmlPath: 'nfse/a/722.xml',
+        danfsePath: null,
+        ignorarNumeracaoValidacao: false,
+        createdAt: new Date('2026-08-03T00:00:00.000Z'),
+        updatedAt: new Date('2026-08-03T00:00:00.000Z'),
+        vinculos: [{ clienteId: 'cliente-1' }]
+      }
+    ]);
+
+    const result = await service.listGapAudits();
+
+    expect(prisma.nfseDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: expect.arrayContaining([
+            { clienteId: { in: ['cliente-1'] } },
+            { vinculos: { some: { clienteId: { in: ['cliente-1'] } } } }
+          ])
+        })
+      })
+    );
+    expect(result).toEqual([]);
+  });
+
   it('valida numeracao emitida mesmo com o filtro padrao de armazenado', async () => {
     prisma.nfseDocumento.count.mockResolvedValueOnce(2);
     prisma.nfseDocumento.findMany.mockResolvedValue([
