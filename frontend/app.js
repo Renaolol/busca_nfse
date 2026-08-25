@@ -6635,7 +6635,12 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
 
 function renderXmlReader30NfeFullscreenBody() {
   const results = Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : [];
-  return renderXmlReader30NfeResultsTableReorderable(results, { fullscreen: true });
+  return `
+    <div class="xml-reader30-fullscreen-content">
+      ${renderXmlReader30Summary()}
+      ${renderXmlReader30NfeResultsTableReorderable(results, { fullscreen: true })}
+    </div>
+  `;
 }
 
 function renderXmlReader30NfeFullscreenModal() {
