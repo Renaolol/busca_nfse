@@ -7571,7 +7571,7 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
   const baseNumero = row?.numeroLabel || '-';
   const baseValorTotal = row?.valorLabel || formatOptionalCurrency(row?.raw?.valor) || '-';
   const baseEvento = normalizeXmlReader30InlineText(row?.raw?.eventosResumo || '-');
-  const baseSelectionKey = `${row?.documentType || 'nfe'}:${row?.rowId || row?.raw?.id || row?.raw?.apiNfeId || row?.raw?.chaveAcesso || baseNumero}`;
+  const baseSelectionKey = `${row?.documentType || 'nfe'}:${getXmlReader30PersistedDocumentId(row) || baseNumero}`;
 
   if (!items.length) {
     if (!includeFallback) {
@@ -8937,7 +8937,7 @@ function getXmlReader30DocumentCheckKey(row) {
 
   const explicitSelectionKey = String(row.selectionKey || '').trim();
   if (explicitSelectionKey) {
-    return explicitSelectionKey;
+    return getXmlReader30SelectionGroupKey(explicitSelectionKey);
   }
 
   const persistedDocumentId = getXmlReader30PersistedDocumentId(row);
@@ -9166,7 +9166,7 @@ function getXmlReader30PendingDocumentChecks() {
 
   getXmlReader30SelectionRows().forEach((row) => {
     const selectionKey = getXmlReader30DocumentCheckKey(row);
-    if (!selectionKey || isXmlReader30LocalSelectionKey(selectionKey) || seenKeys.has(selectionKey)) {
+    if (!selectionKey || seenKeys.has(selectionKey)) {
       return;
     }
 
