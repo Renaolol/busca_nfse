@@ -8,10 +8,36 @@ import { DanfePdfGenerator } from './danfe.types';
 
 type NfeWizardDanfeModule = {
   NFE_GerarDanfe(params: {
-    data: string;
+    data: DanfeJsonData;
     chave?: string;
     outputPath: string;
   }): Promise<{ success: boolean; message: string }>;
+};
+
+type DanfeDetItem = {
+  imposto?: Record<string, unknown> & {
+    ICMS?: Record<string, unknown> | null;
+  };
+} & Record<string, unknown>;
+
+type DanfeNfeData = {
+  infNFe?: {
+    det?: DanfeDetItem | DanfeDetItem[];
+  } & Record<string, unknown>;
+} & Record<string, unknown>;
+
+type DanfeJsonData = {
+  NFe: DanfeNfeData | DanfeNfeData[];
+  protNFe?: Record<string, unknown>;
+};
+
+type NfeWizardSharedModule = {
+  XmlParser: new () => {
+    convertXmlNfeProcToJson(xml: string): {
+      data: DanfeJsonData;
+      chave: string;
+    };
+  };
 };
 
 type NodeModuleLoader = {
@@ -26,13 +52,10 @@ export class RealDanfePdfGenerator implements DanfePdfGenerator {
     const tempDir = await mkdtemp(join(tmpdir(), 'notasync-danfe-'));
     const outputPath = join(tempDir, `${params.chaveAcesso ?? randomUUID()}.pdf`);
     const { NFE_GerarDanfe } = this.loadDanfeModule();
+    const generatorParams = this.buildGeneratorParams(params, outputPath);
 
     try {
-      await NFE_GerarDanfe({
-        data: params.xml,
-        chave: params.chaveAcesso,
-        outputPath
-      });
+      await NFE_GerarDanfe(generatorParams);
 
       await this.waitForGeneratedPdf(outputPath);
       return await readFile(outputPath);
@@ -42,18 +65,26 @@ export class RealDanfePdfGenerator implements DanfePdfGenerator {
   }
 
   private loadDanfeModule(): NfeWizardDanfeModule {
+    return this.loadModule('@nfewizard/danfe');
+  }
+
+  private loadSharedModule(): NfeWizardSharedModule {
+    return this.loadModule('@nfewizard/shared');
+  }
+
+  private loadModule<T>(request: string): T {
     try {
-      return localRequire('@nfewizard/danfe') as NfeWizardDanfeModule;
+      return localRequire(request) as T;
     } catch (error) {
       if (!this.isMissingLibxmlBindingError(error)) {
         throw error;
       }
 
-      return this.loadDanfeModuleWithStubbedLibxml();
+      return this.loadModuleWithStubbedLibxml(request);
     }
   }
 
-  private loadDanfeModuleWithStubbedLibxml(): NfeWizardDanfeModule {
+  private loadModuleWithStubbedLibxml<T>(request: string): T {
     const moduleLoader = localRequire('node:module') as NodeModuleLoader;
     const originalLoad = moduleLoader._load;
 
@@ -66,10 +97,66 @@ export class RealDanfePdfGenerator implements DanfePdfGenerator {
     }) as NodeModuleLoader['_load'];
 
     try {
-      return localRequire('@nfewizard/danfe') as NfeWizardDanfeModule;
+      return localRequire(request) as T;
     } finally {
       moduleLoader._load = originalLoad;
     }
+  }
+
+  private buildGeneratorParams(params: {
+    xml: string;
+    chaveAcesso?: string;
+  }, outputPath: string): {
+    data: DanfeJsonData;
+    chave?: string;
+    outputPath: string;
+  } {
+    const { data, chave } = this.convertXmlToDanfeData(params.xml);
+
+    return {
+      data: this.normalizeDanfeData(data),
+      chave: params.chaveAcesso ?? chave ?? undefined,
+      outputPath
+    };
+  }
+
+  private convertXmlToDanfeData(xml: string): { data: DanfeJsonData; chave: string } {
+    const { XmlParser } = this.loadSharedModule();
+    return new XmlParser().convertXmlNfeProcToJson(xml);
+  }
+
+  private normalizeDanfeData(data: DanfeJsonData): DanfeJsonData {
+    const nfes = Array.isArray(data.NFe) ? data.NFe : [data.NFe];
+
+    for (const nfe of nfes) {
+      const det = nfe?.infNFe?.det;
+      if (!det) {
+        continue;
+      }
+
+      const items = Array.isArray(det) ? det : [det];
+      if (nfe.infNFe) {
+        nfe.infNFe.det = items;
+      }
+
+      for (const item of items) {
+        if (!item || typeof item !== 'object') {
+          continue;
+        }
+
+        const imposto =
+          item.imposto && typeof item.imposto === 'object'
+            ? item.imposto
+            : {};
+        item.imposto = imposto;
+
+        if (!imposto.ICMS || typeof imposto.ICMS !== 'object') {
+          imposto.ICMS = {};
+        }
+      }
+    }
+
+    return data;
   }
 
   private isMissingLibxmlBindingError(error: unknown): boolean {
