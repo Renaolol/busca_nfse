@@ -1,4 +1,11 @@
 import { extractCteServiceSummary, extractNfeLineItems } from './xml-reader30-nfe-parser.js';
+import {
+  isXmlReader30DocumentCancelled,
+  shouldIncludeDocumentValueInSum
+} from './xml-reader30-summary-utils.js';
+import {
+  computeXmlReader30MonofasicValues,
+} from './xml-reader30-monofasic-utils.js';
 
 const appRoot = document.getElementById('app');
 const modalRoot = document.getElementById('modalRoot');
@@ -7203,47 +7210,6 @@ function renderXmlReader30ProductLabel(value) {
   return `<span class="row-title xml-reader30-product-label" title="${escapeHtml(normalized)}">${escapeHtml(normalized)}</span>`;
 }
 
-function resolveXmlReader30AliqVigente(dataEmissao, cstCsosn) {
-  if (String(cstCsosn || '').trim() !== '61') {
-    return 0;
-  }
-
-  const emissionTimestamp = Date.parse(dataEmissao || '');
-  if (!Number.isFinite(emissionTimestamp)) {
-    return 0;
-  }
-
-  const periodos = Array.isArray(state.settings.aliquotas.periodos) ? state.settings.aliquotas.periodos : [];
-  const periodoVigente = periodos.find((periodo) => {
-    const inicioTimestamp = Date.parse(`${periodo.dataInicio}T00:00:00`);
-    if (!Number.isFinite(inicioTimestamp) || emissionTimestamp < inicioTimestamp) {
-      return false;
-    }
-
-    if (!periodo.dataFim) {
-      return true;
-    }
-
-    const fimTimestamp = Date.parse(`${periodo.dataFim}T23:59:59`);
-    return Number.isFinite(fimTimestamp) && emissionTimestamp <= fimTimestamp;
-  });
-
-  return periodoVigente ? Number(periodoVigente.aliquota) || 0 : 0;
-}
-
-function computeXmlReader30MonofasicValues(dataEmissao, cstCsosn, qBCMonoRet) {
-  const aliqVigente = resolveXmlReader30AliqVigente(dataEmissao, cstCsosn);
-  const baseValue = toNumber(qBCMonoRet);
-  const valorCorreto = Number.isFinite(baseValue) ? baseValue * aliqVigente : 0;
-
-  return {
-    aliqVigente: formatXmlReader30DecimalValue(aliqVigente),
-    aliqVigenteRaw: aliqVigente.toFixed(2),
-    valorCorreto: formatXmlReader30CurrencyValue(valorCorreto),
-    valorCorretoRaw: valorCorreto.toFixed(2)
-  };
-}
-
 function renderXmlReader30SortHeader(key, label) {
   const isActive = state.sort.xmlReader30.key === key;
   const direction = isActive ? state.sort.xmlReader30.direction : 'none';
@@ -7602,7 +7568,13 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
       return [];
     }
 
-    const monofasicValues = computeXmlReader30MonofasicValues(row?.raw?.dataEmissao || row?.dataEmissao || '', '0', '0');
+    const monofasicValues = computeXmlReader30MonofasicValues(
+      row?.raw?.dataEmissao || row?.dataEmissao || '',
+      '0',
+      '0',
+      row?.productLabel || '',
+      state.settings.aliquotas.periodos
+    );
     return [
       {
         ...row,
@@ -7671,7 +7643,13 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
     adRemICMSRetRaw: item.adRemICMSRetRaw || '0',
     vICMSMonoRet: item.vICMSMonoRet || '0',
     vICMSMonoRetRaw: item.vICMSMonoRetRaw || '0',
-    ...computeXmlReader30MonofasicValues(row?.raw?.dataEmissao || row?.dataEmissao || '', item.cstCsosn || '0', item.qBCMonoRetRaw || item.qBCMonoRet || '0'),
+    ...computeXmlReader30MonofasicValues(
+      row?.raw?.dataEmissao || row?.dataEmissao || '',
+      item.cstCsosn || '0',
+      item.qBCMonoRetRaw || item.qBCMonoRet || '0',
+      item.description || '',
+      state.settings.aliquotas.periodos
+    ),
     evento: baseEvento
   }));
 }
@@ -8797,8 +8775,24 @@ function mapXmlReader30Item(documentType, doc) {
         ...nfeItems.map((item) => item.qBCMonoRetRaw || item.qBCMonoRet || ''),
         ...nfeItems.map((item) => item.adRemICMSRetRaw || item.adRemICMSRet || ''),
         ...nfeItems.map((item) => item.vICMSMonoRetRaw || item.vICMSMonoRet || ''),
-        ...nfeItems.map((item) => computeXmlReader30MonofasicValues(nfe.dataEmissao || nfe.dataAutorizacao || '', item.cstCsosn || '0', item.qBCMonoRetRaw || item.qBCMonoRet || '0').aliqVigenteRaw),
-        ...nfeItems.map((item) => computeXmlReader30MonofasicValues(nfe.dataEmissao || nfe.dataAutorizacao || '', item.cstCsosn || '0', item.qBCMonoRetRaw || item.qBCMonoRet || '0').valorCorretoRaw)
+        ...nfeItems.map((item) =>
+          computeXmlReader30MonofasicValues(
+            nfe.dataEmissao || nfe.dataAutorizacao || '',
+            item.cstCsosn || '0',
+            item.qBCMonoRetRaw || item.qBCMonoRet || '0',
+            item.description || '',
+            state.settings.aliquotas.periodos
+          ).aliqVigenteRaw
+        ),
+        ...nfeItems.map((item) =>
+          computeXmlReader30MonofasicValues(
+            nfe.dataEmissao || nfe.dataAutorizacao || '',
+            item.cstCsosn || '0',
+            item.qBCMonoRetRaw || item.qBCMonoRet || '0',
+            item.description || '',
+            state.settings.aliquotas.periodos
+          ).valorCorretoRaw
+        )
       ]),
       raw: nfe
     };
@@ -22183,45 +22177,6 @@ function sumListedDocumentValues(items) {
 
     return sum + toNumber(item?.valor);
   }, 0);
-}
-
-function shouldIncludeDocumentValueInSum(item) {
-  if (!item || isXmlReader30DocumentCancelled(item)) {
-    return false;
-  }
-
-  const normalizedStatus = normalizeSearchText(
-    item.statusFiscal || item.statusLabel || item.status || ''
-  );
-
-  return normalizedStatus.includes('autoriz');
-}
-
-function isXmlReader30DocumentCancelled(item) {
-  if (!item) {
-    return false;
-  }
-
-  if (item.cancelada || item.dataCancelamento) {
-    return true;
-  }
-
-  const normalizedStatus = normalizeSearchText(
-    [
-      item.statusFiscal,
-      item.statusLabel,
-      item.status,
-      item.eventosResumo,
-      item.raw?.statusFiscal,
-      item.raw?.statusLabel,
-      item.raw?.status,
-      item.raw?.eventosResumo
-    ]
-      .filter(Boolean)
-      .join(' ')
-  );
-
-  return normalizedStatus.includes('cancel');
 }
 
 function formatInteger(value) {
