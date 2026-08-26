@@ -6391,7 +6391,7 @@ function renderXmlReader30NfeResultsTable(results) {
                 ? displayedRows
                     .map((row) => {
                       const selectionKey = getXmlReader30DocumentCheckKey(row);
-                      const statusTone = row.raw?.cancelada ? 'danger' : row.raw?.statusFiscal === 'Autorizada' ? 'success' : row.statusTone || 'info';
+                      const statusTone = row.raw?.cancelada ? 'danger' : isAutorizadaFiscalStatus(row.raw?.statusFiscal) ? 'success' : row.statusTone || 'info';
                       const numberLabel = row.numeroNf || row.numeroLabel || '-';
                       return `
                         <tr>
@@ -6614,7 +6614,7 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
               rowsHtml: displayedRows.length
                 ? displayedRows
                     .map((row, rowIndex) => {
-                      const statusTone = row.raw?.cancelada ? 'danger' : row.raw?.statusFiscal === 'Autorizada' ? 'success' : row.statusTone || 'info';
+                      const statusTone = row.raw?.cancelada ? 'danger' : isAutorizadaFiscalStatus(row.raw?.statusFiscal) ? 'success' : row.statusTone || 'info';
                       return `
                         <tr>
                           ${visibleColumns.map((column, colIndex) => renderXmlReader30NfeColumnCell(column, row, statusTone, rowIndex, colIndex)).join('')}
@@ -7571,7 +7571,7 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
   const includeFallback = Boolean(options.includeFallback);
   const items = extractNfeLineItems(row?.raw?.conteudoXml || '');
   const baseStatusLabel = resolveNfeLineItemStatusLabel(row?.raw || row);
-  const baseStatusTone = row?.raw?.cancelada ? 'danger' : row?.raw?.statusFiscal === 'Autorizada' ? 'success' : row?.statusTone || 'info';
+  const baseStatusTone = row?.raw?.cancelada ? 'danger' : isAutorizadaFiscalStatus(row?.raw?.statusFiscal) ? 'success' : row?.statusTone || 'info';
   const baseDataEmissao = formatDate(row?.raw?.dataEmissao || row?.dataEmissao || '');
   const baseNumero = row?.numeroLabel || '-';
   const baseValorTotal = row?.valorLabel || formatOptionalCurrency(row?.raw?.valor) || '-';
@@ -8108,7 +8108,7 @@ function computeDifalReaderTotals(itemRows, aliquotaInterna, totalNotas) {
   let totalDifal = 0;
 
   const decoratedRows = rows.map((row) => {
-    const isCancelada = Boolean(row?.raw?.cancelada);
+    const isCancelada = isXmlReader30DocumentCancelled(row?.raw || row);
     const valorIcms = toNumber(row?.valorIcmsRaw);
     const aliquotaIcms = toNumber(row?.aliquotaIcmsRaw);
     const baseCalculo = toNumber(row?.baseCalculoIcmsRaw);
@@ -8698,7 +8698,7 @@ function mapXmlReader30Item(documentType, doc) {
       chaveLabel: xml.chaveAcesso ? `Chave ${xml.chaveAcesso}` : 'Chave nao informada',
       dataEmissao: xml.dataEmissao || xml.dataDownload || null,
       statusLabel: xml.statusFiscal || '-',
-      statusTone: xml.cancelada ? 'danger' : xml.statusFiscal === 'Autorizada' ? 'success' : 'info',
+      statusTone: xml.cancelada ? 'danger' : isAutorizadaFiscalStatus(xml.statusFiscal) ? 'success' : 'info',
       storageLabel: xml.statusArmazenamento || 'Desconhecido',
       storageTone: xml.statusArmazenamento === 'Armazenado' ? 'success' : 'danger',
       valorLabel: formatOptionalCurrency(xml.valor),
@@ -8741,7 +8741,7 @@ function mapXmlReader30Item(documentType, doc) {
       chaveLabel: nfe.chaveAcesso ? `Chave ${nfe.chaveAcesso}` : 'Chave nao informada',
       dataEmissao: nfe.dataEmissao || nfe.dataAutorizacao || null,
       statusLabel: nfe.statusFiscal || '-',
-      statusTone: nfe.cancelada ? 'danger' : nfe.statusFiscal === 'Autorizada' ? 'success' : 'info',
+      statusTone: nfe.cancelada ? 'danger' : isAutorizadaFiscalStatus(nfe.statusFiscal) ? 'success' : 'info',
       storageLabel: nfe.xmlCompletoDisponivel ? 'XML completo' : 'Resumo XML',
       storageTone: nfe.xmlCompletoDisponivel ? 'success' : 'warning',
       valorLabel: formatOptionalCurrency(nfe.valor),
@@ -8800,7 +8800,7 @@ function mapXmlReader30Item(documentType, doc) {
     chaveLabel: cte.chaveAcesso ? `Chave ${cte.chaveAcesso}` : 'Chave nao informada',
     dataEmissao: cte.dataEmissao || cte.dataAutorizacao || null,
     statusLabel: cte.statusFiscal || '-',
-    statusTone: cte.cancelada ? 'danger' : cte.statusFiscal === 'Autorizada' ? 'success' : 'info',
+    statusTone: cte.cancelada ? 'danger' : isAutorizadaFiscalStatus(cte.statusFiscal) ? 'success' : 'info',
     storageLabel: cte.xmlCompletoDisponivel ? 'XML completo' : 'Resumo XML',
     storageTone: cte.xmlCompletoDisponivel ? 'success' : 'warning',
     valorLabel: formatOptionalCurrency(cte.valor),
@@ -9574,7 +9574,7 @@ function mapXmlReader30ItemLegacyUnused(documentType, doc) {
       chaveLabel: xml.chaveAcesso ? `Chave ${xml.chaveAcesso}` : 'Chave nao informada',
       dataEmissao: xml.dataEmissao || xml.dataDownload || null,
       statusLabel: xml.statusFiscal || '-',
-      statusTone: xml.cancelada ? 'danger' : xml.statusFiscal === 'Autorizada' ? 'success' : 'info',
+      statusTone: xml.cancelada ? 'danger' : isAutorizadaFiscalStatus(xml.statusFiscal) ? 'success' : 'info',
       cancelLabel: xml.cancelada ? 'Sim' : 'Nao',
       cancelTone: xml.cancelada ? 'danger' : 'success',
       storageLabel: xml.statusArmazenamento || 'Desconhecido',
@@ -9616,7 +9616,7 @@ function mapXmlReader30ItemLegacyUnused(documentType, doc) {
       chaveLabel: nfe.chaveAcesso ? `Chave ${nfe.chaveAcesso}` : 'Chave nao informada',
       dataEmissao: nfe.dataEmissao || nfe.dataAutorizacao || null,
       statusLabel: nfe.statusFiscal || '-',
-      statusTone: nfe.cancelada ? 'danger' : nfe.statusFiscal === 'Autorizada' ? 'success' : 'info',
+      statusTone: nfe.cancelada ? 'danger' : isAutorizadaFiscalStatus(nfe.statusFiscal) ? 'success' : 'info',
       cancelLabel: nfe.cancelada ? 'Sim' : 'Nao',
       cancelTone: nfe.cancelada ? 'danger' : 'success',
       storageLabel: nfe.xmlCompletoDisponivel ? 'XML completo' : 'Resumo XML',
@@ -9657,7 +9657,7 @@ function mapXmlReader30ItemLegacyUnused(documentType, doc) {
     chaveLabel: cte.chaveAcesso ? `Chave ${cte.chaveAcesso}` : 'Chave nao informada',
     dataEmissao: cte.dataEmissao || cte.dataAutorizacao || null,
     statusLabel: cte.statusFiscal || '-',
-    statusTone: cte.cancelada ? 'danger' : cte.statusFiscal === 'Autorizada' ? 'success' : 'info',
+    statusTone: cte.cancelada ? 'danger' : isAutorizadaFiscalStatus(cte.statusFiscal) ? 'success' : 'info',
     cancelLabel: cte.cancelada ? 'Sim' : 'Nao',
     cancelTone: cte.cancelada ? 'danger' : 'success',
     storageLabel: cte.xmlCompletoDisponivel ? 'XML completo' : 'Resumo XML',
@@ -11720,7 +11720,7 @@ function resolveNfeLineItemStatusLabel(doc) {
     return 'Cancelada';
   }
 
-  if (doc?.statusFiscal === 'Autorizada') {
+  if (isAutorizadaFiscalStatus(doc?.statusFiscal)) {
     return 'Ativa';
   }
 
@@ -20120,7 +20120,7 @@ function resolveFiscalStatus(status, dataCancelamento, cancelamentoEvento) {
   if (dataCancelamento || cancelamentoEvento || normalized.includes('cancel') || normalized === '101') {
     return 'Cancelada';
   }
-  if (normalized === '100' || normalized.includes('autoriz')) {
+  if (normalized === '100' || normalized === 'autorizada') {
     return 'Autorizada';
   }
   return mapFiscalStatusCode(status);
@@ -20134,6 +20134,7 @@ function mapFiscalStatusCode(status) {
 
   const codeLabels = {
     '100': 'Autorizada',
+    '107': 'Autorizada - MEI',
     '101': 'Cancelada',
     '110': 'Uso denegado',
     '128': 'Lote de evento processado',
@@ -20147,10 +20148,16 @@ function mapFiscalStatusCode(status) {
   return codeLabels[raw] || raw;
 }
 
+function isAutorizadaFiscalStatus(status) {
+  const normalized = normalizeSearchText(status);
+  return normalized === '100' || normalized === '107' || normalized.includes('autoriz');
+}
+
 function isCancelamentoEventoApi(evento) {
   const tipoEvento = normalizeSearchText(evento?.tipoEvento);
   const descricao = normalizeSearchText(evento?.descricao);
   return (
+    tipoEvento === '110111' ||
     tipoEvento === 'e101101' ||
     tipoEvento.includes('cancelamento') ||
     tipoEvento.includes('cancelada') ||
@@ -20337,11 +20344,12 @@ function buildNfeDocumentsFromApi(nfeDocs, clients) {
       const tipo = mapNfeTipoLabel(doc.tipoRelacao);
       const eventos = Array.isArray(doc.eventos) ? doc.eventos : [];
       const cancelamentoEvento = eventos.find(isCancelamentoEventoApi) || null;
+      const dataCancelamento = doc.dataCancelamento || cancelamentoEvento?.dataEvento || null;
       const emitenteCnpj = normalizeDigits(doc.cnpjEmitente || '');
       const destinatarioCnpj = normalizeDigits(doc.cnpjDestinatario || '');
       const contraparteNome = tipo === 'Emitida' ? doc.razaoSocialDestinatario : doc.razaoSocialEmitente;
       const contraparteCnpj = tipo === 'Emitida' ? destinatarioCnpj : emitenteCnpj;
-      const statusFiscal = resolveFiscalStatus(doc.status, cancelamentoEvento?.dataEvento || null, cancelamentoEvento);
+      const statusFiscal = resolveFiscalStatus(doc.status, dataCancelamento, cancelamentoEvento);
 
       return {
         id: `nfe-${doc.id}`,
@@ -20356,6 +20364,7 @@ function buildNfeDocumentsFromApi(nfeDocs, clients) {
         ambiente: doc.ambiente || 'producao',
         dataEmissao: doc.dataEmissao || doc.createdAt || doc.updatedAt,
         dataAutorizacao: doc.dataAutorizacao || doc.updatedAt || doc.createdAt,
+        dataCancelamento,
         valor: toNumber(doc.valorTotal),
         tipo,
         statusFiscal,
@@ -22301,7 +22310,7 @@ function sumListedDocumentValues(items) {
 }
 
 function shouldIncludeDocumentValueInSum(item) {
-  if (!item || item.cancelada) {
+  if (!item || isXmlReader30DocumentCancelled(item)) {
     return false;
   }
 
@@ -22310,6 +22319,33 @@ function shouldIncludeDocumentValueInSum(item) {
   );
 
   return normalizedStatus.includes('autoriz');
+}
+
+function isXmlReader30DocumentCancelled(item) {
+  if (!item) {
+    return false;
+  }
+
+  if (item.cancelada || item.dataCancelamento) {
+    return true;
+  }
+
+  const normalizedStatus = normalizeSearchText(
+    [
+      item.statusFiscal,
+      item.statusLabel,
+      item.status,
+      item.eventosResumo,
+      item.raw?.statusFiscal,
+      item.raw?.statusLabel,
+      item.raw?.status,
+      item.raw?.eventosResumo
+    ]
+      .filter(Boolean)
+      .join(' ')
+  );
+
+  return normalizedStatus.includes('cancel');
 }
 
 function formatInteger(value) {
