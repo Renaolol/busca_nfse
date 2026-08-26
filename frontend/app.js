@@ -1037,6 +1037,10 @@ function onDocumentClick(event) {
       void saveXmlReader30DocumentChecks();
       return;
     }
+    case 'xml-reader30-export-excel': {
+      exportXmlReader30ProductsToExcel();
+      return;
+    }
     case 'nfse-fiscal-sort': {
       const key = actionNode.getAttribute('data-sort-key');
       if (!key) {
@@ -5782,6 +5786,7 @@ function renderXmlReader30Section() {
   const hasClients = state.clients.length > 0;
   const currentCount = Number(reader.total || reader.results.length || 0);
   const results = Array.isArray(reader.results) ? reader.results : [];
+  const exportDisabled = !reader.hasSearched || !results.length;
   const summary = reader.hasSearched && reader.lastQuery ? renderXmlReader30Summary() : '';
 
   return `
@@ -5791,7 +5796,19 @@ function renderXmlReader30Section() {
           <h3 class="card-title">Leitor XML 3.0</h3>
           <p class="card-subtitle">Leia os XMLs ja armazenados no Nota Sync em uma tela dedicada.</p>
         </div>
-        ${statusBadge(`${currentCount} item(s)`, currentCount ? 'success' : 'neutral')}
+        <div class="stack-mini" style="align-items:flex-end;">
+          <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; justify-content:flex-end;">
+            ${statusBadge(`${currentCount} item(s)`, currentCount ? 'success' : 'neutral')}
+            <button
+              class="btn secondary"
+              type="button"
+              data-action="xml-reader30-export-excel"
+              ${exportDisabled ? 'disabled' : ''}
+              title="Exportar a lista atual de produtos para Excel"
+              style="height:32px; padding:0 12px;"
+            >Exportar Excel</button>
+          </div>
+        </div>
       </div>
 
       <form id="xmlReader30Form" class="form-grid compare-form">
@@ -23793,6 +23810,186 @@ function exportCteListToCsv() {
 
   triggerBrowserDownload(fileName, blob);
   pushToast(`${docs.length} CT-e exportado(s) para CSV.`, 'success');
+}
+
+function exportXmlReader30ProductsToExcel() {
+  if (!state.xmlReader30.hasSearched) {
+    pushToast('Busque os XMLs antes de exportar a lista de produtos.', 'error');
+    return;
+  }
+
+  const exportRows = getXmlReader30ExportRows();
+  if (!exportRows.length) {
+    pushToast('Nao ha linhas de produtos na listagem atual para exportar.', 'error');
+    return;
+  }
+
+  const client = findClientById(state.xmlReader30.lastQuery?.cliente);
+  const start = state.xmlReader30.lastQuery?.emissaoInicio || 'inicio';
+  const end = state.xmlReader30.lastQuery?.emissaoFim || 'fim';
+  const clientName = toSafeFileName(client?.razaoSocial || 'cliente');
+  const fileName = `xml-reader30-produtos-${clientName}-${start}-${end}.xls`;
+  const blob = buildXmlReader30ProductsExcelBlob(exportRows, {
+    companyName: client?.razaoSocial || 'Cliente',
+    periodLabel: `${start} a ${end}`
+  });
+
+  triggerBrowserDownload(fileName, blob);
+  pushToast(`${exportRows.length} linha(s) exportada(s) para Excel.`, 'success');
+}
+
+function getXmlReader30ExportRows() {
+  const sourceRows = expandXmlReader30NfeRows(Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : []);
+  const cstFilter = String(state.xmlReader30.cstFilter || '').trim();
+  const allRows = sortXmlReader30Results(sourceRows.filter((row) => row?.documentType === 'nfe'));
+
+  return cstFilter ? allRows.filter((row) => String(row.cstCsosn || '').trim() === cstFilter) : allRows;
+}
+
+function buildXmlReader30ProductsExcelBlob(rows, metadata = {}) {
+  const xml = buildXmlReader30ProductsSpreadsheetXml(rows, metadata);
+  return new Blob([`\ufeff${xml}`], { type: 'application/vnd.ms-excel;charset=utf-8' });
+}
+
+function buildXmlReader30ProductsSpreadsheetXml(rows, metadata = {}) {
+  const headers = [
+    'Documento',
+    'Status NF-e',
+    'NF Cancelada?',
+    'Data Emissao',
+    'Produto',
+    'Quantidade',
+    'Valor Unitario',
+    'Valor Total',
+    'Valor Total NF XML R$',
+    'CST/CSOSN',
+    'CFOP',
+    'BC ICMS',
+    'Aliquota ICMS (%)',
+    'Valor ICMS',
+    'BC Mono',
+    'Aliq NF',
+    'Valor Mono',
+    'Aliq Vigente',
+    'Valor Correto R$',
+    'Evento'
+  ];
+  const sheetTitle = `Leitor XML 3.0 - Produtos${metadata.companyName ? ` - ${metadata.companyName}` : ''}`;
+  const sheetRows = (Array.isArray(rows) ? rows : []).map((row) => [
+    row.numeroNf || row.numeroLabel || '-',
+    row.statusNf || row.statusLabel || '-',
+    row.nfCancelada || (row.raw?.cancelada ? 'Sim' : 'Nao'),
+    row.dataEmissaoLabel || formatDate(row.dataEmissao || row.raw?.dataEmissao || ''),
+    row.produto || '-',
+    row.quantidade || '-',
+    row.valorUnitario || '-',
+    row.valorTotal || '-',
+    row.valorTotalNfXml || '-',
+    row.cstCsosn || '-',
+    row.cfop || '-',
+    row.baseCalculoIcms || '-',
+    row.aliquotaIcms || '-',
+    row.valorIcms || '-',
+    row.qBCMonoRet || '-',
+    row.adRemICMSRet || '-',
+    row.vICMSMonoRet || '-',
+    row.aliqVigente || '-',
+    row.valorCorreto || '-',
+    row.evento || '-'
+  ]);
+  const columnCount = headers.length;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<?mso-application progid="Excel.Sheet"?>
+<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:o="urn:schemas-microsoft-com:office:office"
+ xmlns:x="urn:schemas-microsoft-com:office:excel"
+ xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet"
+ xmlns:html="http://www.w3.org/TR/REC-html40">
+  <DocumentProperties xmlns="urn:schemas-microsoft-com:office:office">
+    <Author>NotaSync</Author>
+    <LastAuthor>NotaSync</LastAuthor>
+    <Created>${escapeHtml(new Date().toISOString())}</Created>
+    <Company>NotaSync</Company>
+  </DocumentProperties>
+  <ExcelWorkbook xmlns="urn:schemas-microsoft-com:office:excel">
+    <ProtectStructure>False</ProtectStructure>
+    <ProtectWindows>False</ProtectWindows>
+  </ExcelWorkbook>
+  <Styles>
+    <Style ss:ID="Default" ss:Name="Normal">
+      <Alignment ss:Vertical="Center" />
+      <Font ss:FontName="Calibri" ss:Size="10" />
+    </Style>
+    <Style ss:ID="SheetTitle">
+      <Font ss:Bold="1" ss:Size="14" ss:Color="#0E3E70" />
+      <Interior ss:Color="#B8CBE8" ss:Pattern="Solid" />
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#8EA9CF" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#8EA9CF" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#8EA9CF" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#8EA9CF" />
+      </Borders>
+    </Style>
+    <Style ss:ID="Header">
+      <Font ss:Bold="1" ss:Color="#FFFFFF" />
+      <Interior ss:Color="#1F4E78" ss:Pattern="Solid" />
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#1F4E78" />
+      </Borders>
+    </Style>
+    <Style ss:ID="Cell">
+      <Borders>
+        <Border ss:Position="Bottom" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
+        <Border ss:Position="Left" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
+        <Border ss:Position="Right" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
+        <Border ss:Position="Top" ss:LineStyle="Continuous" ss:Weight="1" ss:Color="#D8DCE2" />
+      </Borders>
+    </Style>
+    <Style ss:ID="CellAlt" ss:Parent="Cell">
+      <Interior ss:Color="#E7EFF9" ss:Pattern="Solid" />
+    </Style>
+  </Styles>
+  <Worksheet ss:Name="Produtos">
+    <Table>
+      ${headers.map(() => '<Column ss:Width="120" />').join('')}
+      <Row ss:Height="22">
+        <Cell ss:MergeAcross="${columnCount - 1}" ss:StyleID="SheetTitle"><Data ss:Type="String">${escapeHtml(sheetTitle)}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="Cell"><Data ss:Type="String">Empresa</Data></Cell>
+        <Cell ss:MergeAcross="${columnCount - 2}" ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(metadata.companyName || '-')}</Data></Cell>
+      </Row>
+      <Row>
+        <Cell ss:StyleID="Cell"><Data ss:Type="String">Periodo</Data></Cell>
+        <Cell ss:MergeAcross="${columnCount - 2}" ss:StyleID="Cell"><Data ss:Type="String">${escapeHtml(metadata.periodLabel || '-')}</Data></Cell>
+      </Row>
+      <Row />
+      <Row>
+        ${headers.map((header) => `<Cell ss:StyleID="Header"><Data ss:Type="String">${escapeHtml(header)}</Data></Cell>`).join('')}
+      </Row>
+      ${
+        sheetRows.length
+          ? sheetRows
+              .map(
+                (row, index) => `
+                  <Row>
+                    ${row
+                      .map(
+                        (value) => `<Cell ss:StyleID="${index % 2 === 0 ? 'Cell' : 'CellAlt'}"><Data ss:Type="String">${escapeHtml(String(value ?? '-'))}</Data></Cell>`
+                      )
+                      .join('')}
+                  </Row>`
+              )
+              .join('')
+          : `<Row><Cell ss:StyleID="Cell" ss:MergeAcross="${columnCount - 1}"><Data ss:Type="String">Nenhuma linha localizada.</Data></Cell></Row>`
+      }
+    </Table>
+  </Worksheet>
+</Workbook>`;
 }
 
 function escapeCsvCell(value) {
