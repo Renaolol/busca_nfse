@@ -7214,7 +7214,7 @@ function resolveXmlReader30AliqVigente(dataEmissao, cstCsosn) {
 
 function computeXmlReader30MonofasicValues(dataEmissao, cstCsosn, qBCMonoRet) {
   const aliqVigente = resolveXmlReader30AliqVigente(dataEmissao, cstCsosn);
-  const baseValue = Number(String(qBCMonoRet || 0).replace(',', '.'));
+  const baseValue = toNumber(qBCMonoRet);
   const valorCorreto = Number.isFinite(baseValue) ? baseValue * aliqVigente : 0;
 
   return {
@@ -7743,7 +7743,7 @@ function getXmlReader30NfeSummaryTotals(rows) {
       return sum;
     }
 
-    return sum + toNumber(row?.vICMSMonoRetRaw ?? row?.vICMSMonoRet ?? 0);
+    return sum + toNumber(row?.valorCorretoRaw ?? row?.valorCorreto ?? row?.vICMSMonoRetRaw ?? row?.vICMSMonoRet ?? 0);
   }, 0);
 
   const totalIcmsStRetValue = itemRows.reduce((sum, row) => {
@@ -8116,7 +8116,7 @@ function computeDifalReaderTotals(itemRows, aliquotaInterna, totalNotas) {
     const difalRaw = isIcms4 ? computeDifalPorDentro(baseCalculo, aliquotaIcms, aliquotaInterna) : 0;
 
     if (!isCancelada) {
-      totalMonofasico += toNumber(row?.vICMSMonoRetRaw);
+      totalMonofasico += toNumber(row?.valorCorretoRaw ?? row?.valorCorreto ?? row?.vICMSMonoRetRaw ?? row?.vICMSMonoRet ?? 0);
       totalIcmsProprio += valorIcms;
 
       if (isIcms4) {
