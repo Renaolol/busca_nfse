@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { resolveMunicipioIbge } from '../../common/utils/municipio-ibge.util';
 
 export interface ParsedNfse {
   chaveAcesso: string;
@@ -16,6 +17,7 @@ export interface ParsedNfse {
   razaoSocialPrestador?: string;
   cnpjTomador?: string;
   razaoSocialTomador?: string;
+  municipioTomador?: string;
   municipioPrestacaoCodigo?: string;
   municipioPrestacaoNome?: string;
   localPrestacao?: string;
@@ -113,6 +115,7 @@ export class NfseXmlParserService {
         ['tomador', 'toma', 'Tomador', 'TomadorServico'],
         ['xNome', 'razaoSocial', 'RazaoSocial', 'Nome', 'NomeFantasia']
       ),
+      municipioTomador: this.extractMunicipioTomador(xml),
       localPrestacao:
         this.extractNestedAny(xml, ['locPrest'], ['xLocPrestacao']) ??
         this.extract(xml, ['localPrestacao', 'xLocPrestacao']),
@@ -308,6 +311,80 @@ export class NfseXmlParserService {
     }
 
     return undefined;
+  }
+
+  private extractFromPaths(xml: string, paths: string[][]): string | undefined {
+    for (const path of paths) {
+      const value = this.extractFromPath(xml, path);
+      if (value) {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractFromPath(xml: string, path: string[]): string | undefined {
+    let current = xml;
+
+    for (const tag of path) {
+      const regex = new RegExp(`<(?:\\w+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${tag}>`, 'i');
+      const match = regex.exec(current);
+      if (!match?.[1]) {
+        return undefined;
+      }
+
+      current = match[1];
+    }
+
+    return this.cleanText(current);
+  }
+
+  private extractMunicipioTomador(xml: string): string | undefined {
+    const codigoMunicipio =
+      this.extractFromPaths(xml, [
+        ['municipioTomadorCodigo'],
+        ['infDPS', 'toma', 'end', 'endNac', 'cMun'],
+        ['Tomador', 'Endereco', 'CodigoMunicipio'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'CodigoMunicipio']
+      ]) ?? undefined;
+
+    const municipioResolvido = resolveMunicipioIbge(codigoMunicipio);
+    if (municipioResolvido) {
+      return municipioResolvido;
+    }
+
+    const nomeMunicipio =
+      this.extractFromPaths(xml, [
+        ['municipioTomador'],
+        ['infDPS', 'toma', 'end', 'endNac', 'xMun'],
+        ['Tomador', 'Endereco', 'Cidade'],
+        ['Tomador', 'Endereco', 'xMun'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Cidade'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'xMun']
+      ]) ?? undefined;
+    if (!nomeMunicipio) {
+      return undefined;
+    }
+
+    const ufMunicipio =
+      this.extractFromPaths(xml, [
+        ['infDPS', 'toma', 'end', 'endNac', 'UF'],
+        ['Tomador', 'Endereco', 'Uf'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Uf']
+      ]) ?? undefined;
+
+    const trimmedNome = nomeMunicipio.trim();
+    const trimmedUf = ufMunicipio?.trim();
+    if (!trimmedUf) {
+      return trimmedNome;
+    }
+
+    if (trimmedNome.toUpperCase().endsWith(`/${trimmedUf.toUpperCase()}`)) {
+      return trimmedNome;
+    }
+
+    return `${trimmedNome}/${trimmedUf}`;
   }
 
   private extractAttribute(xml: string, tag: string, attribute: string): string | undefined {

@@ -10,6 +10,7 @@ import {
   NfseEmissorPublicoClient
 } from '../../integrations/nfse-emissor-publico/nfse-emissor-publico.types';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
+import { resolveMunicipioIbge } from '../../common/utils/municipio-ibge.util';
 import { NFSE_ADN_CLIENT, NfseAdnClient } from '../../integrations/nfse-adn/nfse-adn.types';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -307,6 +308,7 @@ export class NfseService {
 
       try {
         const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
+        const municipioTomador = this.extractMunicipioTomadorFromXml(xml);
         const leitura = this.danfse.extractLeituraFiscal(xml);
         const codigoServicoPrestado = [doc.codigoServicoNacional, doc.itemListaServico].filter(Boolean).join(' / ') || null;
 
@@ -321,6 +323,7 @@ export class NfseService {
           prestador: doc.razaoSocialPrestador ?? null,
           cnpjPrestador: doc.cnpjPrestador ?? null,
           tomador: doc.razaoSocialTomador ?? null,
+          municipioTomador,
           cnpjTomador: doc.cnpjTomador ?? null,
           municipio: doc.municipioPrestacaoNome ?? null,
           codigoServicoPrestado,
@@ -328,13 +331,15 @@ export class NfseService {
           ...leitura
         });
 
-        if (leitura.statusProcessamento === 'OK' && !cancelada) {
-          valorServicoTotal += this.toNumber(leitura.valorServico) ?? 0;
-          valorLiquidoTotal += this.toNumber(leitura.valorLiquidoNfse) ?? 0;
-          valorRetidoTotal += this.toNumber(leitura.valorTotalRetencoes) ?? 0;
-          valorIssTotal += this.toNumber(leitura.valorIss) ?? 0;
-          valorIssRetidoRealTotal += this.toNumber(leitura.valorIssRetidoReal) ?? 0;
-          totalRetencoesFederais += this.toNumber(leitura.totalRetencoesFederais) ?? 0;
+        if (leitura.statusProcessamento === 'OK') {
+          if (!cancelada) {
+            valorServicoTotal += this.toNumber(leitura.valorServico) ?? 0;
+            valorLiquidoTotal += this.toNumber(leitura.valorLiquidoNfse) ?? 0;
+            valorRetidoTotal += this.toNumber(leitura.valorTotalRetencoes) ?? 0;
+            valorIssTotal += this.toNumber(leitura.valorIss) ?? 0;
+            valorIssRetidoRealTotal += this.toNumber(leitura.valorIssRetidoReal) ?? 0;
+            totalRetencoesFederais += this.toNumber(leitura.totalRetencoesFederais) ?? 0;
+          }
         } else {
           totalDocumentosComErro += 1;
         }
@@ -351,6 +356,7 @@ export class NfseService {
           prestador: doc.razaoSocialPrestador ?? null,
           cnpjPrestador: doc.cnpjPrestador ?? null,
           tomador: doc.razaoSocialTomador ?? null,
+          municipioTomador: null,
           cnpjTomador: doc.cnpjTomador ?? null,
           municipio: doc.municipioPrestacaoNome ?? null,
           codigoServicoPrestado: [doc.codigoServicoNacional, doc.itemListaServico].filter(Boolean).join(' / ') || null,
@@ -2145,12 +2151,14 @@ export class NfseService {
         ambiente: this.resolveNfseAmbienteFromParsed(parsed, doc.ambiente),
         razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
         razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
+        municipioTomador: parsed.municipioTomador ?? null,
         municipioPrestacaoNome: municipioPrestacaoNomeEnriquecido ?? doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome ?? null
       };
     } catch (error) {
       this.logger.warn(`Falha ao enriquecer listagem da NFS-e ${doc.id}: ${this.toErrorMessage(error)}`);
       return {
         ...doc,
+        municipioTomador: null,
         municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome
       };
     }
@@ -2164,6 +2172,7 @@ export class NfseService {
     NfseDocumento & {
       eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
       retencaoIss?: string | null;
+      municipioTomador?: string | null;
       leituraFiscal?: NfseLeituraFiscal | null;
     }
   > {
@@ -2175,6 +2184,7 @@ export class NfseService {
       });
       return {
         ...doc,
+        municipioTomador: null,
         municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome
       };
     }
@@ -2193,6 +2203,7 @@ export class NfseService {
         ambiente: this.resolveNfseAmbienteFromParsed(parsed, doc.ambiente),
         razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
         razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
+        municipioTomador: parsed.municipioTomador ?? null,
         municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome ?? null,
         retencaoIss: parsed.retencaoIss ?? null,
         leituraFiscal: this.danfse.extractLeituraFiscal(xml)
@@ -2206,6 +2217,7 @@ export class NfseService {
       });
       return {
         ...doc,
+        municipioTomador: null,
         municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome
       };
     }
@@ -4843,6 +4855,80 @@ export class NfseService {
     }
 
     return String(error);
+  }
+
+  private extractMunicipioTomadorFromXml(xml: string): string | null {
+    const codigoMunicipio =
+      this.extractXmlPathValue(xml, [
+        ['municipioTomadorCodigo'],
+        ['infDPS', 'toma', 'end', 'endNac', 'cMun'],
+        ['Tomador', 'Endereco', 'CodigoMunicipio'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'CodigoMunicipio']
+      ]) ?? undefined;
+
+    const municipioResolvido = resolveMunicipioIbge(codigoMunicipio);
+    if (municipioResolvido) {
+      return municipioResolvido;
+    }
+
+    const nomeMunicipio =
+      this.extractXmlPathValue(xml, [
+        ['municipioTomador'],
+        ['infDPS', 'toma', 'end', 'endNac', 'xMun'],
+        ['Tomador', 'Endereco', 'Cidade'],
+        ['Tomador', 'Endereco', 'xMun'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Cidade'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'xMun']
+      ]) ?? undefined;
+    if (!nomeMunicipio) {
+      return null;
+    }
+
+    const ufMunicipio =
+      this.extractXmlPathValue(xml, [
+        ['infDPS', 'toma', 'end', 'endNac', 'UF'],
+        ['Tomador', 'Endereco', 'Uf'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Uf']
+      ]) ?? undefined;
+
+    const trimmedNome = nomeMunicipio.trim();
+    const trimmedUf = ufMunicipio?.trim();
+    if (!trimmedUf) {
+      return trimmedNome;
+    }
+
+    if (trimmedNome.toUpperCase().endsWith(`/${trimmedUf.toUpperCase()}`)) {
+      return trimmedNome;
+    }
+
+    return `${trimmedNome}/${trimmedUf}`;
+  }
+
+  private extractXmlPathValue(xml: string, paths: string[][]): string | undefined {
+    for (const path of paths) {
+      const value = this.extractXmlPath(xml, path);
+      if (value) {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractXmlPath(xml: string, path: string[]): string | undefined {
+    let current = xml;
+
+    for (const tag of path) {
+      const regex = new RegExp(`<(?:\\w+:)?${tag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${tag}>`, 'i');
+      const match = regex.exec(current);
+      if (!match?.[1]) {
+        return undefined;
+      }
+
+      current = match[1];
+    }
+
+    return current.trim() || undefined;
   }
 
   private assertNfseClientScope(

@@ -1403,10 +1403,11 @@ describe('NfseService', () => {
       Buffer.from(
         `<?xml version="1.0" encoding="utf-8"?>
 <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
-  <infNFSe Id="NFS42110092206960810000176000000000033326062205552016">
+    <infNFSe Id="NFS42110092206960810000176000000000033326062205552016">
     <xLocPrestacao>Mondai</xLocPrestacao>
     <xLocIncid>Mondai</xLocIncid>
     <nNFSe>333</nNFSe>
+    <municipioTomador>Caibi/SC</municipioTomador>
     <valores>
       <vServ>180.00</vServ>
       <vLiq>162.00</vLiq>
@@ -1464,6 +1465,7 @@ describe('NfseService', () => {
       id: 'doc-fiscal-1',
       numeroNfse: '333',
       municipio: 'Mondai',
+      municipioTomador: 'Caibi/SC',
       codigoServicoPrestado: '170101 / 1701',
       valorServico: '180.00',
       valorLiquidoNfse: '162.00',
@@ -1474,7 +1476,6 @@ describe('NfseService', () => {
       valorCsll: '1.50',
       valorPis: '1.00',
       valorCofins: '1.50',
-      retencaoIss: 'Retido',
       retencaoFederal: 'Retido',
       statusProcessamento: 'OK'
     });

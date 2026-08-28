@@ -70,6 +70,7 @@ const NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER = [
   'prestador',
   'cnpjPrestador',
   'tomador',
+  'municipioTomador',
   'cnpjTomador',
   'valorLiquidoNfse',
   'valorTotalRetencoes',
@@ -12205,6 +12206,13 @@ function getNfseFiscalReaderColumnDefinitions() {
       render: (row) => row.tomador || '-'
     },
     {
+      key: 'municipioTomador',
+      label: 'Municipio tomador',
+      className: 'nfse-fiscal-reader-place',
+      html: false,
+      render: (row) => row.municipioTomador || '-'
+    },
+    {
       key: 'cnpjTomador',
       label: 'CNPJ tomador',
       className: 'nfse-fiscal-reader-cnpj',
@@ -12428,7 +12436,24 @@ function normalizeNfseFiscalReaderColumnOrder(columnOrder) {
 
   NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER.forEach((key) => {
     if (!seen.has(key)) {
+      if (key === 'municipioTomador') {
+        const tomadorIndex = normalized.indexOf('tomador');
+        if (tomadorIndex >= 0) {
+          normalized.splice(tomadorIndex + 1, 0, key);
+          seen.add(key);
+          return;
+        }
+
+        const cnpjTomadorIndex = normalized.indexOf('cnpjTomador');
+        if (cnpjTomadorIndex >= 0) {
+          normalized.splice(cnpjTomadorIndex, 0, key);
+          seen.add(key);
+          return;
+        }
+      }
+
       normalized.push(key);
+      seen.add(key);
     }
   });
 
@@ -18649,6 +18674,7 @@ function normalizeNfseFiscalReaderResponse(payload) {
         prestador: String(row?.prestador || '').trim(),
         cnpjPrestador: normalizeDigits(String(row?.cnpjPrestador || '')),
         tomador: String(row?.tomador || '').trim(),
+        municipioTomador: String(row?.municipioTomador || '').trim(),
         cnpjTomador: normalizeDigits(String(row?.cnpjTomador || '')),
         municipio: String(row?.municipio || '').trim(),
         codigoServicoPrestado: String(row?.codigoServicoPrestado || '').trim(),

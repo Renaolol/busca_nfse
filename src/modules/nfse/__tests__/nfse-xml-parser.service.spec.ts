@@ -76,6 +76,13 @@ describe('NfseXmlParserService', () => {
         <toma>
           <CNPJ>06960810000176</CNPJ>
           <xNome>GCONT GESTAO CONTABIL E EMPRESARIAL LTDA</xNome>
+          <end>
+            <endNac>
+              <cMun>4203105</cMun>
+              <xMun>Caibi</xMun>
+              <UF>SC</UF>
+            </endNac>
+          </end>
         </toma>
         <serv>
           <locPrest>
@@ -109,6 +116,7 @@ describe('NfseXmlParserService', () => {
     expect(parsed.razaoSocialPrestador).toContain('TASSIANI');
     expect(parsed.cnpjTomador).toBe('06960810000176');
     expect(parsed.razaoSocialTomador).toContain('GCONT');
+    expect(parsed.municipioTomador).toBe('Caibi/SC');
     expect(parsed.localPrestacao).toBe('Mondai');
     expect(parsed.municipioPrestacaoCodigo).toBe('4211009');
     expect(parsed.municipioPrestacaoNome).toBe('Mondai');

@@ -32,6 +32,9 @@ export class NfseLeituraFiscalRowDto {
   tomador!: string | null;
 
   @ApiPropertyOptional({ nullable: true })
+  municipioTomador!: string | null;
+
+  @ApiPropertyOptional({ nullable: true })
   cnpjTomador!: string | null;
 
   @ApiPropertyOptional({ nullable: true })
