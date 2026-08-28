@@ -464,7 +464,7 @@ describe('NfseDanfseService', () => {
     expect(retencoes.entries).toEqual([{ code: 'iss', label: 'ISS retido' }]);
   });
 
-  it('substitui codigo do municipio pelo nome quando o nome estiver disponivel no fallback', () => {
+  it('prioriza o codigo do local da prestacao para resolver o nome correto do municipio', () => {
     const pdf = service.generatePdf({
       chaveAcesso: '42110092206960810000176000000000000126019687178145',
       numeroNfse: '2',
@@ -472,19 +472,19 @@ describe('NfseDanfseService', () => {
       razaoSocialPrestador: 'JAEGER PRESTADORA DE SERVICOS LTDA',
       municipioPrestador: '4211009 / SC',
       municipioTomador: '4211009',
-      municipioPrestacaoCodigo: '4211009',
-      municipioPrestacaoNome: 'Mondai',
-      localPrestacao: '4211009 / SC',
-      municipioIncidenciaIssqn: '4211009 / SC',
+      municipioPrestacaoCodigo: '4203105',
+      municipioPrestacaoNome: 'Caibi',
+      localPrestacao: '4203105 / SC',
+      municipioIncidenciaIssqn: '4203105 / SC',
       valorServico: '150.00',
       descricaoServico: 'Prestacao de servico de abertura de porta'
     });
 
     const content = pdf.toString('latin1');
 
-      expect(content).toContain('MUNICIPIO DE MONDAI');
-      expect(content).toContain('Mondai - SC');
-      expect(content).toContain('Municipio de Incidencia do ISSQN');
+    expect(content).toContain('Local da Prestacao');
+    expect(content).toContain('Caibi - SC');
+    expect(content).toContain('Municipio de Incidencia do ISSQN');
   });
 
   it('preenche tributacao municipal a partir de vBC e pAliqAplic do layout nacional', () => {

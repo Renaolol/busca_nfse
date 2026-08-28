@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import * as QRCode from 'qrcode';
-import { replaceMunicipioCodigoComNome } from '../../common/utils/municipio-ibge.util';
+import { replaceMunicipioCodigoComNome, resolveMunicipioIbge } from '../../common/utils/municipio-ibge.util';
 
 export interface DanfseRenderInput {
   layoutNfse?: 'padrao_nacional' | 'abrasf' | 'desconhecido';
@@ -3460,13 +3460,35 @@ export class NfseDanfseService {
       municipioTomador: this.replaceMunicipioCodeWithName(input.municipioTomador, nomeMunicipio, codigoMunicipio),
       municipioDestinatario: this.replaceMunicipioCodeWithName(input.municipioDestinatario, nomeMunicipio, codigoMunicipio),
       municipioIntermediario: this.replaceMunicipioCodeWithName(input.municipioIntermediario, nomeMunicipio, codigoMunicipio),
-      localPrestacao: this.replaceMunicipioCodeWithName(input.localPrestacao, nomeMunicipio, codigoMunicipio),
-      municipioIncidenciaIssqn: this.replaceMunicipioCodeWithName(
-        input.municipioIncidenciaIssqn,
-        nomeMunicipio,
-        codigoMunicipio
-      )
+      localPrestacao: this.replaceMunicipioCodeWithResolvedName(input.localPrestacao, codigoMunicipio),
+      municipioIncidenciaIssqn: this.replaceMunicipioCodeWithResolvedName(input.municipioIncidenciaIssqn, codigoMunicipio)
     } as T;
+  }
+
+  private replaceMunicipioCodeWithResolvedName(value: string | null | undefined, expectedCode?: string): string | undefined {
+    const normalizedValue = this.safeValue(value);
+    if (normalizedValue === '-') {
+      return undefined;
+    }
+
+    const codeMatch = normalizedValue.match(/^\s*([0-9]{6,7})(.*)$/);
+    if (!codeMatch) {
+      return value ?? undefined;
+    }
+
+    const codigo = codeMatch[1];
+    const suffix = codeMatch[2] ?? '';
+    const resolvedMunicipio = resolveMunicipioIbge(codigo) ?? resolveMunicipioIbge(expectedCode);
+    if (!resolvedMunicipio) {
+      return value ?? undefined;
+    }
+
+    if (resolvedMunicipio.includes('/')) {
+      return resolvedMunicipio;
+    }
+
+    const normalizedSuffix = suffix.trim();
+    return normalizedSuffix ? `${resolvedMunicipio} ${normalizedSuffix}` : resolvedMunicipio;
   }
 
   private replaceMunicipioCodeWithName(
