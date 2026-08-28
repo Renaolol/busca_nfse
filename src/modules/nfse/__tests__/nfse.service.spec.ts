@@ -1481,6 +1481,83 @@ describe('NfseService', () => {
     });
   });
 
+  it('preenche municipio do tomador pelo cadastro quando o XML nao traz o valor', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-fiscal-fallback',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000033526062205552018',
+        numeroNfse: '335',
+        dataEmissao: new Date('2026-06-22T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador Teste',
+        municipioPrestacaoNome: 'Mondai',
+        codigoServicoNacional: '170101',
+        itemListaServico: '1701',
+        descricaoServico: 'Servico de consultoria',
+        xmlPath: 'nfse/producao/06960810000176/2026/06/xml/doc-fiscal-fallback.xml',
+        createdAt: new Date('2026-06-22T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-22T00:00:00.000Z')
+      }
+    ]);
+    prisma.clienteEstabelecimento.findFirst.mockResolvedValueOnce({ municipioNome: 'Mondaí/SC' });
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42110092206960810000176000000000033526062205552018">
+    <xLocPrestacao>Mondai</xLocPrestacao>
+    <xLocIncid>Mondai</xLocIncid>
+    <nNFSe>335</nNFSe>
+    <toma>
+      <CNPJ>11111111000111</CNPJ>
+      <xNome>Tomador Teste</xNome>
+    </toma>
+    <valores>
+      <vServ>180.00</vServ>
+      <vLiq>162.00</vLiq>
+      <vTotalRet>18.00</vTotalRet>
+      <vISSQN>9.00</vISSQN>
+      <vISSRet>9.00</vISSRet>
+      <pAliqAplic>5.00</pAliqAplic>
+      <trib>
+        <tribFed>
+          <vRetIRRF>3.00</vRetIRRF>
+          <vRetCP>2.00</vRetCP>
+          <vRetCSLL>1.50</vRetCSLL>
+          <piscofins>
+            <vPis>1.00</vPis>
+            <vCofins>1.50</vCofins>
+          </piscofins>
+        </tribFed>
+        <tribMun>
+          <tpRetISSQN>1</tpRetISSQN>
+        </tribMun>
+      </trib>
+    </valores>
+  </infNFSe>
+</NFSe>`,
+        'utf8'
+      )
+    );
+
+    const result = await service.getLeituraFiscal({
+      clienteId: 'cliente-1',
+      all: true
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: 'doc-fiscal-fallback',
+      municipioTomador: 'Mondaí/SC',
+      statusProcessamento: 'OK'
+    });
+  });
+
   it('resolve o codigo IBGE de local de prestacao/ISS para o nome do municipio e soma por municipio', async () => {
     const buildAbrasfXml = (municipioIncidencia: string, valorServico: string) => `<?xml version="1.0" encoding="utf-8"?>
 <CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd"><Nfse versao="1.00"><InfNfse><Numero>1</Numero><DataEmissao>2026-07-28T08:14:45-03:00</DataEmissao><ValoresNfse><BaseCalculo>${valorServico}.00</BaseCalculo><Aliquota>3.00</Aliquota><ValorIss>0.00</ValorIss><ValorLiquidoNfse>${valorServico}.00</ValorLiquidoNfse></ValoresNfse><DeclaracaoPrestacaoServico><InfDeclaracaoPrestacaoServico><Servico><Valores><ValorServicos>${valorServico}.00</ValorServicos><ValorIss>0.00</ValorIss></Valores><IssRetido>2</IssRetido><CodigoMunicipio>${municipioIncidencia}</CodigoMunicipio><MunicipioIncidencia>${municipioIncidencia}</MunicipioIncidencia></Servico></InfDeclaracaoPrestacaoServico></DeclaracaoPrestacaoServico></InfNfse></Nfse></CompNfse>`;

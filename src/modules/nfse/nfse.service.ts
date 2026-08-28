@@ -308,7 +308,8 @@ export class NfseService {
 
       try {
         const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
-        const municipioTomador = this.extractMunicipioTomadorFromXml(xml);
+        const municipioTomador =
+          this.extractMunicipioTomadorFromXml(xml) ?? (await this.resolveMunicipioNomeByCnpj(doc.cnpjTomador)) ?? null;
         const leitura = this.danfse.extractLeituraFiscal(xml);
         const codigoServicoPrestado = [doc.codigoServicoNacional, doc.itemListaServico].filter(Boolean).join(' / ') || null;
 
@@ -344,6 +345,7 @@ export class NfseService {
           totalDocumentosComErro += 1;
         }
       } catch (error) {
+        const municipioTomador = (await this.resolveMunicipioNomeByCnpj(doc.cnpjTomador)) ?? null;
         totalDocumentosComErro += 1;
         rows.push({
           id: doc.id,
@@ -356,7 +358,7 @@ export class NfseService {
           prestador: doc.razaoSocialPrestador ?? null,
           cnpjPrestador: doc.cnpjPrestador ?? null,
           tomador: doc.razaoSocialTomador ?? null,
-          municipioTomador: null,
+          municipioTomador,
           cnpjTomador: doc.cnpjTomador ?? null,
           municipio: doc.municipioPrestacaoNome ?? null,
           codigoServicoPrestado: [doc.codigoServicoNacional, doc.itemListaServico].filter(Boolean).join(' / ') || null,
@@ -2140,6 +2142,8 @@ export class NfseService {
     try {
       const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
       const parsed = this.parser.parse(xml);
+      const municipioTomador =
+        parsed.municipioTomador ?? (await this.resolveMunicipioNomeByCnpj(doc.cnpjTomador ?? parsed.cnpjTomador)) ?? null;
       const municipioPrestacaoNomeEnriquecido = await this.resolveMunicipioPrestacaoNome({
         municipioPrestacaoCodigo: doc.municipioPrestacaoCodigo ?? parsed.municipioPrestacaoCodigo,
         municipioPrestacaoNome: doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome,
@@ -2151,14 +2155,15 @@ export class NfseService {
         ambiente: this.resolveNfseAmbienteFromParsed(parsed, doc.ambiente),
         razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
         razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
-        municipioTomador: parsed.municipioTomador ?? null,
+        municipioTomador,
         municipioPrestacaoNome: municipioPrestacaoNomeEnriquecido ?? doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome ?? null
       };
     } catch (error) {
       this.logger.warn(`Falha ao enriquecer listagem da NFS-e ${doc.id}: ${this.toErrorMessage(error)}`);
+      const municipioTomador = (await this.resolveMunicipioNomeByCnpj(doc.cnpjTomador)) ?? null;
       return {
         ...doc,
-        municipioTomador: null,
+        municipioTomador,
         municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome
       };
     }
@@ -2192,6 +2197,8 @@ export class NfseService {
     try {
       const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
       const parsed = this.parser.parse(xml);
+      const municipioTomador =
+        parsed.municipioTomador ?? (await this.resolveMunicipioNomeByCnpj(doc.cnpjTomador ?? parsed.cnpjTomador)) ?? null;
       const municipioPrestacaoNome = await this.resolveMunicipioPrestacaoNome({
         municipioPrestacaoCodigo: doc.municipioPrestacaoCodigo ?? parsed.municipioPrestacaoCodigo,
         municipioPrestacaoNome: doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome,
@@ -2203,7 +2210,7 @@ export class NfseService {
         ambiente: this.resolveNfseAmbienteFromParsed(parsed, doc.ambiente),
         razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
         razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
-        municipioTomador: parsed.municipioTomador ?? null,
+        municipioTomador,
         municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome ?? null,
         retencaoIss: parsed.retencaoIss ?? null,
         leituraFiscal: this.danfse.extractLeituraFiscal(xml)
@@ -2215,9 +2222,10 @@ export class NfseService {
         municipioPrestacaoNome: doc.municipioPrestacaoNome,
         cnpjPrestador: doc.cnpjPrestador
       });
+      const municipioTomador = (await this.resolveMunicipioNomeByCnpj(doc.cnpjTomador)) ?? null;
       return {
         ...doc,
-        municipioTomador: null,
+        municipioTomador,
         municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome
       };
     }

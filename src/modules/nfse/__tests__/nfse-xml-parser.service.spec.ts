@@ -256,4 +256,43 @@ describe('NfseXmlParserService', () => {
     expect(parsed.razaoSocialTomador).toBe('TRANSPORTES BARBIAN LTDA');
     expect(parsed.retencaoIss).toBe('2');
   });
+
+  it('extrai municipio do tomador em variações de endereco do layout ABRASF', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse versao="1.00">
+    <InfNfse>
+      <Numero>65</Numero>
+      <CodigoVerificacao>42042022228415329000132000000000006526071542411791</CodigoVerificacao>
+      <DataEmissao>2026-07-08T21:01:32-03:00</DataEmissao>
+      <PrestadorServico>
+        <IdentificacaoPrestador>
+          <CpfCnpj><Cnpj>28415329000132</Cnpj></CpfCnpj>
+        </IdentificacaoPrestador>
+        <RazaoSocial>FRIEDRICH PREPARACAO DE DOCUMENTOS LTDA</RazaoSocial>
+      </PrestadorServico>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <Tomador>
+            <IdentificacaoTomador>
+              <CpfCnpj><Cnpj>39857367000161</Cnpj></CpfCnpj>
+            </IdentificacaoTomador>
+            <RazaoSocial>TRANSPORTES BARBIAN LTDA</RazaoSocial>
+            <Endereco>
+              <Municipio>Caibi</Municipio>
+              <Uf>SC</Uf>
+            </Endereco>
+          </Tomador>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`;
+
+    const parsed = parser.parse(xml);
+
+    expect(parsed.cnpjTomador).toBe('39857367000161');
+    expect(parsed.razaoSocialTomador).toBe('TRANSPORTES BARBIAN LTDA');
+    expect(parsed.municipioTomador).toBe('Caibi/SC');
+  });
 });
