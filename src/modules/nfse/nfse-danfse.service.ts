@@ -336,12 +336,13 @@ export class NfseDanfseService {
 
     const localPrestacaoBruto =
       this.safeValue(extracted.localPrestacao) !== '-' ? extracted.localPrestacao ?? undefined : undefined;
+    const localPrestacaoFallback = localPrestacaoBruto ?? extracted.municipioPrestacaoNome ?? undefined;
     const localIncidenciaIssBruto =
       this.safeValue(extracted.municipioIncidenciaIssqn) !== '-' ? extracted.municipioIncidenciaIssqn ?? undefined : undefined;
 
     return {
       layout: layoutNfse,
-      localPrestacao: replaceMunicipioCodigoComNome(localPrestacaoBruto),
+      localPrestacao: replaceMunicipioCodigoComNome(localPrestacaoFallback),
       localIncidenciaIss: replaceMunicipioCodigoComNome(localIncidenciaIssBruto),
       valorServico: this.toFixedCurrencyString(valorServico),
       valorLiquidoNfse: this.toFixedCurrencyString(this.toNumber(extracted.valorLiquidoNfse)),
@@ -1334,7 +1335,7 @@ export class NfseDanfseService {
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'CodigoMunicipio']
       ]) ?? this.extract(xml, ['municipioPrestacaoCodigo', 'codigoMunicipioPrestacao', 'cLocPrestacao']);
 
-    const municipioPrestacaoNome = this.extract(xml, ['municipioPrestacaoNome', 'xLocPrestacao']);
+    const municipioPrestacaoNome = this.extract(xml, ['municipioPrestacaoNome', 'xLocPrestacao', 'xLocIncid']);
     const codigoServicoNacional = this.extractFromPaths(xml, [
       ['infDPS', 'serv', 'cServ', 'cTribNac'],
       ['serv', 'cServ', 'cTribNac']
@@ -1608,7 +1609,7 @@ export class NfseDanfseService {
         ]),
         this.extractFromPaths(xml, [['infDPS', 'serv', 'locPrest', 'UF']]),
         this.extractFromPaths(xml, [['infDPS', 'serv', 'locPrest', 'cPaisPrestacao']])
-      ),
+      ) ?? municipioPrestacaoNome,
       valorServico,
       valorDeducoes,
       valorDescontoIncondicionado,
@@ -3449,6 +3450,8 @@ export class NfseDanfseService {
   private normalizeMunicipioDisplayFields<T extends Partial<DanfseRenderInput>>(input: T): T {
     const nomeMunicipio = this.safeValue(input.municipioPrestacaoNome);
     const codigoMunicipio = this.safeValue(input.municipioPrestacaoCodigo);
+    const localPrestacaoBase =
+      this.safeValue(input.localPrestacao) !== '-' ? input.localPrestacao : input.municipioPrestacaoNome ?? undefined;
 
     if (nomeMunicipio === '-') {
       return input;
@@ -3460,7 +3463,7 @@ export class NfseDanfseService {
       municipioTomador: this.replaceMunicipioCodeWithName(input.municipioTomador, nomeMunicipio, codigoMunicipio),
       municipioDestinatario: this.replaceMunicipioCodeWithName(input.municipioDestinatario, nomeMunicipio, codigoMunicipio),
       municipioIntermediario: this.replaceMunicipioCodeWithName(input.municipioIntermediario, nomeMunicipio, codigoMunicipio),
-      localPrestacao: this.replaceMunicipioCodeWithResolvedName(input.localPrestacao, codigoMunicipio, nomeMunicipio),
+      localPrestacao: this.replaceMunicipioCodeWithResolvedName(localPrestacaoBase, codigoMunicipio, nomeMunicipio),
       municipioIncidenciaIssqn: this.replaceMunicipioCodeWithResolvedName(
         input.municipioIncidenciaIssqn,
         codigoMunicipio,

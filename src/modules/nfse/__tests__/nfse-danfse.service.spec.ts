@@ -294,6 +294,31 @@ describe('NfseDanfseService', () => {
     expect(leitura.camposComProblema).toEqual([]);
   });
 
+  it('usa o municipio da nota como fallback do local da prestacao quando o local explicito nao vier preenchido', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42110092206960810000176000000000033426062205552016">
+    <xLocIncid>Mondai</xLocIncid>
+    <nNFSe>334</nNFSe>
+    <valores>
+      <vServ>180.00</vServ>
+      <vLiq>180.00</vLiq>
+      <vISSQN>9.00</vISSQN>
+      <vISSRet>0.00</vISSRet>
+      <trib>
+        <tribMun>
+          <tpRetISSQN>2</tpRetISSQN>
+        </tribMun>
+      </trib>
+    </valores>
+  </infNFSe>
+</NFSe>`;
+
+    const leitura = service.extractLeituraFiscal(xml);
+
+    expect(leitura.localPrestacao).toBe('Mondai');
+  });
+
   it('usa tpRetPisCofins do layout nacional como indicativo de retencao sem somar vPis/vCofins nas retencoes federais', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
