@@ -3460,28 +3460,43 @@ export class NfseDanfseService {
       municipioTomador: this.replaceMunicipioCodeWithName(input.municipioTomador, nomeMunicipio, codigoMunicipio),
       municipioDestinatario: this.replaceMunicipioCodeWithName(input.municipioDestinatario, nomeMunicipio, codigoMunicipio),
       municipioIntermediario: this.replaceMunicipioCodeWithName(input.municipioIntermediario, nomeMunicipio, codigoMunicipio),
-      localPrestacao: this.replaceMunicipioCodeWithResolvedName(input.localPrestacao, codigoMunicipio),
-      municipioIncidenciaIssqn: this.replaceMunicipioCodeWithResolvedName(input.municipioIncidenciaIssqn, codigoMunicipio)
+      localPrestacao: this.replaceMunicipioCodeWithResolvedName(input.localPrestacao, codigoMunicipio, nomeMunicipio),
+      municipioIncidenciaIssqn: this.replaceMunicipioCodeWithResolvedName(
+        input.municipioIncidenciaIssqn,
+        codigoMunicipio,
+        nomeMunicipio
+      )
     } as T;
   }
 
-  private replaceMunicipioCodeWithResolvedName(value: string | null | undefined, expectedCode?: string): string | undefined {
+  private replaceMunicipioCodeWithResolvedName(
+    value: string | null | undefined,
+    expectedCode?: string,
+    expectedName?: string
+  ): string | undefined {
     const normalizedValue = this.safeValue(value);
     if (normalizedValue === '-') {
       return undefined;
     }
 
     const codeMatch = normalizedValue.match(/^\s*([0-9]{6,7})(.*)$/);
+    const resolvedMunicipio = resolveMunicipioIbge(codeMatch?.[1]) ?? resolveMunicipioIbge(expectedCode);
+    if (!resolvedMunicipio) {
+      return value ?? undefined;
+    }
+
+    const normalizedExpectedName = this.normalizeMunicipioComparisonText(expectedName);
+    const normalizedInputValue = this.normalizeMunicipioComparisonText(normalizedValue);
+
+    if (normalizedExpectedName && normalizedInputValue === normalizedExpectedName) {
+      return resolvedMunicipio;
+    }
+
     if (!codeMatch) {
       return value ?? undefined;
     }
 
-    const codigo = codeMatch[1];
     const suffix = codeMatch[2] ?? '';
-    const resolvedMunicipio = resolveMunicipioIbge(codigo) ?? resolveMunicipioIbge(expectedCode);
-    if (!resolvedMunicipio) {
-      return value ?? undefined;
-    }
 
     if (resolvedMunicipio.includes('/')) {
       return resolvedMunicipio;
@@ -3489,6 +3504,15 @@ export class NfseDanfseService {
 
     const normalizedSuffix = suffix.trim();
     return normalizedSuffix ? `${resolvedMunicipio} ${normalizedSuffix}` : resolvedMunicipio;
+  }
+
+  private normalizeMunicipioComparisonText(value?: string | null): string {
+    return String(value ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   private replaceMunicipioCodeWithName(
