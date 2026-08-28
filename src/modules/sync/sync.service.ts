@@ -2358,7 +2358,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       cnpjPrestador: parsedXml?.cnpjPrestador ?? params.control.cnpjConsulta,
       cnpjTomador: parsedXml?.cnpjTomador,
       municipioPrestacaoCodigo: parsedXml?.municipioPrestacaoCodigo,
-      municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome
+      municipioPrestacaoNome: parsedXml?.municipioPrestacaoNome,
+      localPrestacao: parsedXml?.localPrestacao
     });
     const danfsePdf = this.danfse.generateFromXml(params.document.xml, {
       chaveAcesso: chave,
@@ -3458,6 +3459,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     cnpjTomador?: string | null;
     municipioPrestacaoCodigo?: string | null;
     municipioPrestacaoNome?: string | null;
+    localPrestacao?: string | null;
   }): Promise<{
     municipioPrestador?: string;
     municipioTomador?: string;
@@ -3471,14 +3473,15 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       this.resolveMunicipioNomeByCnpj(params.cnpjTomador)
     ]);
     const municipioPrestacaoNome = params.municipioPrestacaoNome ?? undefined;
+    const localPrestacao = params.localPrestacao ?? municipioPrestacaoNome;
 
     return {
       municipioPrestador: municipioPrestador ?? municipioPrestacaoNome,
       municipioTomador,
       municipioPrestacaoCodigo: params.municipioPrestacaoCodigo ?? undefined,
       municipioPrestacaoNome,
-      localPrestacao: municipioPrestacaoNome,
-      municipioIncidenciaIssqn: municipioPrestacaoNome
+      localPrestacao,
+      municipioIncidenciaIssqn: localPrestacao
     };
   }
 

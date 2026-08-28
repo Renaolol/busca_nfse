@@ -358,6 +358,7 @@ describe('SyncService', () => {
       razaoSocialTomador: 'Tomador',
       municipioPrestacaoCodigo: '4211009',
       municipioPrestacaoNome: 'Mondai',
+      localPrestacao: 'Caibi/SC',
       valorServico: '1720.00',
       codigoServicoNacional: '170101',
       descricaoServico: 'consultoria'
@@ -366,6 +367,13 @@ describe('SyncService', () => {
     await service.runNow();
 
     expect(storage.putObject).toHaveBeenCalledTimes(2);
+    expect(danfse.generateFromXml).toHaveBeenCalledWith(
+      '<NFSe>ok</NFSe>',
+      expect.objectContaining({
+        localPrestacao: 'Caibi/SC',
+        municipioIncidenciaIssqn: 'Caibi/SC'
+      })
+    );
     expect(prisma.nfseDocumento.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         update: expect.objectContaining({

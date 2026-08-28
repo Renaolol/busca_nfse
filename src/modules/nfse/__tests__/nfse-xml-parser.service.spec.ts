@@ -109,12 +109,39 @@ describe('NfseXmlParserService', () => {
     expect(parsed.razaoSocialPrestador).toContain('TASSIANI');
     expect(parsed.cnpjTomador).toBe('06960810000176');
     expect(parsed.razaoSocialTomador).toContain('GCONT');
+    expect(parsed.localPrestacao).toBe('Mondai');
     expect(parsed.municipioPrestacaoCodigo).toBe('4211009');
     expect(parsed.municipioPrestacaoNome).toBe('Mondai');
     expect(parsed.codigoServicoNacional).toBe('170101');
     expect(parsed.valorServico).toBe('1720.00');
     expect(parsed.descricaoServico).toContain('consultoria');
     expect(parsed.competencia?.toISOString()).toBe('2024-08-01T00:00:00.000Z');
+  });
+
+  it('prioriza o Local da Prestacao em locPrest/xLocPrestacao quando houver conflito com outros campos', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42110092244454248000106000000000002924081114719252">
+    <xLocPrestacao>Mondai</xLocPrestacao>
+    <xLocIncid>Mondai</xLocIncid>
+    <DPS>
+      <infDPS>
+        <serv>
+          <locPrest>
+            <xLocPrestacao>Caibi</xLocPrestacao>
+            <cLocPrestacao>4203500</cLocPrestacao>
+          </locPrest>
+        </serv>
+      </infDPS>
+    </DPS>
+  </infNFSe>
+</NFSe>`;
+
+    const parsed = parser.parse(xml);
+
+    expect(parsed.localPrestacao).toBe('Caibi');
+    expect(parsed.municipioPrestacaoNome).toBe('Mondai');
+    expect(parsed.municipioPrestacaoCodigo).toBe('4203500');
   });
 
   it('parseia tpAmb do XML nacional para classificar o ambiente fiscal', () => {

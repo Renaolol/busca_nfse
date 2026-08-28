@@ -18,6 +18,7 @@ export interface ParsedNfse {
   razaoSocialTomador?: string;
   municipioPrestacaoCodigo?: string;
   municipioPrestacaoNome?: string;
+  localPrestacao?: string;
   valorServico?: string;
   valorDeducoes?: string;
   valorIss?: string;
@@ -112,10 +113,15 @@ export class NfseXmlParserService {
         ['tomador', 'toma', 'Tomador', 'TomadorServico'],
         ['xNome', 'razaoSocial', 'RazaoSocial', 'Nome', 'NomeFantasia']
       ),
+      localPrestacao:
+        this.extractNestedAny(xml, ['locPrest'], ['xLocPrestacao']) ??
+        this.extract(xml, ['localPrestacao', 'xLocPrestacao']),
       municipioPrestacaoCodigo:
         this.extract(xml, ['municipioPrestacaoCodigo', 'codigoMunicipioPrestacao', 'cLocPrestacao']) ??
         this.extractNestedAny(xml, ['locPrest'], ['cLocPrestacao']),
-      municipioPrestacaoNome: this.extract(xml, ['municipioPrestacaoNome', 'xLocPrestacao', 'xLocIncid']),
+      municipioPrestacaoNome:
+        this.extract(xml, ['municipioPrestacaoNome', 'xLocPrestacao', 'xLocIncid']) ??
+        this.extractNestedAny(xml, ['locPrest'], ['xLocPrestacao']),
       valorServico:
         this.extract(xml, ['valorServico', 'ValorServicos', 'vServ']) ??
         this.extractNestedAny(xml, ['vServPrest'], ['vServ']),
