@@ -3607,6 +3607,52 @@ describe('NfseService', () => {
     expect(result.idsNaoEncontrados).toEqual(['550e8400-e29b-41d4-a716-446655440012']);
   });
 
+  it('permite baixar lote quando a NFS-e esta vinculada ao cliente, mesmo com custodia em outro clienteId', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      {
+        id: '550e8400-e29b-41d4-a716-446655440021',
+        clienteId: 'cliente-custodia-outra-empresa',
+        chaveAcesso: '42110092206960810000176000000000002126016992784189',
+        ambiente: Ambiente.producao,
+        xmlPath: 'nfse/producao/123/2026/05/xml/doc-21.xml',
+        danfsePath: null,
+        numeroNfse: '21',
+        dataEmissao: new Date('2026-01-21T00:00:00.000Z'),
+        status: 'autorizada',
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador',
+        cnpjTomador: '12345678000199',
+        razaoSocialTomador: 'Tomador',
+        valorServico: null,
+        descricaoServico: null,
+        createdAt: new Date('2026-01-21T00:00:00.000Z'),
+        updatedAt: new Date('2026-01-21T00:00:00.000Z'),
+        vinculos: [{ clienteId: '550e8400-e29b-41d4-a716-446655440001', papel: 'tomada' }]
+      }
+    ]);
+    storage.getObject.mockResolvedValue(Buffer.from('<xml>doc-21</xml>', 'utf8'));
+
+    const result = await service.downloadLote({
+      ids: ['550e8400-e29b-41d4-a716-446655440021'],
+      tipoArquivo: 'xml',
+      clienteId: '550e8400-e29b-41d4-a716-446655440001'
+    });
+
+    expect(prisma.nfseDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          id: {
+            in: ['550e8400-e29b-41d4-a716-446655440021']
+          },
+          OR: [{ clienteId: '550e8400-e29b-41d4-a716-446655440001' }, { vinculos: { some: { clienteId: '550e8400-e29b-41d4-a716-446655440001' } } }]
+        })
+      })
+    );
+    expect(result.idsNaoEncontrados).toEqual([]);
+    expect(result.totalArquivosIncluidos).toBe(1);
+    expect(result.erros).toEqual([]);
+  });
+
   it('permite leitura da NFS-e quando o cliente tem vinculo (mesmo sem ser o dono de custodia)', async () => {
     prisma.nfseDocumento.findUnique.mockResolvedValue({
       id: 'doc-6',

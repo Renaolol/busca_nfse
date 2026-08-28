@@ -3271,13 +3271,14 @@ export class NfseService {
   async downloadLote(dto: DownloadLoteDto) {
     const uniqueIds = [...new Set(dto.ids)];
     const tipoArquivo = dto.tipoArquivo ?? 'ambos';
+    const tenantScope = dto.clienteId ? this.buildClienteVinculoCondition(dto.clienteId) : {};
 
     const docs = await this.prisma.nfseDocumento.findMany({
       where: {
         id: {
           in: uniqueIds
         },
-        clienteId: dto.clienteId ?? undefined
+        ...tenantScope
       },
       include: {
         eventos: {

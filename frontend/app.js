@@ -15799,7 +15799,11 @@ function getFilteredXmlsFromSource(source) {
       xml.clientId === filters.cliente ||
       xml.custodiaClienteId === filters.cliente ||
       (Array.isArray(xml.vinculoClienteIds) && xml.vinculoClienteIds.includes(filters.cliente));
-    const matchesCnpj = !filters.cnpj || normalizeDigits(xml.cnpj).includes(filters.cnpj);
+    const matchesCnpj =
+      !filters.cnpj ||
+      normalizeDigits(xml.cnpj).includes(filters.cnpj) ||
+      normalizeDigits(xml.prestadorCnpj || '').includes(filters.cnpj) ||
+      normalizeDigits(xml.tomadorCnpj || '').includes(filters.cnpj);
     const matchesNumero = !filters.numero || String(xml.numeroNfse).includes(filters.numero);
 
     if (xml?.isNumberingException) {
@@ -19936,6 +19940,8 @@ function buildXmlFilesFromApi(nfseDocs, clients, contextClienteId) {
         estabelecimentoId: doc.estabelecimentoId || null,
         cliente: client?.razaoSocial || 'Cliente nao identificado',
         cnpj: normalizeDigits(client?.cnpj || doc.cnpjPrestador || doc.cnpjTomador || ''),
+        prestadorCnpj: cnpjPrestador || '',
+        tomadorCnpj: cnpjTomador || '',
         municipio: doc.municipioPrestacaoNome || client?.municipio || '-',
         numeroNfse: doc.numeroNfse || (doc.chaveAcesso ? String(doc.chaveAcesso).slice(-8) : '-'),
         codigoVerificacao: '-',
