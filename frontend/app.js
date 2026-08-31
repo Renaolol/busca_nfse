@@ -91,6 +91,8 @@ const NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER = [
   'erroProcessamento'
 ];
 const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
+const AUTH_LOGO_LIGHT_THEME_SRC = '/app/assets/notasync-logo-horizontal-antiga.png';
+const AUTH_LOGO_DEFAULT_SRC = '/app/assets/notasync-logo-horizontal.png';
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
 let dashboardAutoRefreshTimer = null;
 let dashboardAutoRefreshRunning = false;
@@ -2915,6 +2917,8 @@ function renderHeader(meta) {
 
 function renderUnauthenticatedShell() {
   const loading = state.auth.authenticating;
+  const loginLogoSrc =
+    state.settings.geral.tema === 'Claro' ? AUTH_LOGO_LIGHT_THEME_SRC : AUTH_LOGO_DEFAULT_SRC;
 
   return `
     <section class="page-section" style="min-height:100vh; display:flex; align-items:center; justify-content:center; padding:32px;">
@@ -2922,7 +2926,7 @@ function renderUnauthenticatedShell() {
         <div class="brand" style="margin-bottom:24px;">
           <div class="brand-card" aria-label="NotaSync">
             <div class="brand-logo-frame">
-              <img class="brand-logo" src="/app/assets/notasync-logo-horizontal.png" alt="NotaSync" />
+              <img class="brand-logo" src="${escapeHtml(loginLogoSrc)}" alt="NotaSync" />
             </div>
           </div>
           <p class="brand-subtitle">GCONT Gestao Contabil</p>

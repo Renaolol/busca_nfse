@@ -151,6 +151,38 @@ describe('NfseXmlParserService', () => {
     expect(parsed.municipioTomador).toBe('Mondai/SC');
   });
 
+  it('extrai municipio do tomador quando o XML usa TomadorServico', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse versao="1.00">
+    <InfNfse>
+      <Numero>95</Numero>
+      <CodigoVerificacao>42110092206789688000117000000000009526086671280712</CodigoVerificacao>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <TomadorServico>
+            <IdentificacaoTomador>
+              <CpfCnpj><Cnpj>04896658000184</Cnpj></CpfCnpj>
+            </IdentificacaoTomador>
+            <RazaoSocial>TOMAZI E TOMAZI TRANSPORTES LTDA</RazaoSocial>
+            <Endereco>
+              <Municipio>Mondai</Municipio>
+              <Uf>SC</Uf>
+            </Endereco>
+          </TomadorServico>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`;
+
+    const parsed = parser.parse(xml);
+
+    expect(parsed.cnpjTomador).toBe('04896658000184');
+    expect(parsed.razaoSocialTomador).toBe('TOMAZI E TOMAZI TRANSPORTES LTDA');
+    expect(parsed.municipioTomador).toBe('Mondai/SC');
+  });
+
   it('prioriza o Local da Prestacao em locPrest/xLocPrestacao quando houver conflito com outros campos', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">

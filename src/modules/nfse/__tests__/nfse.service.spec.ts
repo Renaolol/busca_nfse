@@ -1586,6 +1586,73 @@ describe('NfseService', () => {
     expect(prisma.clienteEstabelecimento.findFirst).not.toHaveBeenCalled();
   });
 
+  it('extrai municipio do tomador quando o XML usa TomadorServico', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-fiscal-tomador-servico',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206789688000117000000000009526086671280712',
+        numeroNfse: '95',
+        dataEmissao: new Date('2026-08-10T14:40:42.000Z'),
+        cnpjPrestador: '06789688000117',
+        razaoSocialPrestador: 'LEANDRO MULLER TRANSPORTES LTDA',
+        cnpjTomador: '04896658000184',
+        razaoSocialTomador: 'TOMAZI E TOMAZI TRANSPORTES LTDA',
+        municipioPrestacaoNome: 'Mondai',
+        codigoServicoNacional: '160201',
+        itemListaServico: '1602',
+        descricaoServico: 'Servicos de transporte',
+        xmlPath: 'nfse/producao/06789688000117/2026/08/xml/doc-fiscal-tomador-servico.xml',
+        createdAt: new Date('2026-08-10T14:40:42.000Z'),
+        updatedAt: new Date('2026-08-10T14:40:42.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse versao="1.00">
+    <InfNfse>
+      <Numero>95</Numero>
+      <CodigoVerificacao>42110092206789688000117000000000009526086671280712</CodigoVerificacao>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <TomadorServico>
+            <IdentificacaoTomador>
+              <CpfCnpj><Cnpj>04896658000184</Cnpj></CpfCnpj>
+            </IdentificacaoTomador>
+            <RazaoSocial>TOMAZI E TOMAZI TRANSPORTES LTDA</RazaoSocial>
+            <Endereco>
+              <Municipio>Mondai</Municipio>
+              <Uf>SC</Uf>
+            </Endereco>
+          </TomadorServico>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`,
+        'utf8'
+      )
+    );
+    prisma.clienteEstabelecimento.findFirst.mockResolvedValue(null);
+
+    const result = await service.getLeituraFiscal({
+      clienteId: 'cliente-1',
+      all: true
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: 'doc-fiscal-tomador-servico',
+      municipioTomador: 'Mondai/SC',
+      statusProcessamento: 'OK'
+    });
+    expect(prisma.clienteEstabelecimento.findFirst).not.toHaveBeenCalled();
+  });
+
   it('preenche municipio do tomador pelo cadastro quando o XML nao traz o valor', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
       {
