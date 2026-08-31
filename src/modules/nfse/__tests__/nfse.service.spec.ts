@@ -135,6 +135,29 @@ describe('NfseService', () => {
     });
   });
 
+  it('usa o dia do calendario no filtro de data ao listar NFS-e', async () => {
+    prisma.nfseDocumento.count.mockResolvedValueOnce(0);
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([]);
+
+    await service.findAll({
+      clienteId: 'cliente-1',
+      dataInicio: '2026-08-01T00:00:00.000Z',
+      dataFim: '2026-08-31T23:59:59.999Z'
+    });
+
+    const firstCall = (prisma.nfseDocumento.findMany as jest.Mock).mock.calls[0]?.[0];
+    const dateRange = Array.isArray(firstCall?.where?.AND)
+      ? firstCall.where.AND.find((item: { dataEmissao?: { gte?: Date; lte?: Date } }) => item.dataEmissao)?.dataEmissao
+      : undefined;
+
+    expect(dateRange?.gte).toBeInstanceOf(Date);
+    expect(dateRange?.lte).toBeInstanceOf(Date);
+    expect(dateRange?.gte?.getDate()).toBe(1);
+    expect(dateRange?.gte?.getHours()).toBe(0);
+    expect(dateRange?.lte?.getDate()).toBe(31);
+    expect(dateRange?.lte?.getHours()).toBe(23);
+  });
+
   it('ignora page/pageSize e usa o limite de seguranca quando all=true', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([]);
 

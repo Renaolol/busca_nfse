@@ -305,6 +305,28 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return Date.parse(value);
   }
 
+  private parseDateFilterBoundary(value?: string | null, endOfDay = false): Date | undefined {
+    const text = String(value || '').trim();
+    if (!text) {
+      return undefined;
+    }
+
+    const dateMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (dateMatch) {
+      const year = Number(dateMatch[1]);
+      const month = Number(dateMatch[2]);
+      const day = Number(dateMatch[3]);
+      if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+        return endOfDay
+          ? new Date(year, month - 1, day, 23, 59, 59, 999)
+          : new Date(year, month - 1, day, 0, 0, 0, 0);
+      }
+    }
+
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  }
+
   private validateMonofasicoAliquotaPeriodos(periodosOrdenados: MonofasicoAliquotaPeriodoDto[]): void {
     periodosOrdenados.forEach((periodo, index) => {
       const inicio = this.toDateStringTimestamp(periodo.dataInicio);
@@ -3128,8 +3150,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     if (query.dataInicio || query.dataFim) {
       andConditions.push({
         dataEmissao: {
-          gte: query.dataInicio ? new Date(query.dataInicio) : undefined,
-          lte: query.dataFim ? new Date(query.dataFim) : undefined
+          gte: query.dataInicio ? this.parseDateFilterBoundary(query.dataInicio, false) : undefined,
+          lte: query.dataFim ? this.parseDateFilterBoundary(query.dataFim, true) : undefined
         }
       });
     }

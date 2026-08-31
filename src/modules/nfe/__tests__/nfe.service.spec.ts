@@ -191,6 +191,82 @@ describe('NfeService', () => {
     });
   });
 
+  it('filtra NF-e por dia do calendario e nao inclui 31/07 em uma busca de agosto', async () => {
+    const documentos = [
+      {
+        id: 'doc-julho',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        numeroNfe: '123',
+        serie: '1',
+        dataEmissao: new Date('2026-07-31T23:30:00-03:00'),
+        dataAutorizacao: null,
+        cnpjEmitente: '12345678000199',
+        cnpjDestinatario: '99887766000155',
+        xmlCompletoDisponivel: true,
+        resumoDisponivel: true,
+        xmlResumoPath: 'nfe/producao/12345678000199/2026/07/resumos/julho.xml',
+        xmlCompletoPath: 'nfe/producao/12345678000199/2026/07/xml/julho.xml',
+        updatedAt: new Date('2026-07-31T23:40:00-03:00'),
+        createdAt: new Date('2026-07-31T23:40:00-03:00'),
+        eventos: []
+      },
+      {
+        id: 'doc-agosto',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '35260612345678000199550010000001231000001232',
+        numeroNfe: '124',
+        serie: '1',
+        dataEmissao: new Date('2026-08-01T00:30:00-03:00'),
+        dataAutorizacao: null,
+        cnpjEmitente: '12345678000199',
+        cnpjDestinatario: '99887766000155',
+        xmlCompletoDisponivel: true,
+        resumoDisponivel: true,
+        xmlResumoPath: 'nfe/producao/12345678000199/2026/08/resumos/agosto.xml',
+        xmlCompletoPath: 'nfe/producao/12345678000199/2026/08/xml/agosto.xml',
+        updatedAt: new Date('2026-08-01T00:40:00-03:00'),
+        createdAt: new Date('2026-08-01T00:40:00-03:00'),
+        eventos: []
+      }
+    ];
+
+    const getDateRange = (where: { AND?: Array<{ dataEmissao?: { gte?: Date; lte?: Date } }> }) =>
+      Array.isArray(where.AND) ? where.AND.find((item) => item.dataEmissao)?.dataEmissao : undefined;
+    const filterByRange = (items: typeof documentos, range?: { gte?: Date; lte?: Date }) =>
+      items.filter((item) => {
+        const timestamp = item.dataEmissao.getTime();
+        return (!range?.gte || timestamp >= range.gte.getTime()) && (!range?.lte || timestamp <= range.lte.getTime());
+      });
+
+    prisma.nfeDocumento.count.mockImplementation(async (args: { where: { AND?: Array<{ dataEmissao?: { gte?: Date; lte?: Date } }> } }) =>
+      filterByRange(documentos, getDateRange(args.where)).length
+    );
+    prisma.nfeDocumento.findMany.mockImplementation(async (args: { where: { AND?: Array<{ dataEmissao?: { gte?: Date; lte?: Date } }> } }) =>
+      filterByRange(documentos, getDateRange(args.where))
+    );
+
+    const result = await service.findAll({
+      clienteId: 'cliente-1',
+      dataInicio: '2026-08-01T00:00:00.000Z',
+      dataFim: '2026-08-31T23:59:59.999Z',
+      all: true
+    });
+
+    expect(result.items.map((item) => item.id)).toEqual(['doc-agosto']);
+    const dateRange = getDateRange((prisma.nfeDocumento.findMany as jest.Mock).mock.calls[0][0].where);
+    expect(dateRange?.gte).toBeInstanceOf(Date);
+    expect(dateRange?.lte).toBeInstanceOf(Date);
+    expect(dateRange?.gte?.getDate()).toBe(1);
+    expect(dateRange?.gte?.getHours()).toBe(0);
+    expect(dateRange?.lte?.getDate()).toBe(31);
+    expect(dateRange?.lte?.getHours()).toBe(23);
+  });
+
   it('colapsa duplicatas legadas por ambiente e chave_acesso na listagem ampla', async () => {
     prisma.nfeDocumento.count.mockResolvedValueOnce(2);
     prisma.nfeDocumento.findMany.mockResolvedValueOnce([

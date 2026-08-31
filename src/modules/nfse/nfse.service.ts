@@ -1611,8 +1611,8 @@ export class NfseService {
     if (query.dataInicio || query.dataFim) {
       andConditions.push({
         dataEmissao: {
-          gte: query.dataInicio ? new Date(query.dataInicio) : undefined,
-          lte: query.dataFim ? new Date(query.dataFim) : undefined
+          gte: query.dataInicio ? this.parseDateFilterBoundary(query.dataInicio, false) : undefined,
+          lte: query.dataFim ? this.parseDateFilterBoundary(query.dataFim, true) : undefined
         }
       });
     }
@@ -1650,8 +1650,8 @@ export class NfseService {
     if (query.downloadInicio || query.downloadFim) {
       andConditions.push({
         updatedAt: {
-          gte: query.downloadInicio ? new Date(query.downloadInicio) : undefined,
-          lte: query.downloadFim ? new Date(query.downloadFim) : undefined
+          gte: query.downloadInicio ? this.parseDateFilterBoundary(query.downloadInicio, false) : undefined,
+          lte: query.downloadFim ? this.parseDateFilterBoundary(query.downloadFim, true) : undefined
         }
       });
     }
@@ -4764,6 +4764,28 @@ export class NfseService {
     const text = this.scalarToString(value);
     if (!text) {
       return undefined;
+    }
+
+    const parsed = new Date(text);
+    return Number.isNaN(parsed.getTime()) ? undefined : parsed;
+  }
+
+  private parseDateFilterBoundary(value?: string | null, endOfDay = false): Date | undefined {
+    const text = String(value || '').trim();
+    if (!text) {
+      return undefined;
+    }
+
+    const dateMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (dateMatch) {
+      const year = Number(dateMatch[1]);
+      const month = Number(dateMatch[2]);
+      const day = Number(dateMatch[3]);
+      if (Number.isFinite(year) && Number.isFinite(month) && Number.isFinite(day)) {
+        return endOfDay
+          ? new Date(year, month - 1, day, 23, 59, 59, 999)
+          : new Date(year, month - 1, day, 0, 0, 0, 0);
+      }
     }
 
     const parsed = new Date(text);
