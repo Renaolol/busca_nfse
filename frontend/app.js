@@ -6176,6 +6176,18 @@ function renderXmlReader30DifalChartSvg(points, grouping) {
   `;
 }
 
+function renderSortIndicator(direction) {
+  if (direction === 'asc') {
+    return '\u25B2';
+  }
+
+  if (direction === 'desc') {
+    return '\u25BC';
+  }
+
+  return '\u2195';
+}
+
 const DIFAL_NOTES_COLUMNS = [
   { label: 'Numero NF', className: 'xml-reader30-number', value: (row) => row.numeroNf || row.numeroLabel || '-' },
   {
@@ -26179,4 +26191,100 @@ document.addEventListener('click', (event) => {
   }
   pushToast('Conexao com servidor validada com sucesso (mock).', 'success');
 });
+
+function renderNfeSortHeader(key, label) {
+  const isActive = state.sort.nfeDocs.key === key;
+  const direction = isActive ? state.sort.nfeDocs.direction : 'none';
+  const sortLabel =
+    direction === 'asc'
+      ? `${label}, ordenado crescente`
+      : direction === 'desc'
+        ? `${label}, ordenado decrescente`
+        : `${label}, ordenar`;
+
+  return `
+    <th>
+      <button class="sort-header ${isActive ? 'active' : ''}" type="button" data-action="nfe-docs-sort" data-sort-key="${escapeHtml(key)}" aria-label="${escapeHtml(sortLabel)}">
+        <span>${escapeHtml(label)}</span>
+        <span class="sort-indicator" aria-hidden="true">${renderSortIndicator(direction)}</span>
+      </button>
+    </th>
+  `;
+}
+
+function renderCteSortHeader(key, label) {
+  const isActive = state.sort.cteDocs.key === key;
+  const direction = isActive ? state.sort.cteDocs.direction : 'none';
+  const sortLabel =
+    direction === 'asc'
+      ? `${label}, ordenado crescente`
+      : direction === 'desc'
+        ? `${label}, ordenado decrescente`
+        : `${label}, ordenar`;
+
+  return `
+    <th>
+      <button class="sort-header ${isActive ? 'active' : ''}" type="button" data-action="cte-docs-sort" data-sort-key="${escapeHtml(key)}" aria-label="${escapeHtml(sortLabel)}">
+        <span>${escapeHtml(label)}</span>
+        <span class="sort-indicator" aria-hidden="true">${renderSortIndicator(direction)}</span>
+      </button>
+    </th>
+  `;
+}
+
+function renderXmlSortHeader(key, label) {
+  const isActive = state.sort.xmls.key === key;
+  const direction = isActive ? state.sort.xmls.direction : 'none';
+  const sortLabel =
+    direction === 'asc'
+      ? `${label}, ordenado crescente`
+      : direction === 'desc'
+        ? `${label}, ordenado decrescente`
+        : `${label}, ordenar`;
+
+  return `
+    <th>
+      <button class="sort-header ${isActive ? 'active' : ''}" type="button" data-action="xmls-sort" data-sort-key="${escapeHtml(key)}" aria-label="${escapeHtml(sortLabel)}">
+        <span>${escapeHtml(label)}</span>
+        <span class="sort-indicator" aria-hidden="true">${renderSortIndicator(direction)}</span>
+      </button>
+    </th>
+  `;
+}
+
+function renderXmlReader30SortHeader(key, label) {
+  const isActive = state.sort.xmlReader30.key === key;
+  const direction = isActive ? state.sort.xmlReader30.direction : 'none';
+  const sortLabel =
+    direction === 'asc'
+      ? `${label}, ordenado crescente`
+      : direction === 'desc'
+        ? `${label}, ordenado decrescente`
+        : `${label}, ordenar`;
+
+  return `
+    <button class="sort-header xml-reader30-sort-header ${isActive ? 'active' : ''}" type="button" data-action="xml-reader30-sort" data-sort-key="${escapeHtml(key)}" aria-label="${escapeHtml(sortLabel)}">
+      <span>${escapeHtml(label)}</span>
+      <span class="sort-indicator" aria-hidden="true">${renderSortIndicator(direction)}</span>
+    </button>
+  `;
+}
+
+function renderNfseFiscalReaderSortHeader(key, label) {
+  const isActive = state.sort.nfseFiscalReader.key === key;
+  const direction = isActive ? state.sort.nfseFiscalReader.direction : 'none';
+  const sortLabel =
+    direction === 'asc'
+      ? `${label}, ordenado crescente`
+      : direction === 'desc'
+        ? `${label}, ordenado decrescente`
+        : `${label}, ordenar`;
+
+  return `
+    <button class="sort-header nfse-fiscal-reader-sort-header ${isActive ? 'active' : ''}" type="button" data-action="nfse-fiscal-sort" data-sort-key="${escapeHtml(key)}" aria-label="${escapeHtml(sortLabel)}">
+      <span>${escapeHtml(label)}</span>
+      <span class="sort-indicator" aria-hidden="true">${renderSortIndicator(direction)}</span>
+    </button>
+  `;
+}
 
