@@ -126,6 +126,31 @@ describe('NfseXmlParserService', () => {
     expect(parsed.competencia?.toISOString()).toBe('2024-08-01T00:00:00.000Z');
   });
 
+  it('extrai municipio do tomador quando o XML nacional traz o nome do municipio', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42110092206960810000176000000000033626062205552019">
+    <nNFSe>336</nNFSe>
+    <DPS>
+      <infDPS>
+        <toma>
+          <end>
+            <endNac>
+              <Municipio>Mondai</Municipio>
+              <UF>SC</UF>
+            </endNac>
+          </end>
+        </toma>
+      </infDPS>
+    </DPS>
+  </infNFSe>
+</NFSe>`;
+
+    const parsed = parser.parse(xml);
+
+    expect(parsed.municipioTomador).toBe('Mondai/SC');
+  });
+
   it('prioriza o Local da Prestacao em locPrest/xLocPrestacao quando houver conflito com outros campos', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">

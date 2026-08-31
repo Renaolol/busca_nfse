@@ -1504,6 +1504,88 @@ describe('NfseService', () => {
     });
   });
 
+  it('extrai municipio do tomador quando o XML traz o nome do municipio em vez do codigo', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-fiscal-municipio-nome',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000033626062205552019',
+        numeroNfse: '336',
+        dataEmissao: new Date('2026-06-22T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'Prestador Teste',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Tomador Teste',
+        municipioPrestacaoNome: 'Mondai',
+        codigoServicoNacional: '170101',
+        itemListaServico: '1701',
+        descricaoServico: 'Servico de consultoria',
+        xmlPath: 'nfse/producao/06960810000176/2026/06/xml/doc-fiscal-municipio-nome.xml',
+        createdAt: new Date('2026-06-22T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-22T00:00:00.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(
+        `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42110092206960810000176000000000033626062205552019">
+    <xLocPrestacao>Mondai</xLocPrestacao>
+    <xLocIncid>Mondai</xLocIncid>
+    <nNFSe>336</nNFSe>
+    <tomador>
+      <end>
+        <endNac>
+          <Municipio>Mondai</Municipio>
+          <UF>SC</UF>
+        </endNac>
+      </end>
+    </tomador>
+    <valores>
+      <vServ>180.00</vServ>
+      <vLiq>162.00</vLiq>
+      <vTotalRet>18.00</vTotalRet>
+      <vISSQN>9.00</vISSQN>
+      <vISSRet>9.00</vISSRet>
+      <pAliqAplic>5.00</pAliqAplic>
+      <trib>
+        <tribFed>
+          <vRetIRRF>3.00</vRetIRRF>
+          <vRetCP>2.00</vRetCP>
+          <vRetCSLL>1.50</vRetCSLL>
+          <piscofins>
+            <vPis>1.00</vPis>
+            <vCofins>1.50</vCofins>
+          </piscofins>
+        </tribFed>
+        <tribMun>
+          <tpRetISSQN>1</tpRetISSQN>
+        </tribMun>
+      </trib>
+    </valores>
+  </infNFSe>
+</NFSe>`,
+        'utf8'
+      )
+    );
+    prisma.clienteEstabelecimento.findFirst.mockResolvedValue(null);
+
+    const result = await service.getLeituraFiscal({
+      clienteId: 'cliente-1',
+      all: true
+    });
+
+    expect(result.items).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({
+      id: 'doc-fiscal-municipio-nome',
+      municipioTomador: 'Mondai/SC',
+      statusProcessamento: 'OK'
+    });
+    expect(prisma.clienteEstabelecimento.findFirst).not.toHaveBeenCalled();
+  });
+
   it('preenche municipio do tomador pelo cadastro quando o XML nao traz o valor', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
       {

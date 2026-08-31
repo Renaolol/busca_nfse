@@ -308,8 +308,9 @@ export class NfseService {
 
       try {
         const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
+        const parsed = this.parser.parse(xml);
         const municipioTomador =
-          this.extractMunicipioTomadorFromXml(xml) ?? (await this.resolveMunicipioNomeByCnpj(doc.cnpjTomador)) ?? null;
+          parsed.municipioTomador ?? (await this.resolveMunicipioNomeByCnpj(doc.cnpjTomador ?? parsed.cnpjTomador)) ?? null;
         const leitura = this.danfse.extractLeituraFiscal(xml);
         const codigoServicoPrestado = [doc.codigoServicoNacional, doc.itemListaServico].filter(Boolean).join(' / ') || null;
 
@@ -4892,7 +4893,21 @@ export class NfseService {
       this.extractXmlPathValue(xml, [
         ['municipioTomadorCodigo'],
         ['infDPS', 'toma', 'end', 'endNac', 'cMun'],
+        ['infDPS', 'toma', 'end', 'endNac', 'Municipio'],
+        ['infDPS', 'toma', 'end', 'endNac', 'MunicipioNome'],
+        ['infDPS', 'toma', 'end', 'endNac', 'xMunicipio'],
+        ['tomador', 'end', 'endNac', 'cMun'],
+        ['tomador', 'end', 'endNac', 'Municipio'],
+        ['tomador', 'end', 'endNac', 'MunicipioNome'],
+        ['tomador', 'end', 'endNac', 'xMunicipio'],
+        ['tomador', 'Endereco', 'CodigoMunicipio'],
+        ['tomador', 'Endereco', 'Municipio'],
+        ['tomador', 'Endereco', 'MunicipioNome'],
+        ['tomador', 'Endereco', 'xMunicipio'],
         ['Tomador', 'Endereco', 'CodigoMunicipio'],
+        ['Tomador', 'Endereco', 'Municipio'],
+        ['Tomador', 'Endereco', 'MunicipioNome'],
+        ['Tomador', 'Endereco', 'xMunicipio'],
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'CodigoMunicipio']
       ]) ?? undefined;
 
@@ -4905,6 +4920,18 @@ export class NfseService {
       this.extractXmlPathValue(xml, [
         ['municipioTomador'],
         ['infDPS', 'toma', 'end', 'endNac', 'xMun'],
+        ['infDPS', 'toma', 'end', 'endNac', 'Municipio'],
+        ['infDPS', 'toma', 'end', 'endNac', 'MunicipioNome'],
+        ['infDPS', 'toma', 'end', 'endNac', 'xMunicipio'],
+        ['tomador', 'end', 'endNac', 'xMun'],
+        ['tomador', 'end', 'endNac', 'Municipio'],
+        ['tomador', 'end', 'endNac', 'MunicipioNome'],
+        ['tomador', 'end', 'endNac', 'xMunicipio'],
+        ['tomador', 'Endereco', 'Cidade'],
+        ['tomador', 'Endereco', 'xMun'],
+        ['tomador', 'Endereco', 'Municipio'],
+        ['tomador', 'Endereco', 'MunicipioNome'],
+        ['tomador', 'Endereco', 'xMunicipio'],
         ['Tomador', 'Endereco', 'Cidade'],
         ['Tomador', 'Endereco', 'xMun'],
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Cidade'],
@@ -4917,7 +4944,11 @@ export class NfseService {
     const ufMunicipio =
       this.extractXmlPathValue(xml, [
         ['infDPS', 'toma', 'end', 'endNac', 'UF'],
+        ['tomador', 'end', 'endNac', 'UF'],
+        ['tomador', 'Endereco', 'Uf'],
+        ['tomador', 'Endereco', 'UF'],
         ['Tomador', 'Endereco', 'Uf'],
+        ['Tomador', 'Endereco', 'UF'],
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Uf']
       ]) ?? undefined;
 
