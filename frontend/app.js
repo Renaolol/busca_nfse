@@ -2931,9 +2931,6 @@ function renderUnauthenticatedShell() {
           </div>
           <p class="brand-subtitle">GCONT Gestao Contabil</p>
         </div>
-        <p class="card-subtitle" style="margin-top:-8px; margin-bottom:16px;">
-          O destaque agora e a Integracao de Inteligencia Artificial com Banco de Dados, com foco em uso pratico de IA na rotina contabil.
-        </p>
         <h2 class="card-title">Acesso ao painel</h2>
         <p class="card-subtitle">Entre com o usuario interno para acessar clientes, buscas, XMLs e auditoria.</p>
         ${
@@ -5728,8 +5725,8 @@ function renderComparaSpedPage() {
               <p>
                 ${
                   artifactReady
-                    ? `Gerado em ${escapeHtml(formatDateTime(compareState.generatedAt || ''))}. Clique no botao abaixo para baixar novamente.`
-                    : 'Depois de gerar, este painel mostrara o nome do arquivo e o atalho para download.'
+                    ? `Gerado em ${escapeHtml(formatDateTime(compareState.generatedAt || ''))}. Clique no botÃ£o abaixo para baixar novamente.`
+                    : 'Depois de gerar, este painel mostrarÃ¡ o nome do arquivo e o atalho para download.'
                 }
               </p>
             </div>
@@ -5744,15 +5741,15 @@ function renderComparaSpedPage() {
             <div class="compare-card-header">
               <div>
                 <h3 class="card-title">Fluxo simples</h3>
-                <p class="card-subtitle">A ideia e manter a operacao rapida e clara para o usuario.</p>
+                <p class="card-subtitle">A ideia Ã© manter a operaÃ§Ã£o rÃ¡pida e clara para o usuÃ¡rio.</p>
               </div>
               ${statusBadge('3 etapas', 'info')}
             </div>
 
             <div class="compare-step-list">
-              ${renderCompareStep(1, 'Selecione a empresa', 'Use o cadastro ja sincronizado com a Dominio para definir a base da comparacao.')}
-              ${renderCompareStep(2, 'Envie o SPED', 'Carregue o TXT da competencia desejada e deixe o sistema processar as linhas do arquivo.')}
-              ${renderCompareStep(3, 'Baixe o resultado', 'Receba a planilha ou o PDF pronto para auditoria.')}
+              ${renderCompareStep(1, 'Selecione a empresa', 'Use o cadastro jÃ¡ sincronizado com a DomÃ­nio para definir a base da comparaÃ§Ã£o.')}
+              ${renderCompareStep(2, 'Envie o SPED', 'Carregue o TXT da competÃªncia desejada e deixe o sistema processar as linhas do arquivo.')}
+              ${renderCompareStep(3, 'Baixe o resultado', 'Receba a planilha ou o PDF com faltantes e divergÃªncias prontas para auditoria.')}
             </div>
           </article>
         </div>
