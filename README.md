@@ -127,8 +127,8 @@ Veja `.env.example`.
 - `NFE_SYNC_AUTO_RUN_INTERVAL_MS`: intervalo entre ciclos automaticos de NF-e (padrao `300000`).
 - `NFE_SYNC_AUTO_RUN_STARTUP_DELAY_MS`: atraso inicial apos boot para primeiro ciclo de NF-e (padrao `15000`).
 - `NFE_SYNC_NIGHTLY_SWEEP_ENABLED`: habilita busca noturna automatica de NF-e (padrao `true`).
-- `NFE_SYNC_NIGHTLY_SWEEP_SLOTS`: lista de horarios noturnos separados por virgula para NF-e.
-- `NFE_SYNC_NIGHTLY_SWEEP_HOUR` e `NFE_SYNC_NIGHTLY_SWEEP_MINUTE`: horario legado de NF-e quando nao houver slots configurados.
+- `NFE_SYNC_NIGHTLY_SWEEP_SLOTS`: lista de horarios noturnos separados por virgula para NF-e. O exemplo usa `23:00`, janela exclusiva entre a NFS-e incremental das `22:00` e os eventos das `00:00`.
+- `NFE_SYNC_NIGHTLY_SWEEP_HOUR` e `NFE_SYNC_NIGHTLY_SWEEP_MINUTE`: horario legado de NF-e quando nao houver slots configurados (padrao `23:00`).
 - `NFE_SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES`: offset de fuso do agendamento noturno de NF-e (padrao `-180`, UTC-3).
 - `NFE_SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS`: intervalo de verificacao do agendamento noturno de NF-e (padrao `60000`).
 - `ENABLE_SWAGGER`: habilita docs em `/api/docs` (`false` recomendado em producao).
@@ -141,9 +141,12 @@ Veja `.env.example`.
 - `SYNC_EVENTS_MAX_DOCUMENT_AGE_DAYS`: idade maxima, em dias, de documentos elegiveis para consulta automatica/noturna de eventos (padrao `90`). Documentos mais antigos continuam disponiveis para consulta manual.
 - `SYNC_NIGHTLY_EVENTS_ENABLED`: habilita a consulta noturna de eventos para NF-e e CT-e armazenados (padrao `true`).
 - `SYNC_NIGHTLY_EVENTS_PER_ESTABLISHMENT_LIMIT`: quantidade maxima de NF-e ou CT-e por estabelecimento e tipo em cada horario noturno (padrao `25`).
-- `SYNC_NIGHTLY_EVENTS_CANDIDATE_WINDOW`: quantidade maxima de documentos considerados pela busca noturna de eventos antes da distribuicao por estabelecimento (padrao `250`).
-- `SYNC_EVENTS_AUTO_RUN_NO_EVENT_COOLDOWN_MS`: espera antes de tentar novamente uma NFS-e que ainda nao retornou eventos (padrao `86400000` = 24h).
-- `SYNC_EVENTS_AUTO_RUN_WITH_EVENT_COOLDOWN_MS`: espera antes de reconsultar automaticamente uma NFS-e que ja possui eventos, para capturar mudancas posteriores como cancelamento (padrao `43200000` = 12h).
+- `SYNC_NIGHTLY_EVENTS_CANDIDATE_WINDOW`: quantidade maxima de NF-e/CT-e elegiveis para consulta em cada busca noturna, antes da distribuicao por estabelecimento (padrao `250`). O sistema le uma janela interna maior para encontrar documentos que ainda nao estejam em cooldown.
+- `SYNC_NIGHTLY_PAST_NSU_RECOVERY_ENABLED`: habilita a recuperacao incremental noturna de NSUs passados de NFS-e (padrao `true`).
+- `SYNC_NIGHTLY_PAST_NSU_RECOVERY_CONTROLS_PER_RUN`: quantidade maxima de controles NFS-e atendidos por rodada de recuperacao (padrao `10`).
+- `SYNC_NIGHTLY_PAST_NSU_RECOVERY_NSUS_PER_CONTROL`: quantidade maxima de NSUs passados consultados por controle em cada rodada (padrao `5`). O cursor de cada controle e persistido para a proxima rodada continuar do ponto seguinte.
+- `SYNC_EVENTS_AUTO_RUN_NO_EVENT_COOLDOWN_MS`: espera antes de tentar novamente um documento que ainda nao retornou eventos (padrao `86400000` = 24h).
+- `SYNC_EVENTS_AUTO_RUN_WITH_EVENT_COOLDOWN_MS`: espera antes de reconsultar automaticamente um documento que ja possui eventos, para capturar mudancas posteriores como cancelamento (padrao `43200000` = 12h).
 - `SYNC_EVENTS_AUTO_RUN_FAILURE_COOLDOWN_MS`: espera apos falha de API na rotina automatica de eventos (padrao `1800000` = 30min).
 - `SYNC_EVENTS_AUTO_RUN_CERTIFICATE_COOLDOWN_MS`: espera apos falha de certificado na rotina automatica de eventos (padrao `21600000` = 6h).
 - `SYNC_API_RETRY_DELAY_MS`: espera antes de tentar novamente quando ocorrer erro temporario de API (ex.: HTTP 429) (padrao `120000`).
@@ -156,8 +159,8 @@ Veja `.env.example`.
 - `SYNC_ADN_RATE_LIMIT_COOLDOWN_MS`: cooldown global apos `HTTP 429` (padrao `300000`).
 - `SYNC_NIGHTLY_SWEEP_ENABLED`: habilita busca noturna automatica para todos os clientes cadastrados (padrao `true`).
 - `SYNC_NIGHTLY_SWEEP_SLOTS`: lista de horarios noturnos separados por virgula (ex.: `18:00,20:00,22:00,00:00,02:00,04:00,06:00`). Pode ser sobrescrita pelo painel.
-- `SYNC_NIGHTLY_SWEEP_HOUR`: hora da execucao noturna legada (0-23, padrao `2`) quando nao houver slots configurados.
-- `SYNC_NIGHTLY_SWEEP_MINUTE`: minuto da execucao noturna legado (0-59, padrao `0`) quando nao houver slots configurados.
+- `SYNC_NIGHTLY_SWEEP_HOUR`: hora da execucao noturna legada (0-23, padrao `2`) quando definida explicitamente sem `SYNC_NIGHTLY_SWEEP_SLOTS`.
+- `SYNC_NIGHTLY_SWEEP_MINUTE`: minuto da execucao noturna legado (0-59, padrao `0`) quando definido explicitamente sem `SYNC_NIGHTLY_SWEEP_SLOTS`.
 - `SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES`: offset de fuso em minutos para agendamento noturno (padrao `-180`, UTC-3).
 - `SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS`: intervalo de verificacao do agendamento noturno (padrao `60000`).
 - `CERT_MASTER_KEY`: obrigatoria e deve ser configurada com segredo proprio (a API recusa iniciar com valor placeholder `CHANGE_ME...`).
@@ -244,7 +247,7 @@ Valores aceitos:
 - Nesses casos, a proxima tentativa e agendada com base em `SYNC_API_RETRY_DELAY_MS`.
 - Quando o ADN responde em lote (`lote=true`), todos os XMLs do retorno sao salvos e o controle avanca ate o maior NSU do lote.
 - No modo diario, por padrao o ciclo processa ate `SYNC_DAILY_MAX_NSU_PER_RUN` NSUs por lote. Se todos os NSUs consultados tiverem documento, agenda nova execucao curta (`SYNC_DAILY_SUCCESS_COOLDOWN_MS`) antes de continuar.
-- A busca noturna (`SYNC_NIGHTLY_SWEEP_*`) ativa modo diario para todos os clientes cadastrados e dispara varredura incremental a partir do ultimo NSU salvo.
+- A busca noturna distribui as cargas: NFS-e incremental em `18:00`, `22:00`, `02:00` e `06:00`; recuperacao limitada de NSUs passados em `20:00` e `04:00`; NF-e por NSU em `23:00`; e eventos de NF-e/CT-e em `00:00`. Cada tarefa so roda quando o respectivo horario estiver habilitado no painel.
 - O painel permite ligar/desligar a rotina e marcar individualmente os horarios `18:00`, `20:00`, `22:00`, `00:00`, `02:00`, `04:00` e `06:00`.
 
 ## Sincronizacao de NF-e

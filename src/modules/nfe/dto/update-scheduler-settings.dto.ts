@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { ArrayUnique, IsArray, IsBoolean, IsIn, IsOptional } from 'class-validator';
 
-const NFE_NIGHTLY_SWEEP_ALLOWED_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'] as const;
+const NFE_NIGHTLY_SWEEP_ALLOWED_SLOTS = ['18:00', '20:00', '22:00', '23:00', '00:00', '02:00', '04:00', '06:00'] as const;
 
 export class UpdateNfeSchedulerSettingsDto {
   @ApiPropertyOptional({
@@ -15,7 +15,7 @@ export class UpdateNfeSchedulerSettingsDto {
   @ApiPropertyOptional({
     description: 'Horarios ativos da rotina noturna global de NF-e.',
     type: [String],
-    example: ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00']
+    example: ['23:00']
   })
   @IsOptional()
   @IsArray()

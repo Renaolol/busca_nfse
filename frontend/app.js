@@ -19953,6 +19953,17 @@ function getNightlyScheduleInfo() {
   const running = Boolean(nightly.running);
   const activeSlots = Array.isArray(nightly.activeSlots) ? nightly.activeSlots : [];
   const activeSlotsText = activeSlots.length ? activeSlots.join(', ') : 'Nenhum horario selecionado';
+  const taskSchedule = nightly.taskSchedule || {};
+  const nfseSlots = Array.isArray(taskSchedule.nfseIncrementalSlots)
+    ? taskSchedule.nfseIncrementalSlots.join(', ')
+    : '18:00, 22:00, 02:00, 06:00';
+  const recoverySlots = Array.isArray(taskSchedule.pastNsuRecoverySlots)
+    ? taskSchedule.pastNsuRecoverySlots.join(', ')
+    : '20:00, 04:00';
+  const eventSlots = Array.isArray(taskSchedule.nfeCteEventSlots)
+    ? taskSchedule.nfeCteEventSlots.join(', ')
+    : '00:00';
+  const taskScheduleText = `NFS-e: ${nfseSlots}; lacunas NSU: ${recoverySlots}; eventos NF-e/CT-e: ${eventSlots}.`;
   const timezone = formatTimezoneOffset(nightly.timezoneOffsetMinutes);
   const nextRunText = nightly.nextRunAt ? formatDateTime(nightly.nextRunAt) : '-';
 
@@ -19963,7 +19974,7 @@ function getNightlyScheduleInfo() {
       tone: 'info',
       badgeLabel: 'Executando agora',
       shortLabel: activeSlotsText,
-      description: `Rotina noturna em execucao. Slots ativos: ${activeSlotsText} (${timezone}).`,
+      description: `Rotina noturna em execucao. ${taskScheduleText} (${timezone}).`,
       nextRunText
     };
   }
@@ -19975,7 +19986,7 @@ function getNightlyScheduleInfo() {
       tone: 'success',
       badgeLabel: 'Ativa',
       shortLabel: `${activeSlotsText} ${timezone}`,
-      description: `Agendada para executar diariamente nos horarios ${activeSlotsText} (${timezone}).`,
+      description: `${taskScheduleText} Slots habilitados: ${activeSlotsText} (${timezone}).`,
       nextRunText
     };
   }

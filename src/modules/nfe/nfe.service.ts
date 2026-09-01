@@ -48,6 +48,7 @@ import { NfeXmlParserService, ParsedDfeEvento, ParsedNfe } from './nfe-xml-parse
 type NfeNightlySweepConfigFile = {
   enabled?: boolean;
   activeSlots?: string[];
+  scheduleVersion?: number;
 };
 
 type NfeMonofasicoAliquotasConfigFile = {
@@ -134,7 +135,7 @@ type NfeDownloadByKeyPreviewResult = {
 
 @Injectable()
 export class NfeService implements OnModuleInit, OnModuleDestroy {
-  private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
+  private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '23:00', '00:00', '02:00', '04:00', '06:00'];
   private static readonly NIGHTLY_SWEEP_CONFIG_STORAGE_KEY = 'settings/nfe-nightly-sweep.json';
   private static readonly DOMINIO_CHAVE_DATA_EMISSAO_INICIO = '2026-01-02';
   private static readonly MONOFASICO_ALIQUOTAS_STORAGE_KEY = 'settings/nfe-monofasico-aliquotas.json';
@@ -154,7 +155,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   private readonly autoSyncStartupDelayMs = this.parsePositiveNumberEnv('NFE_SYNC_AUTO_RUN_STARTUP_DELAY_MS', 15000);
   private nightlySweepEnabled = process.env.NFE_SYNC_NIGHTLY_SWEEP_ENABLED !== 'false';
   private readonly nightlySweepCheckIntervalMs = this.parsePositiveNumberEnv('NFE_SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS', 60000);
-  private readonly nightlySweepHour = this.parseBoundedIntegerEnv('NFE_SYNC_NIGHTLY_SWEEP_HOUR', 2, 0, 23);
+  private readonly nightlySweepHour = this.parseBoundedIntegerEnv('NFE_SYNC_NIGHTLY_SWEEP_HOUR', 23, 0, 23);
   private readonly nightlySweepMinute = this.parseBoundedIntegerEnv('NFE_SYNC_NIGHTLY_SWEEP_MINUTE', 0, 0, 59);
   private nightlySweepActiveSlots = this.resolveInitialNightlySweepSlots();
   private readonly nightlySweepTimezoneOffsetMinutes = this.parseBoundedIntegerEnv(
@@ -3998,7 +3999,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       }
 
       if (Array.isArray(parsed.activeSlots)) {
-        this.nightlySweepActiveSlots = this.normalizeNightlySweepSlots(parsed.activeSlots);
+        this.nightlySweepActiveSlots =
+          parsed.scheduleVersion === 2
+            ? this.normalizeNightlySweepSlots(parsed.activeSlots)
+            : ['23:00'];
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
@@ -4015,7 +4019,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       JSON.stringify(
         {
           enabled: this.nightlySweepEnabled,
-          activeSlots: this.nightlySweepActiveSlots
+          activeSlots: this.nightlySweepActiveSlots,
+          scheduleVersion: 2
         } satisfies NfeNightlySweepConfigFile,
         null,
         2

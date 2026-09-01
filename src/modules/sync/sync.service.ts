@@ -183,18 +183,45 @@ type AutoEventSyncStateEntry = {
 
 type AutoEventSyncStateFile = {
   documents?: Record<string, AutoEventSyncStateEntry>;
+  nfeCteDocuments?: Record<string, AutoEventSyncStateEntry>;
+};
+
+type NightlyPastNsuRecoveryStateEntry = {
+  nextNsu?: string;
+  lastAttemptAt?: string;
+  lastStatus?: 'concluido' | 'falha';
+};
+
+type NightlyPastNsuRecoveryStateFile = {
+  controls?: Record<string, NightlyPastNsuRecoveryStateEntry>;
+};
+
+type NfeCteEventSyncDetail = {
+  documentoId: string;
+  status: string;
+  eventosEncontrados?: number;
+  mensagem?: string;
+};
+
+type NfeCteEventSyncSummary = {
+  detalhes: NfeCteEventSyncDetail[];
 };
 
 @Injectable()
 export class SyncService implements OnModuleInit, OnModuleDestroy {
   private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'];
+  private static readonly NIGHTLY_NFSE_INCREMENTAL_SLOTS = ['18:00', '22:00', '02:00', '06:00'];
+  private static readonly NIGHTLY_NFE_CTE_EVENT_SLOTS = ['00:00'];
+  private static readonly NIGHTLY_PAST_NSU_RECOVERY_SLOTS = ['20:00', '04:00'];
   private static readonly NIGHTLY_SWEEP_CONFIG_STORAGE_KEY = 'settings/nightly-sweep.json';
   private static readonly AUTO_EVENT_SYNC_STATE_STORAGE_KEY = 'settings/nfse-event-auto-sync-state.json';
+  private static readonly NIGHTLY_PAST_NSU_RECOVERY_STATE_STORAGE_KEY = 'settings/nightly-past-nsu-recovery-state.json';
   private readonly logger = new Logger(SyncService.name);
   private autoSyncTimer: NodeJS.Timeout | null = null;
   private nightlySweepTimer: NodeJS.Timeout | null = null;
   private autoSyncRunning = false;
   private nightlySweepRunning = false;
+  private nightlyPastNsuRecoveryRunning = false;
   private lastNightlySweepExecutionKey: string | null = null;
   private readonly executedNightlySweepKeys = new Set<string>();
   private readonly autoSyncEnabled = process.env.SYNC_AUTO_RUN_ENABLED !== 'false';
@@ -215,6 +242,15 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   private readonly nightlyEventSyncCandidateWindow = this.parsePositiveNumberEnv(
     'SYNC_NIGHTLY_EVENTS_CANDIDATE_WINDOW',
     250
+  );
+  private readonly nightlyPastNsuRecoveryEnabled = process.env.SYNC_NIGHTLY_PAST_NSU_RECOVERY_ENABLED !== 'false';
+  private readonly nightlyPastNsuRecoveryControlsPerRun = this.parsePositiveNumberEnv(
+    'SYNC_NIGHTLY_PAST_NSU_RECOVERY_CONTROLS_PER_RUN',
+    10
+  );
+  private readonly nightlyPastNsuRecoveryNsusPerControl = this.parsePositiveNumberEnv(
+    'SYNC_NIGHTLY_PAST_NSU_RECOVERY_NSUS_PER_CONTROL',
+    5
   );
   private readonly autoEventSyncNoEventCooldownMs = this.parsePositiveNumberEnv(
     'SYNC_EVENTS_AUTO_RUN_NO_EVENT_COOLDOWN_MS',
@@ -383,6 +419,12 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       perEstablishmentLimit: number;
       candidateWindow: number;
     };
+    nightlyPastNsuRecovery: {
+      enabled: boolean;
+      running: boolean;
+      controlsPerRun: number;
+      nsusPerControl: number;
+    };
     nightlySweep: {
       enabled: boolean;
       running: boolean;
@@ -394,6 +436,11 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       checkIntervalMs: number;
       lastRunExecutionKey: string | null;
       nextRunAt: string | null;
+      taskSchedule: {
+        nfseIncrementalSlots: string[];
+        nfeCteEventSlots: string[];
+        pastNsuRecoverySlots: string[];
+      };
     };
     dailySync: {
       intervalMs: number;
@@ -430,6 +477,12 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         perEstablishmentLimit: this.nightlyEventSyncPerEstablishmentLimit,
         candidateWindow: this.nightlyEventSyncCandidateWindow
       },
+      nightlyPastNsuRecovery: {
+        enabled: this.nightlyPastNsuRecoveryEnabled,
+        running: this.nightlyPastNsuRecoveryRunning,
+        controlsPerRun: this.nightlyPastNsuRecoveryControlsPerRun,
+        nsusPerControl: this.nightlyPastNsuRecoveryNsusPerControl
+      },
       nightlySweep: {
         enabled: this.nightlySweepEnabled,
         running: this.nightlySweepRunning,
@@ -440,7 +493,12 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         timezoneOffsetMinutes: this.nightlySweepTimezoneOffsetMinutes,
         checkIntervalMs: this.nightlySweepCheckIntervalMs,
         lastRunExecutionKey: this.lastNightlySweepExecutionKey,
-        nextRunAt: this.nightlySweepEnabled ? this.resolveNextNightlySweepAt(new Date())?.toISOString() ?? null : null
+        nextRunAt: this.nightlySweepEnabled ? this.resolveNextNightlySweepAt(new Date())?.toISOString() ?? null : null,
+        taskSchedule: {
+          nfseIncrementalSlots: [...SyncService.NIGHTLY_NFSE_INCREMENTAL_SLOTS],
+          nfeCteEventSlots: [...SyncService.NIGHTLY_NFE_CTE_EVENT_SLOTS],
+          pastNsuRecoverySlots: [...SyncService.NIGHTLY_PAST_NSU_RECOVERY_SLOTS]
+        }
       },
       dailySync: {
         intervalMs: this.dailySyncIntervalMs,
@@ -1530,7 +1588,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     this.nightlySweepRunning = true;
 
     try {
-      await this.runNightlySweepForAllClients();
+      await this.runNightlySweepForAllClients(currentSlot);
     } catch (error) {
       this.logger.error(`Falha na busca noturna automatica: ${this.toErrorMessage(error)}`);
     } finally {
@@ -1538,7 +1596,24 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async runNightlySweepForAllClients(): Promise<void> {
+  private async runNightlySweepForAllClients(currentSlot: string): Promise<void> {
+    if (SyncService.NIGHTLY_NFSE_INCREMENTAL_SLOTS.includes(currentSlot)) {
+      await this.runNightlyNfseIncrementalSyncForAllClients();
+    }
+
+    if (this.nightlyEventSyncEnabled && SyncService.NIGHTLY_NFE_CTE_EVENT_SLOTS.includes(currentSlot)) {
+      await this.runNightlyEventSyncCycle();
+    }
+
+    if (
+      this.nightlyPastNsuRecoveryEnabled &&
+      SyncService.NIGHTLY_PAST_NSU_RECOVERY_SLOTS.includes(currentSlot)
+    ) {
+      await this.runNightlyPastNsuRecoveryCycle();
+    }
+  }
+
+  private async runNightlyNfseIncrementalSyncForAllClients(): Promise<void> {
     const clients = await this.prisma.cliente.findMany({
       select: { id: true }
     });
@@ -1569,15 +1644,83 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     if (totalControlesAtivados > 0) {
       await this.runAutomaticSyncCycle();
     }
+  }
 
-    if (this.nightlyEventSyncEnabled) {
-      await this.runNightlyEventSyncCycle();
+  private async runNightlyPastNsuRecoveryCycle(): Promise<void> {
+    if (this.nightlyPastNsuRecoveryRunning) {
+      return;
+    }
+
+    this.nightlyPastNsuRecoveryRunning = true;
+    try {
+      await this.waitForAutomaticSyncToFinish();
+      const state = await this.loadNightlyPastNsuRecoveryState();
+      const controlState = state.controls ?? (state.controls = {});
+      const controls = await this.prisma.nfseSyncControle.findMany({
+        where: {
+          status: SyncStatus.ativo,
+          ultimoNsuConsultado: { gte: 1n }
+        },
+        orderBy: [{ updatedAt: 'asc' }, { createdAt: 'asc' }]
+      });
+      const eligibleControls = controls
+        .filter((control) => this.resolveNightlyPastNsuNextNsu(control, controlState[control.id]) <= control.ultimoNsuConsultado)
+        .sort((left, right) => {
+          const leftAttempt = controlState[left.id]?.lastAttemptAt ?? '';
+          const rightAttempt = controlState[right.id]?.lastAttemptAt ?? '';
+          return leftAttempt.localeCompare(rightAttempt);
+        })
+        .slice(0, this.nightlyPastNsuRecoveryControlsPerRun);
+
+      if (eligibleControls.length === 0) {
+        this.logger.log('Recuperacao noturna de NSUs: nenhum controle com NSU pendente.');
+        return;
+      }
+
+      const plan: PreparedPastNsuRecoveryPlan = {
+        mode: 'full',
+        controls: eligibleControls.map((control) => {
+          const nsuInicial = this.resolveNightlyPastNsuNextNsu(control, controlState[control.id]);
+          const nsuFinal = this.minBigInt(
+            control.ultimoNsuConsultado,
+            nsuInicial + BigInt(this.nightlyPastNsuRecoveryNsusPerControl - 1)
+          );
+          return {
+            control,
+            gaps: [],
+            ranges: [{ nsuInicial, nsuFinal, lacunaLabels: [] }]
+          };
+        }),
+        currentMessage: 'Preparando recuperacao noturna e incremental de NSUs passados...'
+      };
+      const result = await this.reprocessPastNsusInternal({}, undefined, plan);
+      const completedAt = new Date().toISOString();
+
+      for (const detail of result.detalhes) {
+        const existing = controlState[detail.controleId] ?? {};
+        const succeeded = detail.falhas === 0 && !result.interrompidoPorRateLimit;
+        controlState[detail.controleId] = {
+          ...existing,
+          ...(succeeded ? { nextNsu: (BigInt(detail.nsuFinal) + 1n).toString() } : {}),
+          lastAttemptAt: completedAt,
+          lastStatus: succeeded ? 'concluido' : 'falha'
+        };
+      }
+
+      await this.saveNightlyPastNsuRecoveryState(state);
+      this.logger.log(
+        `Recuperacao noturna de NSUs: controles=${result.controlesProcessados}, nsus_consultados=${result.nsusConsultados}, documentos_salvos=${result.documentosSalvos}, falhas=${result.falhas}`
+      );
+    } catch (error) {
+      this.logger.error(`Falha na recuperacao noturna de NSUs: ${this.toErrorMessage(error)}`);
+    } finally {
+      this.nightlyPastNsuRecoveryRunning = false;
     }
   }
 
   private async runNightlyEventSyncCycle(): Promise<void> {
     const cutoff = this.resolveAutomaticEventSyncDocumentCutoff(new Date());
-    const documents = await this.prisma.nfeDocumento.findMany({
+    const candidateDocuments = await this.prisma.nfeDocumento.findMany({
       where: {
         OR: [{ dataEmissao: { gte: cutoff } }, { dataEmissao: null, createdAt: { gte: cutoff } }]
       },
@@ -1591,8 +1734,14 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         createdAt: true
       },
       orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
-      take: this.nightlyEventSyncCandidateWindow
+      take: this.nightlyEventSyncCandidateWindow * 4
     });
+    const state = await this.loadAutoEventSyncState();
+    const documentsState = state.nfeCteDocuments ?? (state.nfeCteDocuments = {});
+    const now = new Date();
+    const documents = candidateDocuments
+      .filter((document) => this.isNfeCteEventSyncAttemptDue(document.id, state, now))
+      .slice(0, this.nightlyEventSyncCandidateWindow);
 
     const groups = new Map<
       string,
@@ -1617,35 +1766,43 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     let groupsProcessed = 0;
     let failures = 0;
+    let stateChanged = false;
 
     for (const group of groups.values()) {
       try {
-        if (group.type === 'cte') {
-          await this.cteService.sincronizarEventos({
-            clienteId: group.clienteId,
-            documentoIds: group.documentoIds,
-            somenteSemEventos: false,
-            limit: group.documentoIds.length
-          });
-        } else {
-          await this.nfeService.sincronizarEventos({
-            clienteId: group.clienteId,
-            documentoIds: group.documentoIds,
-            somenteSemEventos: false,
-            limit: group.documentoIds.length
-          });
-        }
+        const summary: NfeCteEventSyncSummary =
+          group.type === 'cte'
+            ? await this.cteService.sincronizarEventos({
+                clienteId: group.clienteId,
+                documentoIds: group.documentoIds,
+                somenteSemEventos: false,
+                limit: group.documentoIds.length
+              })
+            : await this.nfeService.sincronizarEventos({
+                clienteId: group.clienteId,
+                documentoIds: group.documentoIds,
+                somenteSemEventos: false,
+                limit: group.documentoIds.length
+              });
+        this.registerNfeCteEventSyncDetails(documentsState, summary.detalhes, now);
+        stateChanged = true;
         groupsProcessed += 1;
       } catch (error) {
         failures += 1;
+        this.registerNfeCteEventSyncFailure(documentsState, group.documentoIds, now, this.toErrorMessage(error));
+        stateChanged = true;
         this.logger.warn(
           `Busca noturna de eventos: falha ao consultar ${group.type.toUpperCase()} do estabelecimento ${group.estabelecimentoId}: ${this.toErrorMessage(error)}`
         );
       }
     }
 
+    if (stateChanged) {
+      await this.saveAutoEventSyncState(state);
+    }
+
     this.logger.log(
-      `Busca noturna de eventos: documentos_candidatos=${documents.length}, grupos_processados=${groupsProcessed}, falhas=${failures}, limite_idade_dias=${this.autoEventSyncMaxDocumentAgeDays}`
+      `Busca noturna de eventos: documentos_candidatos=${candidateDocuments.length}, documentos_elegiveis=${documents.length}, grupos_processados=${groupsProcessed}, falhas=${failures}, limite_idade_dias=${this.autoEventSyncMaxDocumentAgeDays}`
     );
   }
 
@@ -1656,6 +1813,72 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         String(document.schemaDoc ?? '').startsWith(prefix)
       )
     );
+  }
+
+  private isNfeCteEventSyncAttemptDue(docId: string, state: AutoEventSyncStateFile, now: Date): boolean {
+    const nextAttemptAt = state.nfeCteDocuments?.[docId]?.nextAttemptAt;
+    if (!nextAttemptAt) {
+      return true;
+    }
+
+    const timestamp = Date.parse(nextAttemptAt);
+    return !Number.isFinite(timestamp) || timestamp <= now.getTime();
+  }
+
+  private registerNfeCteEventSyncDetails(
+    documentsState: Record<string, AutoEventSyncStateEntry>,
+    details: NfeCteEventSyncDetail[],
+    now: Date
+  ): void {
+    for (const detail of details) {
+      if (!detail.documentoId) {
+        continue;
+      }
+      documentsState[detail.documentoId] = {
+        nextAttemptAt: this.resolveNfeCteEventNextAttemptAt(detail, now).toISOString(),
+        lastAttemptAt: now.toISOString(),
+        lastStatus: detail.status
+      };
+
+      if (this.isRateLimitMessage(detail.mensagem)) {
+        this.activateRateLimitCooldown();
+      }
+    }
+  }
+
+  private registerNfeCteEventSyncFailure(
+    documentsState: Record<string, AutoEventSyncStateEntry>,
+    documentIds: string[],
+    now: Date,
+    message: string
+  ): void {
+    for (const documentId of documentIds) {
+      documentsState[documentId] = {
+        nextAttemptAt: new Date(now.getTime() + this.autoEventSyncFailureCooldownMs).toISOString(),
+        lastAttemptAt: now.toISOString(),
+        lastStatus: 'falha_api'
+      };
+    }
+
+    if (this.isRateLimitMessage(message)) {
+      this.activateRateLimitCooldown();
+    }
+  }
+
+  private resolveNfeCteEventNextAttemptAt(detail: NfeCteEventSyncDetail, now: Date): Date {
+    if (detail.status === 'falha_certificado') {
+      return new Date(now.getTime() + this.autoEventSyncCertificateCooldownMs);
+    }
+
+    if (detail.status === 'falha_api' || detail.status === 'nao_localizado_endpoint_eventos') {
+      return new Date(now.getTime() + this.autoEventSyncFailureCooldownMs);
+    }
+
+    if (detail.status === 'sincronizado' || detail.status === 'cancelado_sem_evento' || Number(detail.eventosEncontrados || 0) > 0) {
+      return new Date(now.getTime() + this.autoEventSyncWithEventCooldownMs);
+    }
+
+    return new Date(now.getTime() + this.autoEventSyncNoEventCooldownMs);
   }
 
   private buildActivationMessage(modoSync: SyncMode, origem: 'manual' | 'noturna'): string {
@@ -1781,7 +2004,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async runAutomaticSyncCycle(): Promise<void> {
-    if (this.autoSyncRunning) {
+    if (this.autoSyncRunning || this.nightlyPastNsuRecoveryRunning) {
       return;
     }
 
@@ -1989,16 +2212,17 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       const raw = await this.storage.getObject(SyncService.AUTO_EVENT_SYNC_STATE_STORAGE_KEY);
       const parsed = JSON.parse(raw.toString('utf8')) as AutoEventSyncStateFile;
       return {
-        documents: parsed.documents ?? {}
+        documents: parsed.documents ?? {},
+        nfeCteDocuments: parsed.nfeCteDocuments ?? {}
       };
     } catch (error) {
       const message = this.toErrorMessage(error);
       if (message.includes('ENOENT')) {
-        return { documents: {} };
+        return { documents: {}, nfeCteDocuments: {} };
       }
 
       this.logger.warn(`Falha ao carregar estado da rotina automatica de eventos: ${message}`);
-      return { documents: {} };
+      return { documents: {}, nfeCteDocuments: {} };
     }
   }
 
@@ -2007,12 +2231,56 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       SyncService.AUTO_EVENT_SYNC_STATE_STORAGE_KEY,
       JSON.stringify(
         {
-          documents: state.documents ?? {}
+          documents: state.documents ?? {},
+          nfeCteDocuments: state.nfeCteDocuments ?? {}
         } satisfies AutoEventSyncStateFile,
         null,
         2
       )
     );
+  }
+
+  private async loadNightlyPastNsuRecoveryState(): Promise<NightlyPastNsuRecoveryStateFile> {
+    try {
+      const raw = await this.storage.getObject(SyncService.NIGHTLY_PAST_NSU_RECOVERY_STATE_STORAGE_KEY);
+      const parsed = JSON.parse(raw.toString('utf8')) as NightlyPastNsuRecoveryStateFile;
+      return { controls: parsed.controls ?? {} };
+    } catch (error) {
+      const message = this.toErrorMessage(error);
+      if (!/not found|no such file|enoent/i.test(message)) {
+        this.logger.warn(`Falha ao carregar estado da recuperacao noturna de NSUs: ${message}`);
+      }
+      return { controls: {} };
+    }
+  }
+
+  private async saveNightlyPastNsuRecoveryState(state: NightlyPastNsuRecoveryStateFile): Promise<void> {
+    await this.storage.putObject(
+      SyncService.NIGHTLY_PAST_NSU_RECOVERY_STATE_STORAGE_KEY,
+      JSON.stringify({ controls: state.controls ?? {} } satisfies NightlyPastNsuRecoveryStateFile, null, 2)
+    );
+  }
+
+  private resolveNightlyPastNsuNextNsu(
+    control: Pick<NfseSyncControle, 'ultimoNsuConsultado'>,
+    state?: NightlyPastNsuRecoveryStateEntry
+  ): bigint {
+    const saved = String(state?.nextNsu ?? '').trim();
+    if (/^\d+$/.test(saved)) {
+      const nsu = BigInt(saved);
+      return nsu >= 1n ? nsu : 1n;
+    }
+    return control.ultimoNsuConsultado >= 1n ? 1n : 0n;
+  }
+
+  private async waitForAutomaticSyncToFinish(): Promise<void> {
+    const deadline = Date.now() + 5 * 60 * 1000;
+    while (this.autoSyncRunning && Date.now() < deadline) {
+      await this.sleep(250);
+    }
+    if (this.autoSyncRunning) {
+      throw new Error('Ciclo automatico de NFS-e excedeu o tempo de espera para a recuperacao noturna de NSUs');
+    }
   }
 
   private isRateLimitMessage(message?: string | null): boolean {
@@ -3662,7 +3930,11 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       return this.normalizeNightlySweepSlots(envSlots);
     }
 
-    return this.normalizeNightlySweepSlots([this.formatTime(this.nightlySweepHour, this.nightlySweepMinute)]);
+    if (process.env.SYNC_NIGHTLY_SWEEP_HOUR || process.env.SYNC_NIGHTLY_SWEEP_MINUTE) {
+      return this.normalizeNightlySweepSlots([this.formatTime(this.nightlySweepHour, this.nightlySweepMinute)]);
+    }
+
+    return [...SyncService.NIGHTLY_SWEEP_AVAILABLE_SLOTS];
   }
 
   private normalizeNightlySweepSlots(slots: string[]): string[] {

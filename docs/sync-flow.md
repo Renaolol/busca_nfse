@@ -22,7 +22,9 @@
 - A sincronizacao manual de eventos de NFS-e (`POST /nfse/eventos/sincronizar`) opera sobre notas ja salvas, consulta por chave de acesso e nao altera `ultimo_nsu_consultado`.
 - A rotina automatica de eventos reutiliza a mesma consulta por chave, grava um cooldown por documento em storage local e tambem nao altera `ultimo_nsu_consultado`.
 - Para evitar consultas recorrentes sem utilidade operacional, a rotina automatica/noturna considera somente documentos com ate `SYNC_EVENTS_MAX_DOCUMENT_AGE_DAYS` dias (padrao: 90). A data de emissao e usada como referencia; quando indisponivel, usa-se a data de inclusao. A consulta manual nao possui esse corte.
-- Em cada horario da busca noturna global, NF-e e CT-e armazenados sao agrupados por estabelecimento e consultados por chave. A rotina e idempotente: os eventos retornados continuam deduplicados pelos mecanismos de persistencia existentes.
+- A grade noturna separa as cargas: NFS-e incremental em `18:00`, `22:00`, `02:00` e `06:00`; recuperacao incremental de NSUs passados em `20:00` e `04:00`; NF-e por NSU em `23:00`; e eventos de NF-e/CT-e em `00:00`.
+- Na janela de eventos, NF-e e CT-e armazenados sao agrupados por estabelecimento e consultados por chave. A rotina persiste a ultima tentativa por documento e nao o reconsulta antes do cooldown aplicavel: 24h sem evento, 12h com evento ou cancelamento, 30min em falha de API e 6h em falha de certificado. Os eventos retornados continuam deduplicados pelos mecanismos de persistencia existentes.
+- A recuperacao noturna de NSUs usa um cursor persistido por controle NFS-e. Em cada janela ela consulta somente a quantidade configurada de controles e NSUs, avanca o cursor apenas quando o lote termina sem falha e nunca altera `ultimo_nsu_consultado`. Assim, retoma na proxima janela sem revarrer os NSUs ja atendidos.
 - A busca manual em lote `POST /sync/eventos/sincronizar-empresas` permite consultar NF-e e CT-e de todas as empresas ou de empresas selecionadas. Ela percorre somente documentos com ate 90 dias e processa em lotes de 200 documentos para evitar sobrecarga do servidor.
 - Para acompanhamento visual, `POST /sync/eventos/sincronizar-empresas/execucao` inicia uma execucao em segundo plano; `GET /sync/eventos/sincronizar-empresas/execucao/:executionId` retorna o total elegivel e a quantidade ja consultada. A interface consulta esse status periodicamente ate a conclusao e entao exibe o detalhamento final.
 - O endpoint `PUT /sync/scheduler-settings` permite ativar/desativar a rotina noturna global e selecionar os horarios ativos entre `18:00`, `20:00`, `22:00`, `00:00`, `02:00`, `04:00` e `06:00`.
@@ -61,15 +63,11 @@ Os jobs podem ser disparados manualmente pelos scripts `npm run job:*` para oper
 
 - A busca noturna roda em background quando `SYNC_NIGHTLY_SWEEP_ENABLED=true`.
 - Os horarios podem ser controlados pela API/painel ou pela variavel `SYNC_NIGHTLY_SWEEP_SLOTS` (lista separada por virgula).
-- Na ausencia de slots configurados, o sistema usa o horario legado definido por:
+- Quando nenhum slot e configurado, a grade padrao usa todos os horarios disponiveis. Para usar somente o horario legado, defina explicitamente:
   - `SYNC_NIGHTLY_SWEEP_HOUR`
   - `SYNC_NIGHTLY_SWEEP_MINUTE`
 - O fuso segue controlado por:
   - `SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES`
-- A cada execucao noturna, o sistema:
-  - percorre todos os clientes cadastrados,
-  - ativa/reativa controles de sync para todos os estabelecimentos ativos em modo `somente_novas`,
-  - preserva o `ultimo_nsu_consultado` dos controles existentes,
-  - cria controles novos partindo do ultimo NSU encontrado localmente (ou `0` se nao houver historico).
+- Nas janelas de NFS-e incremental, o sistema percorre todos os clientes cadastrados, ativa/reativa controles para os estabelecimentos ativos em modo `somente_novas`, preserva o `ultimo_nsu_consultado` e cria controles novos partindo do ultimo NSU encontrado localmente (ou `0` se nao houver historico).
 - Depois da ativacao, dispara um ciclo imediato de sincronizacao para comecar a busca incremental sem esperar o proximo intervalo.
 - O fluxo evita execucao duplicada para a mesma combinacao de data local + horario configurado.

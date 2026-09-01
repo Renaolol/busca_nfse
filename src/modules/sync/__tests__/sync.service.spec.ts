@@ -1784,17 +1784,28 @@ describe('SyncService', () => {
       perEstablishmentLimit: 25,
       candidateWindow: 250
     });
+    expect(result.nightlyPastNsuRecovery).toEqual({
+      enabled: true,
+      running: false,
+      controlsPerRun: 10,
+      nsusPerControl: 5
+    });
     expect(result.nightlySweep).toEqual(
       expect.objectContaining({
         enabled: true,
         running: false,
         hour: expect.any(Number),
         minute: expect.any(Number),
-        activeSlots: ['02:00'],
+        activeSlots: ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'],
         availableSlots: ['18:00', '20:00', '22:00', '00:00', '02:00', '04:00', '06:00'],
         timezoneOffsetMinutes: expect.any(Number),
         checkIntervalMs: expect.any(Number),
-        nextRunAt: expect.any(String)
+        nextRunAt: expect.any(String),
+        taskSchedule: {
+          nfseIncrementalSlots: ['18:00', '22:00', '02:00', '06:00'],
+          nfeCteEventSlots: ['00:00'],
+          pastNsuRecoverySlots: ['20:00', '04:00']
+        }
       })
     );
   });
@@ -1988,6 +1999,118 @@ describe('SyncService', () => {
         eventosImportados: 1
       }
     });
+  });
+
+  it('nao reconsulta NF-e e CT-e na rotina noturna antes do cooldown do documento', async () => {
+    const futureAttempt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    storage.getObject.mockResolvedValue(
+      Buffer.from(
+        JSON.stringify({
+          documents: {},
+          nfeCteDocuments: {
+            'nfe-ja-consultada': { nextAttemptAt: futureAttempt, lastStatus: 'sem_eventos' }
+          }
+        })
+      )
+    );
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'nfe-ja-consultada',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        modelo: '55',
+        schemaDoc: 'procNFe_v4.00',
+        dataEmissao: new Date(),
+        createdAt: new Date()
+      },
+      {
+        id: 'nfe-nova',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        modelo: '55',
+        schemaDoc: 'procNFe_v4.00',
+        dataEmissao: new Date(),
+        createdAt: new Date()
+      }
+    ]);
+    nfeService.sincronizarEventos.mockResolvedValue({
+      detalhes: [
+        {
+          documentoId: 'nfe-nova',
+          status: 'sem_eventos',
+          eventosEncontrados: 0
+        }
+      ]
+    });
+
+    await (service as unknown as { runNightlyEventSyncCycle: () => Promise<void> }).runNightlyEventSyncCycle();
+
+    expect(nfeService.sincronizarEventos).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      documentoIds: ['nfe-nova'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+    expect(storage.putObject).toHaveBeenCalledWith(
+      'settings/nfse-event-auto-sync-state.json',
+      expect.stringContaining('"nfe-nova"')
+    );
+  });
+
+  it('recupera NSUs passados a noite em lotes incrementais e persiste o proximo cursor', async () => {
+    (service as unknown as { adnRequestIntervalMs: number }).adnRequestIntervalMs = 0;
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'controle-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        status: 'ativo',
+        ultimoNsuConsultado: 3n,
+        ultimoNsuComDocumento: 0n,
+        totalDocumentosBaixados: 0,
+        createdAt: new Date(),
+        updatedAt: new Date()
+      }
+    ]);
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      hasDocument: false,
+      statusCode: 404,
+      message: 'NSU sem documento'
+    });
+
+    await (
+      service as unknown as { runNightlyPastNsuRecoveryCycle: () => Promise<void> }
+    ).runNightlyPastNsuRecoveryCycle();
+
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(3);
+    expect(storage.putObject).toHaveBeenCalledWith(
+      'settings/nightly-past-nsu-recovery-state.json',
+      expect.stringContaining('"nextNsu": "4"')
+    );
+    expect(nfeService.sincronizarEventos).not.toHaveBeenCalled();
+    expect(cteService.sincronizarEventos).not.toHaveBeenCalled();
+  });
+
+  it('separa as tarefas da grade noturna pelos horarios definidos', async () => {
+    const scheduler = service as unknown as {
+      runNightlySweepForAllClients(slot: string): Promise<void>;
+      runNightlyNfseIncrementalSyncForAllClients(): Promise<void>;
+      runNightlyEventSyncCycle(): Promise<void>;
+      runNightlyPastNsuRecoveryCycle(): Promise<void>;
+    };
+    const nfseSpy = jest.spyOn(scheduler, 'runNightlyNfseIncrementalSyncForAllClients').mockResolvedValue(undefined);
+    const eventsSpy = jest.spyOn(scheduler, 'runNightlyEventSyncCycle').mockResolvedValue(undefined);
+    const recoverySpy = jest.spyOn(scheduler, 'runNightlyPastNsuRecoveryCycle').mockResolvedValue(undefined);
+
+    await scheduler.runNightlySweepForAllClients('18:00');
+    await scheduler.runNightlySweepForAllClients('20:00');
+    await scheduler.runNightlySweepForAllClients('00:00');
+
+    expect(nfseSpy).toHaveBeenCalledTimes(1);
+    expect(recoverySpy).toHaveBeenCalledTimes(1);
+    expect(eventsSpy).toHaveBeenCalledTimes(1);
   });
 
   it('atualiza configuracao dos horarios da rotina noturna', async () => {
