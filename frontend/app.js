@@ -819,6 +819,7 @@ function wireGlobalEvents() {
   document.addEventListener('contextmenu', onDocumentContextMenu);
   document.addEventListener('submit', onDocumentSubmit);
   document.addEventListener('change', onDocumentChange);
+  document.addEventListener('input', onDocumentInput);
   document.addEventListener('keydown', registerAuthInteraction, true);
   document.addEventListener('pointerdown', registerAuthInteraction, true);
   document.addEventListener('touchstart', registerAuthInteraction, true);
@@ -1734,6 +1735,26 @@ function onDocumentClick(event) {
       openEventsSyncCompaniesModal();
       return;
     }
+    case 'events-sync-companies-select-visible': {
+      document.querySelectorAll('[data-events-sync-company]:not([hidden]) input[name="clienteIds"]').forEach((input) => {
+        input.checked = true;
+      });
+      const allInput = document.querySelector('#eventsSyncCompaniesForm input[name="todasEmpresas"]');
+      if (allInput) {
+        allInput.checked = false;
+      }
+      return;
+    }
+    case 'events-sync-companies-clear-selection': {
+      document.querySelectorAll('#eventsSyncCompaniesForm input[name="clienteIds"]').forEach((input) => {
+        input.checked = false;
+      });
+      const allInput = document.querySelector('#eventsSyncCompaniesForm input[name="todasEmpresas"]');
+      if (allInput) {
+        allInput.checked = false;
+      }
+      return;
+    }
     case 'cte-docs-clear-filters': {
       resetCteDocsSearch();
       render();
@@ -2305,6 +2326,24 @@ function onDocumentChange(event) {
   }
 
   const action = target.getAttribute('data-action');
+  if (action === 'events-sync-companies-all') {
+    if (target.checked) {
+      document.querySelectorAll('#eventsSyncCompaniesForm input[name="clienteIds"]').forEach((input) => {
+        input.checked = false;
+      });
+    }
+    return;
+  }
+
+  if (action === 'events-sync-companies-client') {
+    if (target.checked) {
+      const allInput = document.querySelector('#eventsSyncCompaniesForm input[name="todasEmpresas"]');
+      if (allInput) {
+        allInput.checked = false;
+      }
+    }
+    return;
+  }
   if (action === 'xml-reader30-select') {
     const selectionKey = target.getAttribute('data-selection-key');
     if (!selectionKey) {
@@ -10881,6 +10920,9 @@ function renderEventsSyncCompaniesModal() {
   const result = state.modal.result || null;
   const errorMessage = String(state.modal.errorMessage || '').trim();
   const clients = [...state.clients].sort((left, right) => String(left.razaoSocial || '').localeCompare(String(right.razaoSocial || '')));
+  const clientNamesById = new Map(clients.map((client) => [String(client.id), String(client.razaoSocial || client.cnpj || client.id)]));
+  const resultDetails = Array.isArray(result?.detalhes) ? result.detalhes : [];
+  const hasFailures = Number(result?.falhas || 0) > 0;
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -10889,40 +10931,112 @@ function renderEventsSyncCompaniesModal() {
           <h3 class="modal-title">Buscar eventos por empresa</h3>
           <p class="modal-subtitle">Consulta NF-e e CT-e armazenados, emitidos nos ultimos 90 dias.</p>
         </div>
-        <div class="modal-body">
+        <div class="modal-body events-sync-companies-modal-body">
+          ${
+            result
+              ? `
+                <section class="events-sync-result ${hasFailures ? 'has-failures' : ''}" aria-live="polite">
+                  <div class="events-sync-result-header">
+                    <div>
+                      <p class="events-sync-result-eyebrow">Busca concluida</p>
+                      <h4>${hasFailures ? 'Busca concluida com falhas' : 'Eventos consultados com sucesso'}</h4>
+                      <p>Resultado das consultas realizadas nos documentos dos ultimos ${Number(result.limiteDias || 90)} dias.</p>
+                    </div>
+                    <span class="chip ${hasFailures ? 'danger' : 'success'}">${hasFailures ? 'Revisar falhas' : 'Concluida'}</span>
+                  </div>
+                  <div class="form-grid three events-sync-result-summary">
+                    ${detailItem('Empresas processadas', String(result.empresasProcessadas || 0))}
+                    ${detailItem('Documentos selecionados', String(result.documentosSelecionados || 0))}
+                    ${detailItem('Documentos processados', String(result.documentosProcessados || 0))}
+                    ${detailItem('Com eventos', String(result.documentosComEventos || 0))}
+                    ${detailItem('Eventos importados', String(result.eventosImportados || 0))}
+                    ${detailItem('Falhas', String(result.falhas || 0))}
+                  </div>
+                  ${
+                    resultDetails.length
+                      ? `
+                        <div class="events-sync-result-details">
+                          <strong>Detalhamento por empresa</strong>
+                          <div class="events-sync-result-scroll">
+                            <table>
+                              <thead><tr><th>Empresa</th><th>Documento</th><th>Processados</th><th>Com eventos</th><th>Importados</th><th>Falhas</th><th>Mensagem</th></tr></thead>
+                              <tbody>
+                                ${resultDetails
+                                  .map((detail) => {
+                                    const clientName = clientNamesById.get(String(detail?.clienteId || '')) || String(detail?.clienteId || '-');
+                                    const documentType = String(detail?.tipoDocumento || '').toUpperCase() || '-';
+                                    return `<tr>
+                                      <td>${escapeHtml(clientName)}</td>
+                                      <td>${escapeHtml(documentType)}</td>
+                                      <td>${Number(detail?.documentosProcessados || 0)}</td>
+                                      <td>${Number(detail?.documentosComEventos || 0)}</td>
+                                      <td>${Number(detail?.eventosImportados || 0)}</td>
+                                      <td>${Number(detail?.falhas || 0)}</td>
+                                      <td>${escapeHtml(String(detail?.mensagem || '-'))}</td>
+                                    </tr>`;
+                                  })
+                                  .join('')}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      `
+                      : '<p class="events-sync-result-empty">Nenhum documento elegivel foi encontrado para as empresas selecionadas.</p>'
+                  }
+                </section>
+              `
+              : ''
+          }
           <form id="eventsSyncCompaniesForm">
-            <label class="check-row" style="margin-bottom:12px;">
-              <input type="checkbox" name="todasEmpresas" checked ${submitting ? 'disabled' : ''} />
+            <label class="events-sync-all-option">
+              <input type="checkbox" name="todasEmpresas" data-action="events-sync-companies-all" checked ${submitting ? 'disabled' : ''} />
               <span>Processar todas as empresas</span>
             </label>
+            <div class="events-sync-companies-toolbar">
+              <input type="search" data-action="events-sync-companies-filter" placeholder="Filtrar por nome ou CNPJ" ${submitting ? 'disabled' : ''} />
+              <div class="events-sync-companies-actions">
+                <button class="btn secondary" type="button" data-action="events-sync-companies-select-visible" ${submitting ? 'disabled' : ''}>Selecionar visiveis</button>
+                <button class="btn secondary" type="button" data-action="events-sync-companies-clear-selection" ${submitting ? 'disabled' : ''}>Limpar</button>
+              </div>
+            </div>
             <p class="card-subtitle" style="margin:0 0 10px;">Ao marcar empresas abaixo, somente as selecionadas serao processadas.</p>
-            <div style="max-height:300px; overflow:auto; border:1px solid var(--line); border-radius:12px; padding:10px;">
+            <div class="events-sync-companies-list">
               ${clients
                 .map(
-                  (client) => `
-                    <label class="check-row" style="padding:7px 4px;">
-                      <input type="checkbox" name="clienteIds" value="${escapeHtml(client.id)}" ${submitting ? 'disabled' : ''} />
-                      <span>${escapeHtml(client.razaoSocial || client.cnpj || client.id)} <small style="color:var(--text-secondary);">${escapeHtml(formatCnpj(client.cnpj || ''))}</small></span>
+                  (client) => {
+                    const clientName = String(client.razaoSocial || client.cnpj || client.id);
+                    const cnpj = formatCnpj(client.cnpj || '');
+                    const searchText = `${clientName} ${client.cnpj || ''}`
+                      .normalize('NFD')
+                      .replace(/[\u0300-\u036f]/g, '')
+                      .toLowerCase();
+                    return `
+                    <label class="events-sync-company-row" data-events-sync-company="${escapeHtml(searchText)}">
+                      <input type="checkbox" name="clienteIds" data-action="events-sync-companies-client" value="${escapeHtml(client.id)}" ${submitting ? 'disabled' : ''} />
+                      <span class="events-sync-company-name">${escapeHtml(clientName)}</span>
+                      <small>${escapeHtml(cnpj)}</small>
                     </label>`
+                  }
                 )
                 .join('')}
             </div>
             ${errorMessage ? `<div class="table-state error" style="margin-top:12px;">${escapeHtml(errorMessage)}</div>` : ''}
             <div class="modal-footer" style="padding:18px 0 0;">
               <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Fechar</button>
-              <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Buscando eventos...' : 'Buscar eventos'}</button>
+              <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Buscando eventos...' : result ? 'Buscar novamente' : 'Buscar eventos'}</button>
             </div>
           </form>
           ${
-            result
+            submitting
               ? `
-                <div class="form-grid three" style="margin-top:20px;">
-                  ${detailItem('Empresas', String(result.empresasProcessadas || 0))}
-                  ${detailItem('Documentos processados', String(result.documentosProcessados || 0))}
-                  ${detailItem('Com eventos', String(result.documentosComEventos || 0))}
-                  ${detailItem('Eventos importados', String(result.eventosImportados || 0))}
-                  ${detailItem('Falhas', String(result.falhas || 0))}
-                  ${detailItem('Limite', `${Number(result.limiteDias || 90)} dias`)}
+                <div class="events-sync-progress-overlay" aria-live="assertive" aria-busy="true">
+                  <div class="events-sync-progress-card">
+                    <div class="page-loading-spinner" aria-hidden="true"></div>
+                    <p class="events-sync-result-eyebrow">Busca em andamento</p>
+                    <h4>Consultando eventos</h4>
+                    <p>Estamos buscando eventos de NF-e e CT-e para ${escapeHtml(state.modal.requestedCompaniesLabel || 'as empresas selecionadas')}.</p>
+                    <div class="events-sync-progress-status">Aguarde. A busca pode levar alguns minutos, conforme a quantidade de documentos.</div>
+                  </div>
                 </div>
               `
               : ''
@@ -10931,6 +11045,23 @@ function renderEventsSyncCompaniesModal() {
       </div>
     </div>
   `;
+}
+
+function onDocumentInput(event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement) || target.getAttribute('data-action') !== 'events-sync-companies-filter') {
+    return;
+  }
+
+  const term = String(target.value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+  document.querySelectorAll('[data-events-sync-company]').forEach((row) => {
+    const content = String(row.getAttribute('data-events-sync-company') || '');
+    row.hidden = Boolean(term) && !content.includes(term);
+  });
 }
 
 function renderEventsSyncReportModal() {
@@ -22926,7 +23057,8 @@ async function submitEventsSyncCompaniesForm(form) {
     ...state.modal,
     submitting: true,
     result: null,
-    errorMessage: ''
+    errorMessage: '',
+    requestedCompaniesLabel: todasEmpresas ? 'todas as empresas cadastradas' : `${clienteIds.length} empresa(s) selecionada(s)`
   };
   render();
 

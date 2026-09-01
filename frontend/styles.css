@@ -3044,6 +3044,225 @@ tbody tr.cert-row-a-vencer:hover {
   padding: 16px 18px;
 }
 
+.events-sync-all-option,
+.events-sync-company-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.events-sync-companies-modal-body {
+  position: relative;
+}
+
+.events-sync-all-option {
+  margin-bottom: 14px;
+  font-weight: 700;
+}
+
+.events-sync-companies-toolbar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.events-sync-companies-toolbar input {
+  flex: 1;
+  min-width: 0;
+}
+
+.events-sync-companies-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.events-sync-companies-list {
+  max-height: 330px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-alt);
+}
+
+.events-sync-company-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.events-sync-company-row:last-child {
+  border-bottom: 0;
+}
+
+.events-sync-company-row:hover {
+  background: var(--surface);
+}
+
+.events-sync-company-row input {
+  flex: 0 0 auto;
+}
+
+.events-sync-company-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.events-sync-company-row small {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.events-sync-progress-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(24, 25, 31, 0.58);
+  backdrop-filter: blur(4px);
+}
+
+.events-sync-progress-card {
+  width: min(460px, 100%);
+  padding: 24px;
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.22);
+}
+
+.events-sync-progress-card .page-loading-spinner {
+  width: 38px;
+  height: 38px;
+  border-width: 3px;
+}
+
+.events-sync-progress-card h4,
+.events-sync-result h4 {
+  margin: 0;
+  font-family: 'Sora', 'Manrope', sans-serif;
+  font-size: 1.08rem;
+}
+
+.events-sync-progress-card p,
+.events-sync-result-header p {
+  margin: 7px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.45;
+}
+
+.events-sync-progress-status {
+  margin-top: 16px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface-alt);
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
+.events-sync-result {
+  margin-bottom: 20px;
+  padding: 16px;
+  border: 1px solid rgba(41, 151, 93, 0.3);
+  border-radius: 14px;
+  background: #f4fbf6;
+}
+
+.events-sync-result.has-failures {
+  border-color: rgba(197, 67, 67, 0.32);
+  background: #fff8f8;
+}
+
+.events-sync-result-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.events-sync-result-eyebrow {
+  margin: 0 0 5px !important;
+  color: var(--warning) !important;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.events-sync-result-summary {
+  margin-top: 16px;
+}
+
+.events-sync-result-details {
+  margin-top: 16px;
+}
+
+.events-sync-result-scroll {
+  max-height: 250px;
+  margin-top: 8px;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.events-sync-result-scroll table {
+  width: 100%;
+  min-width: 720px;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+}
+
+.events-sync-result-scroll th,
+.events-sync-result-scroll td {
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  vertical-align: top;
+}
+
+.events-sync-result-scroll th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-alt);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+}
+
+.events-sync-result-scroll td:not(:first-child) {
+  white-space: nowrap;
+}
+
+.events-sync-result-empty {
+  margin: 16px 0 0;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 640px) {
+  .events-sync-companies-toolbar,
+  .events-sync-companies-actions {
+    flex-direction: column;
+  }
+
+  .events-sync-company-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .events-sync-company-name {
+    flex-basis: calc(100% - 28px);
+  }
+
+  .events-sync-company-row small {
+    margin-left: 28px;
+  }
+
+  .events-sync-result-header {
+    flex-direction: column;
+  }
+}
+
 .modal-title {
   margin: 0;
   font-family: 'Sora', 'Manrope', sans-serif;
