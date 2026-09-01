@@ -2326,7 +2326,8 @@ function onDocumentChange(event) {
   }
 
   const action = target.getAttribute('data-action');
-  if (action === 'events-sync-companies-all') {
+  const eventsSyncControl = target.getAttribute('data-events-sync-control');
+  if (eventsSyncControl === 'all') {
     if (target.checked) {
       document.querySelectorAll('#eventsSyncCompaniesForm input[name="clienteIds"]').forEach((input) => {
         input.checked = false;
@@ -2335,7 +2336,7 @@ function onDocumentChange(event) {
     return;
   }
 
-  if (action === 'events-sync-companies-client') {
+  if (eventsSyncControl === 'client') {
     if (target.checked) {
       const allInput = document.querySelector('#eventsSyncCompaniesForm input[name="todasEmpresas"]');
       if (allInput) {
@@ -10989,11 +10990,11 @@ function renderEventsSyncCompaniesModal() {
           }
           <form id="eventsSyncCompaniesForm">
             <label class="events-sync-all-option">
-              <input type="checkbox" name="todasEmpresas" data-action="events-sync-companies-all" checked ${submitting ? 'disabled' : ''} />
+              <input type="checkbox" name="todasEmpresas" data-events-sync-control="all" checked ${submitting ? 'disabled' : ''} />
               <span>Processar todas as empresas</span>
             </label>
             <div class="events-sync-companies-toolbar">
-              <input type="search" data-action="events-sync-companies-filter" placeholder="Filtrar por nome ou CNPJ" ${submitting ? 'disabled' : ''} />
+              <input type="search" data-events-sync-control="filter" placeholder="Filtrar por nome ou CNPJ" ${submitting ? 'disabled' : ''} />
               <div class="events-sync-companies-actions">
                 <button class="btn secondary" type="button" data-action="events-sync-companies-select-visible" ${submitting ? 'disabled' : ''}>Selecionar visiveis</button>
                 <button class="btn secondary" type="button" data-action="events-sync-companies-clear-selection" ${submitting ? 'disabled' : ''}>Limpar</button>
@@ -11012,7 +11013,7 @@ function renderEventsSyncCompaniesModal() {
                       .toLowerCase();
                     return `
                     <label class="events-sync-company-row" data-events-sync-company="${escapeHtml(searchText)}">
-                      <input type="checkbox" name="clienteIds" data-action="events-sync-companies-client" value="${escapeHtml(client.id)}" ${submitting ? 'disabled' : ''} />
+                      <input type="checkbox" name="clienteIds" data-events-sync-control="client" value="${escapeHtml(client.id)}" ${submitting ? 'disabled' : ''} />
                       <span class="events-sync-company-name">${escapeHtml(clientName)}</span>
                       <small>${escapeHtml(cnpj)}</small>
                     </label>`
@@ -11049,7 +11050,7 @@ function renderEventsSyncCompaniesModal() {
 
 function onDocumentInput(event) {
   const target = event.target;
-  if (!(target instanceof HTMLInputElement) || target.getAttribute('data-action') !== 'events-sync-companies-filter') {
+  if (!(target instanceof HTMLInputElement) || target.getAttribute('data-events-sync-control') !== 'filter') {
     return;
   }
 
