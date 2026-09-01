@@ -31,6 +31,7 @@ import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
 import { StartSyncDto } from './dto/start-sync.dto';
 import { ReprocessPastNsusDto } from './dto/reprocess-past-nsus.dto';
 import { StartPastNsuRecoveryExecutionDto } from './dto/start-past-nsu-recovery-execution.dto';
+import { SincronizarEventosEmpresasDto } from './dto/sincronizar-eventos-empresas.dto';
 
 type ReprocessPastNsusDetail = {
   controleId: string;
@@ -1188,6 +1189,119 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     await this.persistNightlySweepConfig();
     this.refreshNightlySweepTimer();
     return this.schedulerStatus();
+  }
+
+  async sincronizarEventosEmpresas(dto: SincronizarEventosEmpresasDto) {
+    const clienteIds = [...new Set((dto.clienteIds ?? []).map((id) => id.trim()).filter(Boolean))];
+    const cutoff = this.resolveAutomaticEventSyncDocumentCutoff(new Date());
+    const detalhes: Array<{
+      clienteId: string;
+      tipoDocumento: 'nfe' | 'cte';
+      documentosProcessados: number;
+      documentosComEventos: number;
+      eventosImportados: number;
+      falhas: number;
+      mensagem?: string;
+    }> = [];
+    const empresasProcessadas = new Set<string>();
+    let documentosSelecionados = 0;
+    let documentosProcessados = 0;
+    let documentosComEventos = 0;
+    let eventosEncontrados = 0;
+    let eventosImportados = 0;
+    let falhas = 0;
+    let cursorId: string | undefined;
+
+    do {
+      const documents = await this.prisma.nfeDocumento.findMany({
+        where: {
+          ...(clienteIds.length ? { clienteId: { in: clienteIds } } : {}),
+          OR: [{ dataEmissao: { gte: cutoff } }, { dataEmissao: null, createdAt: { gte: cutoff } }]
+        },
+        select: {
+          id: true,
+          clienteId: true,
+          modelo: true,
+          schemaDoc: true
+        },
+        orderBy: { id: 'asc' },
+        take: 200,
+        ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {})
+      });
+
+      if (!documents.length) {
+        break;
+      }
+
+      cursorId = documents[documents.length - 1].id;
+      documentosSelecionados += documents.length;
+      const groups = new Map<string, { clienteId: string; tipoDocumento: 'nfe' | 'cte'; documentoIds: string[] }>();
+
+      for (const document of documents) {
+        const tipoDocumento = this.isCteDocumentForNightlyEventSync(document) ? 'cte' : 'nfe';
+        const groupKey = `${tipoDocumento}:${document.clienteId}`;
+        const group = groups.get(groupKey) ?? { clienteId: document.clienteId, tipoDocumento, documentoIds: [] };
+        group.documentoIds.push(document.id);
+        groups.set(groupKey, group);
+      }
+
+      for (const group of groups.values()) {
+        empresasProcessadas.add(group.clienteId);
+        try {
+          const summary =
+            group.tipoDocumento === 'cte'
+              ? await this.cteService.sincronizarEventos({
+                  clienteId: group.clienteId,
+                  documentoIds: group.documentoIds,
+                  somenteSemEventos: false,
+                  limit: group.documentoIds.length
+                })
+              : await this.nfeService.sincronizarEventos({
+                  clienteId: group.clienteId,
+                  documentoIds: group.documentoIds,
+                  somenteSemEventos: false,
+                  limit: group.documentoIds.length
+                });
+
+          documentosProcessados += summary.documentosProcessados;
+          documentosComEventos += summary.documentosComEventos;
+          eventosEncontrados += summary.eventosEncontrados;
+          eventosImportados += summary.eventosImportados;
+          falhas += summary.falhas;
+          detalhes.push({
+            clienteId: group.clienteId,
+            tipoDocumento: group.tipoDocumento,
+            documentosProcessados: summary.documentosProcessados,
+            documentosComEventos: summary.documentosComEventos,
+            eventosImportados: summary.eventosImportados,
+            falhas: summary.falhas
+          });
+        } catch (error) {
+          falhas += group.documentoIds.length;
+          detalhes.push({
+            clienteId: group.clienteId,
+            tipoDocumento: group.tipoDocumento,
+            documentosProcessados: 0,
+            documentosComEventos: 0,
+            eventosImportados: 0,
+            falhas: group.documentoIds.length,
+            mensagem: this.toErrorMessage(error)
+          });
+        }
+      }
+    } while (cursorId);
+
+    return {
+      limiteDias: this.autoEventSyncMaxDocumentAgeDays,
+      empresasProcessadas: empresasProcessadas.size,
+      documentosSelecionados,
+      documentosProcessados,
+      documentosComEventos,
+      eventosEncontrados,
+      eventosImportados,
+      falhas,
+      detalhes
+    };
   }
 
   private async activateSyncControlsForClient(

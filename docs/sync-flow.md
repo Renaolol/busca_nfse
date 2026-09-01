@@ -23,6 +23,7 @@
 - A rotina automatica de eventos reutiliza a mesma consulta por chave, grava um cooldown por documento em storage local e tambem nao altera `ultimo_nsu_consultado`.
 - Para evitar consultas recorrentes sem utilidade operacional, a rotina automatica/noturna considera somente documentos com ate `SYNC_EVENTS_MAX_DOCUMENT_AGE_DAYS` dias (padrao: 90). A data de emissao e usada como referencia; quando indisponivel, usa-se a data de inclusao. A consulta manual nao possui esse corte.
 - Em cada horario da busca noturna global, NF-e e CT-e armazenados sao agrupados por estabelecimento e consultados por chave. A rotina e idempotente: os eventos retornados continuam deduplicados pelos mecanismos de persistencia existentes.
+- A busca manual em lote `POST /sync/eventos/sincronizar-empresas` permite consultar NF-e e CT-e de todas as empresas ou de empresas selecionadas. Ela percorre somente documentos com ate 90 dias e processa em lotes de 200 documentos para evitar sobrecarga do servidor.
 - O endpoint `PUT /sync/scheduler-settings` permite ativar/desativar a rotina noturna global e selecionar os horarios ativos entre `18:00`, `20:00`, `22:00`, `00:00`, `02:00`, `04:00` e `06:00`.
 - A consulta de logs (`GET /sync/logs`) exige `clienteId` (UUID valido) para retornar apenas o escopo do cliente informado.
 

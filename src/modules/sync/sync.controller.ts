@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
-import { ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
@@ -9,6 +9,10 @@ import { StartSyncDto } from './dto/start-sync.dto';
 import { ReprocessPastNsusDto } from './dto/reprocess-past-nsus.dto';
 import { StartPastNsuRecoveryExecutionDto } from './dto/start-past-nsu-recovery-execution.dto';
 import { UpdateSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
+import {
+  SincronizarEventosEmpresasDto,
+  SincronizarEventosEmpresasResponseDto
+} from './dto/sincronizar-eventos-empresas.dto';
 
 @ApiTags('sync')
 @Controller()
@@ -54,6 +58,13 @@ export class SyncController {
   @Roles('admin')
   runNow() {
     return this.syncService.runNow();
+  }
+
+  @Post('sync/eventos/sincronizar-empresas')
+  @Roles('admin')
+  @ApiOkResponse({ type: SincronizarEventosEmpresasResponseDto })
+  sincronizarEventosEmpresas(@Body() dto: SincronizarEventosEmpresasDto) {
+    return this.syncService.sincronizarEventosEmpresas(dto);
   }
 
   @Post('sync/reprocessar-nsus-passados')

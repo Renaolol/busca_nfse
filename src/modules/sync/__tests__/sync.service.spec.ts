@@ -1885,6 +1885,65 @@ describe('SyncService', () => {
     });
   });
 
+  it('sincroniza eventos de NF-e e CT-e para as empresas selecionadas, limitando a 90 dias', async () => {
+    prisma.nfeDocumento.findMany
+      .mockResolvedValueOnce([
+        { id: 'nfe-1', clienteId: 'cliente-1', modelo: '55', schemaDoc: 'procNFe_v4.00' },
+        { id: 'cte-1', clienteId: 'cliente-2', modelo: '57', schemaDoc: 'cteProc_v4.00' }
+      ])
+      .mockResolvedValueOnce([]);
+    nfeService.sincronizarEventos.mockResolvedValueOnce({
+      documentosProcessados: 1,
+      documentosComEventos: 1,
+      eventosEncontrados: 2,
+      eventosImportados: 2,
+      falhas: 0
+    });
+    cteService.sincronizarEventos.mockResolvedValueOnce({
+      documentosProcessados: 1,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 0
+    });
+
+    const result = await service.sincronizarEventosEmpresas({ clienteIds: ['cliente-1', 'cliente-2'] });
+
+    expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          clienteId: { in: ['cliente-1', 'cliente-2'] },
+          OR: [
+            { dataEmissao: { gte: expect.any(Date) } },
+            { dataEmissao: null, createdAt: { gte: expect.any(Date) } }
+          ]
+        }
+      })
+    );
+    expect(nfeService.sincronizarEventos).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      documentoIds: ['nfe-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+    expect(cteService.sincronizarEventos).toHaveBeenCalledWith({
+      clienteId: 'cliente-2',
+      documentoIds: ['cte-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+    expect(result).toMatchObject({
+      limiteDias: 90,
+      empresasProcessadas: 2,
+      documentosSelecionados: 2,
+      documentosProcessados: 2,
+      documentosComEventos: 1,
+      eventosEncontrados: 2,
+      eventosImportados: 2,
+      falhas: 0
+    });
+  });
+
   it('atualiza configuracao dos horarios da rotina noturna', async () => {
     const result = await service.updateSchedulerSettings({
       enabled: true,

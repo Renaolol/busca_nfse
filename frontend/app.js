@@ -1096,11 +1096,8 @@ function onDocumentClick(event) {
     }
     case 'close-modal': {
       if (
-        (
-          state.modal?.kind === 'events-sync-report' ||
-          state.modal?.kind === 'dominio-import-report'
-        ) &&
-        state.modal.running
+        ((state.modal?.kind === 'events-sync-report' || state.modal?.kind === 'dominio-import-report') && state.modal.running) ||
+        (state.modal?.kind === 'events-sync-companies' && state.modal.submitting)
       ) {
         return;
       }
@@ -1733,6 +1730,10 @@ function onDocumentClick(event) {
       void syncEventsForListedNfes();
       return;
     }
+    case 'events-sync-companies': {
+      openEventsSyncCompaniesModal();
+      return;
+    }
     case 'cte-docs-clear-filters': {
       resetCteDocsSearch();
       render();
@@ -2093,13 +2094,14 @@ function onDocumentClick(event) {
     case 'drawer-close':
     case 'overlay-close': {
       if (
-        (
+        ((
           state.modal?.kind === 'events-sync-report' ||
           state.modal?.kind === 'past-nsu-recovery-report' ||
           state.modal?.kind === 'download-by-key-report' ||
           state.modal?.kind === 'dominio-import-report'
         ) &&
-        state.modal.running
+          state.modal.running) ||
+        (state.modal?.kind === 'events-sync-companies' && state.modal.submitting)
       ) {
         return;
       }
@@ -2206,6 +2208,11 @@ function onDocumentSubmit(event) {
     case 'nfseRecoverByKeyForm': {
       event.preventDefault();
       void submitNfseRecoverByKeyForm(target);
+      return;
+    }
+    case 'eventsSyncCompaniesForm': {
+      event.preventDefault();
+      void submitEventsSyncCompaniesForm(target);
       return;
     }
     case 'nfseNumberingExceptionForm': {
@@ -4482,6 +4489,7 @@ function renderNfeDocumentsPage() {
           <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
             <button class="btn primary" type="submit">Buscar NF-e</button>
             <button class="btn secondary" type="button" data-action="nfe-docs-clear-filters">Limpar</button>
+            <button class="btn secondary" type="button" data-action="events-sync-companies" ${state.dataSource === 'api' ? '' : 'disabled'}>Buscar eventos por empresa</button>
             ${
               showDefaultRunButton
                 ? `<button class="btn secondary" type="button" data-action="nfe-docs-run-now-client" ${selectedClientId ? '' : 'disabled'}>Rodar busca do cliente</button>`
@@ -4741,6 +4749,7 @@ function renderCteDocumentsPage() {
           <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
             <button class="btn primary" type="submit">Buscar CT-e</button>
             <button class="btn secondary" type="button" data-action="cte-docs-clear-filters">Limpar</button>
+            <button class="btn secondary" type="button" data-action="events-sync-companies" ${state.dataSource === 'api' ? '' : 'disabled'}>Buscar eventos por empresa</button>
           </div>
         </form>
       </article>
@@ -9994,6 +10003,8 @@ function renderModal() {
       return renderCteViewerModal(state.modal.cteId);
     case 'events-sync-report':
       return renderEventsSyncReportModal();
+    case 'events-sync-companies':
+      return renderEventsSyncCompaniesModal();
     case 'past-nsu-recovery-report':
       return renderPastNsuRecoveryReportModal();
     case 'nfse-recover-by-dps':
@@ -10855,6 +10866,67 @@ function renderDominioNfeViewerModal() {
         <div class="modal-footer">
           <button class="btn secondary" data-action="close-modal">Fechar</button>
           <button class="btn primary" data-action="dominio-nfe-download-modal">Baixar XML</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderEventsSyncCompaniesModal() {
+  if (state.modal?.kind !== 'events-sync-companies') {
+    return '';
+  }
+
+  const submitting = Boolean(state.modal.submitting);
+  const result = state.modal.result || null;
+  const errorMessage = String(state.modal.errorMessage || '').trim();
+  const clients = [...state.clients].sort((left, right) => String(left.razaoSocial || '').localeCompare(String(right.razaoSocial || '')));
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 820px); max-width:820px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Buscar eventos por empresa</h3>
+          <p class="modal-subtitle">Consulta NF-e e CT-e armazenados, emitidos nos ultimos 90 dias.</p>
+        </div>
+        <div class="modal-body">
+          <form id="eventsSyncCompaniesForm">
+            <label class="check-row" style="margin-bottom:12px;">
+              <input type="checkbox" name="todasEmpresas" checked ${submitting ? 'disabled' : ''} />
+              <span>Processar todas as empresas</span>
+            </label>
+            <p class="card-subtitle" style="margin:0 0 10px;">Ao marcar empresas abaixo, somente as selecionadas serao processadas.</p>
+            <div style="max-height:300px; overflow:auto; border:1px solid var(--line); border-radius:12px; padding:10px;">
+              ${clients
+                .map(
+                  (client) => `
+                    <label class="check-row" style="padding:7px 4px;">
+                      <input type="checkbox" name="clienteIds" value="${escapeHtml(client.id)}" ${submitting ? 'disabled' : ''} />
+                      <span>${escapeHtml(client.razaoSocial || client.cnpj || client.id)} <small style="color:var(--text-secondary);">${escapeHtml(formatCnpj(client.cnpj || ''))}</small></span>
+                    </label>`
+                )
+                .join('')}
+            </div>
+            ${errorMessage ? `<div class="table-state error" style="margin-top:12px;">${escapeHtml(errorMessage)}</div>` : ''}
+            <div class="modal-footer" style="padding:18px 0 0;">
+              <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Fechar</button>
+              <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Buscando eventos...' : 'Buscar eventos'}</button>
+            </div>
+          </form>
+          ${
+            result
+              ? `
+                <div class="form-grid three" style="margin-top:20px;">
+                  ${detailItem('Empresas', String(result.empresasProcessadas || 0))}
+                  ${detailItem('Documentos processados', String(result.documentosProcessados || 0))}
+                  ${detailItem('Com eventos', String(result.documentosComEventos || 0))}
+                  ${detailItem('Eventos importados', String(result.eventosImportados || 0))}
+                  ${detailItem('Falhas', String(result.falhas || 0))}
+                  ${detailItem('Limite', `${Number(result.limiteDias || 90)} dias`)}
+                </div>
+              `
+              : ''
+          }
         </div>
       </div>
     </div>
@@ -22813,6 +22885,79 @@ async function requestNfseEventsSync(clienteId, documentoIds) {
     },
     timeoutMs: Math.max(180000, documentoIds.length * 30000)
   });
+}
+
+function openEventsSyncCompaniesModal() {
+  if (state.dataSource !== 'api') {
+    pushToast('A sincronizacao de eventos por empresa so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  openModal({
+    kind: 'events-sync-companies',
+    submitting: false,
+    result: null,
+    errorMessage: ''
+  });
+}
+
+async function submitEventsSyncCompaniesForm(form) {
+  if (state.modal?.kind !== 'events-sync-companies' || state.modal.submitting) {
+    return;
+  }
+
+  const data = new FormData(form);
+  const clienteIds = data
+    .getAll('clienteIds')
+    .map((value) => String(value || '').trim())
+    .filter(Boolean);
+  const todasEmpresas = data.get('todasEmpresas') === 'on' && clienteIds.length === 0;
+
+  if (!todasEmpresas && !clienteIds.length) {
+    state.modal = {
+      ...state.modal,
+      errorMessage: 'Selecione ao menos uma empresa ou marque todas as empresas.'
+    };
+    render();
+    return;
+  }
+
+  state.modal = {
+    ...state.modal,
+    submitting: true,
+    result: null,
+    errorMessage: ''
+  };
+  render();
+
+  try {
+    const result = await apiRequest('/sync/eventos/sincronizar-empresas', {
+      method: 'POST',
+      body: todasEmpresas ? {} : { clienteIds },
+      timeoutMs: 30 * 60 * 1000
+    });
+
+    state.modal = {
+      ...state.modal,
+      submitting: false,
+      result,
+      errorMessage: ''
+    };
+    render();
+    await refreshNfeSearchAfterEventsSync();
+    await refreshCteSearchAfterEventsSync();
+    pushToast(
+      `Busca de eventos concluida: ${Number(result?.eventosImportados || 0)} evento(s) importado(s), ${Number(result?.falhas || 0)} falha(s).`,
+      Number(result?.falhas || 0) ? 'error' : 'success'
+    );
+  } catch (error) {
+    state.modal = {
+      ...state.modal,
+      submitting: false,
+      errorMessage: toErrorMessage(error)
+    };
+    render();
+  }
 }
 
 async function syncEventsForListedNfes() {
