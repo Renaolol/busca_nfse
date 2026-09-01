@@ -3098,6 +3098,10 @@ tbody tr.cert-row-a-vencer:hover {
   background: var(--surface);
 }
 
+.events-sync-company-row.events-sync-company-hidden {
+  display: none !important;
+}
+
 .events-sync-company-row input {
   flex: 0 0 auto;
 }

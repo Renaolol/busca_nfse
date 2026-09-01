@@ -820,6 +820,8 @@ function wireGlobalEvents() {
   document.addEventListener('submit', onDocumentSubmit);
   document.addEventListener('change', onDocumentChange);
   document.addEventListener('input', onDocumentInput);
+  document.addEventListener('keyup', onDocumentInput);
+  document.addEventListener('search', onDocumentInput);
   document.addEventListener('keydown', registerAuthInteraction, true);
   document.addEventListener('pointerdown', registerAuthInteraction, true);
   document.addEventListener('touchstart', registerAuthInteraction, true);
@@ -1736,7 +1738,7 @@ function onDocumentClick(event) {
       return;
     }
     case 'events-sync-companies-select-visible': {
-      document.querySelectorAll('[data-events-sync-company]:not([hidden]) input[name="clienteIds"]').forEach((input) => {
+      document.querySelectorAll('[data-events-sync-company]:not([hidden]):not(.events-sync-company-hidden) input[name="clienteIds"]').forEach((input) => {
         input.checked = true;
       });
       const allInput = document.querySelector('#eventsSyncCompaniesForm input[name="todasEmpresas"]');
@@ -11071,7 +11073,9 @@ function onDocumentInput(event) {
     .trim();
   document.querySelectorAll('[data-events-sync-company]').forEach((row) => {
     const content = String(row.getAttribute('data-events-sync-company') || '');
-    row.hidden = Boolean(term) && !content.includes(term);
+    const shouldHide = Boolean(term) && !content.includes(term);
+    row.hidden = shouldHide;
+    row.classList.toggle('events-sync-company-hidden', shouldHide);
   });
 }
 
@@ -23120,10 +23124,11 @@ async function monitorEventsSyncCompaniesExecution(initialExecution) {
       return;
     }
 
+    registerAuthInteraction();
     await new Promise((resolve) => window.setTimeout(resolve, 700));
     execution = await apiRequest(`/sync/eventos/sincronizar-empresas/execucao/${encodeURIComponent(String(execution.executionId || ''))}`, {
       timeoutMs: 30000,
-      sessionActivity: 'passive'
+      sessionActivity: 'active'
     });
   }
 }
