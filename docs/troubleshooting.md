@@ -99,6 +99,11 @@ npm run prisma:deploy
 - A chave de acesso do CT-e contem a serie (posicoes 23-25) e o numero (posicoes 26-34). Ela e a fonte de identificacao usada pelo sistema.
 - Se um registro legado exibir outro numero para a mesma chave, a listagem passa a apresentar os dados codificados na chave. Na proxima busca manual de eventos, o numero e a serie armazenados tambem sao corrigidos antes da consulta ao autorizador.
 
+## CT-e subcontratado substitui o CT-e principal
+
+- O XML de um CT-e subcontratado pode conter a chave do CT-e principal em `infCteSub/chCTe`. Essa chave e apenas uma referencia; a identidade do documento e o atributo `Id` de `infCte`.
+- O importador prioriza o `Id` de `infCte`. Quando uma associacao antiga tiver sido gravada pela chave referenciada, a proxima busca manual de eventos recupera o CT-e subcontratado como documento proprio, preservando ambos na listagem.
+
 ## Erro de escopo (`clienteId`)
 
 - Em endpoints por `id` de NFS-e e logs (`/nfse/:id...`, `/sync/logs`), `clienteId` e obrigatorio.

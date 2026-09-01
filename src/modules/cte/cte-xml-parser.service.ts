@@ -61,15 +61,15 @@ export class CteXmlParserService {
   }
 
   private extractChaveAcesso(xml: string): string | undefined {
-    const direct = this.normalizeAccessKey(this.extract(xml, ['chCTe']));
-    if (direct) {
-      return direct;
-    }
-
     const id = this.extractAttribute(xml, 'infCte', 'Id');
     const normalizedId = this.normalizeAccessKey(id);
     if (normalizedId) {
       return normalizedId;
+    }
+
+    const direct = this.normalizeAccessKey(this.extract(xml, ['chCTe']));
+    if (direct) {
+      return direct;
     }
 
     const fromText = xml.match(/\b\d{44}\b/);

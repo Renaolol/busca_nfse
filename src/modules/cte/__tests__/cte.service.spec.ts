@@ -897,6 +897,56 @@ describe('CteService', () => {
     });
   });
 
+  it('recupera CT-e subcontratado quando o XML armazenado aponta para outra chave', async () => {
+    const chavePrincipal = '42260836017714000150570030000019651265948215';
+    const chaveSubcontratado = '42260836017714000150570030000006071234567890';
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-principal',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        chaveAcesso: chavePrincipal,
+        numeroNfe: '1965',
+        serie: '3',
+        schemaDoc: 'cteProc_v4.00',
+        xmlCompletoPath: 'nfe/producao/36017714000150/2026/08/xml/cte-principal.xml',
+        ambiente: NfeAmbiente.producao,
+        origem: 'importacao_xml',
+        eventos: []
+      }
+    ]);
+    storage.getObject.mockResolvedValue(
+      Buffer.from(
+        `<cteProc xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+          <CTe>
+            <infCte Id="CTe${chaveSubcontratado}">
+              <ide><mod>57</mod><serie>3</serie><nCT>607</nCT></ide>
+              <infCTeNorm><infCteSub><chCTe>${chavePrincipal}</chCTe></infCteSub></infCTeNorm>
+            </infCte>
+          </CTe>
+        </cteProc>`,
+        'utf8'
+      )
+    );
+
+    await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-principal'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({
+          chaveAcesso: chaveSubcontratado,
+          numeroNfe: '607',
+          serie: '3'
+        })
+      })
+    );
+  });
+
   it('nao consulta o WebService de CT-e para documento salvo com chave de outro modelo', async () => {
     prisma.nfeDocumento.findMany.mockResolvedValue([
       {

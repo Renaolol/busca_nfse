@@ -533,14 +533,14 @@ export class RealCteConsultaClient implements CteConsultaClient {
   }
 
   private extractChaveAcesso(xml: string): string | undefined {
-    const explicit = this.extractFirstTagText(xml, 'chCTe');
-    if (explicit) {
-      return explicit.replace(/\D/g, '').slice(-44);
-    }
-
     const id = xml.match(/\bId\s*=\s*["']CTe(\d{44})["']/i)?.[1];
     if (id) {
       return id;
+    }
+
+    const explicit = this.extractFirstTagText(xml, 'chCTe');
+    if (explicit) {
+      return explicit.replace(/\D/g, '').slice(-44);
     }
 
     return xml.match(/\b\d{44}\b/)?.[0];

@@ -314,6 +314,7 @@ export class CteService {
         }
 
         await this.reconcileCteIdentificationWithAccessKey(document, identificacaoChave);
+        await this.recoverSubcontractedCteFromStoredXml(document);
 
         const establishment = await this.getEstablishmentOrThrow(document.estabelecimentoId, document.clienteId);
         const certificate = await this.findActiveCertificateOrThrow(document.clienteId, document.estabelecimentoId, establishment.cnpj);
@@ -1196,6 +1197,46 @@ export class CteService {
         document.serie ?? '-'
       )} para ${identificacaoChave.numeroCte}/${identificacaoChave.serie}.`
     );
+  }
+
+  private async recoverSubcontractedCteFromStoredXml(
+    document: Pick<
+      Prisma.NfeDocumentoGetPayload<Record<string, never>>,
+      'id' | 'clienteId' | 'estabelecimentoId' | 'ambiente' | 'chaveAcesso' | 'schemaDoc' | 'xmlCompletoPath' | 'origem'
+    >
+  ): Promise<void> {
+    if (!document.xmlCompletoPath) {
+      return;
+    }
+
+    try {
+      const xml = (await this.storage.getObject(document.xmlCompletoPath)).toString('utf8');
+      const parsed = this.cteXmlParser.parse(xml);
+      const chaveDoXml = this.normalizeChaveAcesso(parsed.chaveAcesso);
+
+      if (!chaveDoXml || chaveDoXml === document.chaveAcesso || this.extractModeloFromChave(chaveDoXml) !== '57') {
+        return;
+      }
+
+      await this.persistDocument({
+        clienteId: document.clienteId,
+        estabelecimentoId: document.estabelecimentoId,
+        ambiente: document.ambiente,
+        document: {
+          schema: parsed.schemaDoc ?? document.schemaDoc ?? 'cteProc_v4.00',
+          xml,
+          chaveAcesso: chaveDoXml
+        },
+        origem: document.origem ?? NfeDocumentoOrigem.distribuicao_nsu
+      });
+      this.logger.warn(
+        `CT-e subcontratado recuperado do XML de ${document.id}: chave armazenada ${document.chaveAcesso}, chave do XML ${chaveDoXml}.`
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Nao foi possivel verificar XML armazenado do CT-e ${document.id} durante a sincronizacao de eventos: ${this.toErrorMessage(error)}`
+      );
+    }
   }
 
   private removeEventosRelationFilter(

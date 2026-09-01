@@ -120,6 +120,20 @@ describe('RealCteConsultaClient', () => {
     expect(result.documents[1].xml).toContain('<procEventoCTe');
   });
 
+  it('prioriza a chave do infCte em vez da chave referenciada por subcontratacao', () => {
+    const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
+      extractChaveAcesso(xml: string): string | undefined;
+    };
+    const chaveSubcontratado = '42260836017714000150570030000006071234567890';
+    const chavePrincipal = '42260836017714000150570030000019651265948215';
+
+    expect(
+      client.extractChaveAcesso(
+        `<cteProc><CTe><infCte Id="CTe${chaveSubcontratado}"><infCteSub><chCTe>${chavePrincipal}</chCTe></infCteSub></infCte></CTe></cteProc>`
+      )
+    ).toBe(chaveSubcontratado);
+  });
+
   it('resolve endpoint de producao por cUF quando nao ha URL fixa configurada', () => {
     const client = new RealCteConsultaClient({} as never, {} as never, {} as never) as unknown as {
       buildConsultaUrl(ambiente: 'producao' | 'homologacao', cUf: string): URL;
