@@ -53,6 +53,9 @@ describe('SyncService', () => {
     nfseEvento: {
       upsert: jest.fn(),
       updateMany: jest.fn()
+    },
+    nfeDocumento: {
+      findMany: jest.fn()
     }
   };
 
@@ -78,6 +81,12 @@ describe('SyncService', () => {
     sincronizarEventos: jest.fn(),
     syncDocumentoVinculos: jest.fn()
   };
+  const nfeService = {
+    sincronizarEventos: jest.fn()
+  };
+  const cteService = {
+    sincronizarEventos: jest.fn()
+  };
 
   let service: SyncService;
 
@@ -88,6 +97,8 @@ describe('SyncService', () => {
       danfse as unknown as NfseDanfseService,
       parser as unknown as NfseXmlParserService,
       nfseService as unknown as NfseService,
+      nfeService as never,
+      cteService as never,
       adnClient as NfseAdnClient
     );
 
@@ -148,6 +159,7 @@ describe('SyncService', () => {
     prisma.nfseDocumentoVinculo.findFirst.mockResolvedValue(null);
     prisma.nfseEvento.upsert.mockResolvedValue({});
     prisma.nfseEvento.updateMany.mockResolvedValue({ count: 0 });
+    prisma.nfeDocumento.findMany.mockResolvedValue([]);
     storage.getObject.mockRejectedValue(new Error('ENOENT: no such file or directory'));
     storage.putObject.mockResolvedValue(undefined);
     nfseService.sincronizarEventos.mockResolvedValue({
@@ -159,6 +171,8 @@ describe('SyncService', () => {
       detalhes: []
     });
     nfseService.syncDocumentoVinculos.mockResolvedValue(undefined);
+    nfeService.sincronizarEventos.mockResolvedValue({});
+    cteService.sincronizarEventos.mockResolvedValue({});
 
     service = buildService();
   });
@@ -1756,12 +1770,19 @@ describe('SyncService', () => {
         enabled: true,
         perControlLimit: expect.any(Number),
         candidateWindow: expect.any(Number),
+        maxDocumentAgeDays: 90,
         noEventCooldownMs: expect.any(Number),
         withEventCooldownMs: expect.any(Number),
         failureCooldownMs: expect.any(Number),
         certificateCooldownMs: expect.any(Number)
       })
     );
+    expect(result.nightlyEventSync).toEqual({
+      enabled: true,
+      maxDocumentAgeDays: 90,
+      perEstablishmentLimit: 25,
+      candidateWindow: 250
+    });
     expect(result.nightlySweep).toEqual(
       expect.objectContaining({
         enabled: true,
@@ -1775,6 +1796,93 @@ describe('SyncService', () => {
         nextRunAt: expect.any(String)
       })
     );
+  });
+
+  it('limita a consulta automatica de eventos a documentos de ate 90 dias', async () => {
+    prisma.nfseSyncControle.findMany
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([
+        {
+          id: 'ctrl-evt-1',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: Ambiente.producao,
+          createdAt: new Date('2026-07-13T00:00:00.000Z'),
+          updatedAt: new Date('2026-07-13T00:00:00.000Z')
+        }
+      ]);
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([]);
+
+    await (service as unknown as { runAutomaticSyncCycle: () => Promise<void> }).runAutomaticSyncCycle();
+
+    expect(prisma.nfseDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          OR: [
+            {
+              dataEmissao: {
+                gte: expect.any(Date)
+              }
+            },
+            {
+              dataEmissao: null,
+              createdAt: {
+                gte: expect.any(Date)
+              }
+            }
+          ]
+        })
+      })
+    );
+    expect(nfseService.sincronizarEventos).not.toHaveBeenCalled();
+  });
+
+  it('consulta NF-e e CT-e elegiveis durante a busca noturna, respeitando o limite de idade', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'nfe-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        modelo: '55',
+        schemaDoc: 'procNFe_v4.00',
+        dataEmissao: new Date(),
+        createdAt: new Date()
+      },
+      {
+        id: 'cte-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        modelo: '57',
+        schemaDoc: 'cteProc_v4.00',
+        dataEmissao: new Date(),
+        createdAt: new Date()
+      }
+    ]);
+
+    await (service as unknown as { runNightlyEventSyncCycle: () => Promise<void> }).runNightlyEventSyncCycle();
+
+    expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          OR: [
+            { dataEmissao: { gte: expect.any(Date) } },
+            { dataEmissao: null, createdAt: { gte: expect.any(Date) } }
+          ]
+        }
+      })
+    );
+    expect(nfeService.sincronizarEventos).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      documentoIds: ['nfe-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+    expect(cteService.sincronizarEventos).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      documentoIds: ['cte-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
   });
 
   it('atualiza configuracao dos horarios da rotina noturna', async () => {

@@ -138,6 +138,10 @@ Veja `.env.example`.
 - `SYNC_EVENTS_AUTO_RUN_ENABLED`: habilita a rotina automatica de consulta de eventos para NFS-e ja salvas (padrao `true`).
 - `SYNC_EVENTS_AUTO_RUN_PER_CONTROL_LIMIT`: quantidade maxima de NFS-e por controle/empresa em cada ciclo automatico de eventos (padrao `2`).
 - `SYNC_EVENTS_AUTO_RUN_CANDIDATE_WINDOW`: janela de documentos por controle considerada para a rotina automatica de eventos (padrao `25`).
+- `SYNC_EVENTS_MAX_DOCUMENT_AGE_DAYS`: idade maxima, em dias, de documentos elegiveis para consulta automatica/noturna de eventos (padrao `90`). Documentos mais antigos continuam disponiveis para consulta manual.
+- `SYNC_NIGHTLY_EVENTS_ENABLED`: habilita a consulta noturna de eventos para NF-e e CT-e armazenados (padrao `true`).
+- `SYNC_NIGHTLY_EVENTS_PER_ESTABLISHMENT_LIMIT`: quantidade maxima de NF-e ou CT-e por estabelecimento e tipo em cada horario noturno (padrao `25`).
+- `SYNC_NIGHTLY_EVENTS_CANDIDATE_WINDOW`: quantidade maxima de documentos considerados pela busca noturna de eventos antes da distribuicao por estabelecimento (padrao `250`).
 - `SYNC_EVENTS_AUTO_RUN_NO_EVENT_COOLDOWN_MS`: espera antes de tentar novamente uma NFS-e que ainda nao retornou eventos (padrao `86400000` = 24h).
 - `SYNC_EVENTS_AUTO_RUN_WITH_EVENT_COOLDOWN_MS`: espera antes de reconsultar automaticamente uma NFS-e que ja possui eventos, para capturar mudancas posteriores como cancelamento (padrao `43200000` = 12h).
 - `SYNC_EVENTS_AUTO_RUN_FAILURE_COOLDOWN_MS`: espera apos falha de API na rotina automatica de eventos (padrao `1800000` = 30min).

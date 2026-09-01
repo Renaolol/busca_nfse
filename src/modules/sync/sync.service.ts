@@ -24,6 +24,8 @@ import {
 import { NfseDanfseService } from '../nfse/nfse-danfse.service';
 import { NfseService } from '../nfse/nfse.service';
 import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from '../nfse/nfse-xml-parser.service';
+import { CteService } from '../cte/cte.service';
+import { NfeService } from '../nfe/nfe.service';
 import { LocalStorageService } from '../storage/storage.service';
 import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
 import { StartSyncDto } from './dto/start-sync.dto';
@@ -179,6 +181,19 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   private readonly autoEventSyncEnabled = process.env.SYNC_EVENTS_AUTO_RUN_ENABLED !== 'false';
   private readonly autoEventSyncPerControlLimit = this.parsePositiveNumberEnv('SYNC_EVENTS_AUTO_RUN_PER_CONTROL_LIMIT', 2);
   private readonly autoEventSyncCandidateWindow = this.parsePositiveNumberEnv('SYNC_EVENTS_AUTO_RUN_CANDIDATE_WINDOW', 25);
+  private readonly autoEventSyncMaxDocumentAgeDays = this.parsePositiveNumberEnv(
+    'SYNC_EVENTS_MAX_DOCUMENT_AGE_DAYS',
+    90
+  );
+  private readonly nightlyEventSyncEnabled = process.env.SYNC_NIGHTLY_EVENTS_ENABLED !== 'false';
+  private readonly nightlyEventSyncPerEstablishmentLimit = this.parsePositiveNumberEnv(
+    'SYNC_NIGHTLY_EVENTS_PER_ESTABLISHMENT_LIMIT',
+    25
+  );
+  private readonly nightlyEventSyncCandidateWindow = this.parsePositiveNumberEnv(
+    'SYNC_NIGHTLY_EVENTS_CANDIDATE_WINDOW',
+    250
+  );
   private readonly autoEventSyncNoEventCooldownMs = this.parsePositiveNumberEnv(
     'SYNC_EVENTS_AUTO_RUN_NO_EVENT_COOLDOWN_MS',
     24 * 60 * 60 * 1000
@@ -229,6 +244,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     private readonly danfse: NfseDanfseService,
     private readonly parser: NfseXmlParserService,
     private readonly nfseService: NfseService,
+    private readonly nfeService: NfeService,
+    private readonly cteService: CteService,
     @Inject(NFSE_ADN_CLIENT) private readonly adnClient: NfseAdnClient
   ) {}
 
@@ -331,10 +348,17 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       enabled: boolean;
       perControlLimit: number;
       candidateWindow: number;
+      maxDocumentAgeDays: number;
       noEventCooldownMs: number;
       withEventCooldownMs: number;
       failureCooldownMs: number;
       certificateCooldownMs: number;
+    };
+    nightlyEventSync: {
+      enabled: boolean;
+      maxDocumentAgeDays: number;
+      perEstablishmentLimit: number;
+      candidateWindow: number;
     };
     nightlySweep: {
       enabled: boolean;
@@ -371,10 +395,17 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         enabled: this.autoEventSyncEnabled,
         perControlLimit: this.autoEventSyncPerControlLimit,
         candidateWindow: this.autoEventSyncCandidateWindow,
+        maxDocumentAgeDays: this.autoEventSyncMaxDocumentAgeDays,
         noEventCooldownMs: this.autoEventSyncNoEventCooldownMs,
         withEventCooldownMs: this.autoEventSyncWithEventCooldownMs,
         failureCooldownMs: this.autoEventSyncFailureCooldownMs,
         certificateCooldownMs: this.autoEventSyncCertificateCooldownMs
+      },
+      nightlyEventSync: {
+        enabled: this.nightlyEventSyncEnabled,
+        maxDocumentAgeDays: this.autoEventSyncMaxDocumentAgeDays,
+        perEstablishmentLimit: this.nightlyEventSyncPerEstablishmentLimit,
+        candidateWindow: this.nightlyEventSyncCandidateWindow
       },
       nightlySweep: {
         enabled: this.nightlySweepEnabled,
@@ -1282,6 +1313,93 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     if (totalControlesAtivados > 0) {
       await this.runAutomaticSyncCycle();
     }
+
+    if (this.nightlyEventSyncEnabled) {
+      await this.runNightlyEventSyncCycle();
+    }
+  }
+
+  private async runNightlyEventSyncCycle(): Promise<void> {
+    const cutoff = this.resolveAutomaticEventSyncDocumentCutoff(new Date());
+    const documents = await this.prisma.nfeDocumento.findMany({
+      where: {
+        OR: [{ dataEmissao: { gte: cutoff } }, { dataEmissao: null, createdAt: { gte: cutoff } }]
+      },
+      select: {
+        id: true,
+        clienteId: true,
+        estabelecimentoId: true,
+        modelo: true,
+        schemaDoc: true,
+        dataEmissao: true,
+        createdAt: true
+      },
+      orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
+      take: this.nightlyEventSyncCandidateWindow
+    });
+
+    const groups = new Map<
+      string,
+      { type: 'nfe' | 'cte'; clienteId: string; estabelecimentoId: string; documentoIds: string[] }
+    >();
+
+    for (const document of documents) {
+      const type = this.isCteDocumentForNightlyEventSync(document) ? 'cte' : 'nfe';
+      const key = `${type}:${document.clienteId}:${document.estabelecimentoId}`;
+      const group = groups.get(key) ?? {
+        type,
+        clienteId: document.clienteId,
+        estabelecimentoId: document.estabelecimentoId,
+        documentoIds: []
+      };
+
+      if (group.documentoIds.length < this.nightlyEventSyncPerEstablishmentLimit) {
+        group.documentoIds.push(document.id);
+      }
+      groups.set(key, group);
+    }
+
+    let groupsProcessed = 0;
+    let failures = 0;
+
+    for (const group of groups.values()) {
+      try {
+        if (group.type === 'cte') {
+          await this.cteService.sincronizarEventos({
+            clienteId: group.clienteId,
+            documentoIds: group.documentoIds,
+            somenteSemEventos: false,
+            limit: group.documentoIds.length
+          });
+        } else {
+          await this.nfeService.sincronizarEventos({
+            clienteId: group.clienteId,
+            documentoIds: group.documentoIds,
+            somenteSemEventos: false,
+            limit: group.documentoIds.length
+          });
+        }
+        groupsProcessed += 1;
+      } catch (error) {
+        failures += 1;
+        this.logger.warn(
+          `Busca noturna de eventos: falha ao consultar ${group.type.toUpperCase()} do estabelecimento ${group.estabelecimentoId}: ${this.toErrorMessage(error)}`
+        );
+      }
+    }
+
+    this.logger.log(
+      `Busca noturna de eventos: documentos_candidatos=${documents.length}, grupos_processados=${groupsProcessed}, falhas=${failures}, limite_idade_dias=${this.autoEventSyncMaxDocumentAgeDays}`
+    );
+  }
+
+  private isCteDocumentForNightlyEventSync(document: { modelo: string | null; schemaDoc: string | null }): boolean {
+    return (
+      document.modelo === '57' ||
+      ['CTe', 'cteProc', 'resCTe', 'eventoCTe', 'procEventoCTe'].some((prefix) =>
+        String(document.schemaDoc ?? '').startsWith(prefix)
+      )
+    );
   }
 
   private buildActivationMessage(modoSync: SyncMode, origem: 'manual' | 'noturna'): string {
@@ -1495,11 +1613,13 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       id: string;
       status: string | null;
       dataCancelamento: Date | null;
+      dataEmissao: Date | null;
       createdAt: Date;
       updatedAt: Date;
       eventos: Array<{ tipoEvento: string | null; descricao: string | null; dataEvento: Date | null }>;
     }>
   > {
+    const cutoff = this.resolveAutomaticEventSyncDocumentCutoff(now);
     const docs = await this.prisma.nfseDocumento.findMany({
       where: {
         clienteId: control.clienteId,
@@ -1507,12 +1627,26 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         ambiente: control.ambiente,
         xmlPath: {
           not: null
-        }
+        },
+        OR: [
+          {
+            dataEmissao: {
+              gte: cutoff
+            }
+          },
+          {
+            dataEmissao: null,
+            createdAt: {
+              gte: cutoff
+            }
+          }
+        ]
       },
       select: {
         id: true,
         status: true,
         dataCancelamento: true,
+        dataEmissao: true,
         createdAt: true,
         updatedAt: true,
         eventos: {
@@ -1537,6 +1671,12 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         return leftHasEvents - rightHasEvents || left.updatedAt.getTime() - right.updatedAt.getTime();
       })
       .slice(0, this.autoEventSyncPerControlLimit);
+  }
+
+  private resolveAutomaticEventSyncDocumentCutoff(now: Date): Date {
+    const cutoff = new Date(now);
+    cutoff.setUTCDate(cutoff.getUTCDate() - this.autoEventSyncMaxDocumentAgeDays);
+    return cutoff;
   }
 
   private hasDocumentoCancelamento(doc: {
