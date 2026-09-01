@@ -94,6 +94,11 @@ npm run prisma:deploy
 - O `CteConsultaV4` informa o cancelamento homologado com `cStat 101`, mas alguns retornos nao incluem o XML `procEventoCTe`.
 - Nessa situacao a auditoria da busca de eventos mostra `Cancelado`, atualiza a situacao armazenada do CT-e e esclarece que nenhum XML de evento foi retornado. O sistema nao cria XML de cancelamento artificialmente.
 
+## Numero do CT-e diverge da chave de acesso
+
+- A chave de acesso do CT-e contem a serie (posicoes 23-25) e o numero (posicoes 26-34). Ela e a fonte de identificacao usada pelo sistema.
+- Se um registro legado exibir outro numero para a mesma chave, a listagem passa a apresentar os dados codificados na chave. Na proxima busca manual de eventos, o numero e a serie armazenados tambem sao corrigidos antes da consulta ao autorizador.
+
 ## Erro de escopo (`clienteId`)
 
 - Em endpoints por `id` de NFS-e e logs (`/nfse/:id...`, `/sync/logs`), `clienteId` e obrigatorio.

@@ -22,6 +22,7 @@ describe('CteService', () => {
       groupBy: jest.fn(),
       findMany: jest.fn(),
       findUnique: jest.fn(),
+      update: jest.fn(),
       upsert: jest.fn()
     }
   };
@@ -69,6 +70,7 @@ describe('CteService', () => {
     ]);
     prisma.nfeDocumento.findMany.mockResolvedValue([]);
     prisma.nfeDocumento.findUnique.mockResolvedValue(null);
+    prisma.nfeDocumento.update.mockResolvedValue({ id: 'doc-1' });
     prisma.nfeDocumento.upsert.mockResolvedValue({ id: 'doc-1' });
     nfeService.sincronizarEventosDocumentos.mockResolvedValue({
       documentosProcessados: 0,
@@ -346,6 +348,38 @@ describe('CteService', () => {
     expect(result.numeroNfe).toBe('31969');
     expect(result.valorTotal).toBe('1450.75');
     expect(result.serie).toBe('1');
+  });
+
+  it('prioriza numero e serie codificados na chave quando metadados legados estiverem inconsistentes', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-chave-inconsistente',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '42260836017714000150570030000019651265948215',
+        numeroNfe: '607',
+        serie: '3',
+        modelo: '57',
+        valorTotal: new Prisma.Decimal('7700.00'),
+        schemaDoc: 'cteProc_v4.00',
+        dataEmissao: new Date('2026-08-07T13:33:29.000Z'),
+        dataAutorizacao: new Date('2026-08-07T13:33:29.000Z'),
+        xmlCompletoPath: 'nfe/producao/36017714000150/2026/08/xml/cte.xml',
+        xmlResumoPath: null,
+        eventos: []
+      }
+    ]);
+
+    const response = await service.findAll({ clienteId: 'cliente-1' });
+
+    expect(response.items[0]).toEqual(
+      expect.objectContaining({
+        numeroNfe: '1965',
+        serie: '3'
+      })
+    );
+    expect(storage.getObject).not.toHaveBeenCalled();
   });
 
   it('retorna XML com metadados de download', async () => {
@@ -810,6 +844,56 @@ describe('CteService', () => {
             'Cancelamento homologado identificado pelo autorizador (cStat 101). O XML do evento nao foi retornado; a situacao do CT-e foi atualizada.'
         }
       ]
+    });
+  });
+
+  it('corrige numero e serie locais pela chave antes de consultar eventos', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        chaveAcesso: '42260836017714000150570030000019651265948215',
+        numeroNfe: '607',
+        serie: '3',
+        ambiente: NfeAmbiente.producao,
+        origem: 'distribuicao_nsu',
+        eventos: []
+      }
+    ]);
+    (cteConsultaClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '100',
+      xMotivo: 'Autorizado o uso do CT-e',
+      documents: [
+        {
+          schema: 'retConsSitCTe_v4.00',
+          chaveAcesso: '42260836017714000150570030000019651265948215',
+          xml: '<retConsSitCTe xmlns="http://www.portalfiscal.inf.br/cte"><cStat>100</cStat><chCTe>42260836017714000150570030000019651265948215</chCTe></retConsSitCTe>'
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+
+    expect(prisma.nfeDocumento.update).toHaveBeenCalledWith({
+      where: { id: 'doc-1' },
+      data: expect.objectContaining({
+        numeroNfe: '1965',
+        serie: '3',
+        modelo: '57'
+      })
+    });
+    expect(result.detalhes[0]).toMatchObject({
+      numeroDocumento: '1965',
+      status: 'sem_eventos',
+      mensagem: 'Autorizado o uso do CT-e'
     });
   });
 

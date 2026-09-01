@@ -368,6 +368,7 @@ Observacoes:
 - `POST /nfe/sync/consultar-chave` consulta uma NF-e especifica via `consChNFe`, com opcao de persistir o retorno.
 - `POST /cte/consultar-chave` consulta um CT-e especifico via `CteConsultaV4`, persiste o resumo/XML retornado e tenta aproveitar eventos quando o autorizador devolver `procEventoCTe`.
 - `POST /cte/eventos/sincronizar` reconsulta CT-es ja armazenados por chave de acesso para tentar importar eventos vinculados no mesmo storage compartilhado. Quando o autorizador retornar `cStat 101` sem enviar o XML `procEventoCTe`, a auditoria informa `Cancelado` e atualiza a situacao do CT-e, sem fabricar um evento/XML inexistente.
+- A identificacao exibida para CT-e usa a serie e o numero codificados na chave de acesso. A sincronizacao manual corrige esses dois campos se um registro legado estiver associado a metadados divergentes.
 - A deduplicacao de NF-e tambem ocorre por `ambiente + chave_acesso`.
 - `POST /nfe/importar-dominio` consulta a base da Dominio via ODBC, relaciona `bethadba.geempre.cgce_emp` com `cliente_estabelecimentos.cnpj` e reaproveita o mesmo pipeline de persistencia/deduplicacao do endpoint manual. O exportador prioriza `bethadba.EFATENDIMENTO_NFE_XML_V2` e usa `bethadba.EFATENDIMENTO_NFE_XML` como fallback quando necessario.
 - `POST /nfe/importar-dominio` tambem aceita `catalogoIds` para reimportacao pontual de XMLs ja localizados pela Dominio.

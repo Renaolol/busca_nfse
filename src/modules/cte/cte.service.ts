@@ -294,8 +294,9 @@ export class CteService {
     let falhas = 0;
 
     for (const document of documents) {
-      const numeroDocumento = document.numeroNfe ?? null;
       const modelo = this.extractModeloFromChave(document.chaveAcesso);
+      const identificacaoChave = this.extractCteIdentificationFromChave(document.chaveAcesso);
+      const numeroDocumento = identificacaoChave?.numeroCte ?? document.numeroNfe ?? null;
 
       try {
         if (modelo !== '57') {
@@ -311,6 +312,8 @@ export class CteService {
           });
           continue;
         }
+
+        await this.reconcileCteIdentificationWithAccessKey(document, identificacaoChave);
 
         const establishment = await this.getEstablishmentOrThrow(document.estabelecimentoId, document.clienteId);
         const certificate = await this.findActiveCertificateOrThrow(document.clienteId, document.estabelecimentoId, establishment.cnpj);
@@ -665,6 +668,7 @@ export class CteService {
     const fallbackDataEmissao = this.parseExternalDate(params.fallbackDataEmissao);
     const dataEmissao = parsed.dataEmissao ?? existing?.dataEmissao ?? fallbackDataEmissao;
     const dataAutorizacao = parsed.dataAutorizacao ?? existing?.dataAutorizacao;
+    const identificacaoChave = this.extractCteIdentificationFromChave(chaveAcesso);
     const dataReferencia = dataEmissao ?? dataAutorizacao ?? new Date();
     const year = dataReferencia.getUTCFullYear();
     const month = String(dataReferencia.getUTCMonth() + 1).padStart(2, '0');
@@ -678,8 +682,8 @@ export class CteService {
     const updateData: Prisma.NfeDocumentoUncheckedUpdateInput = {
       clienteId: params.clienteId,
       estabelecimentoId: params.estabelecimentoId,
-      numeroNfe: parsed.numeroCte ?? existing?.numeroNfe,
-      serie: parsed.serie ?? existing?.serie,
+      numeroNfe: parsed.numeroCte ?? identificacaoChave?.numeroCte ?? existing?.numeroNfe,
+      serie: parsed.serie ?? identificacaoChave?.serie ?? existing?.serie,
       modelo: parsed.modelo ?? existing?.modelo ?? '57',
       dataEmissao,
       dataAutorizacao,
@@ -711,8 +715,8 @@ export class CteService {
       estabelecimentoId: params.estabelecimentoId,
       ambiente: params.ambiente,
       chaveAcesso,
-      numeroNfe: parsed.numeroCte,
-      serie: parsed.serie,
+      numeroNfe: parsed.numeroCte ?? identificacaoChave?.numeroCte,
+      serie: parsed.serie ?? identificacaoChave?.serie,
       modelo: parsed.modelo ?? '57',
       dataEmissao,
       dataAutorizacao,
@@ -1055,13 +1059,30 @@ export class CteService {
     xmlCompletoPath?: string | null;
     xmlResumoPath?: string | null;
   }>(document: T): Promise<T> {
-    if (!this.needsXmlEnrichment(document)) {
+    const identificacaoChave = this.extractCteIdentificationFromChave(document.chaveAcesso);
+    const identificacaoInconsistente =
+      Boolean(identificacaoChave) &&
+      (this.normalizeCteNumero(document.numeroNfe) !== identificacaoChave?.numeroCte ||
+        this.normalizeCteNumero(document.serie) !== identificacaoChave?.serie);
+
+    if (!this.needsXmlEnrichment(document) && !identificacaoInconsistente) {
       return document;
+    }
+
+    const documentWithCanonicalIdentification = {
+      ...document,
+      numeroNfe: identificacaoChave?.numeroCte ?? document.numeroNfe ?? null,
+      serie: identificacaoChave?.serie ?? document.serie ?? null,
+      modelo: identificacaoChave ? '57' : document.modelo ?? null
+    } as T;
+
+    if (!this.needsXmlEnrichment(document)) {
+      return documentWithCanonicalIdentification;
     }
 
     const storageKey = document.xmlCompletoPath ?? document.xmlResumoPath;
     if (!storageKey) {
-      return document;
+      return documentWithCanonicalIdentification;
     }
 
     try {
@@ -1070,16 +1091,16 @@ export class CteService {
 
       return {
         ...document,
-        numeroNfe: document.numeroNfe ?? parsed.numeroCte ?? null,
-        serie: document.serie ?? parsed.serie ?? null,
-        modelo: document.modelo ?? parsed.modelo ?? null,
+        numeroNfe: identificacaoChave?.numeroCte ?? document.numeroNfe ?? parsed.numeroCte ?? null,
+        serie: identificacaoChave?.serie ?? document.serie ?? parsed.serie ?? null,
+        modelo: identificacaoChave ? '57' : document.modelo ?? parsed.modelo ?? null,
         dataEmissao: document.dataEmissao ?? parsed.dataEmissao ?? null,
         dataAutorizacao: document.dataAutorizacao ?? parsed.dataAutorizacao ?? null,
         valorTotal: document.valorTotal ?? (parsed.valorTotal as unknown as Prisma.Decimal | null) ?? null,
         schemaDoc: document.schemaDoc ?? parsed.schemaDoc ?? null
       };
     } catch {
-      return document;
+      return documentWithCanonicalIdentification;
     }
   }
 
@@ -1130,6 +1151,51 @@ export class CteService {
     }
 
     return normalized.slice(20, 22);
+  }
+
+  private extractCteIdentificationFromChave(chaveAcesso?: string): { numeroCte: string; serie: string } | undefined {
+    const normalized = this.normalizeChaveAcesso(chaveAcesso);
+    if (!normalized || this.extractModeloFromChave(normalized) !== '57') {
+      return undefined;
+    }
+
+    return {
+      serie: this.normalizeCteNumero(normalized.slice(22, 25)),
+      numeroCte: this.normalizeCteNumero(normalized.slice(25, 34))
+    };
+  }
+
+  private normalizeCteNumero(value?: string | null): string {
+    const digits = String(value ?? '').replace(/\D/g, '');
+    return digits ? digits.replace(/^0+(?=\d)/, '') : '';
+  }
+
+  private async reconcileCteIdentificationWithAccessKey(
+    document: Pick<Prisma.NfeDocumentoGetPayload<Record<string, never>>, 'id' | 'numeroNfe' | 'serie'>,
+    identificacaoChave?: { numeroCte: string; serie: string }
+  ): Promise<void> {
+    if (
+      !identificacaoChave ||
+      (this.normalizeCteNumero(document.numeroNfe) === identificacaoChave.numeroCte &&
+        this.normalizeCteNumero(document.serie) === identificacaoChave.serie)
+    ) {
+      return;
+    }
+
+    await this.prisma.nfeDocumento.update({
+      where: { id: document.id },
+      data: {
+        numeroNfe: identificacaoChave.numeroCte,
+        serie: identificacaoChave.serie,
+        modelo: '57',
+        updatedAt: new Date()
+      }
+    });
+    this.logger.warn(
+      `CT-e ${document.id} corrigido pela chave de acesso: numero ${String(document.numeroNfe ?? '-')}/${String(
+        document.serie ?? '-'
+      )} para ${identificacaoChave.numeroCte}/${identificacaoChave.serie}.`
+    );
   }
 
   private removeEventosRelationFilter(
