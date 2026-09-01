@@ -23454,6 +23454,10 @@ function resolveSyncAuditEventLabel(detail, document) {
     return 'Sem evento';
   }
 
+  if (detail?.status === 'cancelado_sem_evento') {
+    return 'Cancelamento identificado';
+  }
+
   const eventos = Array.isArray(document?.eventos) ? document.eventos : [];
   const labels = [...new Set(eventos.map((evento) => formatEventoResumoLabel(evento)).filter(Boolean))];
   if (labels.length > 0) {
@@ -23471,6 +23475,8 @@ function mapSyncAuditStatusLabel(status) {
       return 'Nao localizado no endpoint';
     case 'sem_eventos':
       return 'Sem evento';
+    case 'cancelado_sem_evento':
+      return 'Cancelado';
     case 'falha_certificado':
       return 'Falha de certificado';
     case 'falha_api':
@@ -23488,6 +23494,8 @@ function resolveSyncAuditStatusTone(status) {
       return 'warning';
     case 'sem_eventos':
       return 'neutral';
+    case 'cancelado_sem_evento':
+      return 'warning';
     case 'falha_certificado':
     case 'falha_api':
       return 'danger';

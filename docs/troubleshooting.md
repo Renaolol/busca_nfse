@@ -89,6 +89,11 @@ npm run prisma:deploy
 - As demais resolucoes de alertas operacionais e de auditoria tambem passaram a ser persistidas em banco via `GET /alertas/resolucoes` e `PUT /alertas/resolucoes/:alertId`, na tabela `alert_resolutions`.
 - `cStat 236` com mensagem sobre `Modelo diferente de 57 ou 67 ou 64` indica que a chave enviada ao fluxo de CT-e nao pertence a CT-e. O backend agora bloqueia essa consulta antes de chamar o autorizador.
 
+## CT-e cancelado aparece sem XML de evento
+
+- O `CteConsultaV4` informa o cancelamento homologado com `cStat 101`, mas alguns retornos nao incluem o XML `procEventoCTe`.
+- Nessa situacao a auditoria da busca de eventos mostra `Cancelado`, atualiza a situacao armazenada do CT-e e esclarece que nenhum XML de evento foi retornado. O sistema nao cria XML de cancelamento artificialmente.
+
 ## Erro de escopo (`clienteId`)
 
 - Em endpoints por `id` de NFS-e e logs (`/nfse/:id...`, `/sync/logs`), `clienteId` e obrigatorio.

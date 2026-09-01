@@ -44,8 +44,8 @@ export class SincronizarCteEventosDetalheDto {
   @ApiPropertyOptional()
   numeroDocumento?: string | null;
 
-  @ApiProperty({ enum: ['sincronizado', 'sem_eventos', 'falha_api', 'falha_certificado'] })
-  status!: 'sincronizado' | 'sem_eventos' | 'falha_api' | 'falha_certificado';
+  @ApiProperty({ enum: ['sincronizado', 'sem_eventos', 'cancelado_sem_evento', 'falha_api', 'falha_certificado'] })
+  status!: 'sincronizado' | 'sem_eventos' | 'cancelado_sem_evento' | 'falha_api' | 'falha_certificado';
 
   @ApiProperty()
   eventosEncontrados!: number;

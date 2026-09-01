@@ -747,6 +747,72 @@ describe('CteService', () => {
     });
   });
 
+  it('identifica e persiste o cancelamento pelo cStat 101 quando o autorizador nao envia procEventoCTe', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        numeroNfe: '31969',
+        ambiente: NfeAmbiente.producao,
+        origem: 'distribuicao_nsu',
+        eventos: []
+      }
+    ]);
+    (cteConsultaClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '101',
+      xMotivo: 'Cancelamento de CT-e homologado',
+      documents: [
+        {
+          schema: 'retConsSitCTe_v4.00',
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          xml: `<?xml version="1.0" encoding="UTF-8"?>
+<retConsSitCTe xmlns="http://www.portalfiscal.inf.br/cte" versao="4.00">
+  <cStat>101</cStat>
+  <xMotivo>Cancelamento de CT-e homologado</xMotivo>
+  <chCTe>42260795849600000135570010000319691243772228</chCTe>
+</retConsSitCTe>`
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-1'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+
+    expect(nfeService.persistEventDocumentFromExternalSource).not.toHaveBeenCalled();
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ status: 'Cancelamento de CT-e homologado' })
+      })
+    );
+    expect(result).toEqual({
+      documentosProcessados: 1,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 0,
+      detalhes: [
+        {
+          documentoId: 'doc-1',
+          chaveAcesso: '42260795849600000135570010000319691243772228',
+          numeroDocumento: '31969',
+          status: 'cancelado_sem_evento',
+          eventosEncontrados: 0,
+          eventosImportados: 0,
+          mensagem:
+            'Cancelamento homologado identificado pelo autorizador (cStat 101). O XML do evento nao foi retornado; a situacao do CT-e foi atualizada.'
+        }
+      ]
+    });
+  });
+
   it('nao consulta o WebService de CT-e para documento salvo com chave de outro modelo', async () => {
     prisma.nfeDocumento.findMany.mockResolvedValue([
       {

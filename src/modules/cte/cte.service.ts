@@ -283,7 +283,7 @@ export class CteService {
       documentoId: string;
       chaveAcesso: string;
       numeroDocumento?: string | null;
-      status: 'sincronizado' | 'sem_eventos' | 'falha_api' | 'falha_certificado';
+      status: 'sincronizado' | 'sem_eventos' | 'cancelado_sem_evento' | 'falha_api' | 'falha_certificado';
       eventosEncontrados: number;
       eventosImportados: number;
       mensagem?: string;
@@ -373,14 +373,38 @@ export class CteService {
           documentosComEventos += 1;
         }
         eventosEncontrados += eventDocuments.length;
+        const cancelamentoSemEvento = eventDocuments.length === 0 && this.isCancelledCteStatus(result.cStat);
+
+        if (cancelamentoSemEvento) {
+          const summaryDocument = result.documents.find((candidate) => candidate.schema === 'retConsSitCTe_v4.00');
+          if (summaryDocument) {
+            await this.persistDocument({
+              clienteId: document.clienteId,
+              estabelecimentoId: document.estabelecimentoId,
+              ambiente: document.ambiente,
+              cnpjConsulta: establishment.cnpj,
+              document: {
+                ...summaryDocument,
+                chaveAcesso: summaryDocument.chaveAcesso || document.chaveAcesso
+              },
+              origem: document.origem ?? NfeDocumentoOrigem.distribuicao_nsu
+            });
+          }
+        }
+
+        const statusSincronizacao =
+          eventDocuments.length > 0 ? 'sincronizado' : cancelamentoSemEvento ? 'cancelado_sem_evento' : 'sem_eventos';
+
         detalhes.push({
           documentoId: document.id,
           chaveAcesso: document.chaveAcesso,
           numeroDocumento,
-          status: eventDocuments.length > 0 ? 'sincronizado' : 'sem_eventos',
+          status: statusSincronizacao,
           eventosEncontrados: eventDocuments.length,
           eventosImportados: eventosImportados - importedBefore,
-          mensagem: result.xMotivo
+          mensagem: cancelamentoSemEvento
+            ? 'Cancelamento homologado identificado pelo autorizador (cStat 101). O XML do evento nao foi retornado; a situacao do CT-e foi atualizada.'
+            : result.xMotivo
         });
       } catch (error) {
         falhas += 1;
@@ -1280,6 +1304,10 @@ export class CteService {
 
   private isSuccessfulConsultaSummaryStatus(cStat?: string): boolean {
     return ['100', '101', '110', '150', '151', '155'].includes(String(cStat || '').trim());
+  }
+
+  private isCancelledCteStatus(cStat?: string): boolean {
+    return String(cStat || '').trim() === '101';
   }
 
   private parseExternalDate(value?: string): Date | undefined {
