@@ -1486,6 +1486,25 @@ function onDocumentClick(event) {
       openNfseRecoverByKeyModal();
       return;
     }
+    case 'nfse-recover-by-key-exception': {
+      const clientId = actionNode.getAttribute('data-client-id') || '';
+      const cnpjConsulta = normalizeDigits(actionNode.getAttribute('data-cnpj-consulta') || '');
+      const ambiente = actionNode.getAttribute('data-ambiente') || 'producao';
+      const numeroNfse = actionNode.getAttribute('data-numero-nfse') || '';
+      const client = findClientById(clientId);
+      if (!clientId || !client || !cnpjConsulta) {
+        pushToast('Nao foi possivel identificar a empresa da excecao para recuperar a NFS-e por chave.', 'error');
+        return;
+      }
+      openNfseRecoverByKeyModalForContext({
+        clientId,
+        client,
+        cnpjConsulta,
+        ambiente,
+        gapPreview: numeroNfse ? [`Excecao de numeracao ${numeroNfse}`] : []
+      });
+      return;
+    }
     case 'nfse-open-numbering-exception': {
       openNfseNumberingExceptionModalForContext(getCurrentNfseGapContext());
       return;
@@ -5356,7 +5375,18 @@ function renderXmlsTableCard(xmls) {
                       : '';
                   const xmlMenuId = `xml:${xml.id}`;
                   const xmlActionsItems = xml.isNumberingException
-                    ? []
+                    ? [
+                        {
+                          label: 'Recuperar por chave',
+                          action: 'nfse-recover-by-key-exception',
+                          attrs: {
+                            'client-id': xml.clientId,
+                            'cnpj-consulta': xml.cnpj,
+                            ambiente: xml.ambiente,
+                            'numero-nfse': xml.numeroNfse
+                          }
+                        }
+                      ]
                     : [
                         { label: 'Visualizar detalhes', action: 'xml-details', attrs: { 'xml-id': xml.id } },
                         {
@@ -5369,7 +5399,7 @@ function renderXmlsTableCard(xmls) {
                         { label: 'Baixar XML', action: 'xml-download', attrs: { 'xml-id': xml.id } },
                         { label: 'Baixar DANFSE', action: 'xml-download-danfse', attrs: { 'xml-id': xml.id } }
                       ];
-                  return `<tr class="${xml.cancelada && !xml.substitui ? 'xml-row-cancelled' : ''}" ${xml.isNumberingException ? '' : `data-row-actions-menu-id="${escapeHtml(xmlMenuId)}"`}>
+                  return `<tr class="${xml.cancelada && !xml.substitui ? 'xml-row-cancelled' : ''}" data-row-actions-menu-id="${escapeHtml(xmlMenuId)}">
                     <td><input type="checkbox" data-action="xml-select" data-xml-id="${escapeHtml(xml.id)}" ${state.selectedXmlIds.has(xml.id) ? 'checked' : ''} ${xml.apiNfseId ? '' : 'disabled'} aria-label="Selecionar NFS-e ${escapeHtml(xml.numeroNfse || '-')}" /></td>
                     <td>${renderNfseNumber(xml)}</td>
                     <td>${escapeHtml(xml.cliente)}</td>
@@ -5382,9 +5412,7 @@ function renderXmlsTableCard(xmls) {
                     <td>${renderXmlStatusBadges(xml)}</td>
                     <td>
                       ${
-                        xml.isNumberingException
-                          ? '<span class="row-sub">Somente informativo</span>'
-                          : renderRowActionsMenu(xmlMenuId, xmlActionsItems)
+                        renderRowActionsMenu(xmlMenuId, xmlActionsItems)
                       }
                     </td>
                   </tr>`;
@@ -10186,7 +10214,7 @@ function renderNfseRecoverByKeyModal() {
               <span>Chaves de acesso</span>
               <textarea name="chaves" rows="8" placeholder="Cole uma chave ou URL do portal por linha." ${submitting ? 'disabled' : ''}>${escapeHtml(state.modal.keyText || '')}</textarea>
             </label>
-            <p class="card-subtitle" style="margin-top:10px;">A API oficial nao lista a chave a partir da numeracao pulada. Aqui o sistema consulta o Emissor Publico usando as chaves informadas.</p>
+            <p class="card-subtitle" style="margin-top:10px;">A API oficial nao lista a chave a partir da numeracao pulada. Inclusive para numeracoes marcadas como excecao, cole a chave aqui para consultar o Emissor Publico.</p>
             ${errorMessage ? `<div class="table-state error" style="margin-top:14px;">${escapeHtml(errorMessage)}</div>` : ''}
             <div class="modal-footer" style="padding:18px 0 0;">
               <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Fechar</button>

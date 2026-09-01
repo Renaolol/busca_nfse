@@ -210,7 +210,7 @@ Para desconsiderar uma numeracao realmente inutilizada ou inexistente nas audito
 - `POST /nfse/numeracao-excecoes`
 - `DELETE /nfse/numeracao-excecoes/:id?clienteId=...`
 
-A excecao remove a numeracao da validacao de lacunas e evita que ela continue aparecendo como XML faltante no painel.
+A excecao remove a numeracao da validacao de lacunas e evita que ela continue aparecendo como XML faltante no painel. Se depois for localizada a chave de acesso, a propria linha da excecao oferece `Recuperar por chave`; a excecao nao bloqueia o download e permanece cadastrada ate ser removida manualmente.
 
 Para desconsiderar um documento ja armazenado na validacao de numeracao sem removelo do acervo, use:
 
