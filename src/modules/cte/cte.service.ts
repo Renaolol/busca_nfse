@@ -313,10 +313,9 @@ export class CteService {
           continue;
         }
 
-        await this.reconcileCteIdentificationWithAccessKey(document, identificacaoChave);
-        await this.recoverSubcontractedCteFromStoredXml(document);
-
         const establishment = await this.getEstablishmentOrThrow(document.estabelecimentoId, document.clienteId);
+        await this.reconcileCteIdentificationWithAccessKey(document, identificacaoChave);
+        await this.recoverSubcontractedCteFromStoredXml(document, establishment.cnpj);
         const certificate = await this.findActiveCertificateOrThrow(document.clienteId, document.estabelecimentoId, establishment.cnpj);
         const result = await this.cteConsultaClient.consultarPorChave({
           chaveAcesso: document.chaveAcesso,
@@ -662,7 +661,7 @@ export class CteService {
     const tipoRelacao =
       parsed.cnpjEmitente && cnpjConsulta && parsed.cnpjEmitente === cnpjConsulta
         ? NfeTipoRelacao.emitida
-        : parsed.cnpjDestinatario && cnpjConsulta && parsed.cnpjDestinatario === cnpjConsulta
+        : cnpjConsulta && (parsed.cnpjDestinatario === cnpjConsulta || parsed.cnpjTomador === cnpjConsulta)
           ? NfeTipoRelacao.recebida
           : existing?.tipoRelacao ?? null;
 
@@ -1202,8 +1201,9 @@ export class CteService {
   private async recoverSubcontractedCteFromStoredXml(
     document: Pick<
       Prisma.NfeDocumentoGetPayload<Record<string, never>>,
-      'id' | 'clienteId' | 'estabelecimentoId' | 'ambiente' | 'chaveAcesso' | 'schemaDoc' | 'xmlCompletoPath' | 'origem'
-    >
+      'id' | 'clienteId' | 'estabelecimentoId' | 'ambiente' | 'chaveAcesso' | 'schemaDoc' | 'xmlCompletoPath' | 'origem' | 'tipoRelacao'
+    >,
+    cnpjConsulta: string
   ): Promise<void> {
     if (!document.xmlCompletoPath) {
       return;
@@ -1213,8 +1213,10 @@ export class CteService {
       const xml = (await this.storage.getObject(document.xmlCompletoPath)).toString('utf8');
       const parsed = this.cteXmlParser.parse(xml);
       const chaveDoXml = this.normalizeChaveAcesso(parsed.chaveAcesso);
+      const deveRecuperarDocumento = chaveDoXml !== document.chaveAcesso;
+      const deveClassificarVinculo = !document.tipoRelacao;
 
-      if (!chaveDoXml || chaveDoXml === document.chaveAcesso || this.extractModeloFromChave(chaveDoXml) !== '57') {
+      if (!chaveDoXml || this.extractModeloFromChave(chaveDoXml) !== '57' || (!deveRecuperarDocumento && !deveClassificarVinculo)) {
         return;
       }
 
@@ -1222,6 +1224,7 @@ export class CteService {
         clienteId: document.clienteId,
         estabelecimentoId: document.estabelecimentoId,
         ambiente: document.ambiente,
+        cnpjConsulta,
         document: {
           schema: parsed.schemaDoc ?? document.schemaDoc ?? 'cteProc_v4.00',
           xml,
@@ -1230,7 +1233,9 @@ export class CteService {
         origem: document.origem ?? NfeDocumentoOrigem.distribuicao_nsu
       });
       this.logger.warn(
-        `CT-e subcontratado recuperado do XML de ${document.id}: chave armazenada ${document.chaveAcesso}, chave do XML ${chaveDoXml}.`
+        deveRecuperarDocumento
+          ? `CT-e subcontratado recuperado do XML de ${document.id}: chave armazenada ${document.chaveAcesso}, chave do XML ${chaveDoXml}.`
+          : `Vinculo do CT-e ${document.id} identificado a partir do tomador informado no XML armazenado.`
       );
     } catch (error) {
       this.logger.warn(

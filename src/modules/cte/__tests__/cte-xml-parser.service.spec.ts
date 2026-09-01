@@ -11,6 +11,7 @@ describe('CteXmlParserService', () => {
         <CTe>
           <infCte Id="CTe${chaveSubcontratado}">
             <ide><mod>57</mod><serie>3</serie><nCT>607</nCT></ide>
+            <toma4><CNPJ>12345678000199</CNPJ><xNome>TOMADOR LTDA</xNome></toma4>
             <infCTeNorm><infCteSub><chCTe>${chavePrincipal}</chCTe></infCteSub></infCTeNorm>
           </infCte>
         </CTe>
@@ -20,7 +21,9 @@ describe('CteXmlParserService', () => {
     expect(parsed).toMatchObject({
       chaveAcesso: chaveSubcontratado,
       numeroCte: '607',
-      serie: '3'
+      serie: '3',
+      cnpjTomador: '12345678000199',
+      razaoSocialTomador: 'TOMADOR LTDA'
     });
   });
 });

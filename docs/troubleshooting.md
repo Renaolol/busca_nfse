@@ -103,6 +103,7 @@ npm run prisma:deploy
 
 - O XML de um CT-e subcontratado pode conter a chave do CT-e principal em `infCteSub/chCTe`. Essa chave e apenas uma referencia; a identidade do documento e o atributo `Id` de `infCte`.
 - O importador prioriza o `Id` de `infCte`. Quando uma associacao antiga tiver sido gravada pela chave referenciada, a proxima busca manual de eventos recupera o CT-e subcontratado como documento proprio, preservando ambos na listagem.
+- O CNPJ do tomador em `toma4` tambem passa a definir o vinculo como `Recebido`; isso evita exibir `Nao identificado` para CT-e subcontratado tomado pelo cliente.
 
 ## Erro de escopo (`clienteId`)
 

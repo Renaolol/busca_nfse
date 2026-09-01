@@ -921,6 +921,7 @@ describe('CteService', () => {
           <CTe>
             <infCte Id="CTe${chaveSubcontratado}">
               <ide><mod>57</mod><serie>3</serie><nCT>607</nCT></ide>
+              <toma4><CNPJ>12345678000199</CNPJ></toma4>
               <infCTeNorm><infCteSub><chCTe>${chavePrincipal}</chCTe></infCteSub></infCTeNorm>
             </infCte>
           </CTe>
@@ -941,7 +942,8 @@ describe('CteService', () => {
         create: expect.objectContaining({
           chaveAcesso: chaveSubcontratado,
           numeroNfe: '607',
-          serie: '3'
+          serie: '3',
+          tipoRelacao: 'recebida'
         })
       })
     );

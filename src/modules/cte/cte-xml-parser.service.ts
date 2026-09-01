@@ -13,6 +13,8 @@ export interface ParsedCte {
   razaoSocialEmitente?: string;
   cnpjDestinatario?: string;
   razaoSocialDestinatario?: string;
+  cnpjTomador?: string;
+  razaoSocialTomador?: string;
   schemaDoc?: string;
 }
 
@@ -36,6 +38,8 @@ export class CteXmlParserService {
       razaoSocialDestinatario:
         this.extractNestedAny(xml, ['dest', 'rem', 'receb'], ['xNome']) ??
         this.extract(xml, ['xNomeDest', 'xNomeRem']),
+      cnpjTomador: this.extractNestedAny(xml, ['toma4'], ['CNPJ', 'CPF']),
+      razaoSocialTomador: this.extractNestedAny(xml, ['toma4'], ['xNome']),
       schemaDoc: this.detectSchemaDoc(xml)
     };
   }

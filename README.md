@@ -370,6 +370,7 @@ Observacoes:
 - `POST /cte/eventos/sincronizar` reconsulta CT-es ja armazenados por chave de acesso para tentar importar eventos vinculados no mesmo storage compartilhado. Quando o autorizador retornar `cStat 101` sem enviar o XML `procEventoCTe`, a auditoria informa `Cancelado` e atualiza a situacao do CT-e, sem fabricar um evento/XML inexistente.
 - A identificacao exibida para CT-e usa a serie e o numero codificados na chave de acesso. A sincronizacao manual corrige esses dois campos se um registro legado estiver associado a metadados divergentes.
 - Em XMLs de subcontratacao, a chave de `infCteSub/chCTe` e tratada somente como referencia ao CT-e principal; o CT-e subcontratado e identificado e persistido pela chave do `infCte`.
+- O CNPJ presente em `toma4` e usado para classificar CT-e subcontratado como `Recebido` quando o estabelecimento do cliente for o tomador.
 - A deduplicacao de NF-e tambem ocorre por `ambiente + chave_acesso`.
 - `POST /nfe/importar-dominio` consulta a base da Dominio via ODBC, relaciona `bethadba.geempre.cgce_emp` com `cliente_estabelecimentos.cnpj` e reaproveita o mesmo pipeline de persistencia/deduplicacao do endpoint manual. O exportador prioriza `bethadba.EFATENDIMENTO_NFE_XML_V2` e usa `bethadba.EFATENDIMENTO_NFE_XML` como fallback quando necessario.
 - `POST /nfe/importar-dominio` tambem aceita `catalogoIds` para reimportacao pontual de XMLs ja localizados pela Dominio.
