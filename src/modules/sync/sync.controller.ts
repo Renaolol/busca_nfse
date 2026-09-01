@@ -11,6 +11,7 @@ import { StartPastNsuRecoveryExecutionDto } from './dto/start-past-nsu-recovery-
 import { UpdateSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
 import {
   SincronizarEventosEmpresasDto,
+  SincronizarEventosEmpresasExecutionDto,
   SincronizarEventosEmpresasResponseDto
 } from './dto/sincronizar-eventos-empresas.dto';
 
@@ -65,6 +66,20 @@ export class SyncController {
   @ApiOkResponse({ type: SincronizarEventosEmpresasResponseDto })
   sincronizarEventosEmpresas(@Body() dto: SincronizarEventosEmpresasDto) {
     return this.syncService.sincronizarEventosEmpresas(dto);
+  }
+
+  @Post('sync/eventos/sincronizar-empresas/execucao')
+  @Roles('admin')
+  @ApiOkResponse({ type: SincronizarEventosEmpresasExecutionDto })
+  iniciarSincronizacaoEventosEmpresas(@Body() dto: SincronizarEventosEmpresasDto) {
+    return this.syncService.startSincronizacaoEventosEmpresasExecution(dto);
+  }
+
+  @Get('sync/eventos/sincronizar-empresas/execucao/:executionId')
+  @Roles('admin')
+  @ApiOkResponse({ type: SincronizarEventosEmpresasExecutionDto })
+  consultarSincronizacaoEventosEmpresas(@Param('executionId') executionId: string) {
+    return this.syncService.getSincronizacaoEventosEmpresasExecution(executionId);
   }
 
   @Post('sync/reprocessar-nsus-passados')

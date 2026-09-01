@@ -63,3 +63,29 @@ export class SincronizarEventosEmpresasResponseDto {
   @ApiProperty({ type: [SincronizarEventosEmpresasDetalheDto] })
   detalhes!: SincronizarEventosEmpresasDetalheDto[];
 }
+
+export class SincronizarEventosEmpresasExecutionDto {
+  @ApiProperty()
+  executionId!: string;
+
+  @ApiProperty({ enum: ['running', 'completed', 'failed'] })
+  status!: 'running' | 'completed' | 'failed';
+
+  @ApiProperty({ description: 'Total de documentos elegiveis para consulta.' })
+  documentosTotal!: number;
+
+  @ApiProperty({ description: 'Documentos cuja consulta de eventos ja foi concluida.' })
+  documentosConsultados!: number;
+
+  @ApiPropertyOptional()
+  currentMessage!: string | null;
+
+  @ApiProperty()
+  startedAt!: string;
+
+  @ApiPropertyOptional()
+  finishedAt!: string | null;
+
+  @ApiPropertyOptional({ type: SincronizarEventosEmpresasResponseDto })
+  result!: SincronizarEventosEmpresasResponseDto | null;
+}

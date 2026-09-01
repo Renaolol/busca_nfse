@@ -10924,6 +10924,10 @@ function renderEventsSyncCompaniesModal() {
   const clientNamesById = new Map(clients.map((client) => [String(client.id), String(client.razaoSocial || client.cnpj || client.id)]));
   const resultDetails = Array.isArray(result?.detalhes) ? result.detalhes : [];
   const hasFailures = Number(result?.falhas || 0) > 0;
+  const execution = state.modal.execution || null;
+  const documentosTotal = Number(execution?.documentosTotal || 0);
+  const documentosConsultados = Math.min(Number(execution?.documentosConsultados || 0), documentosTotal);
+  const progressPercent = documentosTotal ? Math.round((documentosConsultados / documentosTotal) * 100) : 0;
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -11036,7 +11040,13 @@ function renderEventsSyncCompaniesModal() {
                     <p class="events-sync-result-eyebrow">Busca em andamento</p>
                     <h4>Consultando eventos</h4>
                     <p>Estamos buscando eventos de NF-e e CT-e para ${escapeHtml(state.modal.requestedCompaniesLabel || 'as empresas selecionadas')}.</p>
-                    <div class="events-sync-progress-status">Aguarde. A busca pode levar alguns minutos, conforme a quantidade de documentos.</div>
+                    <div class="events-sync-progress-counts">
+                      <strong>${documentosConsultados}</strong><span>consultados de</span><strong>${documentosTotal}</strong><span>documentos</span>
+                    </div>
+                    <div class="events-sync-progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="${documentosTotal}" aria-valuenow="${documentosConsultados}">
+                      <span style="width:${progressPercent}%;"></span>
+                    </div>
+                    <div class="events-sync-progress-status">${escapeHtml(String(execution?.currentMessage || (documentosTotal ? 'Preparando as consultas...' : 'Calculando o total de documentos...')))}</div>
                   </div>
                 </div>
               `
@@ -23064,25 +23074,12 @@ async function submitEventsSyncCompaniesForm(form) {
   render();
 
   try {
-    const result = await apiRequest('/sync/eventos/sincronizar-empresas', {
+    const execution = await apiRequest('/sync/eventos/sincronizar-empresas/execucao', {
       method: 'POST',
       body: todasEmpresas ? {} : { clienteIds },
-      timeoutMs: 30 * 60 * 1000
+      timeoutMs: 30000
     });
-
-    state.modal = {
-      ...state.modal,
-      submitting: false,
-      result,
-      errorMessage: ''
-    };
-    render();
-    await refreshNfeSearchAfterEventsSync();
-    await refreshCteSearchAfterEventsSync();
-    pushToast(
-      `Busca de eventos concluida: ${Number(result?.eventosImportados || 0)} evento(s) importado(s), ${Number(result?.falhas || 0)} falha(s).`,
-      Number(result?.falhas || 0) ? 'error' : 'success'
-    );
+    await monitorEventsSyncCompaniesExecution(execution);
   } catch (error) {
     state.modal = {
       ...state.modal,
@@ -23090,6 +23087,44 @@ async function submitEventsSyncCompaniesForm(form) {
       errorMessage: toErrorMessage(error)
     };
     render();
+  }
+}
+
+async function monitorEventsSyncCompaniesExecution(initialExecution) {
+  let execution = initialExecution;
+
+  while (state.modal?.kind === 'events-sync-companies') {
+    const running = execution?.status === 'running';
+    const completed = execution?.status === 'completed';
+    const failed = execution?.status === 'failed';
+    const result = completed ? execution?.result || null : null;
+
+    state.modal = {
+      ...state.modal,
+      submitting: running,
+      execution,
+      result,
+      errorMessage: failed ? String(execution?.currentMessage || 'A busca de eventos falhou.') : ''
+    };
+    render();
+
+    if (!running) {
+      if (completed) {
+        await refreshNfeSearchAfterEventsSync();
+        await refreshCteSearchAfterEventsSync();
+        pushToast(
+          `Busca de eventos concluida: ${Number(result?.eventosImportados || 0)} evento(s) importado(s), ${Number(result?.falhas || 0)} falha(s).`,
+          Number(result?.falhas || 0) ? 'error' : 'success'
+        );
+      }
+      return;
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+    execution = await apiRequest(`/sync/eventos/sincronizar-empresas/execucao/${encodeURIComponent(String(execution.executionId || ''))}`, {
+      timeoutMs: 30000,
+      sessionActivity: 'passive'
+    });
   }
 }
 

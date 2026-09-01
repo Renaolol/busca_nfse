@@ -55,6 +55,7 @@ describe('SyncService', () => {
       updateMany: jest.fn()
     },
     nfeDocumento: {
+      count: jest.fn(),
       findMany: jest.fn()
     }
   };
@@ -1941,6 +1942,51 @@ describe('SyncService', () => {
       eventosEncontrados: 2,
       eventosImportados: 2,
       falhas: 0
+    });
+  });
+
+  it('informa o total e o progresso da execucao de busca manual de eventos', async () => {
+    prisma.nfeDocumento.count.mockResolvedValue(2);
+    prisma.nfeDocumento.findMany
+      .mockResolvedValueOnce([
+        { id: 'nfe-1', clienteId: 'cliente-1', modelo: '55', schemaDoc: 'procNFe_v4.00' },
+        { id: 'cte-1', clienteId: 'cliente-1', modelo: '57', schemaDoc: 'cteProc_v4.00' }
+      ])
+      .mockResolvedValueOnce([]);
+    nfeService.sincronizarEventos.mockResolvedValueOnce({
+      documentosProcessados: 1,
+      documentosComEventos: 1,
+      eventosEncontrados: 1,
+      eventosImportados: 1,
+      falhas: 0
+    });
+    cteService.sincronizarEventos.mockResolvedValueOnce({
+      documentosProcessados: 1,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 0
+    });
+
+    const started = await service.startSincronizacaoEventosEmpresasExecution({ clienteIds: ['cliente-1'] });
+
+    expect(started).toMatchObject({
+      status: 'running',
+      documentosTotal: 2,
+      documentosConsultados: 0
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const completed = service.getSincronizacaoEventosEmpresasExecution(started.executionId);
+
+    expect(completed).toMatchObject({
+      status: 'completed',
+      documentosTotal: 2,
+      documentosConsultados: 2,
+      result: {
+        documentosProcessados: 2,
+        eventosImportados: 1
+      }
     });
   });
 

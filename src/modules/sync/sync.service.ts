@@ -31,7 +31,10 @@ import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
 import { StartSyncDto } from './dto/start-sync.dto';
 import { ReprocessPastNsusDto } from './dto/reprocess-past-nsus.dto';
 import { StartPastNsuRecoveryExecutionDto } from './dto/start-past-nsu-recovery-execution.dto';
-import { SincronizarEventosEmpresasDto } from './dto/sincronizar-eventos-empresas.dto';
+import {
+  SincronizarEventosEmpresasDto,
+  SincronizarEventosEmpresasResponseDto
+} from './dto/sincronizar-eventos-empresas.dto';
 
 type ReprocessPastNsusDetail = {
   controleId: string;
@@ -100,6 +103,24 @@ type PastNsuRecoveryExecutionState = {
   currentMessage: string | null;
   summary: ReprocessPastNsusResult;
   rows: PastNsuRecoveryExecutionRow[];
+};
+
+type SincronizacaoEventosEmpresasProgress = {
+  documentosConsultados: number;
+  currentMessage: string;
+  result: SincronizarEventosEmpresasResponseDto;
+};
+
+type SincronizacaoEventosEmpresasExecutionState = {
+  executionId: string;
+  requestSignature: string;
+  status: 'running' | 'completed' | 'failed';
+  documentosTotal: number;
+  documentosConsultados: number;
+  currentMessage: string | null;
+  startedAt: string;
+  finishedAt: string | null;
+  result: SincronizarEventosEmpresasResponseDto | null;
 };
 
 type NormalizedGapAuditRange = {
@@ -212,6 +233,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     6 * 60 * 60 * 1000
   );
   private readonly pastNsuRecoveryExecutions = new Map<string, PastNsuRecoveryExecutionState>();
+  private readonly sincronizacaoEventosEmpresasExecutions = new Map<string, SincronizacaoEventosEmpresasExecutionState>();
   private readonly apiRetryDelayMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_DELAY_MS', 120000);
   private readonly dailySyncIntervalMs = this.parsePositiveNumberEnv('SYNC_DAILY_INTERVAL_MS', 24 * 60 * 60 * 1000);
   private readonly dailySyncMaxNsuPerRun = this.parsePositiveNumberEnv('SYNC_DAILY_MAX_NSU_PER_RUN', 10);
@@ -1191,7 +1213,54 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     return this.schedulerStatus();
   }
 
-  async sincronizarEventosEmpresas(dto: SincronizarEventosEmpresasDto) {
+  async startSincronizacaoEventosEmpresasExecution(dto: SincronizarEventosEmpresasDto) {
+    const clienteIds = [...new Set((dto.clienteIds ?? []).map((id) => id.trim()).filter(Boolean))];
+    const requestSignature = clienteIds.length ? [...clienteIds].sort().join('|') : 'todas';
+    const existingExecution = [...this.sincronizacaoEventosEmpresasExecutions.values()].find(
+      (execution) => execution.requestSignature === requestSignature && execution.status === 'running'
+    );
+    if (existingExecution) {
+      return this.cloneSincronizacaoEventosEmpresasExecution(existingExecution);
+    }
+
+    const cutoff = this.resolveAutomaticEventSyncDocumentCutoff(new Date());
+    const where = {
+      ...(clienteIds.length ? { clienteId: { in: clienteIds } } : {}),
+      OR: [{ dataEmissao: { gte: cutoff } }, { dataEmissao: null, createdAt: { gte: cutoff } }]
+    };
+    const documentosTotal = await this.prisma.nfeDocumento.count({ where });
+    const execution: SincronizacaoEventosEmpresasExecutionState = {
+      executionId: randomUUID(),
+      requestSignature,
+      status: documentosTotal > 0 ? 'running' : 'completed',
+      documentosTotal,
+      documentosConsultados: 0,
+      currentMessage: documentosTotal > 0 ? `Preparando consulta de ${documentosTotal} documento(s).` : 'Nenhum documento elegivel foi encontrado.',
+      startedAt: new Date().toISOString(),
+      finishedAt: documentosTotal > 0 ? null : new Date().toISOString(),
+      result: documentosTotal > 0 ? null : this.createEmptySincronizacaoEventosEmpresasResult()
+    };
+    this.sincronizacaoEventosEmpresasExecutions.set(execution.executionId, execution);
+
+    if (documentosTotal > 0) {
+      void this.runSincronizacaoEventosEmpresasExecution(execution.executionId, { clienteIds });
+    }
+
+    return this.cloneSincronizacaoEventosEmpresasExecution(execution);
+  }
+
+  getSincronizacaoEventosEmpresasExecution(executionId: string) {
+    const execution = this.sincronizacaoEventosEmpresasExecutions.get(executionId);
+    if (!execution) {
+      throw new NotFoundException('Execucao de busca de eventos nao encontrada');
+    }
+    return this.cloneSincronizacaoEventosEmpresasExecution(execution);
+  }
+
+  async sincronizarEventosEmpresas(
+    dto: SincronizarEventosEmpresasDto,
+    onProgress?: (progress: SincronizacaoEventosEmpresasProgress) => void
+  ): Promise<SincronizarEventosEmpresasResponseDto> {
     const clienteIds = [...new Set((dto.clienteIds ?? []).map((id) => id.trim()).filter(Boolean))];
     const cutoff = this.resolveAutomaticEventSyncDocumentCutoff(new Date());
     const detalhes: Array<{
@@ -1210,7 +1279,19 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     let eventosEncontrados = 0;
     let eventosImportados = 0;
     let falhas = 0;
+    let documentosConsultados = 0;
     let cursorId: string | undefined;
+    const buildResult = (): SincronizarEventosEmpresasResponseDto => ({
+      limiteDias: this.autoEventSyncMaxDocumentAgeDays,
+      empresasProcessadas: empresasProcessadas.size,
+      documentosSelecionados,
+      documentosProcessados,
+      documentosComEventos,
+      eventosEncontrados,
+      eventosImportados,
+      falhas,
+      detalhes
+    });
 
     do {
       const documents = await this.prisma.nfeDocumento.findMany({
@@ -1288,19 +1369,80 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             mensagem: this.toErrorMessage(error)
           });
         }
+
+        documentosConsultados += group.documentoIds.length;
+        onProgress?.({
+          documentosConsultados,
+          currentMessage: `Consultados ${documentosConsultados} de ${documentosSelecionados} documento(s).`,
+          result: buildResult()
+        });
       }
     } while (cursorId);
 
+    return buildResult();
+  }
+
+  private async runSincronizacaoEventosEmpresasExecution(
+    executionId: string,
+    dto: SincronizarEventosEmpresasDto
+  ): Promise<void> {
+    const execution = this.sincronizacaoEventosEmpresasExecutions.get(executionId);
+    if (!execution) {
+      return;
+    }
+
+    try {
+      const result = await this.sincronizarEventosEmpresas(dto, (progress) => {
+        const currentExecution = this.sincronizacaoEventosEmpresasExecutions.get(executionId);
+        if (!currentExecution || currentExecution.status !== 'running') {
+          return;
+        }
+        currentExecution.documentosConsultados = Math.min(progress.documentosConsultados, currentExecution.documentosTotal);
+        currentExecution.currentMessage = `Consultados ${currentExecution.documentosConsultados} de ${currentExecution.documentosTotal} documento(s).`;
+        currentExecution.result = this.cloneSincronizacaoEventosEmpresasResult(progress.result);
+      });
+      execution.documentosConsultados = execution.documentosTotal;
+      execution.currentMessage = `Consulta concluida: ${execution.documentosConsultados} de ${execution.documentosTotal} documento(s).`;
+      execution.result = this.cloneSincronizacaoEventosEmpresasResult(result);
+      execution.status = 'completed';
+      execution.finishedAt = new Date().toISOString();
+    } catch (error) {
+      execution.status = 'failed';
+      execution.finishedAt = new Date().toISOString();
+      execution.currentMessage = this.toErrorMessage(error);
+      execution.result = execution.result ?? this.createEmptySincronizacaoEventosEmpresasResult();
+    }
+  }
+
+  private createEmptySincronizacaoEventosEmpresasResult(): SincronizarEventosEmpresasResponseDto {
     return {
       limiteDias: this.autoEventSyncMaxDocumentAgeDays,
-      empresasProcessadas: empresasProcessadas.size,
-      documentosSelecionados,
-      documentosProcessados,
-      documentosComEventos,
-      eventosEncontrados,
-      eventosImportados,
-      falhas,
-      detalhes
+      empresasProcessadas: 0,
+      documentosSelecionados: 0,
+      documentosProcessados: 0,
+      documentosComEventos: 0,
+      eventosEncontrados: 0,
+      eventosImportados: 0,
+      falhas: 0,
+      detalhes: []
+    };
+  }
+
+  private cloneSincronizacaoEventosEmpresasResult(
+    result: SincronizarEventosEmpresasResponseDto
+  ): SincronizarEventosEmpresasResponseDto {
+    return {
+      ...result,
+      detalhes: result.detalhes.map((detail) => ({ ...detail }))
+    };
+  }
+
+  private cloneSincronizacaoEventosEmpresasExecution(
+    execution: SincronizacaoEventosEmpresasExecutionState
+  ): SincronizacaoEventosEmpresasExecutionState {
+    return {
+      ...execution,
+      result: execution.result ? this.cloneSincronizacaoEventosEmpresasResult(execution.result) : null
     };
   }
 
