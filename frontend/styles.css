@@ -2406,6 +2406,10 @@ body.xml-reader30-cell-selecting * {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.form-grid.nfse-fiscal-summary-values {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .auth-login-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -3424,6 +3428,10 @@ tbody tr.cert-row-a-vencer:hover {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .form-grid.nfse-fiscal-summary-values {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .compare-span-2,
   .compare-span-3,
   .compare-span-4 {
@@ -3488,7 +3496,8 @@ tbody tr.cert-row-a-vencer:hover {
   .scheduler-strip,
   .form-grid,
   .form-grid.two,
-  .form-grid.three {
+  .form-grid.three,
+  .form-grid.nfse-fiscal-summary-values {
     grid-template-columns: 1fr;
   }
 

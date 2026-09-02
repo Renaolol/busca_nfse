@@ -142,6 +142,12 @@ export class NfseLeituraFiscalSummaryDto {
   valorIssRetidoRealTotal?: number;
 
   @ApiPropertyOptional()
+  valorIrrfTotal?: number;
+
+  @ApiPropertyOptional()
+  valorCsllTotal?: number;
+
+  @ApiPropertyOptional()
   totalRetencoesFederais?: number;
 }
 

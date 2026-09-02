@@ -12233,10 +12233,14 @@ function renderNfseFiscalReaderCard() {
         ${detailItem('Valor servico', formatOptionalCurrency(summary.valorServicoTotal))}
         ${detailItem('ISS retido real', formatOptionalCurrency(summary.valorIssRetidoRealTotal))}
       </div>
-      <div class="form-grid four" style="margin-bottom:18px;">
+      <div class="form-grid nfse-fiscal-summary-values" style="margin-bottom:18px;">
         ${detailItem('Valor liquido', formatOptionalCurrency(summary.valorLiquidoTotal))}
         ${detailItem('Valor retido', formatOptionalCurrency(summary.valorRetidoTotal))}
         ${detailItem('ISS total', formatOptionalCurrency(summary.valorIssTotal))}
+        <div>
+          ${detailItem('IRRF', formatOptionalCurrency(summary.valorIrrfTotal))}
+          ${detailItem('CSLL', formatOptionalCurrency(summary.valorCsllTotal))}
+        </div>
         ${detailItem('Retencoes federais', formatOptionalCurrency(summary.totalRetencoesFederais))}
       </div>
     `
@@ -19033,6 +19037,8 @@ function normalizeNfseFiscalReaderResponse(payload) {
         valorRetidoTotal: Number(payload.summary.valorRetidoTotal || 0),
         valorIssTotal: Number(payload.summary.valorIssTotal || 0),
         valorIssRetidoRealTotal: Number(payload.summary.valorIssRetidoRealTotal || 0),
+        valorIrrfTotal: Number(payload.summary.valorIrrfTotal || 0),
+        valorCsllTotal: Number(payload.summary.valorCsllTotal || 0),
         totalRetencoesFederais: Number(payload.summary.totalRetencoesFederais || 0)
       }
     : null;

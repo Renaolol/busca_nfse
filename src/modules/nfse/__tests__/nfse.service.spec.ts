@@ -1481,6 +1481,8 @@ describe('NfseService', () => {
       valorRetidoTotal: 18,
       valorIssTotal: 9,
       valorIssRetidoRealTotal: 9,
+      valorIrrfTotal: 3,
+      valorCsllTotal: 1.5,
       totalRetencoesFederais: 6.5
     });
     expect(result.items).toHaveLength(1);

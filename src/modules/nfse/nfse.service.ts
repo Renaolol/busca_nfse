@@ -297,6 +297,8 @@ export class NfseService {
     let valorRetidoTotal = 0;
     let valorIssTotal = 0;
     let valorIssRetidoRealTotal = 0;
+    let valorIrrfTotal = 0;
+    let valorCsllTotal = 0;
     let totalRetencoesFederais = 0;
 
     for (const doc of uniqueItems) {
@@ -340,6 +342,8 @@ export class NfseService {
             valorRetidoTotal += this.toNumber(leitura.valorTotalRetencoes) ?? 0;
             valorIssTotal += this.toNumber(leitura.valorIss) ?? 0;
             valorIssRetidoRealTotal += this.toNumber(leitura.valorIssRetidoReal) ?? 0;
+            valorIrrfTotal += this.toNumber(leitura.valorIrrf) ?? 0;
+            valorCsllTotal += this.toNumber(leitura.valorCsll) ?? 0;
             totalRetencoesFederais += this.toNumber(leitura.totalRetencoesFederais) ?? 0;
           }
         } else {
@@ -386,6 +390,8 @@ export class NfseService {
         valorRetidoTotal: this.roundTo2(valorRetidoTotal),
         valorIssTotal: this.roundTo2(valorIssTotal),
         valorIssRetidoRealTotal: this.roundTo2(valorIssRetidoRealTotal),
+        valorIrrfTotal: this.roundTo2(valorIrrfTotal),
+        valorCsllTotal: this.roundTo2(valorCsllTotal),
         totalRetencoesFederais: this.roundTo2(totalRetencoesFederais)
       },
       resumoPorMunicipio: {
