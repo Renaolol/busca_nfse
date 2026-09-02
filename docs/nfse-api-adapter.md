@@ -38,4 +38,5 @@ As integracoes oficiais devem ser encapsuladas em adapters separados:
 - O leitor fiscal de NFS-e expõe `POST /nfse/leitura-fiscal/exportar-dominio` para gerar o TXT no layout padrao do LeitorXML.
 - O endpoint reutiliza a leitura fiscal do DANFSE e aplica a logica fiscal corrigida do projeto para ISS e retencoes federais.
 - O campo `produtoPadrao` aceita codigos alfanumericos (por exemplo, `557`, `A` ou `A12`) e e usado nos registros `1030` e `3030`.
+- Informe os acumuladores conforme o tipo de registro: `acumuladorEntradaSemRetencoes` e `acumuladorEntradaComRetencoes` para `Entrada`; `acumuladorServicoSemRetencoes` e `acumuladorServicoComRetencoes` para `Servico`. A nota usa o acumulador **com retencoes** quando houver ISS, IRRF, INSS, CSLL, PIS ou COFINS retido; caso contrario, usa o acumulador **sem retencoes**. Nenhum acumulador e definido automaticamente.
 - Quando a exportacao for enviada com `contas=PorFornecedor`, o backend consulta o banco Dominio via ODBC usando `DOMINIO_ODBC_CONNECTION_STRING` e o script `scripts/dominio_nfse_fornecedor_contas.py`.

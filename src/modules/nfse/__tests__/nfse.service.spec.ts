@@ -2132,7 +2132,9 @@ describe('NfseService', () => {
       codigoEmpresa: 10105,
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
-      produtoPadrao: '557'
+      produtoPadrao: '557',
+      acumuladorEntradaSemRetencoes: '802',
+      acumuladorEntradaComRetencoes: '804'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
@@ -2256,7 +2258,9 @@ describe('NfseService', () => {
       codigoEmpresa: 10105,
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
-      produtoPadrao: '557'
+      produtoPadrao: '557',
+      acumuladorEntradaSemRetencoes: '802',
+      acumuladorEntradaComRetencoes: '804'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
@@ -2355,13 +2359,16 @@ describe('NfseService', () => {
       codigoEmpresa: 10105,
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
-      produtoPadrao: '557'
+      produtoPadrao: '557',
+      acumuladorEntradaSemRetencoes: '802',
+      acumuladorEntradaComRetencoes: '804'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
     expect(prisma.nfseContaContabilConfig.findMany).toHaveBeenCalledWith({
       where: { clienteId: 'cliente-1', ativo: true }
     });
+    expect(content).toContain('|1000|39|06960810000176||802|1933||333|U||');
     // debito (registro 1300) vem da configuracao (999); credito continua o fornecedor padrao (506), pois contas=Padrao nao aciona a busca ODBC.
     expect(content).toContain('|1300|09/07/2026|999|506|180,00|| NFS-E N 333 Prestador Exportacao|||');
   });
@@ -2445,7 +2452,9 @@ describe('NfseService', () => {
       codigoEmpresa: 10105,
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
-      produtoPadrao: '557'
+      produtoPadrao: '557',
+      acumuladorEntradaSemRetencoes: '802',
+      acumuladorEntradaComRetencoes: '804'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
@@ -2530,10 +2539,13 @@ describe('NfseService', () => {
       codigoEmpresa: 10105,
       tipoRegistro: 'Servico',
       contas: 'Padrao',
-      produtoPadrao: 'A'
+      produtoPadrao: 'A',
+      acumuladorServicoSemRetencoes: '901',
+      acumuladorServicoComRetencoes: '902'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
+    expect(content).toContain('|3000|39|11111111000111|SC|901||333|U||');
     expect(content).toContain('|3030|A|1|180,00');
     expect(prisma.nfseContaContabilConfig.findMany).not.toHaveBeenCalled();
   });
@@ -2549,6 +2561,19 @@ describe('NfseService', () => {
         produtoPadrao: '557'
       })
     ).rejects.toThrow('DOMINIO_ODBC_CONNECTION_STRING nao configurada para exportacao Por Fornecedor.');
+  });
+
+  it('exige os acumuladores configurados do tipo de registro para nao aplicar codigos padrao', async () => {
+    await expect(
+      service.exportarLeituraFiscalDominio({
+        clienteId: 'cliente-1',
+        all: true,
+        codigoEmpresa: 10105,
+        tipoRegistro: 'Entrada',
+        contas: 'Padrao',
+        produtoPadrao: '557'
+      })
+    ).rejects.toThrow('Informe os acumuladores de Entrada sem e com retencoes para exportar no layout Dominio.');
   });
 
   it('rejeita busca automatica do codigo empresa Dominio quando cliente nao existe', async () => {

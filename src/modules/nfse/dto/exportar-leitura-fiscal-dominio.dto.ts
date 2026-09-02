@@ -33,4 +33,44 @@ export class ExportarLeituraFiscalDominioDto extends QueryNfseDto {
   @IsString()
   @Matches(/^[A-Za-z0-9]+$/, { message: 'produtoPadrao deve conter apenas letras e numeros.' })
   produtoPadrao?: string;
+
+  @ApiPropertyOptional({
+    description: 'Acumulador Dominio para NFS-e de Entrada sem retencoes',
+    pattern: '^[A-Za-z0-9]+$'
+  })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined || value === null ? value : String(value).trim()))
+  @IsString()
+  @Matches(/^[A-Za-z0-9]+$/, { message: 'acumuladorEntradaSemRetencoes deve conter apenas letras e numeros.' })
+  acumuladorEntradaSemRetencoes?: string;
+
+  @ApiPropertyOptional({
+    description: 'Acumulador Dominio para NFS-e de Entrada com retencoes',
+    pattern: '^[A-Za-z0-9]+$'
+  })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined || value === null ? value : String(value).trim()))
+  @IsString()
+  @Matches(/^[A-Za-z0-9]+$/, { message: 'acumuladorEntradaComRetencoes deve conter apenas letras e numeros.' })
+  acumuladorEntradaComRetencoes?: string;
+
+  @ApiPropertyOptional({
+    description: 'Acumulador Dominio para NFS-e de Servico sem retencoes',
+    pattern: '^[A-Za-z0-9]+$'
+  })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined || value === null ? value : String(value).trim()))
+  @IsString()
+  @Matches(/^[A-Za-z0-9]+$/, { message: 'acumuladorServicoSemRetencoes deve conter apenas letras e numeros.' })
+  acumuladorServicoSemRetencoes?: string;
+
+  @ApiPropertyOptional({
+    description: 'Acumulador Dominio para NFS-e de Servico com retencoes',
+    pattern: '^[A-Za-z0-9]+$'
+  })
+  @IsOptional()
+  @Transform(({ value }) => (value === undefined || value === null ? value : String(value).trim()))
+  @IsString()
+  @Matches(/^[A-Za-z0-9]+$/, { message: 'acumuladorServicoComRetencoes deve conter apenas letras e numeros.' })
+  acumuladorServicoComRetencoes?: string;
 }

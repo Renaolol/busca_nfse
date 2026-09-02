@@ -407,6 +407,10 @@ const state = {
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
       produtoPadrao: '557',
+      acumuladorEntradaSemRetencoes: '',
+      acumuladorEntradaComRetencoes: '',
+      acumuladorServicoSemRetencoes: '',
+      acumuladorServicoComRetencoes: '',
       exporting: false
     },
     columnOrder: [...NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER],
@@ -12287,6 +12291,23 @@ function renderNfseFiscalReaderCard() {
         />
         <span style="color:var(--text-secondary); font-size:12px;">Aceita codigos numericos ou alfanumericos, como A ou A12.</span>
       </label>
+      <label class="field">
+        Acumulador Entrada sem retencoes
+        <input name="acumuladorEntradaSemRetencoes" type="text" inputmode="text" pattern="[A-Za-z0-9]+" title="Use apenas letras e numeros." value="${escapeHtml(String(exportConfig.acumuladorEntradaSemRetencoes || ''))}" placeholder="Informe o acumulador" />
+      </label>
+      <label class="field">
+        Acumulador Entrada com retencoes
+        <input name="acumuladorEntradaComRetencoes" type="text" inputmode="text" pattern="[A-Za-z0-9]+" title="Use apenas letras e numeros." value="${escapeHtml(String(exportConfig.acumuladorEntradaComRetencoes || ''))}" placeholder="Informe o acumulador" />
+      </label>
+      <label class="field">
+        Acumulador Servico sem retencoes
+        <input name="acumuladorServicoSemRetencoes" type="text" inputmode="text" pattern="[A-Za-z0-9]+" title="Use apenas letras e numeros." value="${escapeHtml(String(exportConfig.acumuladorServicoSemRetencoes || ''))}" placeholder="Informe o acumulador" />
+      </label>
+      <label class="field">
+        Acumulador Servico com retencoes
+        <input name="acumuladorServicoComRetencoes" type="text" inputmode="text" pattern="[A-Za-z0-9]+" title="Use apenas letras e numeros." value="${escapeHtml(String(exportConfig.acumuladorServicoComRetencoes || ''))}" placeholder="Informe o acumulador" />
+        <span style="color:var(--text-secondary); font-size:12px;">Preencha os dois acumuladores do tipo de registro selecionado. Os codigos sao definidos na sua base Dominio.</span>
+      </label>
       <div class="stack-actions" style="grid-column:1 / -1; justify-content:flex-start; align-items:flex-end;">
         <button class="btn primary" type="submit" ${exportDisabled ? 'disabled' : ''}>
           ${exportConfig.exporting ? 'Exportando layout Dominio...' : 'Exportar layout Dominio'}
@@ -16644,6 +16665,14 @@ async function submitNfseFiscalDominioExportForm(form) {
   const tipoRegistro = String(data.get('tipoRegistro') || 'Entrada').trim() === 'Servico' ? 'Servico' : 'Entrada';
   const contas = tipoRegistro === 'Entrada' && String(data.get('contas') || '').trim() === 'PorFornecedor' ? 'PorFornecedor' : 'Padrao';
   const produtoPadrao = String(data.get('produtoPadrao') || '557').trim();
+  const acumuladorEntradaSemRetencoes = String(data.get('acumuladorEntradaSemRetencoes') || '').trim();
+  const acumuladorEntradaComRetencoes = String(data.get('acumuladorEntradaComRetencoes') || '').trim();
+  const acumuladorServicoSemRetencoes = String(data.get('acumuladorServicoSemRetencoes') || '').trim();
+  const acumuladorServicoComRetencoes = String(data.get('acumuladorServicoComRetencoes') || '').trim();
+  const acumuladoresDoTipo =
+    tipoRegistro === 'Entrada'
+      ? [acumuladorEntradaSemRetencoes, acumuladorEntradaComRetencoes]
+      : [acumuladorServicoSemRetencoes, acumuladorServicoComRetencoes];
 
   if (!codigoEmpresa || Number(codigoEmpresa) < 0) {
     pushToast('Informe um codigo de empresa Dominio valido.', 'error');
@@ -16655,11 +16684,20 @@ async function submitNfseFiscalDominioExportForm(form) {
     return;
   }
 
+  if (acumuladoresDoTipo.some((acumulador) => !/^[A-Za-z0-9]+$/.test(acumulador))) {
+    pushToast(`Informe os acumuladores de ${tipoRegistro === 'Entrada' ? 'Entrada' : 'Servico'} sem e com retencoes, usando apenas letras e numeros.`, 'error');
+    return;
+  }
+
   state.nfseFiscalReader.exportConfig = {
     codigoEmpresa,
     tipoRegistro,
     contas,
     produtoPadrao,
+    acumuladorEntradaSemRetencoes,
+    acumuladorEntradaComRetencoes,
+    acumuladorServicoSemRetencoes,
+    acumuladorServicoComRetencoes,
     exporting: true
   };
   render();
@@ -16676,7 +16714,11 @@ async function submitNfseFiscalDominioExportForm(form) {
         codigoEmpresa: Number(codigoEmpresa),
         tipoRegistro,
         contas,
-        produtoPadrao
+        produtoPadrao,
+        acumuladorEntradaSemRetencoes: acumuladorEntradaSemRetencoes || undefined,
+        acumuladorEntradaComRetencoes: acumuladorEntradaComRetencoes || undefined,
+        acumuladorServicoSemRetencoes: acumuladorServicoSemRetencoes || undefined,
+        acumuladorServicoComRetencoes: acumuladorServicoComRetencoes || undefined
       },
       timeoutMs: 2 * 60 * 1000
     });
@@ -16695,6 +16737,10 @@ async function submitNfseFiscalDominioExportForm(form) {
       tipoRegistro,
       contas,
       produtoPadrao,
+      acumuladorEntradaSemRetencoes,
+      acumuladorEntradaComRetencoes,
+      acumuladorServicoSemRetencoes,
+      acumuladorServicoComRetencoes,
       exporting: false
     };
     render();

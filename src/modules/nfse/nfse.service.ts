@@ -460,6 +460,8 @@ export class NfseService {
       throw new BadRequestException('DOMINIO_ODBC_CONNECTION_STRING nao configurada para exportacao Por Fornecedor.');
     }
 
+    const acumuladores = this.resolveDominioAcumuladores(dto, tipoRegistro);
+
     const documentos = (await this.findLeituraFiscalDocumentos(dto)).filter((doc) => !this.hasCancelamento(doc));
     const sources: NfseDominioExportSource[] = [];
 
@@ -503,6 +505,7 @@ export class NfseService {
           source,
           tipoRegistro,
           produtoPadrao,
+          acumuladores,
           contaFornecedorByCnpj,
           contaServicoByCodigo
         })
@@ -610,10 +613,11 @@ export class NfseService {
     source: NfseDominioExportSource;
     tipoRegistro: 'Entrada' | 'Servico';
     produtoPadrao: string;
+    acumuladores: { semRetencoes: string; comRetencoes: string };
     contaFornecedorByCnpj: Map<string, string>;
     contaServicoByCodigo: Map<string, string>;
   }): string[] {
-    const { source, tipoRegistro, produtoPadrao, contaFornecedorByCnpj, contaServicoByCodigo } = params;
+    const { source, tipoRegistro, produtoPadrao, acumuladores, contaFornecedorByCnpj, contaServicoByCodigo } = params;
     const data = source.exportData;
     const valorServico = this.roundTo2(data.valorServico ?? 0);
     const valorLiquido = this.roundTo2(data.valorLiquidoNfse ?? 0);
@@ -635,7 +639,7 @@ export class NfseService {
     const nomeDescricao = this.sanitizeDominioText(
       tipoRegistro === 'Servico' ? data.tomadorNome || data.destinatarioNome || data.prestadorNome || '' : data.prestadorNome || ''
     );
-    const acumulador = tipoRegistro === 'Servico' ? '900' : data.retencaoIss === 'Retido' ? '804' : '801';
+    const acumulador = this.hasDominioRetencoes(data) ? acumuladores.comRetencoes : acumuladores.semRetencoes;
     const prestadorUf = this.sanitizeDominioText(data.prestadorUf || '');
     const contaFornecedor =
       params.tipoRegistro === 'Entrada'
@@ -746,6 +750,37 @@ export class NfseService {
     }
 
     return linhas;
+  }
+
+  private resolveDominioAcumuladores(
+    dto: ExportarLeituraFiscalDominioDto,
+    tipoRegistro: 'Entrada' | 'Servico'
+  ): { semRetencoes: string; comRetencoes: string } {
+    const semRetencoes =
+      tipoRegistro === 'Entrada' ? dto.acumuladorEntradaSemRetencoes : dto.acumuladorServicoSemRetencoes;
+    const comRetencoes =
+      tipoRegistro === 'Entrada' ? dto.acumuladorEntradaComRetencoes : dto.acumuladorServicoComRetencoes;
+    const tipoDescricao = tipoRegistro === 'Entrada' ? 'Entrada' : 'Servico';
+
+    if (!semRetencoes || !comRetencoes) {
+      throw new BadRequestException(`Informe os acumuladores de ${tipoDescricao} sem e com retencoes para exportar no layout Dominio.`);
+    }
+
+    return { semRetencoes, comRetencoes };
+  }
+
+  private hasDominioRetencoes(data: NfseDominioExportData): boolean {
+    return (
+      data.retencaoIss === 'Retido' ||
+      data.retencaoFederal === 'Retido' ||
+      (data.valorTotalRetencoes ?? 0) > 0 ||
+      (data.valorIssRetidoReal ?? 0) > 0 ||
+      (data.valorIrrf ?? 0) > 0 ||
+      (data.valorInss ?? 0) > 0 ||
+      (data.valorCsll ?? 0) > 0 ||
+      (data.pisRetido === true && (data.valorPis ?? 0) > 0) ||
+      (data.cofinsRetido === true && (data.valorCofins ?? 0) > 0)
+    );
   }
 
   private resolveDominioHeaderCnpj(
