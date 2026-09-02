@@ -12232,14 +12232,12 @@ function renderNfseFiscalReaderCard() {
         ${detailItem('Sem XML', String(summary.totalDocumentosSemXml || 0))}
         ${detailItem('Valor servico', formatOptionalCurrency(summary.valorServicoTotal))}
         ${detailItem('ISS retido real', formatOptionalCurrency(summary.valorIssRetidoRealTotal))}
-        ${detailItem('Valor liquido', formatOptionalCurrency(summary.valorLiquidoTotal))}
-        ${detailItem('Valor retido', formatOptionalCurrency(summary.valorRetidoTotal))}
         ${detailItem('ISS total', formatOptionalCurrency(summary.valorIssTotal))}
-        <div>
-          ${detailItem('IRRF', formatOptionalCurrency(summary.valorIrrfTotal))}
-          ${detailItem('CSLL', formatOptionalCurrency(summary.valorCsllTotal))}
-        </div>
+        ${detailItem('Valor retido', formatOptionalCurrency(summary.valorRetidoTotal))}
+        ${detailItem('Valor liquido', formatOptionalCurrency(summary.valorLiquidoTotal))}
+        ${detailItem('IRRF', formatOptionalCurrency(summary.valorIrrfTotal))}
         ${detailItem('Retencoes federais', formatOptionalCurrency(summary.totalRetencoesFederais))}
+        ${detailItem('CSLL', formatOptionalCurrency(summary.valorCsllTotal))}
       </div>
     `
     : '';
