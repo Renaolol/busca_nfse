@@ -12225,15 +12225,13 @@ function renderNfseFiscalReaderCard() {
     exportConfig.exporting;
   const summaryCards = summary
     ? `
-      <div class="form-grid six" style="margin-bottom:18px;">
+      <div class="form-grid four" style="margin-bottom:18px;">
         ${detailItem('Filtradas', String(summary.totalDocumentosFiltrados || 0))}
         ${detailItem('Lidas', String(summary.totalDocumentosLidos || 0))}
         ${detailItem('Com erro', String(summary.totalDocumentosComErro || 0))}
         ${detailItem('Sem XML', String(summary.totalDocumentosSemXml || 0))}
         ${detailItem('Valor servico', formatOptionalCurrency(summary.valorServicoTotal))}
         ${detailItem('ISS retido real', formatOptionalCurrency(summary.valorIssRetidoRealTotal))}
-      </div>
-      <div class="form-grid nfse-fiscal-summary-values" style="margin-bottom:18px;">
         ${detailItem('Valor liquido', formatOptionalCurrency(summary.valorLiquidoTotal))}
         ${detailItem('Valor retido', formatOptionalCurrency(summary.valorRetidoTotal))}
         ${detailItem('ISS total', formatOptionalCurrency(summary.valorIssTotal))}
@@ -12256,7 +12254,7 @@ function renderNfseFiscalReaderCard() {
     `
       : '';
   const exportForm = `
-    <form id="nfseFiscalDominioExportForm" class="form-grid nfse-fiscal-summary-values" style="margin:0 0 18px;">
+    <form id="nfseFiscalDominioExportForm" class="form-grid four" style="margin:0 0 18px;">
       <label class="field">
         Codigo empresa Dominio
         <input
