@@ -2132,7 +2132,7 @@ describe('NfseService', () => {
       codigoEmpresa: 10105,
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
-      produtoPadrao: 557
+      produtoPadrao: '557'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
@@ -2256,7 +2256,7 @@ describe('NfseService', () => {
       codigoEmpresa: 10105,
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
-      produtoPadrao: 557
+      produtoPadrao: '557'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
@@ -2355,7 +2355,7 @@ describe('NfseService', () => {
       codigoEmpresa: 10105,
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
-      produtoPadrao: 557
+      produtoPadrao: '557'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
@@ -2445,7 +2445,7 @@ describe('NfseService', () => {
       codigoEmpresa: 10105,
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
-      produtoPadrao: 557
+      produtoPadrao: '557'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
@@ -2524,15 +2524,17 @@ describe('NfseService', () => {
       )
     );
 
-    await service.exportarLeituraFiscalDominio({
+    const result = await service.exportarLeituraFiscalDominio({
       clienteId: 'cliente-1',
       all: true,
       codigoEmpresa: 10105,
       tipoRegistro: 'Servico',
       contas: 'Padrao',
-      produtoPadrao: 557
+      produtoPadrao: 'A'
     });
 
+    const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
+    expect(content).toContain('|3030|A|1|180,00');
     expect(prisma.nfseContaContabilConfig.findMany).not.toHaveBeenCalled();
   });
 
@@ -2544,7 +2546,7 @@ describe('NfseService', () => {
         codigoEmpresa: 10105,
         tipoRegistro: 'Entrada',
         contas: 'PorFornecedor',
-        produtoPadrao: 557
+        produtoPadrao: '557'
       })
     ).rejects.toThrow('DOMINIO_ODBC_CONNECTION_STRING nao configurada para exportacao Por Fornecedor.');
   });

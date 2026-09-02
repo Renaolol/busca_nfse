@@ -447,7 +447,7 @@ export class NfseService {
   async exportarLeituraFiscalDominio(dto: ExportarLeituraFiscalDominioDto) {
     const tipoRegistro = dto.tipoRegistro === 'Servico' ? 'Servico' : 'Entrada';
     const contas = dto.contas === 'PorFornecedor' ? 'PorFornecedor' : 'Padrao';
-    const produtoPadrao = dto.produtoPadrao ?? 557;
+    const produtoPadrao = String(dto.produtoPadrao ?? '557').trim();
 
     if (contas === 'PorFornecedor' && tipoRegistro !== 'Entrada') {
       throw new BadRequestException('O modo Por Fornecedor so pode ser usado na exportacao de Entrada.');
@@ -609,7 +609,7 @@ export class NfseService {
   private buildDominioExportLinesForSource(params: {
     source: NfseDominioExportSource;
     tipoRegistro: 'Entrada' | 'Servico';
-    produtoPadrao: number;
+    produtoPadrao: string;
     contaFornecedorByCnpj: Map<string, string>;
     contaServicoByCodigo: Map<string, string>;
   }): string[] {
@@ -912,7 +912,7 @@ export class NfseService {
     aliquota: number,
     valorIss: number,
     estadoEmitente: string,
-    produtoPadrao: number
+    produtoPadrao: string
   ): string {
     const cfop = estadoEmitente === 'SC' ? '1933' : '2933';
     return `|1030|${produtoPadrao}|1|${this.formatDominioNumber(valorUnitario)}|||1|${dataEmissao}||00|${this.formatDominioNumber(valorUnitario)}||||||||||||||||||||||||${this.formatDominioNumber(aliquota)}|${this.formatDominioNumber(valorIss)}|${cfop}|||||||||||||||||||||||||||||||||03|||||||||||||||||||||||||||||||||||||||||||||||`;
@@ -924,7 +924,7 @@ export class NfseService {
     aliquota: number,
     valorIss: number,
     cfps: string,
-    produtoPadrao: number
+    produtoPadrao: string
   ): string {
     return `|3030|${produtoPadrao}|1|${this.formatDominioNumber(valorUnitario)}|||1|${dataEmissao}||00|${this.formatDominioNumber(valorUnitario)}||||||||||||||||||||||||${this.formatDominioNumber(aliquota)}|${this.formatDominioNumber(valorIss)}|${cfps}|||||||||||||||||||||||||||||||||03|||||||||||||||||||||||||||||||||||||||||||||||`;
   }

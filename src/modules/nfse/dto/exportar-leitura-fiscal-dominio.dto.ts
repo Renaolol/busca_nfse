@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsUUID, Min } from 'class-validator';
+import { Transform, Type } from 'class-transformer';
+import { IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, Min } from 'class-validator';
 import { QueryNfseDto } from './query-nfse.dto';
 
 export class ExportarLeituraFiscalDominioDto extends QueryNfseDto {
@@ -23,10 +23,14 @@ export class ExportarLeituraFiscalDominioDto extends QueryNfseDto {
   @IsIn(['Padrao', 'PorFornecedor'])
   contas?: 'Padrao' | 'PorFornecedor';
 
-  @ApiPropertyOptional({ description: 'Codigo do produto padrao para os registros 1030/3030', default: 557 })
+  @ApiPropertyOptional({
+    description: 'Codigo alfanumerico do produto padrao para os registros 1030/3030',
+    default: '557',
+    pattern: '^[A-Za-z0-9]+$'
+  })
   @IsOptional()
-  @Type(() => Number)
-  @IsInt()
-  @Min(1)
-  produtoPadrao?: number;
+  @Transform(({ value }) => (value === undefined || value === null ? value : String(value).trim()))
+  @IsString()
+  @Matches(/^[A-Za-z0-9]+$/, { message: 'produtoPadrao deve conter apenas letras e numeros.' })
+  produtoPadrao?: string;
 }

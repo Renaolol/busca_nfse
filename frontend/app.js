@@ -12276,7 +12276,16 @@ function renderNfseFiscalReaderCard() {
       </label>
       <label class="field">
         Produto padrao
-        <input name="produtoPadrao" type="number" min="1" step="1" value="${escapeHtml(String(exportConfig.produtoPadrao || '557'))}" required />
+        <input
+          name="produtoPadrao"
+          type="text"
+          inputmode="text"
+          pattern="[A-Za-z0-9]+"
+          title="Use apenas letras e numeros."
+          value="${escapeHtml(String(exportConfig.produtoPadrao || '557'))}"
+          required
+        />
+        <span style="color:var(--text-secondary); font-size:12px;">Aceita codigos numericos ou alfanumericos, como A ou A12.</span>
       </label>
       <div class="stack-actions" style="grid-column:1 / -1; justify-content:flex-start; align-items:flex-end;">
         <button class="btn primary" type="submit" ${exportDisabled ? 'disabled' : ''}>
@@ -16641,8 +16650,8 @@ async function submitNfseFiscalDominioExportForm(form) {
     return;
   }
 
-  if (!produtoPadrao || Number(produtoPadrao) <= 0) {
-    pushToast('Informe um produto padrao valido.', 'error');
+  if (!/^[A-Za-z0-9]+$/.test(produtoPadrao)) {
+    pushToast('Informe um produto padrao com apenas letras e numeros.', 'error');
     return;
   }
 
@@ -16667,7 +16676,7 @@ async function submitNfseFiscalDominioExportForm(form) {
         codigoEmpresa: Number(codigoEmpresa),
         tipoRegistro,
         contas,
-        produtoPadrao: Number(produtoPadrao)
+        produtoPadrao
       },
       timeoutMs: 2 * 60 * 1000
     });
