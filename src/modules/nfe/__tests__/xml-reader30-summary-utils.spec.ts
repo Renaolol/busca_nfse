@@ -32,4 +32,21 @@ describe('xml-reader30-summary-utils', () => {
     expect(isXmlReader30DocumentCancelled(item)).toBe(false);
     expect(shouldIncludeDocumentValueInSum(item)).toBe(true);
   });
+
+  it('nao exclui CT-e autorizado por cancelamento de CT-e complementar no resumo de eventos', () => {
+    const item = {
+      statusFiscal: 'Autorizada',
+      cancelada: false,
+      valor: '58.28',
+      eventosResumo: 'Cancelamento CT-e Complementar Registrado / CT-e Complementar Registrado',
+      raw: {
+        statusFiscal: 'Autorizada',
+        cancelada: false,
+        eventosResumo: 'Cancelamento CT-e Complementar Registrado'
+      }
+    };
+
+    expect(isXmlReader30DocumentCancelled(item)).toBe(false);
+    expect(shouldIncludeDocumentValueInSum(item)).toBe(true);
+  });
 });

@@ -11,21 +11,24 @@ function isXmlReader30DocumentCancelled(item) {
   }
 
   const raw = item.raw && typeof item.raw === 'object' ? item.raw : {};
+  const isMarkedCancelled =
+    item.cancelada === true ||
+    raw.cancelada === true ||
+    normalizeSearchText(item.nfCancelada) === 'sim' ||
+    normalizeSearchText(raw.nfCancelada) === 'sim' ||
+    Boolean(item.dataCancelamento || raw.dataCancelamento);
+  if (isMarkedCancelled) {
+    return true;
+  }
+
   const normalizedStatus = normalizeSearchText(
     [
-      item.cancelada,
-      item.dataCancelamento,
-      item.nfCancelada,
       item.statusFiscal,
       item.statusLabel,
       item.status,
-      item.eventosResumo,
-      raw.cancelada,
-      raw.dataCancelamento,
       raw.statusFiscal,
       raw.statusLabel,
-      raw.status,
-      raw.eventosResumo
+      raw.status
     ]
       .filter(Boolean)
       .join(' ')
