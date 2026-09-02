@@ -93,6 +93,7 @@ npm run prisma:deploy
 
 - O `CteConsultaV4` informa o cancelamento homologado com `cStat 101`, mas alguns retornos nao incluem o XML `procEventoCTe`.
 - Nessa situacao a auditoria da busca de eventos mostra `Cancelado`, atualiza a situacao armazenada do CT-e e esclarece que nenhum XML de evento foi retornado. O sistema nao cria XML de cancelamento artificialmente.
+- A consulta tambem reconcilia o status salvo com o `cStat` oficial: `100` restaura o CT-e para `Autorizada` e `101` o marca como `Cancelada`, inclusive quando ja houver eventos locais. O resumo da consulta nao substitui o XML principal armazenado.
 
 ## Numero do CT-e diverge da chave de acesso
 

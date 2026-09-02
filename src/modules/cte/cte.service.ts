@@ -378,22 +378,11 @@ export class CteService {
         eventosEncontrados += eventDocuments.length;
         const cancelamentoSemEvento = eventDocuments.length === 0 && this.isCancelledCteStatus(result.cStat);
 
-        if (cancelamentoSemEvento) {
-          const summaryDocument = result.documents.find((candidate) => candidate.schema === 'retConsSitCTe_v4.00');
-          if (summaryDocument) {
-            await this.persistDocument({
-              clienteId: document.clienteId,
-              estabelecimentoId: document.estabelecimentoId,
-              ambiente: document.ambiente,
-              cnpjConsulta: establishment.cnpj,
-              document: {
-                ...summaryDocument,
-                chaveAcesso: summaryDocument.chaveAcesso || document.chaveAcesso
-              },
-              origem: document.origem ?? NfeDocumentoOrigem.distribuicao_nsu
-            });
-          }
-        }
+        // A consulta de situacao e a fonte oficial para o estado atual do CT-e.
+        // Reconciliamos o status salvo sem trocar o XML principal pelo resumo da
+        // consulta. Isso tambem corrige estados legados marcados como cancelados
+        // quando o autorizador responde cStat 100, mesmo se houver eventos locais.
+        await this.reconcileStatusFromConsulta(document.id, result.cStat, result.xMotivo);
 
         const statusSincronizacao =
           eventDocuments.length > 0 ? 'sincronizado' : cancelamentoSemEvento ? 'cancelado_sem_evento' : 'sem_eventos';
@@ -1420,6 +1409,28 @@ export class CteService {
 
   private isCancelledCteStatus(cStat?: string): boolean {
     return String(cStat || '').trim() === '101';
+  }
+
+  private async reconcileStatusFromConsulta(documentoId: string, cStat?: string, xMotivo?: string): Promise<void> {
+    const normalizedStatus = String(cStat || '').trim();
+    const status =
+      normalizedStatus === '100'
+        ? 'Autorizada'
+        : normalizedStatus === '101'
+          ? 'Cancelada'
+          : xMotivo?.trim() || normalizedStatus;
+
+    if (!status) {
+      return;
+    }
+
+    await this.prisma.nfeDocumento.update({
+      where: { id: documentoId },
+      data: {
+        status,
+        updatedAt: new Date()
+      }
+    });
   }
 
   private parseExternalDate(value?: string): Date | undefined {

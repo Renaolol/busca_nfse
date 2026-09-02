@@ -761,6 +761,12 @@ describe('CteService', () => {
         })
       })
     );
+    expect(prisma.nfeDocumento.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'doc-1' },
+        data: expect.objectContaining({ status: 'Autorizada' })
+      })
+    );
     expect(result).toEqual({
       documentosProcessados: 1,
       documentosComEventos: 1,
@@ -821,9 +827,10 @@ describe('CteService', () => {
     });
 
     expect(nfeService.persistEventDocumentFromExternalSource).not.toHaveBeenCalled();
-    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
+    expect(prisma.nfeDocumento.update).toHaveBeenCalledWith(
       expect.objectContaining({
-        update: expect.objectContaining({ status: 'Cancelamento de CT-e homologado' })
+        where: { id: 'doc-1' },
+        data: expect.objectContaining({ status: 'Cancelada' })
       })
     );
     expect(result).toEqual({
@@ -845,6 +852,57 @@ describe('CteService', () => {
         }
       ]
     });
+  });
+
+  it('restaura CT-e legado para autorizada quando a consulta oficial retorna cStat 100 sem eventos', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-302',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'est-1',
+        chaveAcesso: '42260865628779000130570020000003021120848577',
+        numeroNfe: '302',
+        ambiente: NfeAmbiente.producao,
+        status: 'Cancelada',
+        origem: 'distribuicao_nsu',
+        eventos: []
+      }
+    ]);
+    (cteConsultaClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '100',
+      xMotivo: 'Autorizado o uso do CT-e',
+      documents: [
+        {
+          schema: 'retConsSitCTe_v4.00',
+          chaveAcesso: '42260865628779000130570020000003021120848577',
+          xml: '<retConsSitCTe xmlns="http://www.portalfiscal.inf.br/cte"><cStat>100</cStat><chCTe>42260865628779000130570020000003021120848577</chCTe></retConsSitCTe>'
+        }
+      ],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.sincronizarEventos({
+      clienteId: 'cliente-1',
+      documentoIds: ['doc-302'],
+      somenteSemEventos: false,
+      limit: 1
+    });
+
+    expect(prisma.nfeDocumento.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'doc-302' },
+        data: expect.objectContaining({ status: 'Autorizada' })
+      })
+    );
+    expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
+    expect(result.detalhes).toEqual([
+      expect.objectContaining({
+        documentoId: 'doc-302',
+        status: 'sem_eventos',
+        eventosEncontrados: 0
+      })
+    ]);
   });
 
   it('corrige numero e serie locais pela chave antes de consultar eventos', async () => {

@@ -20574,7 +20574,9 @@ function buildCteDocumentsFromApi(cteDocs, clients) {
       const isConsultaResumo = String(doc.schemaDoc || '').startsWith('retConsSitCTe');
       const tipoBase = mapCteTipoLabel(doc.tipoRelacao);
       const tipo = tipoBase === 'Nao identificado' && isConsultaResumo ? 'Consulta por chave' : tipoBase;
-      const eventos = Array.isArray(doc.eventos) ? doc.eventos : [];
+      // Eventos sao vinculados por FK, mas bases legadas podem conter um vinculo
+      // incorreto. Um evento de outra chave nunca pode alterar o status deste CT-e.
+      const eventos = getEventosDaMesmaChave(doc.chaveAcesso, doc.eventos);
       const cancelamentoEvento = eventos.find(isCancelamentoEventoApi) || null;
       const emitenteCnpj = normalizeDigits(doc.cnpjEmitente || '');
       const destinatarioCnpj = normalizeDigits(doc.cnpjDestinatario || '');
@@ -20582,7 +20584,7 @@ function buildCteDocumentsFromApi(cteDocs, clients) {
         tipo === 'Emitido' ? doc.razaoSocialDestinatario : tipo === 'Recebido' ? doc.razaoSocialEmitente : '-';
       const contraparteCnpj =
         tipo === 'Emitido' ? destinatarioCnpj : tipo === 'Recebido' ? emitenteCnpj : '';
-      const statusFiscal = resolveFiscalStatus(doc.status, cancelamentoEvento?.dataEvento || null, cancelamentoEvento);
+      const statusFiscal = resolveCteFiscalStatus(doc.status, cancelamentoEvento);
 
       return {
         id: `cte-${doc.id}`,
@@ -23042,6 +23044,24 @@ async function requestNfseEventsSync(clienteId, documentoIds) {
     },
     timeoutMs: Math.max(180000, documentoIds.length * 30000)
   });
+}
+
+function getEventosDaMesmaChave(chaveAcesso, eventos) {
+  const chaveNormalizada = normalizeDigits(chaveAcesso || '');
+  if (!chaveNormalizada || !Array.isArray(eventos)) {
+    return Array.isArray(eventos) ? eventos : [];
+  }
+
+  return eventos.filter((evento) => normalizeDigits(evento?.chaveAcesso || '') === chaveNormalizada);
+}
+
+function resolveCteFiscalStatus(status, cancelamentoEvento) {
+  const normalized = normalizeSearchText(status);
+  if (normalized === '100' || normalized === 'autorizada' || normalized.includes('autorizado o uso')) {
+    return 'Autorizada';
+  }
+
+  return resolveFiscalStatus(status, cancelamentoEvento?.dataEvento || null, cancelamentoEvento);
 }
 
 function openEventsSyncCompaniesModal() {
