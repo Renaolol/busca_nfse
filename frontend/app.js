@@ -12256,7 +12256,7 @@ function renderNfseFiscalReaderCard() {
     `
       : '';
   const exportForm = `
-    <form id="nfseFiscalDominioExportForm" class="form-grid four" style="margin:0 0 18px;">
+    <form id="nfseFiscalDominioExportForm" class="form-grid nfse-fiscal-summary-values" style="margin:0 0 18px;">
       <label class="field">
         Codigo empresa Dominio
         <input
