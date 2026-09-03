@@ -762,15 +762,14 @@ export class NfseService {
     dto: ExportarLeituraFiscalDominioDto,
     tipoRegistro: 'Entrada' | 'Servico'
   ): { semRetencoes: string; comRetencoes: string } {
+    const defaults =
+      tipoRegistro === 'Entrada'
+        ? { semRetencoes: '802', comRetencoes: '804' }
+        : { semRetencoes: '900', comRetencoes: '900' };
     const semRetencoes =
-      tipoRegistro === 'Entrada' ? dto.acumuladorEntradaSemRetencoes : dto.acumuladorServicoSemRetencoes;
+      (tipoRegistro === 'Entrada' ? dto.acumuladorEntradaSemRetencoes : dto.acumuladorServicoSemRetencoes) || defaults.semRetencoes;
     const comRetencoes =
-      tipoRegistro === 'Entrada' ? dto.acumuladorEntradaComRetencoes : dto.acumuladorServicoComRetencoes;
-    const tipoDescricao = tipoRegistro === 'Entrada' ? 'Entrada' : 'Servico';
-
-    if (!semRetencoes || !comRetencoes) {
-      throw new BadRequestException(`Informe os acumuladores de ${tipoDescricao} sem e com retencoes para exportar no layout Dominio.`);
-    }
+      (tipoRegistro === 'Entrada' ? dto.acumuladorEntradaComRetencoes : dto.acumuladorServicoComRetencoes) || defaults.comRetencoes;
 
     return { semRetencoes, comRetencoes };
   }

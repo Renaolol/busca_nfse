@@ -2135,8 +2135,6 @@ describe('NfseService', () => {
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
       produtoPadrao: '557',
-      acumuladorEntradaSemRetencoes: '802',
-      acumuladorEntradaComRetencoes: '804'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
@@ -2261,8 +2259,6 @@ describe('NfseService', () => {
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
       produtoPadrao: '557',
-      acumuladorEntradaSemRetencoes: '802',
-      acumuladorEntradaComRetencoes: '804'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
@@ -2362,8 +2358,6 @@ describe('NfseService', () => {
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
       produtoPadrao: '557',
-      acumuladorEntradaSemRetencoes: '802',
-      acumuladorEntradaComRetencoes: '804'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
@@ -2455,8 +2449,6 @@ describe('NfseService', () => {
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
       produtoPadrao: '557',
-      acumuladorEntradaSemRetencoes: '802',
-      acumuladorEntradaComRetencoes: '804'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
@@ -2542,12 +2534,10 @@ describe('NfseService', () => {
       tipoRegistro: 'Servico',
       contas: 'Padrao',
       produtoPadrao: 'A',
-      acumuladorServicoSemRetencoes: '901',
-      acumuladorServicoComRetencoes: '902'
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
-    expect(content).toContain('|3000|39|11111111000111|SC|901||333|U||');
+    expect(content).toContain('|3000|39|11111111000111|SC|900||333|U||');
     expect(content).toContain('|3030|A|1|180,00');
     expect(prisma.nfseContaContabilConfig.findMany).not.toHaveBeenCalled();
   });
@@ -2563,19 +2553,6 @@ describe('NfseService', () => {
         produtoPadrao: '557'
       })
     ).rejects.toThrow('DOMINIO_ODBC_CONNECTION_STRING nao configurada para exportacao Por Fornecedor.');
-  });
-
-  it('exige os acumuladores configurados do tipo de registro para nao aplicar codigos padrao', async () => {
-    await expect(
-      service.exportarLeituraFiscalDominio({
-        clienteId: 'cliente-1',
-        all: true,
-        codigoEmpresa: 10105,
-        tipoRegistro: 'Entrada',
-        contas: 'Padrao',
-        produtoPadrao: '557'
-      })
-    ).rejects.toThrow('Informe os acumuladores de Entrada sem e com retencoes para exportar no layout Dominio.');
   });
 
   it('rejeita busca automatica do codigo empresa Dominio quando cliente nao existe', async () => {

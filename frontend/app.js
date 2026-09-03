@@ -407,10 +407,10 @@ const state = {
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
       produtoPadrao: '557',
-      acumuladorEntradaSemRetencoes: '',
-      acumuladorEntradaComRetencoes: '',
-      acumuladorServicoSemRetencoes: '',
-      acumuladorServicoComRetencoes: '',
+      acumuladorEntradaSemRetencoes: '802',
+      acumuladorEntradaComRetencoes: '804',
+      acumuladorServicoSemRetencoes: '900',
+      acumuladorServicoComRetencoes: '900',
       exporting: false
     },
     columnOrder: [...NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER],
@@ -12293,19 +12293,19 @@ function renderNfseFiscalReaderCard() {
       </label>
       <label class="field">
         Acumulador Entrada sem retencoes
-        <input name="acumuladorEntradaSemRetencoes" type="text" inputmode="text" pattern="[A-Za-z0-9]+" title="Use apenas letras e numeros." value="${escapeHtml(String(exportConfig.acumuladorEntradaSemRetencoes || ''))}" placeholder="Informe o acumulador" />
+        <input name="acumuladorEntradaSemRetencoes" type="text" inputmode="text" pattern="[A-Za-z0-9]+" title="Use apenas letras e numeros." value="${escapeHtml(String(exportConfig.acumuladorEntradaSemRetencoes || '802'))}" placeholder="Informe o acumulador" />
       </label>
       <label class="field">
         Acumulador Entrada com retencoes
-        <input name="acumuladorEntradaComRetencoes" type="text" inputmode="text" pattern="[A-Za-z0-9]+" title="Use apenas letras e numeros." value="${escapeHtml(String(exportConfig.acumuladorEntradaComRetencoes || ''))}" placeholder="Informe o acumulador" />
+        <input name="acumuladorEntradaComRetencoes" type="text" inputmode="text" pattern="[A-Za-z0-9]+" title="Use apenas letras e numeros." value="${escapeHtml(String(exportConfig.acumuladorEntradaComRetencoes || '804'))}" placeholder="Informe o acumulador" />
       </label>
       <label class="field">
         Acumulador Servico sem retencoes
-        <input name="acumuladorServicoSemRetencoes" type="text" inputmode="text" pattern="[A-Za-z0-9]+" title="Use apenas letras e numeros." value="${escapeHtml(String(exportConfig.acumuladorServicoSemRetencoes || ''))}" placeholder="Informe o acumulador" />
+        <input name="acumuladorServicoSemRetencoes" type="text" inputmode="text" pattern="[A-Za-z0-9]+" title="Use apenas letras e numeros." value="${escapeHtml(String(exportConfig.acumuladorServicoSemRetencoes || '900'))}" placeholder="Informe o acumulador" />
       </label>
       <label class="field">
         Acumulador Servico com retencoes
-        <input name="acumuladorServicoComRetencoes" type="text" inputmode="text" pattern="[A-Za-z0-9]+" title="Use apenas letras e numeros." value="${escapeHtml(String(exportConfig.acumuladorServicoComRetencoes || ''))}" placeholder="Informe o acumulador" />
+        <input name="acumuladorServicoComRetencoes" type="text" inputmode="text" pattern="[A-Za-z0-9]+" title="Use apenas letras e numeros." value="${escapeHtml(String(exportConfig.acumuladorServicoComRetencoes || '900'))}" placeholder="Informe o acumulador" />
         <span style="color:var(--text-secondary); font-size:12px;">Preencha os dois acumuladores do tipo de registro selecionado. Os codigos sao definidos na sua base Dominio.</span>
       </label>
       <div class="stack-actions" style="grid-column:1 / -1; justify-content:flex-start; align-items:flex-end;">
