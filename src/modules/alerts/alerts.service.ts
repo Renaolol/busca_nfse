@@ -443,6 +443,7 @@ export class AlertsService {
       cep?: string | null;
     } | null
   ): { hasDifference: boolean; labels: string[]; details: string[] } {
+    const municipioCadastral = this.normalizeMunicipality(establishment?.municipioNome || establishment?.municipio);
     const comparisons = [
       {
         label: 'logradouro',
@@ -464,7 +465,7 @@ export class AlertsService {
       {
         label: 'municipio',
         left: parsed.destinatarioEnderecoMunicipio,
-        right: establishment?.municipioNome || establishment?.municipio
+        right: municipioCadastral
       },
       {
         label: 'CEP',
@@ -517,6 +518,11 @@ export class AlertsService {
       .replace(/(?:,|\s+-?\s+)\s*(?:n[ºo]?\.?\s*)?\d+\s*$/i, '')
       .replace(/\s+/g, ' ')
       .trim();
+  }
+
+  private normalizeMunicipality(value?: string | null): string {
+    const text = String(value || '').trim();
+    return this.normalizeSearchText(text) === 'mondais' ? 'Mondaí' : text;
   }
 
   private async applyGenericResolutionState(alerts: AlertResponseDto[]): Promise<void> {

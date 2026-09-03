@@ -13511,11 +13511,11 @@ function renderNfeStorageBadges(doc) {
 
 function renderNfeStatusBadges(doc) {
   const badges = [];
-  if (hasOpenNfeAddressMismatchAlertForDocument(doc)) {
-    badges.push(statusBadge('!', 'danger', 'nfe-address-alert-chip'));
-  }
   if (doc.statusFiscal && doc.statusFiscal !== '-') {
     badges.push(statusBadge(doc.statusFiscal, toneFromFiscalStatus(doc.statusFiscal)));
+  }
+  if (hasOpenNfeAddressMismatchAlertForDocument(doc)) {
+    badges.push(statusBadge('Endereco incorreto', 'danger', 'nfe-address-alert-chip'));
   }
   if (doc.temEventos) {
     badges.push(statusBadge('Com eventos', 'info'));

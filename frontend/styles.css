@@ -488,11 +488,11 @@ a {
 }
 
 .nfe-address-alert-chip {
-  min-width: 22px;
-  padding-left: 0;
-  padding-right: 0;
+  min-width: auto;
+  padding-left: 9px;
+  padding-right: 9px;
   font-size: 0.72rem;
-  font-weight: 900;
+  font-weight: 800;
 }
 
 .avatar {
