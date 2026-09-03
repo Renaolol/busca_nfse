@@ -7,6 +7,17 @@ import {
   computeXmlReader30MonofasicValues,
 } from './xml-reader30-monofasic-utils.js';
 
+import {
+  mockAlerts,
+  mockCertificates,
+  mockClients,
+  mockCteDocuments,
+  mockNfeDocuments,
+  mockRunningExecution,
+  mockSearchRuns,
+  mockXmlFiles
+} from './mocks/index.js';
+
 const appRoot = document.getElementById('app');
 const modalRoot = document.getElementById('modalRoot');
 const drawerRoot = document.getElementById('drawerRoot');
@@ -296,7 +307,7 @@ const state = {
   route: parseRoute(window.location.hash),
   mobileSidebarOpen: false,
   dataReady: false,
-  dataSource: 'api',
+  dataSource: 'mock',
   auth: {
     initialized: false,
     authenticating: false,
@@ -681,14 +692,10 @@ async function initializeData() {
     await hydrateFromApi({ onProgress: updatePageLoadingTask });
     state.dataSource = 'api';
   } catch (error) {
-    console.error('Falha ao carregar dados reais da API.', error);
-    state.dataSource = 'api';
-    Object.keys(state.tableState).forEach((key) => {
-      state.tableState[key] = 'error';
-    });
-    state.executionMonitor.message = 'Falha ao carregar dados reais da API.';
-    state.executionMonitor.updatedAt = new Date().toISOString();
-    pushToast('Nao foi possivel carregar dados reais da API. Verifique backend e banco.', 'error');
+    console.error('Falha ao carregar dados reais da API. Usando fallback mock.', error);
+    hydrateFromMocks();
+    state.dataSource = 'mock';
+    pushToast('Nao foi possivel carregar dados reais. Exibindo dados de exemplo.', 'error');
   }
 
   setGlobalLoading(false);
@@ -696,6 +703,53 @@ async function initializeData() {
   stopPageLoading();
   render();
   syncDashboardAutoRefresh();
+}
+
+function hydrateFromMocks() {
+  const clients = deepClone(mockClients);
+  const establishmentsByClient = Object.fromEntries(
+    clients.map((client) => [
+      client.id,
+      [{
+        id: `estabelecimento-${client.id}`,
+        clienteId: client.id,
+        razaoSocial: client.razaoSocial,
+        cnpj: client.cnpj,
+        inscricaoMunicipal: client.inscricaoMunicipal || '',
+        logradouro: client.logradouro || '',
+        bairro: client.bairro || '',
+        cep: client.cep || '',
+        municipioNome: client.municipio || '-',
+        uf: client.uf || '',
+        ativo: true
+      }]
+    ])
+  );
+
+  state.clients = clients;
+  state.certificates = deepClone(mockCertificates);
+  state.searchRuns = deepClone(mockSearchRuns);
+  state.runningExecution = deepClone(mockRunningExecution);
+  state.xmlFiles = deepClone(mockXmlFiles);
+  state.nfeDocuments = buildNfeDocumentsFromApi(deepClone(mockNfeDocuments), clients);
+  state.cteDocuments = buildCteDocumentsFromApi(deepClone(mockCteDocuments), clients);
+  state.nfeSyncControls = [];
+  state.nfeDashboardStats = {
+    totalNfe: state.nfeDocuments.length,
+    xmlsCompletos: state.nfeDocuments.filter((doc) => doc.xmlCompletoDisponivel).length
+  };
+  state.cteDashboardStats = {
+    totalCte: state.cteDocuments.length,
+    xmlsCompletos: state.cteDocuments.filter((doc) => doc.xmlCompletoDisponivel).length
+  };
+  state.nfeSchedulerStatus = null;
+  state.serverResolvedAlerts = {};
+  state.alerts = applyResolvedAlertState(deepClone(mockAlerts));
+  state.establishmentsByClient = establishmentsByClient;
+  state.syncByClient = {};
+  state.dashboardStats = null;
+  state.schedulerStatus = null;
+  syncExecutionMonitorWithData();
 }
 
 async function hydrateFromApi(options = {}) {
