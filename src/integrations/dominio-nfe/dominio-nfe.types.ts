@@ -15,7 +15,19 @@ export interface DominioNfeCatalogRecord {
   dataEmissao?: string;
 }
 
+export interface DominioEmpresaEnderecoRecord {
+  codigoEmpresa: number;
+  cnpjEmpresa: string;
+  logradouro?: string;
+  numero?: string;
+  bairro?: string;
+  cep?: string;
+  municipio?: string;
+  uf?: string;
+}
+
 export interface DominioNfeXmlSource {
+  listCompanyAddresses(cnpjs: string[]): Promise<DominioEmpresaEnderecoRecord[]>;
   listDocuments(params: {
     cnpjs: string[];
     limit?: number;

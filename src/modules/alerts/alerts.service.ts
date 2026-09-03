@@ -1,5 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { AlertResolution, Prisma } from '@prisma/client';
+import { DominioEmpresaEnderecoRecord } from '../../integrations/dominio-nfe/dominio-nfe.types';
+import { RealDominioNfeClient } from '../../integrations/dominio-nfe/real-dominio-nfe.client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NfeXmlParserService, type ParsedNfe } from '../nfe/nfe-xml-parser.service';
 import { NfseDanfseService } from '../nfse/nfse-danfse.service';
@@ -42,7 +44,8 @@ export class AlertsService {
     private readonly prisma: PrismaService,
     private readonly storage: LocalStorageService,
     private readonly nfseDanfse: NfseDanfseService,
-    private readonly nfeXmlParser: NfeXmlParserService
+    private readonly nfeXmlParser: NfeXmlParserService,
+    @Optional() private readonly dominioNfeClient?: RealDominioNfeClient
   ) {}
 
   async findAll(query: QueryAlertsDto = {}): Promise<AlertResponseDto[]> {
@@ -97,9 +100,12 @@ export class AlertsService {
       })
     ]);
 
+    const dominioAddresses = await this.loadDominioAddresses(nfeRows);
     const cteAlerts = cteRows.filter((row) => this.isDesacordoEvent(row)).map((row) => this.toCteAlertDto(row));
     const nfseAlertsRaw = await Promise.all(nfseRows.map((row) => this.toNfseRetentionAlertDto(row)));
-    const nfeAddressAlertsRaw = await Promise.all(nfeRows.map((row) => this.toNfeEnderecoDivergenteAlertDto(row)));
+    const nfeAddressAlertsRaw = await Promise.all(
+      nfeRows.map((row) => this.toNfeEnderecoDivergenteAlertDto(row, dominioAddresses.get(this.normalizeDigits(row.estabelecimento?.cnpj)) || row.estabelecimento))
+    );
     const alerts = [
       ...cteAlerts,
       ...nfseAlertsRaw.filter((row): row is AlertResponseDto => Boolean(row)),
@@ -302,7 +308,10 @@ export class AlertsService {
     }
   }
 
-  private async toNfeEnderecoDivergenteAlertDto(row: NfeEnderecoDivergenteAlertRow): Promise<AlertResponseDto | null> {
+  private async toNfeEnderecoDivergenteAlertDto(
+    row: NfeEnderecoDivergenteAlertRow,
+    comparisonEstablishment?: NfeEnderecoDivergenteAlertRow['estabelecimento'] | DominioEmpresaEnderecoRecord | null
+  ): Promise<AlertResponseDto | null> {
     if (!this.isNfeEntradaTomada(row)) {
       return null;
     }
@@ -315,11 +324,11 @@ export class AlertsService {
     try {
       const xml = (await this.storage.getObject(xmlPath)).toString('utf8');
       const parsed = this.nfeXmlParser.parse(xml);
-      if (!this.isNfeEnderecoComparisonEligible(parsed, row.estabelecimento)) {
+      if (!this.isNfeEnderecoComparisonEligible(parsed, comparisonEstablishment)) {
         return null;
       }
 
-      const addressComparison = this.compareNfeAddress(parsed, row.estabelecimento);
+      const addressComparison = this.compareNfeAddress(parsed, comparisonEstablishment);
       if (!addressComparison.hasDifference) {
         return null;
       }
@@ -360,6 +369,24 @@ export class AlertsService {
     }
   }
 
+  private async loadDominioAddresses(rows: NfeEnderecoDivergenteAlertRow[]): Promise<Map<string, DominioEmpresaEnderecoRecord>> {
+    const cnpjs = [...new Set(rows.map((row) => this.normalizeDigits(row.estabelecimento?.cnpj)).filter(Boolean))];
+    if (!this.dominioNfeClient || !cnpjs.length) {
+      return new Map();
+    }
+
+    try {
+      const records = await this.dominioNfeClient.listCompanyAddresses(cnpjs);
+      return new Map(
+        records
+          .map((record) => [this.normalizeDigits(record.cnpjEmpresa), record] as const)
+          .filter(([cnpj]) => Boolean(cnpj))
+      );
+    } catch {
+      return new Map();
+    }
+  }
+
   private isDesacordoEvent(row: Pick<CteDesacordoAlertRow, 'descricao' | 'tipoEvento'>): boolean {
     const description = this.normalizeSearchText(row.descricao);
     const eventType = this.normalizeSearchText(row.tipoEvento);
@@ -386,13 +413,16 @@ export class AlertsService {
       | 'destinatarioEnderecoMunicipio'
       | 'destinatarioEnderecoCep'
     >,
-    establishment?: Pick<NonNullable<NfeEnderecoDivergenteAlertRow['estabelecimento']>, 'logradouro' | 'bairro' | 'uf' | 'municipioNome' | 'cep'> | null
+    establishment?: Pick<NonNullable<NfeEnderecoDivergenteAlertRow['estabelecimento']>, 'logradouro' | 'bairro' | 'uf' | 'municipioNome' | 'cep'> | DominioEmpresaEnderecoRecord | null
   ): boolean {
+    const dominioEstablishment = establishment && 'municipio' in establishment ? establishment : null;
+    const municipio = dominioEstablishment?.municipio ?? (establishment as { municipioNome?: string | null } | null | undefined)?.municipioNome;
+
     return Boolean(
       establishment?.logradouro?.trim() &&
         establishment?.bairro?.trim() &&
         establishment?.uf?.trim() &&
-        establishment?.municipioNome?.trim() &&
+        municipio?.trim() &&
         parsed.destinatarioEnderecoLogradouro?.trim() &&
         parsed.destinatarioEnderecoBairro?.trim() &&
         parsed.destinatarioEnderecoUf?.trim() &&
@@ -413,6 +443,7 @@ export class AlertsService {
       bairro?: string | null;
       uf?: string | null;
       municipioNome?: string | null;
+      municipio?: string | null;
       cep?: string | null;
     } | null
   ): { hasDifference: boolean; labels: string[]; details: string[] } {
@@ -437,7 +468,7 @@ export class AlertsService {
       {
         label: 'municipio',
         left: parsed.destinatarioEnderecoMunicipio,
-        right: establishment?.municipioNome
+        right: establishment?.municipioNome || establishment?.municipio
       },
       {
         label: 'CEP',

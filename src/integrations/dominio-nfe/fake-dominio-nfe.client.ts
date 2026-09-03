@@ -3,6 +3,10 @@ import { DominioNfeCatalogRecord, DominioNfeXmlRecord, DominioNfeXmlSource } fro
 
 @Injectable()
 export class FakeDominioNfeClient implements DominioNfeXmlSource {
+  async listCompanyAddresses(): Promise<[]> {
+    return [];
+  }
+
   async listDocuments(): Promise<DominioNfeXmlRecord[]> {
     return [];
   }

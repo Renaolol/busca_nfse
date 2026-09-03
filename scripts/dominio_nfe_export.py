@@ -24,7 +24,8 @@ def parse_payload():
     if not raw.strip():
         raise ValueError('Payload vazio para importacao Dominio')
     payload = json.loads(raw)
-    payload['mode'] = 'catalog' if str(payload.get('mode') or '').lower() == 'catalog' else 'xml'
+    requested_mode = str(payload.get('mode') or '').lower()
+    payload['mode'] = requested_mode if requested_mode in {'catalog', 'address'} else 'xml'
     payload['cnpjs'] = [normalize_digits(item) for item in payload.get('cnpjs', []) if normalize_digits(item)]
     payload['chavesAcesso'] = [normalize_digits(item) for item in payload.get('chavesAcesso', []) if normalize_digits(item)]
     payload['catalogoIds'] = [int(item) for item in payload.get('catalogoIds', []) if str(item).strip()]
@@ -55,7 +56,20 @@ def build_query(payload):
     if not cnpjs:
         raise ValueError('Nenhum CNPJ informado para consulta Dominio')
 
-    if payload['mode'] == 'catalog':
+    if payload['mode'] == 'address':
+        query = """
+SELECT cgce_emp AS cnpj_empresa,
+       codi_emp AS codigo_empresa,
+       ende_emp AS logradouro,
+       nume_emp AS numero,
+       bair_emp AS bairro,
+       cep_emp AS cep,
+       cida_emp AS municipio,
+       uf_emp AS uf
+  FROM bethadba.geempre
+ WHERE cgce_emp IN ({})
+""".format(','.join('?' for _ in cnpjs))
+    elif payload['mode'] == 'catalog':
         query = f"""
 SELECT TOP {payload['limit']}
        cat.I_CATALOGO AS catalogo_id,
@@ -90,6 +104,8 @@ SELECT TOP {payload['limit']}
 """
 
     params = list(cnpjs)
+    if payload['mode'] == 'address':
+        return query, params
 
     if payload['catalogoIdMinExclusive'] > 0:
         query += "   AND cat.I_CATALOGO > ?\n"
@@ -130,6 +146,20 @@ def main():
         cursor.execute(query, params)
 
         for row in cursor.fetchall():
+            if payload['mode'] == 'address':
+                record = {
+                    'codigo_empresa': int(row.codigo_empresa),
+                    'cnpj_empresa': normalize_digits(row.cnpj_empresa) or '',
+                    'logradouro': str(row.logradouro or '').strip(),
+                    'numero': str(row.numero or '').strip(),
+                    'bairro': str(row.bairro or '').strip(),
+                    'cep': normalize_digits(row.cep) or '',
+                    'municipio': str(row.municipio or '').strip(),
+                    'uf': str(row.uf or '').strip().upper()
+                }
+                sys.stdout.write(json.dumps(record, ensure_ascii=False) + '\n')
+                continue
+
             if payload['mode'] == 'catalog':
                 emitted_at = None
                 if row.data_emissao is not None:

@@ -1,7 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { spawn } from 'node:child_process';
 import { join } from 'node:path';
-import { DominioNfeCatalogRecord, DominioNfeXmlRecord, DominioNfeXmlSource } from './dominio-nfe.types';
+import {
+  DominioEmpresaEnderecoRecord,
+  DominioNfeCatalogRecord,
+  DominioNfeXmlRecord,
+  DominioNfeXmlSource
+} from './dominio-nfe.types';
 import { resolveDominioPythonBin } from './python-bin';
 
 type PythonRecord = {
@@ -13,11 +18,45 @@ type PythonRecord = {
   xml_base64: string;
 };
 
+type PythonAddressRecord = {
+  codigo_empresa: number;
+  cnpj_empresa: string;
+  logradouro?: string;
+  numero?: string;
+  bairro?: string;
+  cep?: string;
+  municipio?: string;
+  uf?: string;
+};
+
 @Injectable()
 export class RealDominioNfeClient implements DominioNfeXmlSource {
   private readonly pythonBin = resolveDominioPythonBin();
   private readonly connectionString = process.env.DOMINIO_ODBC_CONNECTION_STRING || '';
   private readonly scriptPath = join(process.cwd(), 'scripts', 'dominio_nfe_export.py');
+
+  async listCompanyAddresses(cnpjs: string[]): Promise<DominioEmpresaEnderecoRecord[]> {
+    if (!this.connectionString) {
+      throw new Error('DOMINIO_ODBC_CONNECTION_STRING nao configurada para buscar enderecos da Dominio');
+    }
+
+    const payload = JSON.stringify({
+      mode: 'address',
+      connectionString: this.connectionString,
+      cnpjs
+    });
+    const records = await this.runPythonScript(payload) as PythonAddressRecord[];
+    return records.map((record) => ({
+      codigoEmpresa: record.codigo_empresa,
+      cnpjEmpresa: record.cnpj_empresa,
+      logradouro: record.logradouro,
+      numero: record.numero,
+      bairro: record.bairro,
+      cep: record.cep,
+      municipio: record.municipio,
+      uf: record.uf
+    }));
+  }
 
   async listDocuments(params: {
     cnpjs: string[];
