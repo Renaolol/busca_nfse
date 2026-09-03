@@ -6343,14 +6343,18 @@ function renderXmlReader30Summary() {
     return '';
   }
 
-  const totals = getXmlReader30NfeSummaryTotals(Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : []);
-  const totalNotasPeriodo = countXmlReader30NfeNotes(Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : []);
+  const cstFilter = String(state.xmlReader30.cstFilter || '').trim();
+  const summaryRows = Array.isArray(state.xmlReader30.results) ? state.xmlReader30.results : [];
+  const totals = getXmlReader30NfeSummaryTotals(summaryRows, { cstFilter });
+  const totalNotasPeriodo = countXmlReader30NfeNotes(summaryRows, { cstFilter });
   const tipoLabel = query.tipo === 'Recebida' ? 'Entradas' : query.tipo === 'Emitida' ? 'Saidas' : 'Entradas e saídas';
+  const filterSummary = cstFilter ? `<span>CST/CSOSN aplicado: <strong>${escapeHtml(cstFilter)}</strong></span>` : '';
 
   return `
     <article class="card" style="box-shadow:none; border-style:dashed; margin-top: 2px;">
       <div class="xml-reader30-summary-meta">
         <span>Movimentacao: <strong>${escapeHtml(tipoLabel)}</strong></span>
+        ${filterSummary}
         <span>Total de notas no período: <strong>${escapeHtml(String(totalNotasPeriodo))} nota(s)</strong></span>
         <span>Valor Total das notas: <strong>${escapeHtml(formatCurrency(totals.totalNotasValue))}</strong></span>
         <span>Valor Total ICMS: <strong>${escapeHtml(formatCurrency(totals.totalIcmsValue))}</strong></span>
@@ -7790,11 +7794,23 @@ function resolveXmlReader30NfeFornecedorLabel(row) {
   return contraparte || emitente || destinatario || cliente || '-';
 }
 
-function countXmlReader30NfeNotes(rows) {
+function countXmlReader30NfeNotes(rows, options = {}) {
+  const cstFilter = String(options.cstFilter || '').trim();
+  const matchingNoteKeys = cstFilter
+    ? new Set(
+        expandXmlReader30NfeRows(rows)
+          .filter((row) => row?.documentType === 'nfe' && String(row.cstCsosn || '').trim() === cstFilter)
+          .map((row) => getXmlReader30NfeGroupKey(row))
+      )
+    : null;
   const seenKeys = new Set();
 
-  for (const row of expandXmlReader30NfeRows(rows)) {
+  for (const row of Array.isArray(rows) ? rows : []) {
     if (!row || row.documentType !== 'nfe') {
+      continue;
+    }
+
+    if (matchingNoteKeys && !matchingNoteKeys.has(getXmlReader30NfeGroupKey(row))) {
       continue;
     }
 
@@ -7814,12 +7830,20 @@ function countXmlReader30NfeNotes(rows) {
   return seenKeys.size;
 }
 
-function getXmlReader30NfeSummaryTotals(rows) {
+function getXmlReader30NfeSummaryTotals(rows, options = {}) {
   const sourceRows = Array.isArray(rows) ? rows : [];
   const invoiceRows = sourceRows.filter((row) => row?.documentType === 'nfe');
-  const itemRows = expandXmlReader30NfeRows(sourceRows).filter((row) => row?.documentType === 'nfe');
+  const allItemRows = expandXmlReader30NfeRows(sourceRows).filter((row) => row?.documentType === 'nfe');
+  const cstFilter = String(options.cstFilter || '').trim();
+  const itemRows = cstFilter
+    ? allItemRows.filter((row) => String(row.cstCsosn || '').trim() === cstFilter)
+    : allItemRows;
+  const matchingNoteKeys = cstFilter ? new Set(itemRows.map((row) => getXmlReader30NfeGroupKey(row))) : null;
+  const filteredInvoiceRows = matchingNoteKeys
+    ? invoiceRows.filter((row) => matchingNoteKeys.has(getXmlReader30NfeGroupKey(row)))
+    : invoiceRows;
 
-  const totalNotasValue = invoiceRows.reduce((sum, row) => {
+  const totalNotasValue = filteredInvoiceRows.reduce((sum, row) => {
     if (!shouldIncludeDocumentValueInSum(row?.raw || row)) {
       return sum;
     }
@@ -8008,6 +8032,7 @@ function resetXmlReader30Search() {
     nfeColumnOrder,
     nfeColumnWidths,
     hiddenNfeColumns,
+    cstFilter: '',
     selectionDrag: null,
     scrollDrag: null,
     columnMenuOpenKey: null,
