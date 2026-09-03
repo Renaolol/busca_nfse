@@ -380,9 +380,13 @@ export class AlertsService {
   private isNfeEnderecoComparisonEligible(
     parsed: Pick<
       ParsedNfe,
-      'destinatarioEnderecoLogradouro' | 'destinatarioEnderecoBairro' | 'destinatarioEnderecoUf' | 'destinatarioEnderecoMunicipio'
+      | 'destinatarioEnderecoLogradouro'
+      | 'destinatarioEnderecoBairro'
+      | 'destinatarioEnderecoUf'
+      | 'destinatarioEnderecoMunicipio'
+      | 'destinatarioEnderecoCep'
     >,
-    establishment?: Pick<NonNullable<NfeEnderecoDivergenteAlertRow['estabelecimento']>, 'logradouro' | 'bairro' | 'uf' | 'municipioNome'> | null
+    establishment?: Pick<NonNullable<NfeEnderecoDivergenteAlertRow['estabelecimento']>, 'logradouro' | 'bairro' | 'uf' | 'municipioNome' | 'cep'> | null
   ): boolean {
     return Boolean(
       establishment?.logradouro?.trim() &&
@@ -402,19 +406,22 @@ export class AlertsService {
       destinatarioEnderecoBairro?: string | null;
       destinatarioEnderecoUf?: string | null;
       destinatarioEnderecoMunicipio?: string | null;
+      destinatarioEnderecoCep?: string | null;
     },
     establishment?: {
       logradouro?: string | null;
       bairro?: string | null;
       uf?: string | null;
       municipioNome?: string | null;
+      cep?: string | null;
     } | null
   ): { hasDifference: boolean; labels: string[]; details: string[] } {
     const comparisons = [
       {
         label: 'logradouro',
         left: parsed.destinatarioEnderecoLogradouro,
-        right: establishment?.logradouro
+        right: establishment?.logradouro,
+        normalize: (value: string) => this.normalizeStreet(value)
       },
       {
         label: 'bairro',
@@ -431,6 +438,12 @@ export class AlertsService {
         label: 'municipio',
         left: parsed.destinatarioEnderecoMunicipio,
         right: establishment?.municipioNome
+      },
+      {
+        label: 'CEP',
+        left: parsed.destinatarioEnderecoCep,
+        right: establishment?.cep,
+        normalize: (value: string) => this.normalizeDigits(value)
       }
     ];
 
@@ -470,6 +483,13 @@ export class AlertsService {
     }
 
     return this.normalizeSearchText(text).replace(/[^a-z0-9]+/gi, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  private normalizeStreet(value: string): string {
+    return this.normalizeSearchText(value)
+      .replace(/(?:,|\s+-?\s+)\s*(?:n[ºo]?\.?\s*)?\d+\s*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   private isNfseRetentionDateEligible(value?: Date | null): boolean {

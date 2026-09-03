@@ -746,18 +746,22 @@ textarea:focus-visible,
   padding: 10px 14px;
   min-height: 48px;
   cursor: pointer;
-  box-shadow: 0 10px 18px rgba(194, 43, 43, 0.1);
+  box-shadow: none;
 }
 
 .dashboard-alert-button:hover {
   background: linear-gradient(180deg, #fff0f0 0%, #ffdcdc 100%);
 }
 
+.summary-bar {
+  box-shadow: none;
+}
+
 .dashboard-alert-button-empty {
   border-color: rgba(28, 161, 103, 0.3);
   background: linear-gradient(180deg, #f0fff7 0%, #dcf8e9 100%);
   color: #16784f;
-  box-shadow: 0 10px 18px rgba(28, 161, 103, 0.08);
+  box-shadow: none;
 }
 
 .dashboard-alert-button-empty:hover {

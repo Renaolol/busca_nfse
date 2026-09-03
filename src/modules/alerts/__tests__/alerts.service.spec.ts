@@ -235,10 +235,11 @@ describe('AlertsService', () => {
         },
         estabelecimento: {
           cnpj: '12345678000199',
-          logradouro: 'Rua Estrela',
+          logradouro: 'Rua Estrela, 628',
           bairro: 'Centro',
           uf: 'SC',
-          municipioNome: 'Mondai'
+          municipioNome: 'Mondai',
+          cep: '89700-000'
         }
       }
     ]);
@@ -291,6 +292,10 @@ describe('AlertsService', () => {
         canToggleResolved: true
       })
     ]);
+    expect(result[0].mensagemTecnica).toContain('UF');
+    expect(result[0].mensagemTecnica).toContain('municipio');
+    expect(result[0].mensagemTecnica).not.toContain('logradouro');
+    expect(result[0].mensagemTecnica).not.toContain('CEP');
   });
 
   it('marca um alerta como resolvido por evento', async () => {

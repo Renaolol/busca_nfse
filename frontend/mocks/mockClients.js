@@ -182,5 +182,29 @@ export const mockClients = [
     horarioPreferencial: '02:00',
     tipoBusca: 'Ambas',
     municipioIntegrado: true
+  },
+  {
+    id: 'cliente-wolf-e-wolf',
+    razaoSocial: 'Wolf e Wolf LTDA',
+    nomeFantasia: 'Wolf e Wolf',
+    cnpj: '12345678000199',
+    inscricaoMunicipal: '14801',
+    logradouro: 'Rua Estrela, 628',
+    bairro: 'Centro',
+    cep: '89700000',
+    municipio: 'Mondai',
+    uf: 'SC',
+    responsavelInterno: 'Lucas Goldbeck',
+    buscaAtiva: true,
+    buscaNfeAtiva: true,
+    buscaStatus: 'Ativo',
+    ultimaBusca: '2026-07-24T13:35:20.000Z',
+    xmlsEncontrados: 148,
+    certificadoStatus: 'Valido',
+    certificadoValidade: '2028-01-17',
+    statusOperacional: 'Sucesso',
+    horarioPreferencial: '02:00',
+    tipoBusca: 'Ambas',
+    municipioIntegrado: true
   }
 ];
