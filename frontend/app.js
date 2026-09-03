@@ -13511,7 +13511,7 @@ function renderNfeStorageBadges(doc) {
 
 function renderNfeStatusBadges(doc) {
   const badges = [];
-  if (hasOpenNfeAddressMismatchAlertForDocument(doc?.apiNfeId)) {
+  if (hasOpenNfeAddressMismatchAlertForDocument(doc)) {
     badges.push(statusBadge('!', 'danger', 'nfe-address-alert-chip'));
   }
   if (doc.statusFiscal && doc.statusFiscal !== '-') {
@@ -17944,13 +17944,19 @@ function getOpenNfeAddressMismatchAlerts() {
   return getNfeAddressMismatchAlerts().filter((alert) => alert.status !== 'Resolvido');
 }
 
-function hasOpenNfeAddressMismatchAlertForDocument(apiNfeId) {
-  if (!apiNfeId) {
+function hasOpenNfeAddressMismatchAlertForDocument(doc) {
+  const apiNfeId = String(doc?.apiNfeId || '').trim();
+  const chaveAcesso = normalizeDigits(doc?.chaveAcesso || '');
+  if (!apiNfeId && !chaveAcesso) {
     return false;
   }
 
   return state.alerts.some(
-    (alert) => alert.status !== 'Resolvido' && isNfeAddressMismatchAlert(alert) && alert.documentoId === apiNfeId
+    (alert) =>
+      alert.status !== 'Resolvido' &&
+      isNfeAddressMismatchAlert(alert) &&
+      (String(alert.documentoId || '').trim() === apiNfeId ||
+        (chaveAcesso && normalizeDigits(alert.chaveAcesso || '') === chaveAcesso))
   );
 }
 
