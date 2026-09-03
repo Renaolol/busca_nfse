@@ -101,7 +101,12 @@ export class AlertsService {
     const cteAlerts = cteRows.filter((row) => this.isDesacordoEvent(row)).map((row) => this.toCteAlertDto(row));
     const nfseAlertsRaw = await Promise.all(nfseRows.map((row) => this.toNfseRetentionAlertDto(row)));
     const nfeAddressAlertsRaw = await Promise.all(
-      nfeRows.map((row) => this.toNfeEnderecoDivergenteAlertDto(row, dominioAddresses.get(this.normalizeDigits(row.estabelecimento?.cnpj)) || row.estabelecimento))
+      nfeRows.map((row) =>
+        this.toNfeEnderecoDivergenteAlertDto(row, {
+          ...(row.estabelecimento || {}),
+          ...(dominioAddresses.get(this.normalizeDigits(row.estabelecimento?.cnpj)) || {})
+        })
+      )
     );
     const alerts = [
       ...cteAlerts,
@@ -408,9 +413,10 @@ export class AlertsService {
       | 'destinatarioEnderecoBairro'
       | 'destinatarioEnderecoUf'
       | 'destinatarioEnderecoMunicipio'
+      | 'destinatarioEnderecoCodigoMunicipio'
       | 'destinatarioEnderecoCep'
     >,
-    establishment?: Pick<NonNullable<NfeEnderecoDivergenteAlertRow['estabelecimento']>, 'logradouro' | 'bairro' | 'uf' | 'municipioNome' | 'cep'> | DominioEmpresaEnderecoRecord | null
+    establishment?: Pick<NonNullable<NfeEnderecoDivergenteAlertRow['estabelecimento']>, 'logradouro' | 'bairro' | 'uf' | 'municipioNome' | 'municipioCodigoIbge' | 'cep'> | DominioEmpresaEnderecoRecord | null
   ): boolean {
     const dominioEstablishment = establishment && 'municipio' in establishment ? establishment : null;
     const municipio = dominioEstablishment?.municipio ?? (establishment as { municipioNome?: string | null } | null | undefined)?.municipioNome;
@@ -432,6 +438,7 @@ export class AlertsService {
       destinatarioEnderecoBairro?: string | null;
       destinatarioEnderecoUf?: string | null;
       destinatarioEnderecoMunicipio?: string | null;
+      destinatarioEnderecoCodigoMunicipio?: string | null;
       destinatarioEnderecoCep?: string | null;
     },
     establishment?: {
@@ -440,10 +447,11 @@ export class AlertsService {
       uf?: string | null;
       municipioNome?: string | null;
       municipio?: string | null;
+      municipioCodigoIbge?: string | null;
       cep?: string | null;
     } | null
   ): { hasDifference: boolean; labels: string[]; details: string[] } {
-    const municipioCadastral = this.normalizeMunicipality(establishment?.municipioNome || establishment?.municipio);
+    const municipioCadastral = this.normalizeMunicipalityForComparison(establishment?.municipioNome || establishment?.municipio);
     const comparisons = [
       {
         label: 'logradouro',
@@ -465,7 +473,8 @@ export class AlertsService {
       {
         label: 'municipio',
         left: parsed.destinatarioEnderecoMunicipio,
-        right: municipioCadastral
+        right: municipioCadastral,
+        skip: this.sameMunicipalityCode(parsed.destinatarioEnderecoCodigoMunicipio, establishment?.municipioCodigoIbge)
       },
       {
         label: 'CEP',
@@ -479,6 +488,10 @@ export class AlertsService {
     const details: string[] = [];
 
     for (const comparison of comparisons) {
+      if (comparison.skip) {
+        continue;
+      }
+
       const left = this.normalizeAddressValue(comparison.left, comparison.normalize);
       const right = this.normalizeAddressValue(comparison.right, comparison.normalize);
       if (!left || !right) {
@@ -523,6 +536,20 @@ export class AlertsService {
   private normalizeMunicipality(value?: string | null): string {
     const text = String(value || '').trim();
     return this.normalizeSearchText(text) === 'mondais' ? 'Mondaí' : text;
+  }
+
+  private normalizeMunicipalityForComparison(value?: string | null): string {
+    const text = String(value || '')
+      .trim()
+      .replace(/^\(\s*\d+\s*\)\s*/, '')
+      .trim();
+    return this.normalizeSearchText(text) === 'mondais' ? 'Mondai' : text;
+  }
+
+  private sameMunicipalityCode(documentCode?: string | null, registeredCode?: string | null): boolean {
+    const documentDigits = this.normalizeDigits(documentCode);
+    const registeredDigits = this.normalizeDigits(registeredCode);
+    return Boolean(documentDigits && registeredDigits && documentDigits === registeredDigits);
   }
 
   private async applyGenericResolutionState(alerts: AlertResponseDto[]): Promise<void> {

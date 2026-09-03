@@ -23,6 +23,7 @@ export interface DominioEmpresaEnderecoRecord {
   bairro?: string;
   cep?: string;
   municipio?: string;
+  municipioCodigoIbge?: string;
   uf?: string;
 }
 

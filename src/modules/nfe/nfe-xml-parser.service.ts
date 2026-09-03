@@ -19,6 +19,7 @@ export interface ParsedNfe {
   destinatarioEnderecoComplemento?: string;
   destinatarioEnderecoBairro?: string;
   destinatarioEnderecoMunicipio?: string;
+  destinatarioEnderecoCodigoMunicipio?: string;
   destinatarioEnderecoUf?: string;
   destinatarioEnderecoCep?: string;
   valorTotal?: string;
@@ -171,6 +172,7 @@ export class NfeXmlParserService {
       destinatarioEnderecoComplemento: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['xCpl']),
       destinatarioEnderecoBairro: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['xBairro']),
       destinatarioEnderecoMunicipio: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['xMun']),
+      destinatarioEnderecoCodigoMunicipio: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['cMun']),
       destinatarioEnderecoUf: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['UF']),
       destinatarioEnderecoCep: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['CEP']),
       valorTotal:
