@@ -36,8 +36,6 @@ type NfeEnderecoDivergenteAlertRow = Prisma.NfeDocumentoGetPayload<{
   };
 }>;
 
-const NFSE_RETENTION_ALERT_START_DATE = new Date('2026-07-01T00:00:00.000Z');
-
 @Injectable()
 export class AlertsService {
   constructor(
@@ -77,7 +75,6 @@ export class AlertsService {
           xmlPath: { not: null },
           cnpjTomador: { not: null },
           dataCancelamento: null,
-          dataEmissao: { gte: NFSE_RETENTION_ALERT_START_DATE }
         },
         include: {
           cliente: true,
@@ -252,7 +249,7 @@ export class AlertsService {
   }
 
   private async toNfseRetentionAlertDto(row: NfseRetencaoAlertRow): Promise<AlertResponseDto | null> {
-    if (!this.isNfseTomada(row) || !this.isNfseRetentionDateEligible(row.dataEmissao)) {
+    if (!this.isNfseTomada(row)) {
       return null;
     }
 
@@ -418,16 +415,15 @@ export class AlertsService {
     const dominioEstablishment = establishment && 'municipio' in establishment ? establishment : null;
     const municipio = dominioEstablishment?.municipio ?? (establishment as { municipioNome?: string | null } | null | undefined)?.municipioNome;
 
-    return Boolean(
-      establishment?.logradouro?.trim() &&
-        establishment?.bairro?.trim() &&
-        establishment?.uf?.trim() &&
-        municipio?.trim() &&
-        parsed.destinatarioEnderecoLogradouro?.trim() &&
-        parsed.destinatarioEnderecoBairro?.trim() &&
-        parsed.destinatarioEnderecoUf?.trim() &&
-        parsed.destinatarioEnderecoMunicipio?.trim()
-    );
+    const comparableFields = [
+      [establishment?.logradouro, parsed.destinatarioEnderecoLogradouro],
+      [establishment?.bairro, parsed.destinatarioEnderecoBairro],
+      [establishment?.uf, parsed.destinatarioEnderecoUf],
+      [municipio, parsed.destinatarioEnderecoMunicipio],
+      [establishment?.cep, parsed.destinatarioEnderecoCep]
+    ];
+
+    return comparableFields.some(([registered, documentValue]) => registered?.trim() && documentValue?.trim());
   }
 
   private compareNfeAddress(
@@ -521,10 +517,6 @@ export class AlertsService {
       .replace(/(?:,|\s+-?\s+)\s*(?:n[ºo]?\.?\s*)?\d+\s*$/i, '')
       .replace(/\s+/g, ' ')
       .trim();
-  }
-
-  private isNfseRetentionDateEligible(value?: Date | null): boolean {
-    return value instanceof Date && !Number.isNaN(value.getTime()) && value >= NFSE_RETENTION_ALERT_START_DATE;
   }
 
   private async applyGenericResolutionState(alerts: AlertResponseDto[]): Promise<void> {

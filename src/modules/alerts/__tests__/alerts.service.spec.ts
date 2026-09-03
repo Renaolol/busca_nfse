@@ -184,7 +184,7 @@ describe('AlertsService', () => {
     expect(result).toEqual([]);
   });
 
-  it('ignora NFS-e tomada anterior a 01/07/2026 mesmo quando ha retencao no XML', async () => {
+  it('lista NFS-e tomada anterior a 01/07/2026 quando ha retencao no XML', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValue([
       {
         id: 'nfse-antiga-1',
@@ -207,11 +207,22 @@ describe('AlertsService', () => {
         }
       }
     ]);
+    storage.getObject.mockResolvedValue(Buffer.from('<xml />'));
+    nfseDanfse.extractRetentionAlertData.mockReturnValue({
+      hasRetention: true,
+      entries: [{ code: 'iss', label: 'ISS retido' }]
+    });
 
     const result = await service.findAll({});
 
-    expect(storage.getObject).not.toHaveBeenCalled();
-    expect(result).toEqual([]);
+    expect(storage.getObject).toHaveBeenCalledWith('nfse/producao/32973310000189/2026/06/xml/99.xml');
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'nfse-retencao-nfse-antiga-1',
+        numeroDocumento: '99',
+        retencoes: ['ISS retido']
+      })
+    ]);
   });
 
   it('lista alerta de NF-e de entrada com endereco divergente', async () => {
