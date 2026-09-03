@@ -6,8 +6,11 @@
   "license": "UNLICENSED",
   "scripts": {
     "build": "nest build",
+    "predev": "prisma migrate deploy",
     "dev": "nest start --watch",
+    "prestart": "prisma migrate deploy",
     "start": "node dist/main.js",
+    "prestart:prod": "prisma migrate deploy",
     "start:prod": "node dist/main.js",
     "lint": "eslint \"{src,test}/**/*.ts\"",
     "pretest": "prisma generate",
