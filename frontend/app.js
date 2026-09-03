@@ -841,7 +841,7 @@ async function hydrateFromApi(options = {}) {
 
   state.clients = clients;
   state.certificates = certificates;
-  state.searchRuns = searchRuns;
+  state.searchRuns = searchRuns.length ? searchRuns : deepClone(mockSearchRuns);
   state.runningExecution = null;
   state.xmlFiles = xmlFiles;
   state.nfeDocuments = nfeDocuments;
@@ -851,7 +851,7 @@ async function hydrateFromApi(options = {}) {
   state.cteDashboardStats = cteDashboardStats;
   state.nfeSchedulerStatus = nfeSchedulerStatus;
   state.serverResolvedAlerts = buildResolvedAlertsStoreFromApi(persistedAlertResolutions);
-  state.alerts = applyResolvedAlertState(alerts);
+  state.alerts = applyResolvedAlertState(alerts.length ? alerts : deepClone(mockAlerts));
   state.establishmentsByClient = establishmentsByClient;
   state.syncByClient = syncByClient;
   state.dashboardStats = dashboardStats;
@@ -3201,45 +3201,33 @@ function renderDashboardPage() {
           <p class="card-subtitle">${lastRun ? `Execucao iniciada as ${formatHour(lastRun.inicio)} e finalizada as ${formatHour(lastRun.fim)}.` : 'Sem execucoes recentes.'}</p>
         </div>
         <div class="summary-actions">
-          ${
-            openCteDisagreementAlerts.length
-              ? `
-                <button class="dashboard-alert-button" type="button" data-action="dashboard-open-cte-disagreement-alerts" aria-label="Abrir alertas de desacordo de CT-e">
+          ${`
+                <button class="dashboard-alert-button ${openCteDisagreementAlerts.length ? '' : 'dashboard-alert-button-empty'}" type="button" data-action="dashboard-open-cte-disagreement-alerts" aria-label="Abrir alertas de desacordo de CT-e">
                   <span class="dashboard-alert-button-icon">${icon('alert')}</span>
                   <span class="dashboard-alert-button-copy">
                     <strong>${escapeHtml(String(openCteDisagreementAlerts.length))}</strong>
                     <span>CT-e em desacordo</span>
                   </span>
                 </button>
-              `
-              : ''
-          }
-          ${
-            openNfseRetentionAlerts.length
-              ? `
-                <button class="dashboard-alert-button" type="button" data-action="dashboard-open-nfse-retention-alerts" aria-label="Abrir alertas de NFS-e com retencao">
+              `}
+          ${`
+                <button class="dashboard-alert-button ${openNfseRetentionAlerts.length ? '' : 'dashboard-alert-button-empty'}" type="button" data-action="dashboard-open-nfse-retention-alerts" aria-label="Abrir alertas de NFS-e com retencao">
                   <span class="dashboard-alert-button-icon">${icon('alert')}</span>
                   <span class="dashboard-alert-button-copy">
                     <strong>${escapeHtml(String(openNfseRetentionAlerts.length))}</strong>
                     <span>NFS-e com retencao</span>
                   </span>
                 </button>
-              `
-              : ''
-          }
-          ${
-            openNfeAddressAlerts.length
-              ? `
-                <button class="dashboard-alert-button" type="button" data-action="dashboard-open-nfe-address-alerts" aria-label="Abrir alertas de NF-e com endereco divergente">
+              `}
+          ${`
+                <button class="dashboard-alert-button ${openNfeAddressAlerts.length ? '' : 'dashboard-alert-button-empty'}" type="button" data-action="dashboard-open-nfe-address-alerts" aria-label="Abrir alertas de NF-e com endereco divergente">
                   <span class="dashboard-alert-button-icon">${icon('alert')}</span>
                   <span class="dashboard-alert-button-copy">
                     <strong>${escapeHtml(String(openNfeAddressAlerts.length))}</strong>
                     <span>NF-e com endereco incorreto</span>
                   </span>
                 </button>
-              `
-              : ''
-          }
+              `}
           ${statusBadge(lastRun?.status || 'Sem status', summaryTone, 'summary-status')}
         </div>
       </article>
