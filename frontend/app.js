@@ -1138,6 +1138,10 @@ function onDocumentClick(event) {
       openModal({ kind: 'nfse-retention-alerts', empresaId: '' });
       return;
     }
+    case 'dashboard-open-nfe-address-alerts': {
+      openModal({ kind: 'nfe-address-alerts' });
+      return;
+    }
     case 'open-new-client-modal': {
       openModal({ kind: 'client-form', mode: 'create' });
       return;
@@ -3129,6 +3133,7 @@ function renderDashboardPage() {
   const certsExpiring = state.certificates.filter((cert) => cert.status === 'A vencer').length;
   const openCteDisagreementAlerts = getOpenCteDisagreementAlerts();
   const openNfseRetentionAlerts = getOpenNfseRetentionAlerts();
+  const openNfeAddressAlerts = getOpenNfeAddressMismatchAlerts();
   const latestSearchRows = [...state.clients]
     .sort((a, b) => Date.parse(b.ultimaBusca || 0) - Date.parse(a.ultimaBusca || 0))
     .slice(0, 8);
@@ -3163,6 +3168,19 @@ function renderDashboardPage() {
                   <span class="dashboard-alert-button-copy">
                     <strong>${escapeHtml(String(openNfseRetentionAlerts.length))}</strong>
                     <span>NFS-e com retencao</span>
+                  </span>
+                </button>
+              `
+              : ''
+          }
+          ${
+            openNfeAddressAlerts.length
+              ? `
+                <button class="dashboard-alert-button" type="button" data-action="dashboard-open-nfe-address-alerts" aria-label="Abrir alertas de NF-e com endereco divergente">
+                  <span class="dashboard-alert-button-icon">${icon('alert')}</span>
+                  <span class="dashboard-alert-button-copy">
+                    <strong>${escapeHtml(String(openNfeAddressAlerts.length))}</strong>
+                    <span>NF-e com endereco incorreto</span>
                   </span>
                 </button>
               `
@@ -3465,6 +3483,8 @@ function renderClientDetailsPage(clientId) {
   const clientAlerts = state.alerts.filter((alert) => alert.clientId === client.id).slice(0, 5);
   const establishmentSummary = getClientEstablishmentSummary(client.id);
   const nfeBaseSummary = getClientNfeBaseSummary(client.id);
+  const clientAddressParts = [client.logradouro, client.bairro, client.municipio && client.uf ? `${client.municipio} / ${client.uf}` : '', client.cep ? `CEP ${client.cep}` : ''].filter(Boolean);
+  const clientAddressLabel = clientAddressParts.length ? clientAddressParts.join(' • ') : '-';
 
   return `
     <section class="page-section">
@@ -3491,7 +3511,8 @@ function renderClientDetailsPage(clientId) {
               ${detailItem('Nome fantasia', client.nomeFantasia || '-')}
               ${detailItem('CNPJ', formatCnpj(client.cnpj))}
               ${detailItem('Inscricao municipal', client.inscricaoMunicipal || '-')}
-              ${detailItem('Municipio', `${client.municipio} / ${client.uf}`)}
+              ${detailItem('Endereco', clientAddressLabel)}
+              ${detailItem('Municipio', formatMunicipioUfLabel(client.municipio, client.uf))}
               ${detailItem('Estabelecimento', establishmentSummary.detail)}
               ${detailItem('Cursor NF-e', nfeBaseSummary.displayValue)}
               ${detailItem('Controles NF-e', nfeBaseSummary.controlsLabel)}
@@ -5530,7 +5551,7 @@ function renderAlertsPage() {
             </label>
             <label class="field">
               Tipo
-              <select name="tipo">${renderOptions(['Todos', 'Certificado', 'Prefeitura', 'XML', 'Cliente', 'Servidor', 'Busca', 'CT-e', 'NFS-e'], state.filters.alerts.tipo)}</select>
+              <select name="tipo">${renderOptions(['Todos', 'Certificado', 'Prefeitura', 'XML', 'Cliente', 'Servidor', 'Busca', 'CT-e', 'NF-e', 'NFS-e'], state.filters.alerts.tipo)}</select>
             </label>
             <label class="field">
               Status
@@ -10094,6 +10115,8 @@ function renderModal() {
       return renderCteDisagreementAlertsModal();
     case 'nfse-retention-alerts':
       return renderNfseRetentionAlertsModal();
+    case 'nfe-address-alerts':
+      return renderNfeAddressAlertsModal();
     case 'dominio-nfe-view':
       return renderDominioNfeViewerModal();
     case 'compare-sped-report':
@@ -10535,6 +10558,9 @@ function renderClientFormModal() {
   const client = state.modal.mode === 'edit' ? findClientById(state.modal.clientId) : null;
   const municipioValue = getEditableValue(client?.municipio);
   const ufValue = getEditableValue(client?.uf);
+  const logradouroValue = getEditableValue(client?.logradouro);
+  const bairroValue = getEditableValue(client?.bairro);
+  const cepValue = getEditableValue(client?.cep);
   const responsavelInternoValue = getEditableValue(client?.responsavelInterno);
   const codigoEmpresaDominioValue =
     state.modal.codigoEmpresaDominioOverride ?? (client?.codigoEmpresaDominio != null ? String(client.codigoEmpresaDominio) : '');
@@ -10569,12 +10595,24 @@ function renderClientFormModal() {
                 <input name="inscricaoMunicipal" value="${escapeHtml(client?.inscricaoMunicipal || '')}" />
               </label>
               <label class="field">
-                Municipio
-                <input name="municipio" required value="${escapeHtml(municipioValue)}" />
+                Logradouro
+                <input name="logradouro" value="${escapeHtml(logradouroValue)}" placeholder="Rua Estrela, 628" />
+              </label>
+              <label class="field">
+                Bairro
+                <input name="bairro" value="${escapeHtml(bairroValue)}" />
+              </label>
+              <label class="field">
+                CEP
+                <input name="cep" value="${escapeHtml(cepValue)}" placeholder="89700000" />
               </label>
               <label class="field">
                 UF
                 <input name="uf" maxlength="2" required value="${escapeHtml(ufValue)}" />
+              </label>
+              <label class="field">
+                Municipio
+                <input name="municipio" required value="${escapeHtml(municipioValue)}" />
               </label>
               <label class="field">
                 Codigo empresa Dominio
@@ -12165,6 +12203,80 @@ function renderCteDisagreementAlertsModal() {
   `;
 }
 
+function renderNfeAddressAlertsModal() {
+  const alerts = getNfeAddressMismatchAlerts();
+  const openAlerts = alerts.filter((alert) => alert.status !== 'Resolvido');
+  const resolvedAlerts = alerts.filter((alert) => alert.status === 'Resolvido');
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(1100px, calc(100vw - 24px));">
+        <div class="modal-header">
+          <h3 class="modal-title">NF-e de entrada com endereco divergente</h3>
+          <p class="modal-subtitle">Acompanhe notas recebidas que chegaram com endereco diferente do cadastro da empresa e abra o documento para conferir os dados.</p>
+        </div>
+        <div class="modal-body">
+          <div class="form-grid four" style="margin-bottom:18px;">
+            ${detailItem('Total', String(alerts.length))}
+            ${detailItem('Em aberto', String(openAlerts.length))}
+            ${detailItem('Resolvidos', String(resolvedAlerts.length))}
+            ${detailItem('Empresas afetadas', String(new Set(openAlerts.map((alert) => alert.clientId).filter(Boolean)).size))}
+          </div>
+          ${
+            alerts.length
+              ? `<div style="display:grid; gap:14px;">
+                  ${alerts
+                    .map(
+                      (alert) => `
+                        <article class="dashboard-alert-overlay-card ${alert.status === 'Resolvido' ? 'resolved' : 'open'}">
+                          <div class="dashboard-alert-overlay-main">
+                            <div class="dashboard-alert-overlay-icon">${icon('alert')}</div>
+                            <div style="min-width:0;">
+                              <div class="dashboard-alert-overlay-header">
+                                <div>
+                                  <h4 class="dashboard-alert-overlay-title">${escapeHtml(alert.titulo)}</h4>
+                                  <p class="dashboard-alert-overlay-subtitle">${escapeHtml(alert.descricao)}</p>
+                                </div>
+                                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
+                                  ${statusBadge(alert.status, toneFromAlertStatus(alert.status))}
+                                  ${statusBadge(alert.severity, toneFromSeverity(alert.severity))}
+                                </div>
+                              </div>
+                              <div class="dashboard-alert-overlay-meta">
+                                <span><strong>Cliente:</strong> ${escapeHtml(alert.cliente)}</span>
+                                <span><strong>Data:</strong> ${escapeHtml(formatDateTime(alert.dataHora))}</span>
+                              </div>
+                              <div class="dashboard-alert-overlay-meta">
+                                <span><strong>NF-e:</strong> ${escapeHtml(alert.numeroDocumento || alert.chaveAcesso || '-')}</span>
+                                <span><strong>Chave:</strong> ${escapeHtml(alert.chaveAcesso || '-')}</span>
+                              </div>
+                              <div class="table-actions" style="margin-top:12px;">
+                                <button class="btn secondary" type="button" data-action="alert-details" data-alert-id="${escapeHtml(alert.id)}">Ver detalhes</button>
+                                <button class="btn secondary" type="button" data-action="alert-open-document" data-alert-id="${escapeHtml(alert.id)}">Ver NF-e</button>
+                                ${
+                                  alert.status === 'Resolvido'
+                                    ? `<button class="btn primary" type="button" data-action="alert-unresolve" data-alert-id="${escapeHtml(alert.id)}">Reabrir alerta</button>`
+                                    : `<button class="btn primary" type="button" data-action="alert-resolve" data-alert-id="${escapeHtml(alert.id)}">Marcar como resolvido</button>`
+                                }
+                              </div>
+                            </div>
+                          </div>
+                        </article>
+                      `
+                    )
+                    .join('')}
+                </div>`
+              : '<div class="table-state">Nenhuma NF-e com endereco divergente encontrada.</div>'
+          }
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" data-action="close-modal">Fechar</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderNfseFiscalReaderResumoMunicipioTable(titulo, linhas) {
   const items = Array.isArray(linhas) ? linhas : [];
   if (!items.length) {
@@ -13357,6 +13469,9 @@ function renderNfeStorageBadges(doc) {
 
 function renderNfeStatusBadges(doc) {
   const badges = [];
+  if (hasOpenNfeAddressMismatchAlertForDocument(doc?.apiNfeId)) {
+    badges.push(statusBadge('!', 'danger', 'nfe-address-alert-chip'));
+  }
   if (doc.statusFiscal && doc.statusFiscal !== '-') {
     badges.push(statusBadge(doc.statusFiscal, toneFromFiscalStatus(doc.statusFiscal)));
   }
@@ -13623,8 +13738,11 @@ async function submitClientForm(form) {
     nomeFantasia: String(formData.get('nomeFantasia') || '').trim(),
     cnpj: normalizeDigits(String(formData.get('cnpj') || '')),
     inscricaoMunicipal: String(formData.get('inscricaoMunicipal') || '').trim(),
-    municipio: String(formData.get('municipio') || '').trim(),
+    logradouro: String(formData.get('logradouro') || '').trim(),
+    bairro: String(formData.get('bairro') || '').trim(),
+    cep: normalizeDigits(String(formData.get('cep') || '')),
     uf: String(formData.get('uf') || '').trim().toUpperCase(),
+    municipio: String(formData.get('municipio') || '').trim(),
     responsavelInterno: String(formData.get('responsavelInterno') || '').trim(),
     buscaAtiva: formData.get('buscaAtiva') === 'on',
     buscaNfeAtiva: formData.get('buscaNfeAtiva') === 'on',
@@ -13642,6 +13760,10 @@ async function submitClientForm(form) {
       nomeFantasia: payload.nomeFantasia || undefined,
       cnpj: payload.cnpj,
       inscricaoMunicipal: payload.inscricaoMunicipal || undefined,
+      logradouro: payload.logradouro || undefined,
+      bairro: payload.bairro || undefined,
+      cep: payload.cep || undefined,
+      uf: payload.uf || undefined,
       municipioNome: payload.municipio || undefined,
       responsavelInterno: payload.responsavelInterno || undefined,
       ativo: payload.buscaAtiva,
@@ -17762,6 +17884,34 @@ function getOpenNfseRetentionAlerts() {
   return getNfseRetentionAlerts().filter((alert) => alert.status !== 'Resolvido');
 }
 
+function isNfeAddressMismatchAlert(alert) {
+  return Boolean(alert && alert.tipo === 'NF-e' && alert.origem === 'nfe-endereco-divergente');
+}
+
+function getNfeAddressMismatchAlerts() {
+  return [...state.alerts]
+    .filter((alert) => isNfeAddressMismatchAlert(alert))
+    .sort((a, b) => {
+      const leftResolved = a.status === 'Resolvido' ? 1 : 0;
+      const rightResolved = b.status === 'Resolvido' ? 1 : 0;
+      return leftResolved - rightResolved || Date.parse(b.dataHora || 0) - Date.parse(a.dataHora || 0);
+    });
+}
+
+function getOpenNfeAddressMismatchAlerts() {
+  return getNfeAddressMismatchAlerts().filter((alert) => alert.status !== 'Resolvido');
+}
+
+function hasOpenNfeAddressMismatchAlertForDocument(apiNfeId) {
+  if (!apiNfeId) {
+    return false;
+  }
+
+  return state.alerts.some(
+    (alert) => alert.status !== 'Resolvido' && isNfeAddressMismatchAlert(alert) && alert.documentoId === apiNfeId
+  );
+}
+
 function getFilteredNfseRetentionAlerts(companyId = '') {
   const normalizedCompanyId = String(companyId || '').trim();
   if (!normalizedCompanyId) {
@@ -20202,8 +20352,11 @@ function buildClientsFromApi(apiClients, establishmentsByClient, certificatesByC
       nomeFantasia: client.nomeFantasia || '',
       cnpj: normalizeDigits(client.cnpj || ''),
       inscricaoMunicipal: primaryEstablishment?.inscricaoMunicipal || '',
+      logradouro: primaryEstablishment?.logradouro || '',
+      bairro: primaryEstablishment?.bairro || '',
+      cep: primaryEstablishment?.cep || '',
+      uf: primaryEstablishment?.uf || '',
       municipio: primaryEstablishment?.municipioNome || '-',
-      uf: '-',
       responsavelInterno: client.responsavelInterno || client.emailResponsavel || '-',
       buscaAtiva: buscaStatus === 'Ativo',
       buscaNfeAtiva,
@@ -21229,12 +21382,15 @@ function renderAlertDocumentLine(alert) {
 }
 
 function hasAlertDocumentAction(alert) {
-  return alert?.tipo === 'CT-e' || alert?.tipo === 'NFS-e';
+  return alert?.tipo === 'CT-e' || alert?.tipo === 'NFS-e' || alert?.tipo === 'NF-e';
 }
 
 function renderAlertOpenDocumentLabel(alert) {
   if (alert?.tipo === 'NFS-e') {
     return 'Ver NFS-e';
+  }
+  if (alert?.tipo === 'NF-e') {
+    return 'Ver NF-e';
   }
   if (alert?.tipo === 'CT-e') {
     return 'Ver CT-e';
@@ -22460,6 +22616,17 @@ function formatRelativeDate(value) {
   }
 
   return formatDate(date);
+}
+
+function formatMunicipioUfLabel(municipio, uf) {
+  const municipioLabel = String(municipio || '').trim();
+  const ufLabel = String(uf || '').trim();
+
+  if (municipioLabel && ufLabel) {
+    return `${municipioLabel} / ${ufLabel}`;
+  }
+
+  return municipioLabel || ufLabel || '-';
 }
 
 function formatHour(value) {

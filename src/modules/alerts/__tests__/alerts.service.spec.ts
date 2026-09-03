@@ -7,6 +7,9 @@ describe('AlertsService', () => {
       findMany: jest.fn(),
       findUnique: jest.fn()
     },
+    nfeDocumento: {
+      findMany: jest.fn()
+    },
     nfseDocumento: {
       findMany: jest.fn()
     },
@@ -26,15 +29,19 @@ describe('AlertsService', () => {
   const nfseDanfse = {
     extractRetentionAlertData: jest.fn()
   } as any;
+  const nfeXmlParser = {
+    parse: jest.fn()
+  } as any;
 
   let service: AlertsService;
 
   beforeEach(() => {
     jest.resetAllMocks();
     prisma.nfeEvento.findMany.mockResolvedValue([]);
+    prisma.nfeDocumento.findMany.mockResolvedValue([]);
     prisma.nfseDocumento.findMany.mockResolvedValue([]);
     prisma.alertResolution.findMany.mockResolvedValue([]);
-    service = new AlertsService(prisma, storage, nfseDanfse);
+    service = new AlertsService(prisma, storage, nfseDanfse, nfeXmlParser);
   });
 
   it('lista alertas de desacordo de CT-e com status resolvido quando houver resolucao', async () => {
@@ -205,6 +212,85 @@ describe('AlertsService', () => {
 
     expect(storage.getObject).not.toHaveBeenCalled();
     expect(result).toEqual([]);
+  });
+
+  it('lista alerta de NF-e de entrada com endereco divergente', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'nfe-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        chaveAcesso: '35260612345678000199550010000001231000001231',
+        numeroNfe: '123',
+        dataEmissao: new Date('2026-07-24T13:35:20.000Z'),
+        dataCancelamento: null,
+        tipoRelacao: 'recebida',
+        cnpjDestinatario: '12345678000199',
+        razaoSocialEmitente: 'Fornecedor Teste',
+        xmlCompletoPath: 'nfe/producao/12345678000199/2026/07/xml/123.xml',
+        createdAt: new Date('2026-07-24T13:35:20.000Z'),
+        updatedAt: new Date('2026-07-24T13:35:20.000Z'),
+        cliente: {
+          razaoSocial: 'Cliente Teste'
+        },
+        estabelecimento: {
+          cnpj: '12345678000199',
+          logradouro: 'Rua Estrela',
+          bairro: 'Centro',
+          uf: 'SC',
+          municipioNome: 'Mondai'
+        }
+      }
+    ]);
+    storage.getObject.mockResolvedValue(
+      Buffer.from(
+        `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe35260612345678000199550010000001231000001231">
+      <ide><mod>55</mod><serie>1</serie><nNF>123</nNF></ide>
+      <emit><CNPJ>11111111000111</CNPJ><xNome>Fornecedor Teste</xNome></emit>
+      <dest>
+        <CNPJ>12345678000199</CNPJ>
+        <xNome>Cliente Teste</xNome>
+        <enderDest>
+          <xLgr>Rua Estrela</xLgr>
+          <nro>628</nro>
+          <xBairro>Centro</xBairro>
+          <xMun>Outro Municipio</xMun>
+          <UF>PR</UF>
+          <CEP>89700000</CEP>
+        </enderDest>
+      </dest>
+    </infNFe>
+  </NFe>
+</nfeProc>`,
+        'utf8'
+      )
+    );
+    nfeXmlParser.parse.mockReturnValue({
+      destinatarioEnderecoLogradouro: 'Rua Estrela',
+      destinatarioEnderecoNumero: '628',
+      destinatarioEnderecoComplemento: undefined,
+      destinatarioEnderecoBairro: 'Centro',
+      destinatarioEnderecoMunicipio: 'Outro Municipio',
+      destinatarioEnderecoUf: 'PR',
+      destinatarioEnderecoCep: '89700000'
+    });
+
+    const result = await service.findAll({});
+
+    expect(storage.getObject).toHaveBeenCalledWith('nfe/producao/12345678000199/2026/07/xml/123.xml');
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: 'nfe-endereco-divergente-nfe-1',
+        tipo: 'NF-e',
+        numeroDocumento: '123',
+        status: 'Aberto',
+        persistence: 'client',
+        canToggleResolved: true
+      })
+    ]);
   });
 
   it('marca um alerta como resolvido por evento', async () => {

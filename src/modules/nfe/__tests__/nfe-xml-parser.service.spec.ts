@@ -16,7 +16,19 @@ describe('NfeXmlParserService', () => {
         <dhEmi>2026-06-29T10:00:00-03:00</dhEmi>
       </ide>
       <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
-      <dest><CNPJ>99888777000166</CNPJ><xNome>Destinatario Teste</xNome></dest>
+      <dest>
+        <CNPJ>99888777000166</CNPJ>
+        <xNome>Destinatario Teste</xNome>
+        <enderDest>
+          <xLgr>Rua Principal</xLgr>
+          <nro>123</nro>
+          <xCpl>Sala 2</xCpl>
+          <xBairro>Centro</xBairro>
+          <xMun>Sao Paulo</xMun>
+          <UF>SP</UF>
+          <CEP>89700000</CEP>
+        </enderDest>
+      </dest>
       <total><ICMSTot><vNF>199.90</vNF></ICMSTot></total>
     </infNFe>
   </NFe>
@@ -33,6 +45,13 @@ describe('NfeXmlParserService', () => {
       razaoSocialEmitente: 'Emitente Teste',
       cnpjDestinatario: '99888777000166',
       razaoSocialDestinatario: 'Destinatario Teste',
+      destinatarioEnderecoLogradouro: 'Rua Principal',
+      destinatarioEnderecoNumero: '123',
+      destinatarioEnderecoComplemento: 'Sala 2',
+      destinatarioEnderecoBairro: 'Centro',
+      destinatarioEnderecoMunicipio: 'Sao Paulo',
+      destinatarioEnderecoUf: 'SP',
+      destinatarioEnderecoCep: '89700000',
       valorTotal: '199.90',
       schemaDoc: 'procNFe_v4.00',
       contentType: 'completo'

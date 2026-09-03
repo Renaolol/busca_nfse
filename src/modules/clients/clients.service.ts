@@ -12,6 +12,8 @@ export class ClientsService {
     dto: CreateClientDto
   ): Promise<Cliente & { estabelecimentoPrincipal: ClienteEstabelecimento }> {
     const cnpj = dto.cnpj.replace(/\D/g, '');
+    const uf = this.normalizeUf(dto.uf);
+    const cep = this.normalizeCep(dto.cep);
 
     return this.prisma.$transaction(async (tx) => {
       const client = await tx.cliente.create({
@@ -34,6 +36,10 @@ export class ClientsService {
           cnpj,
           razaoSocial: dto.razaoSocial,
           inscricaoMunicipal: dto.inscricaoMunicipal,
+          logradouro: dto.logradouro,
+          bairro: dto.bairro,
+          cep,
+          uf,
           municipioCodigoIbge: dto.municipioCodigoIbge,
           municipioNome: dto.municipioNome,
           ativo: true
@@ -70,6 +76,8 @@ export class ClientsService {
     await this.findOne(id);
 
     const cnpjNormalizado = dto.cnpj?.replace(/\D/g, '');
+    const uf = this.normalizeUf(dto.uf);
+    const cep = this.normalizeCep(dto.cep);
 
     return this.prisma.$transaction(async (tx) => {
       const updatedClient = await tx.cliente.update({
@@ -99,6 +107,10 @@ export class ClientsService {
             cnpj: cnpjNormalizado,
             razaoSocial: dto.razaoSocial,
             inscricaoMunicipal: dto.inscricaoMunicipal,
+            logradouro: dto.logradouro,
+            bairro: dto.bairro,
+            cep,
+            uf,
             municipioCodigoIbge: dto.municipioCodigoIbge,
             municipioNome: dto.municipioNome
           }
@@ -158,5 +170,15 @@ export class ClientsService {
 
       return client;
     });
+  }
+
+  private normalizeUf(value?: string | null): string | undefined {
+    const normalized = String(value || '').trim().toUpperCase();
+    return normalized || undefined;
+  }
+
+  private normalizeCep(value?: string | null): string | undefined {
+    const normalized = String(value || '').replace(/\D/g, '').slice(0, 8);
+    return normalized || undefined;
   }
 }

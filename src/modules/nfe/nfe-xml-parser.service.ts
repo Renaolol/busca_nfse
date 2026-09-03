@@ -14,6 +14,13 @@ export interface ParsedNfe {
   razaoSocialEmitente?: string;
   cnpjDestinatario?: string;
   razaoSocialDestinatario?: string;
+  destinatarioEnderecoLogradouro?: string;
+  destinatarioEnderecoNumero?: string;
+  destinatarioEnderecoComplemento?: string;
+  destinatarioEnderecoBairro?: string;
+  destinatarioEnderecoMunicipio?: string;
+  destinatarioEnderecoUf?: string;
+  destinatarioEnderecoCep?: string;
   valorTotal?: string;
   schemaDoc: string;
   contentType: 'resumo' | 'completo';
@@ -159,6 +166,13 @@ export class NfeXmlParserService {
         this.extractNestedAny(xml, ['emit'], ['xNome']) ?? (summary ? this.extract(xml, ['xNome']) : undefined),
       cnpjDestinatario: this.normalizeCnpj(this.extractNestedAny(xml, ['dest'], ['CNPJ', 'CPF'])),
       razaoSocialDestinatario: this.extractNestedAny(xml, ['dest'], ['xNome']),
+      destinatarioEnderecoLogradouro: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['xLgr']),
+      destinatarioEnderecoNumero: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['nro']),
+      destinatarioEnderecoComplemento: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['xCpl']),
+      destinatarioEnderecoBairro: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['xBairro']),
+      destinatarioEnderecoMunicipio: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['xMun']),
+      destinatarioEnderecoUf: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['UF']),
+      destinatarioEnderecoCep: this.extractEnderecoField(xml, ['dest'], ['enderDest'], ['CEP']),
       valorTotal:
         this.extractNestedAny(xml, ['ICMSTot'], ['vNF']) ??
         this.extractNestedAny(xml, ['total'], ['vNF']) ??
@@ -324,6 +338,31 @@ export class NfeXmlParserService {
   }
 
   private extractNestedAny(xml: string, parentTags: string[], childTags: string[]): string | undefined {
+    const block = this.extractNestedBlock(xml, parentTags, childTags);
+    return block ? this.cleanText(block) : undefined;
+  }
+
+  private extractEnderecoField(xml: string, parentTags: string[], childTags: string[], fieldTags: string[]): string | undefined {
+    const block = this.extractNestedBlock(xml, parentTags, childTags);
+    if (!block) {
+      return undefined;
+    }
+
+    for (const fieldTag of fieldTags) {
+      const regex = new RegExp(`<(?:\\w+:)?${fieldTag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${fieldTag}>`, 'i');
+      const match = regex.exec(block);
+      if (match?.[1]) {
+        const cleaned = this.cleanText(match[1]);
+        if (cleaned) {
+          return cleaned;
+        }
+      }
+    }
+
+    return undefined;
+  }
+
+  private extractNestedBlock(xml: string, parentTags: string[], childTags: string[]): string | undefined {
     for (const parentTag of parentTags) {
       const parentRegex = new RegExp(
         `<(?:\\w+:)?${parentTag}\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?${parentTag}>`,
@@ -341,10 +380,7 @@ export class NfeXmlParserService {
         );
         const childMatch = childRegex.exec(parentMatch[1]);
         if (childMatch?.[1]) {
-          const cleaned = this.cleanText(childMatch[1]);
-          if (cleaned) {
-            return cleaned;
-          }
+          return childMatch[1];
         }
       }
     }

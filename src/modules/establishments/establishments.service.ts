@@ -15,6 +15,10 @@ export class EstablishmentsService {
         cnpj: dto.cnpj,
         razaoSocial: dto.razaoSocial,
         inscricaoMunicipal: dto.inscricaoMunicipal,
+        logradouro: dto.logradouro,
+        bairro: dto.bairro,
+        cep: this.normalizeCep(dto.cep),
+        uf: this.normalizeUf(dto.uf),
         municipioCodigoIbge: dto.municipioCodigoIbge,
         municipioNome: dto.municipioNome,
         ativo: dto.ativo ?? true
@@ -40,7 +44,21 @@ export class EstablishmentsService {
 
     return this.prisma.clienteEstabelecimento.update({
       where: { id },
-      data: dto
+      data: {
+        ...dto,
+        cep: this.normalizeCep(dto.cep),
+        uf: this.normalizeUf(dto.uf)
+      }
     });
+  }
+
+  private normalizeUf(value?: string | null): string | undefined {
+    const normalized = String(value || '').trim().toUpperCase();
+    return normalized || undefined;
+  }
+
+  private normalizeCep(value?: string | null): string | undefined {
+    const normalized = String(value || '').replace(/\D/g, '').slice(0, 8);
+    return normalized || undefined;
   }
 }

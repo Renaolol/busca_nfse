@@ -94,5 +94,31 @@ export const mockAlerts = [
     sugestaoAcao: 'Sem acao adicional. Evento encerrado.',
     historicoTentativas: ['01:17 alerta aberto', '01:19 recuperacao automatica'],
     allowsReprocess: false
+  },
+  {
+    id: 'alert-007',
+    severity: 'Atencao',
+    tipo: 'NF-e',
+    titulo: 'NF-e de entrada com endereco divergente',
+    descricao: 'A nota chegou com municipio e UF diferentes do cadastro da empresa.',
+    clientId: '65e42ec6-f287-4ff5-8f2c-65cb743f6f14',
+    cliente: 'Metalurgica Forte Aco SA',
+    dataHora: '2026-06-01T02:27:00.000Z',
+    status: 'Aberto',
+    origem: 'nfe-endereco-divergente',
+    mensagemTecnica: 'logradouro: NF-e="Rua da Industria, 500" vs cadastro="Rua da Industria, 500" | bairro: NF-e="Atiradores" vs cadastro="Atiradores" | UF: NF-e="PR" vs cadastro="SC" | municipio: NF-e="Joinville" vs cadastro="Joinville"',
+    sugestaoAcao: 'Solicitar ao fornecedor a correcao da NF-e e revisar o cadastro da empresa.',
+    historicoTentativas: ['02:27 alerta gerado'],
+    allowsReprocess: false,
+    persistence: 'client',
+    canToggleResolved: true,
+    documentoId: 'nfe-alert-001',
+    chaveAcesso: '35260612345678000199550010000001231000001231',
+    numeroDocumento: '123',
+    eventoTipo: '',
+    eventoDescricao: '',
+    resolvedAt: null,
+    emissor: 'Fornecedor Exemplo LTDA',
+    retencoes: []
   }
 ];

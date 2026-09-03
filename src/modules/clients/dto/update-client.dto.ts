@@ -19,6 +19,26 @@ export class UpdateClientDto {
   @IsString()
   inscricaoMunicipal?: string;
 
+  @ApiPropertyOptional({ description: 'Logradouro do estabelecimento principal' })
+  @IsOptional()
+  @IsString()
+  logradouro?: string;
+
+  @ApiPropertyOptional({ description: 'Bairro do estabelecimento principal' })
+  @IsOptional()
+  @IsString()
+  bairro?: string;
+
+  @ApiPropertyOptional({ description: 'CEP do estabelecimento principal' })
+  @IsOptional()
+  @IsString()
+  cep?: string;
+
+  @ApiPropertyOptional({ description: 'UF do estabelecimento principal' })
+  @IsOptional()
+  @IsString()
+  uf?: string;
+
   @ApiPropertyOptional({ description: 'Codigo IBGE do municipio do estabelecimento principal' })
   @IsOptional()
   @IsString()

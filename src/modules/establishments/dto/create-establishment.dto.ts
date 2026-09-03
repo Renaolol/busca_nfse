@@ -20,6 +20,26 @@ export class CreateEstablishmentDto {
   @ApiPropertyOptional()
   @IsOptional()
   @IsString()
+  logradouro?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  bairro?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  cep?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
+  uf?: string;
+
+  @ApiPropertyOptional()
+  @IsOptional()
+  @IsString()
   municipioCodigoIbge?: string;
 
   @ApiPropertyOptional()

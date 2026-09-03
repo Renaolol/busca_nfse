@@ -55,6 +55,10 @@ describe('ClientsService', () => {
       id: 'estabelecimento-1',
       clienteId: 'cliente-1',
       inscricaoMunicipal: '12345',
+      logradouro: 'Rua das Flores',
+      bairro: 'Centro',
+      cep: '89700000',
+      uf: 'SC',
       municipioNome: 'Sao Paulo'
     };
 
@@ -66,6 +70,10 @@ describe('ClientsService', () => {
       nomeFantasia: 'Cliente Teste',
       cnpj: '12.345.678/0001-90',
       inscricaoMunicipal: '12345',
+      logradouro: 'Rua das Flores',
+      bairro: 'Centro',
+      cep: '89700-000',
+      uf: 'sc',
       municipioCodigoIbge: '3550308',
       municipioNome: 'Sao Paulo',
       responsavelInterno: 'Equipe Fiscal',
@@ -84,6 +92,10 @@ describe('ClientsService', () => {
         clienteId: 'cliente-1',
         cnpj: '12345678000190',
         inscricaoMunicipal: '12345',
+        logradouro: 'Rua das Flores',
+        bairro: 'Centro',
+        cep: '89700000',
+        uf: 'SC',
         municipioCodigoIbge: '3550308',
         municipioNome: 'Sao Paulo'
       })
@@ -110,6 +122,10 @@ describe('ClientsService', () => {
     prisma.clienteEstabelecimento.update.mockResolvedValue({
       id: 'estabelecimento-1',
       inscricaoMunicipal: '67890',
+      logradouro: 'Avenida Brasil',
+      bairro: 'Centro',
+      cep: '13010000',
+      uf: 'SP',
       municipioNome: 'Campinas'
     });
 
@@ -117,6 +133,10 @@ describe('ClientsService', () => {
       razaoSocial: 'Cliente Atualizado',
       cnpj: '12.345.678/0001-90',
       inscricaoMunicipal: '67890',
+      logradouro: 'Avenida Brasil',
+      bairro: 'Centro',
+      cep: '13010-000',
+      uf: 'sp',
       municipioCodigoIbge: '3509502',
       municipioNome: 'Campinas',
       responsavelInterno: 'Joao Fiscal'
@@ -134,6 +154,10 @@ describe('ClientsService', () => {
       data: expect.objectContaining({
         cnpj: '12345678000190',
         inscricaoMunicipal: '67890',
+        logradouro: 'Avenida Brasil',
+        bairro: 'Centro',
+        cep: '13010000',
+        uf: 'SP',
         municipioCodigoIbge: '3509502',
         municipioNome: 'Campinas'
       })

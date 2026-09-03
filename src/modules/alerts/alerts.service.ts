@@ -1,6 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { AlertResolution, Prisma } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
+import { NfeXmlParserService, type ParsedNfe } from '../nfe/nfe-xml-parser.service';
 import { NfseDanfseService } from '../nfse/nfse-danfse.service';
 import { LocalStorageService } from '../storage/storage.service';
 import { AlertResponseDto } from './dto/alert-response.dto';
@@ -26,6 +27,13 @@ type NfseRetencaoAlertRow = Prisma.NfseDocumentoGetPayload<{
   };
 }>;
 
+type NfeEnderecoDivergenteAlertRow = Prisma.NfeDocumentoGetPayload<{
+  include: {
+    cliente: true;
+    estabelecimento: true;
+  };
+}>;
+
 const NFSE_RETENTION_ALERT_START_DATE = new Date('2026-07-01T00:00:00.000Z');
 
 @Injectable()
@@ -33,11 +41,12 @@ export class AlertsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: LocalStorageService,
-    private readonly nfseDanfse: NfseDanfseService
+    private readonly nfseDanfse: NfseDanfseService,
+    private readonly nfeXmlParser: NfeXmlParserService
   ) {}
 
   async findAll(query: QueryAlertsDto = {}): Promise<AlertResponseDto[]> {
-    const [cteRows, nfseRows] = await Promise.all([
+    const [cteRows, nfseRows, nfeRows] = await Promise.all([
       this.prisma.nfeEvento.findMany({
         where: {
           nfeDocumento: {
@@ -72,12 +81,30 @@ export class AlertsService {
           estabelecimento: true
         },
         orderBy: [{ dataEmissao: 'desc' }, { updatedAt: 'desc' }]
+      }),
+      this.prisma.nfeDocumento.findMany({
+        where: {
+          ...(query.clienteId ? { clienteId: query.clienteId } : {}),
+          tipoRelacao: 'recebida',
+          NOT: { status: 'Cancelada' },
+          OR: [{ xmlCompletoPath: { not: null } }, { xmlResumoPath: { not: null } }]
+        },
+        include: {
+          cliente: true,
+          estabelecimento: true
+        },
+        orderBy: [{ dataEmissao: 'desc' }, { updatedAt: 'desc' }]
       })
     ]);
 
     const cteAlerts = cteRows.filter((row) => this.isDesacordoEvent(row)).map((row) => this.toCteAlertDto(row));
     const nfseAlertsRaw = await Promise.all(nfseRows.map((row) => this.toNfseRetentionAlertDto(row)));
-    const alerts = [...cteAlerts, ...nfseAlertsRaw.filter((row): row is AlertResponseDto => Boolean(row))];
+    const nfeAddressAlertsRaw = await Promise.all(nfeRows.map((row) => this.toNfeEnderecoDivergenteAlertDto(row)));
+    const alerts = [
+      ...cteAlerts,
+      ...nfseAlertsRaw.filter((row): row is AlertResponseDto => Boolean(row)),
+      ...nfeAddressAlertsRaw.filter((row): row is AlertResponseDto => Boolean(row))
+    ];
 
     await this.applyGenericResolutionState(alerts);
 
@@ -275,6 +302,64 @@ export class AlertsService {
     }
   }
 
+  private async toNfeEnderecoDivergenteAlertDto(row: NfeEnderecoDivergenteAlertRow): Promise<AlertResponseDto | null> {
+    if (!this.isNfeEntradaTomada(row)) {
+      return null;
+    }
+
+    const xmlPath = String(row.xmlCompletoPath || row.xmlResumoPath || '').trim();
+    if (!xmlPath) {
+      return null;
+    }
+
+    try {
+      const xml = (await this.storage.getObject(xmlPath)).toString('utf8');
+      const parsed = this.nfeXmlParser.parse(xml);
+      if (!this.isNfeEnderecoComparisonEligible(parsed, row.estabelecimento)) {
+        return null;
+      }
+
+      const addressComparison = this.compareNfeAddress(parsed, row.estabelecimento);
+      if (!addressComparison.hasDifference) {
+        return null;
+      }
+
+      const numeroDocumento = String(row.numeroNfe || '').trim() || row.chaveAcesso;
+      const emissor = String(row.razaoSocialEmitente || '').trim() || 'Emissor nao identificado';
+      const descricao = `A NF-e ${numeroDocumento} de entrada possui divergencias no endereco cadastral: ${addressComparison.labels.join(', ')}.`;
+
+      return {
+        id: `nfe-endereco-divergente-${row.id}`,
+        eventId: row.id,
+        severity: 'Atencao',
+        tipo: 'NF-e',
+        titulo: 'NF-e de entrada com endereco divergente',
+        descricao,
+        clientId: row.clienteId,
+        cliente: row.cliente?.razaoSocial || 'Cliente nao identificado',
+        dataHora: (row.dataEmissao ?? row.updatedAt ?? row.createdAt).toISOString(),
+        status: 'Aberto',
+        origem: 'nfe-endereco-divergente',
+        mensagemTecnica: addressComparison.details.join(' | '),
+        sugestaoAcao: 'Conferir o cadastro da empresa e solicitar ao fornecedor a correcao da NF-e de entrada.',
+        historicoTentativas: [],
+        allowsReprocess: false,
+        persistence: 'client',
+        canToggleResolved: true,
+        documentoId: row.id,
+        chaveAcesso: row.chaveAcesso,
+        numeroDocumento,
+        eventoTipo: '',
+        eventoDescricao: '',
+        resolvedAt: null,
+        emissor,
+        retencoes: []
+      };
+    } catch {
+      return null;
+    }
+  }
+
   private isDesacordoEvent(row: Pick<CteDesacordoAlertRow, 'descricao' | 'tipoEvento'>): boolean {
     const description = this.normalizeSearchText(row.descricao);
     const eventType = this.normalizeSearchText(row.tipoEvento);
@@ -283,6 +368,108 @@ export class AlertsService {
 
   private isNfseTomada(row: Pick<NfseRetencaoAlertRow, 'cnpjTomador' | 'estabelecimento'>): boolean {
     return this.normalizeDigits(row.cnpjTomador) === this.normalizeDigits(row.estabelecimento?.cnpj);
+  }
+
+  private isNfeEntradaTomada(row: Pick<NfeEnderecoDivergenteAlertRow, 'cnpjDestinatario' | 'estabelecimento' | 'tipoRelacao'>): boolean {
+    return (
+      row.tipoRelacao === 'recebida' &&
+      this.normalizeDigits(row.cnpjDestinatario) === this.normalizeDigits(row.estabelecimento?.cnpj)
+    );
+  }
+
+  private isNfeEnderecoComparisonEligible(
+    parsed: Pick<
+      ParsedNfe,
+      'destinatarioEnderecoLogradouro' | 'destinatarioEnderecoBairro' | 'destinatarioEnderecoUf' | 'destinatarioEnderecoMunicipio'
+    >,
+    establishment?: Pick<NonNullable<NfeEnderecoDivergenteAlertRow['estabelecimento']>, 'logradouro' | 'bairro' | 'uf' | 'municipioNome'> | null
+  ): boolean {
+    return Boolean(
+      establishment?.logradouro?.trim() &&
+        establishment?.bairro?.trim() &&
+        establishment?.uf?.trim() &&
+        establishment?.municipioNome?.trim() &&
+        parsed.destinatarioEnderecoLogradouro?.trim() &&
+        parsed.destinatarioEnderecoBairro?.trim() &&
+        parsed.destinatarioEnderecoUf?.trim() &&
+        parsed.destinatarioEnderecoMunicipio?.trim()
+    );
+  }
+
+  private compareNfeAddress(
+    parsed: {
+      destinatarioEnderecoLogradouro?: string | null;
+      destinatarioEnderecoBairro?: string | null;
+      destinatarioEnderecoUf?: string | null;
+      destinatarioEnderecoMunicipio?: string | null;
+    },
+    establishment?: {
+      logradouro?: string | null;
+      bairro?: string | null;
+      uf?: string | null;
+      municipioNome?: string | null;
+    } | null
+  ): { hasDifference: boolean; labels: string[]; details: string[] } {
+    const comparisons = [
+      {
+        label: 'logradouro',
+        left: parsed.destinatarioEnderecoLogradouro,
+        right: establishment?.logradouro
+      },
+      {
+        label: 'bairro',
+        left: parsed.destinatarioEnderecoBairro,
+        right: establishment?.bairro
+      },
+      {
+        label: 'UF',
+        left: parsed.destinatarioEnderecoUf,
+        right: establishment?.uf,
+        normalize: (value: string) => this.normalizeSearchText(value).toUpperCase()
+      },
+      {
+        label: 'municipio',
+        left: parsed.destinatarioEnderecoMunicipio,
+        right: establishment?.municipioNome
+      }
+    ];
+
+    const labels: string[] = [];
+    const details: string[] = [];
+
+    for (const comparison of comparisons) {
+      const left = this.normalizeAddressValue(comparison.left, comparison.normalize);
+      const right = this.normalizeAddressValue(comparison.right, comparison.normalize);
+      if (!left || !right) {
+        continue;
+      }
+
+      if (left !== right) {
+        labels.push(comparison.label);
+        details.push(
+          `${comparison.label}: NF-e="${String(comparison.left).trim()}" vs cadastro="${String(comparison.right).trim()}"`
+        );
+      }
+    }
+
+    return {
+      hasDifference: labels.length > 0,
+      labels,
+      details
+    };
+  }
+
+  private normalizeAddressValue(value?: string | null, customNormalize?: (value: string) => string): string {
+    const text = String(value || '').trim();
+    if (!text) {
+      return '';
+    }
+
+    if (customNormalize) {
+      return customNormalize(text).replace(/[^a-z0-9]+/gi, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    return this.normalizeSearchText(text).replace(/[^a-z0-9]+/gi, ' ').replace(/\s+/g, ' ').trim();
   }
 
   private isNfseRetentionDateEligible(value?: Date | null): boolean {
