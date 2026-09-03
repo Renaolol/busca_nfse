@@ -17636,6 +17636,34 @@ async function openAlertDocument(alertId, options = {}) {
     return;
   }
 
+  if (alert.tipo === 'NF-e') {
+    let doc = findNfeForAlert(alert);
+
+    if (!doc && state.dataSource === 'api' && alert.documentoId && alert.clientId) {
+      try {
+        const raw = await apiRequest(`/nfe/${encodeURIComponent(alert.documentoId)}?clienteId=${encodeURIComponent(alert.clientId)}`);
+        const mapped = buildNfeDocumentsFromApi([raw], state.clients)[0] || null;
+        if (mapped) {
+          state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, [mapped]);
+          doc = mapped;
+        }
+      } catch (error) {
+        pushToast(`Falha ao carregar NF-e do alerta: ${toErrorMessage(error)}`, 'error');
+        return;
+      }
+    }
+
+    if (!doc) {
+      pushToast('Nao foi possivel localizar a NF-e vinculada a este alerta.', 'error');
+      return;
+    }
+
+    state.drawer = null;
+    state.modal = null;
+    await openNfeDanfeById(doc.id);
+    return;
+  }
+
   pushToast('Este alerta nao possui documento vinculado para visualizacao.', 'info');
 }
 
@@ -22666,6 +22694,33 @@ function formatRelativeDate(value) {
   return formatDate(date);
 }
 
+function findNfeByChaveAcesso(chaveAcesso) {
+  const chaveNormalizada = normalizeDigits(chaveAcesso || '');
+  if (!chaveNormalizada) {
+    return null;
+  }
+
+  return (
+    state.nfeSearch.results.find((doc) => normalizeDigits(doc?.chaveAcesso || '') === chaveNormalizada) ||
+    state.nfeDocuments.find((doc) => normalizeDigits(doc?.chaveAcesso || '') === chaveNormalizada) ||
+    null
+  );
+}
+
+function findNfeForAlert(alert) {
+  if (!alert || alert.tipo !== 'NF-e') {
+    return null;
+  }
+
+  return (
+    findNfeById(alert.documentoId) ||
+    state.nfeSearch.results.find((doc) => doc.apiNfeId === alert.documentoId) ||
+    state.nfeDocuments.find((doc) => doc.apiNfeId === alert.documentoId) ||
+    findNfeByChaveAcesso(alert.chaveAcesso) ||
+    null
+  );
+}
+
 function formatMunicipioUfLabel(municipio, uf) {
   const municipioLabel = String(municipio || '').trim();
   const ufLabel = String(uf || '').trim();
@@ -22950,6 +23005,40 @@ async function downloadNfeDanfeById(nfeId) {
     pushToast(`Download do DANFE ${doc.numeroNfe || doc.chaveAcesso} iniciado.`, 'success');
   } catch (error) {
     pushToast(`Falha ao baixar DANFE da NF-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function openNfeDanfeById(nfeId) {
+  const doc = findNfeById(nfeId);
+  if (!doc) {
+    pushToast('NF-e nao encontrada.', 'error');
+    return;
+  }
+
+  if (!doc.xmlCompletoDisponivel || !doc.apiNfeId || !doc.clientId) {
+    pushToast('DANFE indisponivel para esta NF-e.', 'error');
+    return;
+  }
+
+  const previewWindow = window.open('', '_blank');
+  try {
+    const payload = await apiRequest(`/nfe/${doc.apiNfeId}/danfe?clienteId=${encodeURIComponent(doc.clientId)}`);
+    if (!payload?.contentBase64) {
+      throw new Error('Resposta sem conteudo para visualizar o DANFE.');
+    }
+
+    const blob = base64ToBlob(payload.contentBase64, payload.contentType || 'application/pdf');
+    const url = URL.createObjectURL(blob);
+    if (previewWindow && !previewWindow.closed) {
+      previewWindow.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } else {
+      triggerBrowserDownload(payload.fileName || `DANFE-${doc.chaveAcesso}.pdf`, blob);
+      pushToast('A visualizacao foi bloqueada; o DANFE foi baixado.', 'info');
+    }
+  } catch (error) {
+    previewWindow?.close();
+    pushToast(`Falha ao abrir DANFE da NF-e: ${toErrorMessage(error)}`, 'error');
   }
 }
 
