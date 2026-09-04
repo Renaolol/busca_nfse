@@ -3453,14 +3453,10 @@ export class NfseDanfseService {
     const localPrestacaoBase =
       this.safeValue(input.localPrestacao) !== '-' ? input.localPrestacao : input.municipioPrestacaoNome ?? undefined;
 
-    if (nomeMunicipio === '-') {
-      return input;
-    }
-
     return {
       ...input,
       municipioPrestador: this.replaceMunicipioCodeWithName(input.municipioPrestador, nomeMunicipio, codigoMunicipio),
-      municipioTomador: this.replaceMunicipioCodeWithName(input.municipioTomador, nomeMunicipio, codigoMunicipio),
+      municipioTomador: this.replaceMunicipioCodeWithResolvedName(input.municipioTomador),
       municipioDestinatario: this.replaceMunicipioCodeWithName(input.municipioDestinatario, nomeMunicipio, codigoMunicipio),
       municipioIntermediario: this.replaceMunicipioCodeWithName(input.municipioIntermediario, nomeMunicipio, codigoMunicipio),
       localPrestacao: this.replaceMunicipioCodeWithResolvedName(localPrestacaoBase, codigoMunicipio, nomeMunicipio),

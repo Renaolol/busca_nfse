@@ -534,6 +534,29 @@ describe('NfseDanfseService', () => {
     expect(content).not.toContain('Monda');
   });
 
+  it('mantem o municipio do tomador independente do local da prestacao', () => {
+    const pdf = service.generatePdf({
+      chaveAcesso: '42110092206960810000176000000000000126019687178147',
+      numeroNfse: '4',
+      cnpjPrestador: '06960810000176',
+      razaoSocialPrestador: 'MILLENIUM SERVICOS LTDA',
+      cnpjTomador: '08560957000102',
+      razaoSocialTomador: 'TOMADOR TESTE LTDA',
+      enderecoTomador: 'Rua Principal, 100',
+      municipioTomador: '4203105 / SC',
+      municipioPrestacaoCodigo: '4211009',
+      municipioPrestacaoNome: 'Mondai',
+      localPrestacao: '4211009 / SC',
+      valorServico: '150.00',
+      descricaoServico: 'Prestacao de servico'
+    });
+
+    const content = pdf.toString('latin1');
+
+    expect(content).toContain('Caibi - SC');
+    expect(content).toContain('Mondai - SC');
+  });
+
   it('preenche tributacao municipal a partir de vBC e pAliqAplic do layout nacional', () => {
     const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
