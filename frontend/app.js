@@ -681,12 +681,27 @@ async function initializeApp() {
   await initializeData();
 }
 
-async function initializeData() {
+async function initializeData(options = {}) {
+  const blocking = options.blocking !== false;
+  const maxLoadingMs = Number(options.maxLoadingMs);
+  let loadingTimeoutId = null;
   startPageLoading(buildPageLoadingPlan(state.route));
-  setGlobalLoading(true);
-  render();
+  if (blocking) {
+    setGlobalLoading(true);
+    render();
+    if (Number.isFinite(maxLoadingMs) && maxLoadingMs > 0) {
+      loadingTimeoutId = window.setTimeout(() => {
+        if (!state.dataReady) {
+          setGlobalLoading(false);
+          render();
+        }
+      }, maxLoadingMs);
+    }
+  }
 
-  await wait(250);
+  if (blocking) {
+    await wait(250);
+  }
 
   try {
     await hydrateFromApi({ onProgress: updatePageLoadingTask });
@@ -698,6 +713,9 @@ async function initializeData() {
     pushToast('Nao foi possivel carregar dados reais. Exibindo dados de exemplo.', 'error');
   }
 
+  if (loadingTimeoutId !== null) {
+    window.clearTimeout(loadingTimeoutId);
+  }
   setGlobalLoading(false);
   await ensureRouteDataLoaded({ silent: true, onProgress: updatePageLoadingTask });
   stopPageLoading();
@@ -19776,9 +19794,10 @@ async function submitAuthLoginForm(form) {
 
     applyAuthPayload(payload);
     state.auth.initialized = true;
-    render();
-    await initializeData();
+    state.auth.authenticating = false;
+    state.dataSource = 'api';
     pushToast(`Sessao iniciada para ${state.auth.user?.nome || state.auth.user?.username || username}.`, 'success');
+    void initializeData({ blocking: true, maxLoadingMs: 2500 });
   } catch (error) {
     pushToast(`Falha no login: ${toErrorMessage(error)}`, 'error');
   } finally {
