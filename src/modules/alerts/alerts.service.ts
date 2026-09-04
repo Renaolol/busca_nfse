@@ -474,6 +474,7 @@ export class AlertsService {
         label: 'municipio',
         left: parsed.destinatarioEnderecoMunicipio,
         right: municipioCadastral,
+        normalize: (value: string) => this.normalizeMunicipalityForComparison(value),
         skip: this.sameMunicipalityCode(parsed.destinatarioEnderecoCodigoMunicipio, establishment?.municipioCodigoIbge)
       },
       {
@@ -543,7 +544,7 @@ export class AlertsService {
       .trim()
       .replace(/^\(\s*\d+\s*\)\s*/, '')
       .trim();
-    return this.normalizeSearchText(text) === 'mondais' ? 'Mondai' : text;
+    return this.normalizeSearchText(text);
   }
 
   private sameMunicipalityCode(documentCode?: string | null, registeredCode?: string | null): boolean {
