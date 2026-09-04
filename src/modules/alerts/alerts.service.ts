@@ -543,7 +543,8 @@ export class AlertsService {
       .trim()
       .replace(/^\(\s*\d+\s*\)\s*/, '')
       .trim();
-    return this.normalizeSearchText(text);
+    const normalized = this.normalizeSearchText(text);
+    return /(^|[^a-z])mondai([^a-z]|$)/.test(normalized) ? 'mondai' : normalized;
   }
 
   private getEstablishmentMunicipality(

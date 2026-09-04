@@ -334,7 +334,7 @@ describe('AlertsService', () => {
           bairro: 'Centro',
           uf: 'SC',
           municipioNome: 'Municipio antigo',
-          municipio: 'Mondai',
+          municipio: 'Mondaí / SC',
           cep: '89700-000'
         }
       }
