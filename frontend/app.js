@@ -1169,6 +1169,16 @@ function onDocumentClick(event) {
       restoreAllNfseFiscalReaderColumns();
       return;
     }
+    case 'nfse-fiscal-download': {
+      const documentId = actionNode.getAttribute('data-document-id');
+      const clientId = actionNode.getAttribute('data-client-id');
+      const tipoArquivo = actionNode.getAttribute('data-tipo-arquivo');
+      if (!documentId || !clientId || !tipoArquivo) {
+        return;
+      }
+      void downloadNfseFiscalReaderDocument(documentId, clientId, actionNode.getAttribute('data-numero-nfse'), tipoArquivo);
+      return;
+    }
     case 'toggle-sidebar': {
       state.mobileSidebarOpen = !state.mobileSidebarOpen;
       render();
@@ -12543,7 +12553,7 @@ function renderNfseFiscalReaderCard() {
       <div style="display:flex; justify-content:space-between; gap:12px; align-items:flex-start; flex-wrap:wrap;">
         <div>
           <h3 class="card-title">Leitura fiscal das NFS-e filtradas</h3>
-          <p class="card-subtitle">Tabela consolidada no estilo do LeitorXML, usando exatamente as NFS-e retornadas pelos filtros atuais. Arraste os cabecalhos para reorganizar e oculte colunas quando precisar focar na conferencia.</p>
+          <p class="card-subtitle">Tabela consolidada no estilo do LeitorXML, usando exatamente as NFS-e retornadas pelos filtros atuais. Clique com o botao direito em uma linha para baixar o XML ou o DANFSE em PDF. Arraste os cabecalhos para reorganizar e oculte colunas quando precisar focar na conferencia.</p>
         </div>
         <div class="stack-mini" style="align-items:flex-end;">
           <div class="progress-meta">
@@ -12621,12 +12631,39 @@ function renderNfseFiscalReaderCard() {
               key: 'nfseFiscalReader',
               colSpan: visibleColumns.length,
               rowsHtml: rows
-                .map(
-                  (row) =>
-                    `<tr class="${row.cancelada ? 'xml-row-cancelled' : ''}">${visibleColumns
-                      .map((column) => renderNfseFiscalReaderColumnCell(column, row))
-                      .join('')}</tr>`
-                )
+                .map((row) => {
+                  const menuId = `nfse-fiscal:${row.id}`;
+                  const rowActions = [
+                    {
+                      label: 'Baixar XML',
+                      action: 'nfse-fiscal-download',
+                      attrs: {
+                        'document-id': row.id,
+                        'client-id': row.clienteId,
+                        'numero-nfse': row.numeroNfse || row.chaveAcesso,
+                        'tipo-arquivo': 'xml'
+                      }
+                    },
+                    {
+                      label: 'Baixar DANFSE (PDF)',
+                      action: 'nfse-fiscal-download',
+                      attrs: {
+                        'document-id': row.id,
+                        'client-id': row.clienteId,
+                        'numero-nfse': row.numeroNfse || row.chaveAcesso,
+                        'tipo-arquivo': 'danfse'
+                      }
+                    }
+                  ];
+                  const cells = visibleColumns
+                    .map((column, index) => {
+                      const cell = renderNfseFiscalReaderColumnCell(column, row);
+                      return index === 0 ? cell.replace('>', `>${renderRowActionsMenu(menuId, rowActions, { renderTrigger: false })}`) : cell;
+                    })
+                    .join('');
+
+                  return `<tr class="${row.cancelada ? 'xml-row-cancelled' : ''}" data-row-actions-menu-id="${escapeHtml(menuId)}">${cells}</tr>`;
+                })
                 .join(''),
               emptyMessage: 'Nenhuma NFS-e armazenada foi processada para a leitura fiscal com os filtros atuais.'
             })}
@@ -13280,9 +13317,10 @@ function renderRowActionsMenuItem(item) {
   `;
 }
 
-function renderRowActionsMenu(menuId, items) {
+function renderRowActionsMenu(menuId, items, options = {}) {
   const normalizedId = String(menuId || '');
   const visibleItems = (Array.isArray(items) ? items : []).filter(Boolean);
+  const renderTrigger = options.renderTrigger !== false;
   const isOpen = Boolean(normalizedId) && state.rowActionsMenu.openId === normalizedId;
   const anchor = state.rowActionsMenu.anchor || { top: 8, left: 8 };
   const verticalStyle =
@@ -13294,16 +13332,20 @@ function renderRowActionsMenu(menuId, items) {
 
   return `
     <div class="row-actions-menu-wrap" data-row-actions-menu-wrap>
-      <button
-        class="row-actions-menu-trigger"
-        type="button"
-        data-action="row-actions-menu-toggle"
-        data-menu-id="${escapeHtml(normalizedId)}"
-        aria-haspopup="true"
-        aria-expanded="${isOpen ? 'true' : 'false'}"
-        aria-label="Abrir menu de acoes"
-        title="Acoes"
-      >&#8942;</button>
+      ${
+        renderTrigger
+          ? `<button
+              class="row-actions-menu-trigger"
+              type="button"
+              data-action="row-actions-menu-toggle"
+              data-menu-id="${escapeHtml(normalizedId)}"
+              aria-haspopup="true"
+              aria-expanded="${isOpen ? 'true' : 'false'}"
+              aria-label="Abrir menu de acoes"
+              title="Acoes"
+            >&#8942;</button>`
+          : ''
+      }
       ${
         isOpen
           ? `
@@ -23285,6 +23327,33 @@ async function downloadDanfseByXmlId(xmlId) {
     pushToast(`Download do DANFSE ${xml.numeroNfse} iniciado.`, 'success');
   } catch (error) {
     pushToast(`Falha ao baixar DANFSE: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function downloadNfseFiscalReaderDocument(documentId, clientId, numeroNfse, tipoArquivo) {
+  const normalizedDocumentId = String(documentId || '').trim();
+  const normalizedClientId = String(clientId || '').trim();
+  const normalizedTipoArquivo = tipoArquivo === 'danfse' ? 'danfse' : 'xml';
+  const numero = String(numeroNfse || 'nfse').trim() || 'nfse';
+
+  if (!normalizedDocumentId || !normalizedClientId) {
+    pushToast('NFS-e nao encontrada para download.', 'error');
+    return;
+  }
+
+  try {
+    const endpoint = normalizedTipoArquivo === 'danfse' ? 'danfse' : 'xml';
+    const payload = await apiRequest(
+      `/nfse/${encodeURIComponent(normalizedDocumentId)}/${endpoint}?clienteId=${encodeURIComponent(normalizedClientId)}`,
+      { cache: false, timeoutMs: 60000 }
+    );
+    downloadFromPayload(payload, normalizedTipoArquivo === 'danfse' ? `DANFSE-${numero}.pdf` : `nfse-${numero}.xml`);
+    pushToast(`Download do ${normalizedTipoArquivo === 'danfse' ? 'DANFSE' : 'XML'} ${numero} iniciado.`, 'success');
+  } catch (error) {
+    pushToast(
+      `Falha ao baixar ${normalizedTipoArquivo === 'danfse' ? 'o DANFSE' : 'o XML'} da NFS-e: ${toErrorMessage(error)}`,
+      'error'
+    );
   }
 }
 
