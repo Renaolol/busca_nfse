@@ -312,7 +312,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       return undefined;
     }
 
-    const dateMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    // Datas sem horario representam um dia do calendario. Ja timestamps completos
+    // devem preservar o instante e seu fuso para nao deslocar o limite do filtro.
+    const dateMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (dateMatch) {
       const year = Number(dateMatch[1]);
       const month = Number(dateMatch[2]);

@@ -265,6 +265,8 @@ describe('NfeService', () => {
     expect(dateRange?.gte?.getHours()).toBe(0);
     expect(dateRange?.lte?.getDate()).toBe(31);
     expect(dateRange?.lte?.getHours()).toBe(23);
+    expect(dateRange?.gte?.toISOString()).toBe('2026-08-01T00:00:00.000Z');
+    expect(dateRange?.lte?.toISOString()).toBe('2026-08-31T23:59:59.999Z');
   });
 
   it('colapsa duplicatas legadas por ambiente e chave_acesso na listagem ampla', async () => {
