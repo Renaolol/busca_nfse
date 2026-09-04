@@ -327,12 +327,14 @@ export class NfseService {
           prestador: doc.razaoSocialPrestador ?? null,
           cnpjPrestador: doc.cnpjPrestador ?? null,
           tomador: doc.razaoSocialTomador ?? null,
-          municipioTomador,
           cnpjTomador: doc.cnpjTomador ?? null,
           municipio: doc.municipioPrestacaoNome ?? null,
           codigoServicoPrestado,
           descricaoServico: doc.descricaoServico ?? null,
-          ...leitura
+          ...leitura,
+          // O parser dedicado ao tomador deve prevalecer sobre os campos
+          // derivados da leitura fiscal, que podem vir de outro layout.
+          municipioTomador
         });
 
         if (leitura.statusProcessamento === 'OK') {

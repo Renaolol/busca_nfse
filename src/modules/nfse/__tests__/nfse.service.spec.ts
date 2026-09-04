@@ -1607,6 +1607,50 @@ describe('NfseService', () => {
     expect(prisma.clienteEstabelecimento.findFirst).not.toHaveBeenCalled();
   });
 
+  it('prioriza o municipio do tomador extraido do XML sobre o valor derivado da leitura fiscal', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-fiscal-municipio-tomador-prioridade',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092208560957000102000000000006526085566482365',
+        numeroNfse: '65',
+        dataEmissao: new Date('2026-08-31T15:23:43.000Z'),
+        cnpjPrestador: '08560957000102',
+        razaoSocialPrestador: 'MILLENNIUM CONTABILIDADE',
+        cnpjTomador: '06960810000176',
+        razaoSocialTomador: 'GCONT GESTAO CONTABIL E EMPRESARIAL LTDA',
+        municipioPrestacaoNome: 'Mondai',
+        codigoServicoNacional: '170101',
+        itemListaServico: '1701',
+        descricaoServico: 'Servico de consultoria',
+        xmlPath: 'nfse/producao/08560957000102/2026/08/xml/doc-fiscal-municipio-tomador-prioridade.xml',
+        createdAt: new Date('2026-08-31T15:23:43.000Z'),
+        updatedAt: new Date('2026-08-31T15:23:43.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(`<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS42110092208560957000102000000000006526085566482365">
+    <nNFSe>65</nNFSe>
+    <xLocPrestacao>Mondai</xLocPrestacao>
+    <DPS><infDPS><toma><end><endNac><cMun>4203105</cMun><xMun>Caibi</xMun><UF>SC</UF></endNac></end></toma></infDPS></DPS>
+  </infNFSe>
+</NFSe>`, 'utf8')
+    );
+    const leituraFiscalSpy = jest.spyOn(danfse, 'extractLeituraFiscal').mockReturnValue({
+      municipioTomador: 'Mondai/SC',
+      statusProcessamento: 'OK'
+    } as unknown as ReturnType<NfseDanfseService['extractLeituraFiscal']>);
+
+    const result = await service.getLeituraFiscal({ clienteId: 'cliente-1', all: true });
+
+    expect(result.items[0]).toMatchObject({ municipioTomador: 'Caibi/SC' });
+    leituraFiscalSpy.mockRestore();
+  });
+
   it('extrai municipio do tomador quando o XML usa TomadorServico', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
       {
