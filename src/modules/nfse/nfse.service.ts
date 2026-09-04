@@ -4817,7 +4817,10 @@ export class NfseService {
       return undefined;
     }
 
-    const dateMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    // Datas sem horario representam um dia do calendario. Ja timestamps completos
+    // (como os enviados pela interface) devem preservar o instante e seu fuso;
+    // reconstruir o horario no fuso do processo pode avancar o limite para o dia seguinte.
+    const dateMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
     if (dateMatch) {
       const year = Number(dateMatch[1]);
       const month = Number(dateMatch[2]);
