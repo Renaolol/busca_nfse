@@ -23,6 +23,8 @@ const modalRoot = document.getElementById('modalRoot');
 const drawerRoot = document.getElementById('drawerRoot');
 const toastRoot = document.getElementById('toastRoot');
 const API_TIMEOUT_MS = 20000;
+const API_CACHE_TTL_MS = 30000;
+const INITIAL_LOADING_MIN_MS = 1200;
 const SEARCH_PAGE_SIZE = 100;
 const DASHBOARD_AUTO_REFRESH_INTERVAL_MS = 60000;
 const AUTH_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -116,6 +118,7 @@ let lastAuthActivityPingAt = 0;
 let authActivityPingPromise = null;
 const initialXmlReader30NfeRegime = loadXmlReader30NfeRegimeStore();
 const initialXmlReader30NfeColumnWidths = loadXmlReader30NfeColumnWidthsStore();
+const apiResponseCache = new Map();
 
 function buildDefaultAccessReportRange() {
   const end = new Date();
@@ -684,6 +687,8 @@ async function initializeApp() {
 async function initializeData(options = {}) {
   const blocking = options.blocking !== false;
   const maxLoadingMs = Number(options.maxLoadingMs);
+  const minLoadingMs = Number(options.minLoadingMs ?? (blocking ? INITIAL_LOADING_MIN_MS : 0));
+  const loadingStartedAt = Date.now();
   let loadingTimeoutId = null;
   startPageLoading(buildPageLoadingPlan(state.route));
   if (blocking) {
@@ -715,6 +720,10 @@ async function initializeData(options = {}) {
 
   if (loadingTimeoutId !== null) {
     window.clearTimeout(loadingTimeoutId);
+  }
+  const remainingLoadingMs = minLoadingMs - (Date.now() - loadingStartedAt);
+  if (blocking && remainingLoadingMs > 0) {
+    await wait(remainingLoadingMs);
   }
   setGlobalLoading(false);
   await ensureRouteDataLoaded({ silent: true, onProgress: updatePageLoadingTask });
@@ -22114,6 +22123,15 @@ async function apiRequest(path, options = {}) {
 
 async function performApiRequest(path, options = {}) {
   const { method = 'GET', body, timeoutMs = API_TIMEOUT_MS, skipAuth = false, headers: extraHeaders = {} } = options;
+  const cacheable = method === 'GET' && options.cache !== false && !path.startsWith('/auth/');
+  if (cacheable) {
+    const cached = apiResponseCache.get(path);
+    if (cached && cached.expiresAt > Date.now()) {
+      return deepClone(cached.value);
+    }
+    apiResponseCache.delete(path);
+  }
+
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -22143,16 +22161,22 @@ async function performApiRequest(path, options = {}) {
       throw error;
     }
 
-    if (response.status === 204) {
-      return null;
+    let result = null;
+    if (response.status !== 204) {
+      const contentType = response.headers.get('content-type') || '';
+      result = contentType.includes('application/json') ? await response.json() : await response.text();
     }
 
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      return await response.json();
+    if (cacheable) {
+      apiResponseCache.set(path, {
+        value: deepClone(result),
+        expiresAt: Date.now() + API_CACHE_TTL_MS
+      });
+    } else if (method !== 'GET') {
+      apiResponseCache.clear();
     }
 
-    return await response.text();
+    return result;
   } catch (error) {
     if (error?.name === 'AbortError') {
       throw new Error('Tempo limite excedido na chamada da API');
