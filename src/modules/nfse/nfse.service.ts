@@ -311,9 +311,12 @@ export class NfseService {
       try {
         const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
         const parsed = this.parser.parse(xml);
-        const municipioTomador =
-          parsed.municipioTomador ?? (await this.resolveMunicipioNomeByCnpj(doc.cnpjTomador ?? parsed.cnpjTomador)) ?? null;
         const leitura = this.danfse.extractLeituraFiscal(xml);
+        const municipioTomador =
+          parsed.municipioTomador ??
+          this.extractMunicipioTomadorFromXml(xml) ??
+          (await this.resolveMunicipioNomeByCnpj(doc.cnpjTomador ?? parsed.cnpjTomador)) ??
+          null;
         const codigoServicoPrestado = [doc.codigoServicoNacional, doc.itemListaServico].filter(Boolean).join(' / ') || null;
 
         rows.push({
