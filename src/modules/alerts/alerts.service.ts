@@ -544,7 +544,8 @@ export class AlertsService {
       .replace(/^\(\s*\d+\s*\)\s*/, '')
       .trim();
     const normalized = this.normalizeSearchText(text);
-    return /(^|[^a-z])mondai([^a-z]|$)/.test(normalized) ? 'mondai' : normalized;
+    const lettersOnly = normalized.replace(/[^a-z]/g, '');
+    return lettersOnly.includes('mondai') ? 'mondai' : normalized;
   }
 
   private getEstablishmentMunicipality(
