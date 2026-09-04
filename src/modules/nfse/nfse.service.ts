@@ -10,7 +10,7 @@ import {
   NfseEmissorPublicoClient
 } from '../../integrations/nfse-emissor-publico/nfse-emissor-publico.types';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
-import { resolveMunicipioIbge } from '../../common/utils/municipio-ibge.util';
+import { resolveMunicipioIbge, resolveMunicipioNome } from '../../common/utils/municipio-ibge.util';
 import { NFSE_ADN_CLIENT, NfseAdnClient } from '../../integrations/nfse-adn/nfse-adn.types';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -5003,7 +5003,7 @@ export class NfseService {
         ['Tomador', 'Endereco', 'xMun'],
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Cidade'],
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'xMun']
-      ]) ?? undefined;
+      ]) ?? (codigoMunicipio && /[A-Za-zÀ-ÿ]/.test(codigoMunicipio) ? codigoMunicipio : undefined);
     if (!nomeMunicipio) {
       return null;
     }
@@ -5025,15 +5025,13 @@ export class NfseService {
 
     const trimmedNome = nomeMunicipio.trim();
     const trimmedUf = ufMunicipio?.trim();
-    if (!trimmedUf) {
-      return trimmedNome;
-    }
+    const municipioComUf = !trimmedUf
+      ? trimmedNome
+      : trimmedNome.toUpperCase().endsWith(`/${trimmedUf.toUpperCase()}`)
+        ? trimmedNome
+        : `${trimmedNome}/${trimmedUf}`;
 
-    if (trimmedNome.toUpperCase().endsWith(`/${trimmedUf.toUpperCase()}`)) {
-      return trimmedNome;
-    }
-
-    return `${trimmedNome}/${trimmedUf}`;
+    return resolveMunicipioNome(municipioComUf) ?? municipioComUf;
   }
 
   private extractXmlPathValue(xml: string, paths: string[][]): string | undefined {

@@ -382,4 +382,19 @@ describe('NfseXmlParserService', () => {
     expect(parsed.razaoSocialTomador).toBe('TRANSPORTES BARBIAN LTDA');
     expect(parsed.municipioTomador).toBe('Caibi/SC');
   });
+
+  it('normaliza o municipio do tomador informado por extenso em um layout municipal', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<CompNfse>
+  <Nfse><InfNfse>
+    <Numero>66</Numero>
+    <CodigoVerificacao>42042022228415329000132000000000006626071542411792</CodigoVerificacao>
+    <DeclaracaoPrestacaoServico><InfDeclaracaoPrestacaoServico>
+      <Tomador><Endereco><Municipio>MONDAIs</Municipio><Uf>SC</Uf></Endereco></Tomador>
+    </InfDeclaracaoPrestacaoServico></DeclaracaoPrestacaoServico>
+  </InfNfse></Nfse>
+</CompNfse>`;
+
+    expect(parser.parse(xml).municipioTomador).toBe('Mondaí/SC');
+  });
 });

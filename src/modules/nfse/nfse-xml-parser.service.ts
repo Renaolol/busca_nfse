@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { resolveMunicipioIbge } from '../../common/utils/municipio-ibge.util';
+import { resolveMunicipioIbge, resolveMunicipioNome } from '../../common/utils/municipio-ibge.util';
 
 export interface ParsedNfse {
   chaveAcesso: string;
@@ -412,7 +412,7 @@ export class NfseXmlParserService {
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'xMun'],
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Municipio'],
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'MunicipioNome']
-      ]) ?? undefined;
+      ]) ?? (codigoMunicipio && /[A-Za-zÀ-ÿ]/.test(codigoMunicipio) ? codigoMunicipio : undefined);
     if (!nomeMunicipio) {
       return undefined;
     }
@@ -436,15 +436,13 @@ export class NfseXmlParserService {
 
     const trimmedNome = nomeMunicipio.trim();
     const trimmedUf = ufMunicipio?.trim();
-    if (!trimmedUf) {
-      return trimmedNome;
-    }
+    const municipioComUf = !trimmedUf
+      ? trimmedNome
+      : trimmedNome.toUpperCase().endsWith(`/${trimmedUf.toUpperCase()}`)
+        ? trimmedNome
+        : `${trimmedNome}/${trimmedUf}`;
 
-    if (trimmedNome.toUpperCase().endsWith(`/${trimmedUf.toUpperCase()}`)) {
-      return trimmedNome;
-    }
-
-    return `${trimmedNome}/${trimmedUf}`;
+    return resolveMunicipioNome(municipioComUf) ?? municipioComUf;
   }
 
   private extractAttribute(xml: string, tag: string, attribute: string): string | undefined {
