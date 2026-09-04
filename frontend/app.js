@@ -678,7 +678,7 @@ async function initializeApp() {
     return;
   }
 
-  await initializeData();
+  await initializeData({ maxLoadingMs: 2500 });
 }
 
 async function initializeData(options = {}) {
