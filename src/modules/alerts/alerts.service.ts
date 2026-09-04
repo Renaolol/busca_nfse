@@ -418,8 +418,7 @@ export class AlertsService {
     >,
     establishment?: Pick<NonNullable<NfeEnderecoDivergenteAlertRow['estabelecimento']>, 'logradouro' | 'bairro' | 'uf' | 'municipioNome' | 'municipioCodigoIbge' | 'cep'> | DominioEmpresaEnderecoRecord | null
   ): boolean {
-    const dominioEstablishment = establishment && 'municipio' in establishment ? establishment : null;
-    const municipio = dominioEstablishment?.municipio ?? (establishment as { municipioNome?: string | null } | null | undefined)?.municipioNome;
+    const municipio = this.getEstablishmentMunicipality(establishment);
 
     const comparableFields = [
       [establishment?.logradouro, parsed.destinatarioEnderecoLogradouro],
@@ -451,7 +450,7 @@ export class AlertsService {
       cep?: string | null;
     } | null
   ): { hasDifference: boolean; labels: string[]; details: string[] } {
-    const municipioCadastral = this.normalizeMunicipalityForComparison(establishment?.municipioNome || establishment?.municipio);
+    const municipioCadastral = this.normalizeMunicipalityForComparison(this.getEstablishmentMunicipality(establishment));
     const comparisons = [
       {
         label: 'logradouro',
@@ -545,6 +544,19 @@ export class AlertsService {
       .replace(/^\(\s*\d+\s*\)\s*/, '')
       .trim();
     return this.normalizeSearchText(text);
+  }
+
+  private getEstablishmentMunicipality(
+    establishment?: {
+      municipioNome?: string | null;
+      municipio?: string | null;
+    } | null
+  ): string | null | undefined {
+    if (establishment && 'municipio' in establishment) {
+      return establishment.municipio ?? establishment.municipioNome;
+    }
+
+    return establishment?.municipioNome;
   }
 
   private sameMunicipalityCode(documentCode?: string | null, registeredCode?: string | null): boolean {

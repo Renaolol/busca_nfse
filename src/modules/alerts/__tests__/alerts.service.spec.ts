@@ -333,7 +333,8 @@ describe('AlertsService', () => {
           logradouro: 'Rua Estrela, 628',
           bairro: 'Centro',
           uf: 'SC',
-          municipioNome: 'Mondai',
+          municipioNome: 'Municipio antigo',
+          municipio: 'Mondai',
           cep: '89700-000'
         }
       }
