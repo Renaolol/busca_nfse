@@ -398,6 +398,7 @@ Observacoes:
 - Opcionalmente configure `DOMINIO_PYTHON_BIN` quando o executavel Python nao estiver disponivel como `python`.
 - Opcionalmente configure `NFE_DOMINIO_IMPORT_LIMIT_PER_RUN` para limitar quantos registros por controle sao lidos em cada execucao automatica/manual do painel.
 - O importador usa o script `scripts/dominio_nfe_export.py`, que depende de `pyodbc` no host onde a API estiver rodando.
+- A importacao manual `POST /nfe/importar-dominio` aceita filtros opcionais `numeroDocumento` e `fornecedor` para localizar XMLs pontuais pelo conteudo salvo na Dominio, alem dos filtros de emissao, chave e catalogo.
 - A vinculacao com o cliente local ocorre por CNPJ do estabelecimento ativo; nao foi necessario adicionar coluna de codigo da empresa da Dominio no schema.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio`, o backend reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, evitando reler o historico inteiro a cada execucao.
 - Mesmo quando `NFE_SYNC_SOURCE_MODE=dominio`, o painel passa a expor o botao manual `Download por chave`, que usa `POST /nfe/sync/download-por-chave/preview` e `POST /nfe/sync/download-por-chave/executar` como fluxo complementar para consultar documentos faltantes no gov por chave de acesso.

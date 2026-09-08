@@ -1082,6 +1082,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       limit: dto.limit,
       dataEmissaoInicio: dto.dataEmissaoInicio,
       dataEmissaoFim: dto.dataEmissaoFim,
+      numeroDocumento: dto.numeroDocumento,
+      fornecedor: dto.fornecedor,
       chavesAcesso: dto.chavesAcesso,
       catalogoIds: dto.catalogoIds
     });
@@ -1112,6 +1114,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         limit: Math.min(batchSize, maxDocuments - collected.length),
         dataEmissaoInicio: dto.dataEmissaoInicio,
         dataEmissaoFim: dto.dataEmissaoFim,
+        numeroDocumento: dto.numeroDocumento,
+        fornecedor: dto.fornecedor,
         catalogoIdMinExclusive: cursor,
         sortDirection: 'asc'
       });
@@ -1364,6 +1368,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     limit?: number;
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
+    numeroDocumento?: string;
+    fornecedor?: string;
     chavesAcesso?: string[];
     catalogoIds?: number[];
     catalogoIdMinExclusive?: number;
@@ -1394,6 +1400,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       limit: params.limit,
       dataEmissaoInicio: effectiveRange.dataEmissaoInicio,
       dataEmissaoFim: effectiveRange.dataEmissaoFim,
+      numeroDocumento: params.numeroDocumento,
+      fornecedor: params.fornecedor,
       chavesAcesso: params.chavesAcesso,
       catalogoIds: params.catalogoIds,
       catalogoIdMinExclusive: params.catalogoIdMinExclusive,
@@ -1633,6 +1641,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     limit?: number;
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
+    numeroDocumento?: string;
+    fornecedor?: string;
     chavesAcesso?: string[];
     catalogoIds?: number[];
     catalogoIdMinExclusive?: number;
@@ -1648,6 +1658,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       limit: params.limit,
       dataEmissaoInicio: params.dataEmissaoInicio,
       dataEmissaoFim: params.dataEmissaoFim,
+      numeroDocumento: params.numeroDocumento?.trim() || undefined,
+      fornecedor: params.fornecedor?.trim() || undefined,
       chavesAcesso: params.chavesAcesso?.map((value) => this.normalizeChaveAcesso(value)).filter((value): value is string => Boolean(value)),
       catalogoIds: (params.catalogoIds || [])
         .map((value) => Number(value))
@@ -1683,6 +1695,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     limit?: number;
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
+    numeroDocumento?: string;
+    fornecedor?: string;
     chavesAcesso?: string[];
     catalogoIds?: number[];
     catalogoIdMinExclusive?: number;
@@ -1698,6 +1712,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       limit: params.limit,
       dataEmissaoInicio: params.dataEmissaoInicio,
       dataEmissaoFim: params.dataEmissaoFim,
+      numeroDocumento: params.numeroDocumento?.trim() || undefined,
+      fornecedor: params.fornecedor?.trim() || undefined,
       chavesAcesso: params.chavesAcesso?.map((value) => this.normalizeChaveAcesso(value)).filter((value): value is string => Boolean(value)),
       catalogoIds: (params.catalogoIds || [])
         .map((value) => Number(value))

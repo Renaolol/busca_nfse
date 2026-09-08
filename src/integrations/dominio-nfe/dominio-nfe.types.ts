@@ -34,6 +34,8 @@ export interface DominioNfeXmlSource {
     limit?: number;
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
+    numeroDocumento?: string;
+    fornecedor?: string;
     chavesAcesso?: string[];
     catalogoIds?: number[];
     catalogoIdMinExclusive?: number;
@@ -44,6 +46,8 @@ export interface DominioNfeXmlSource {
     limit?: number;
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
+    numeroDocumento?: string;
+    fornecedor?: string;
     chavesAcesso?: string[];
     catalogoIds?: number[];
     catalogoIdMinExclusive?: number;

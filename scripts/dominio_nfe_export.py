@@ -30,6 +30,8 @@ def parse_payload():
     payload['chavesAcesso'] = [normalize_digits(item) for item in payload.get('chavesAcesso', []) if normalize_digits(item)]
     payload['catalogoIds'] = [int(item) for item in payload.get('catalogoIds', []) if str(item).strip()]
     payload['limit'] = int(payload.get('limit') or 200)
+    payload['numeroDocumento'] = str(payload.get('numeroDocumento') or '').strip()
+    payload['fornecedor'] = str(payload.get('fornecedor') or '').strip()
     if payload['limit'] <= 0:
         payload['limit'] = 200
     payload['catalogoIdMinExclusive'] = int(payload.get('catalogoIdMinExclusive') or 0)
@@ -118,6 +120,23 @@ SELECT TOP {payload['limit']}
     if payload.get('dataEmissaoFim'):
         query += "   AND cat.EMISSAO <= ?\n"
         params.append(payload['dataEmissaoFim'])
+
+    xml_expression = "CONVERT(LONG VARCHAR, COALESCE(nfe_xml_v2.CONTEUDO_XML, nfe_xml.CONTEUDO_XML))"
+    numero_documento = payload.get('numeroDocumento')
+    if numero_documento:
+        like_value = f"%{numero_documento}%"
+        if payload['mode'] == 'catalog':
+            query += "   AND cat.CHAVE LIKE ?\n"
+            params.append(like_value)
+        else:
+            query += f"   AND (cat.CHAVE LIKE ? OR {xml_expression} LIKE ?)\n"
+            params.extend([like_value, like_value])
+
+    fornecedor = payload.get('fornecedor')
+    if fornecedor and payload['mode'] != 'catalog':
+        like_value = f"%{fornecedor}%"
+        query += f"   AND {xml_expression} LIKE ?\n"
+        params.append(like_value)
 
     chaves = payload.get('chavesAcesso') or []
     if chaves:

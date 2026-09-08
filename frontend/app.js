@@ -4160,6 +4160,14 @@ function renderNfeSyncPage() {
             Emissao final
             <input name="dataEmissaoFim" type="date" />
           </label>
+          <label class="field">
+            Numero
+            <input name="numeroDocumento" placeholder="99656206" />
+          </label>
+          <label class="field">
+            Fornecedor
+            <input name="fornecedor" placeholder="VR BENEFICIOS" />
+          </label>
           <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
             <button class="btn primary" type="submit">Importar XMLs da Dominio</button>
           </div>
@@ -14807,6 +14815,8 @@ async function submitNfeDominioImportForm(form) {
   const limitValue = Number(data.get('limit') || 200);
   const dataEmissaoInicio = String(data.get('dataEmissaoInicio') || '').trim();
   const dataEmissaoFim = String(data.get('dataEmissaoFim') || '').trim();
+  const numeroDocumento = String(data.get('numeroDocumento') || '').trim();
+  const fornecedor = String(data.get('fornecedor') || '').trim();
 
   if (dataEmissaoInicio && dataEmissaoFim && dataEmissaoInicio > dataEmissaoFim) {
     pushToast('A data inicial nao pode ser maior que a data final.', 'error');
@@ -14851,7 +14861,9 @@ async function submitNfeDominioImportForm(form) {
         ambiente,
         limit,
         ...(dataEmissaoInicio ? { dataEmissaoInicio } : {}),
-        ...(dataEmissaoFim ? { dataEmissaoFim } : {})
+        ...(dataEmissaoFim ? { dataEmissaoFim } : {}),
+        ...(numeroDocumento ? { numeroDocumento } : {}),
+        ...(fornecedor ? { fornecedor } : {})
       };
 
       overlayRows = patchDominioImportOverlayRow(overlayRows, client.id, {
