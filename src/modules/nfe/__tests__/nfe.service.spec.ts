@@ -70,6 +70,7 @@ describe('NfeService', () => {
   };
 
   const dominioXmlSource: DominioNfeXmlSource = {
+    listCompanyAddresses: jest.fn(),
     listDocuments: jest.fn(),
     listCatalog: jest.fn()
   };
@@ -675,6 +676,8 @@ describe('NfeService', () => {
       limit: undefined,
       dataEmissaoInicio: undefined,
       dataEmissaoFim: undefined,
+      numeroDocumento: undefined,
+      fornecedor: undefined,
       chavesAcesso: undefined,
       catalogoIds: [],
       catalogoIdMinExclusive: undefined,
@@ -695,6 +698,29 @@ describe('NfeService', () => {
         totalDocumentosPrincipais: 1,
         totalEventos: 0,
         totalXmlsImportados: 1
+      })
+    );
+  });
+
+  it('repassa filtros pontuais de numero e fornecedor para a importacao da Dominio', async () => {
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([]);
+
+    await service.importFromDominio({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao,
+      dataEmissaoInicio: '2026-08-12',
+      dataEmissaoFim: '2026-08-12',
+      numeroDocumento: '99656206',
+      fornecedor: 'VR BENEFICIOS'
+    });
+
+    expect(dominioXmlSource.listDocuments).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cnpjs: ['12345678000199'],
+        dataEmissaoInicio: '2026-08-12',
+        dataEmissaoFim: '2026-08-12',
+        numeroDocumento: '99656206',
+        fornecedor: 'VR BENEFICIOS'
       })
     );
   });

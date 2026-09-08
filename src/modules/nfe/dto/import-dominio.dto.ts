@@ -49,6 +49,16 @@ export class ImportNfeFromDominioDto {
   @IsDateString()
   dataEmissaoFim?: string;
 
+  @ApiPropertyOptional({ description: 'Filtro textual pelo numero do documento fiscal dentro do XML da Dominio' })
+  @IsOptional()
+  @IsString()
+  numeroDocumento?: string;
+
+  @ApiPropertyOptional({ description: 'Filtro textual pelo nome ou CNPJ do fornecedor/prestador dentro do XML da Dominio' })
+  @IsOptional()
+  @IsString()
+  fornecedor?: string;
+
   @ApiPropertyOptional({ description: 'Lista opcional de chaves para importacao pontual', type: [String] })
   @IsOptional()
   @IsArray()

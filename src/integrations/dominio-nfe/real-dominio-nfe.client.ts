@@ -63,6 +63,8 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
     limit?: number;
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
+    numeroDocumento?: string;
+    fornecedor?: string;
     chavesAcesso?: string[];
     catalogoIds?: number[];
     catalogoIdMinExclusive?: number;
@@ -78,6 +80,8 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
       limit: params.limit,
       dataEmissaoInicio: params.dataEmissaoInicio,
       dataEmissaoFim: params.dataEmissaoFim,
+      numeroDocumento: params.numeroDocumento,
+      fornecedor: params.fornecedor,
       chavesAcesso: params.chavesAcesso,
       catalogoIds: params.catalogoIds,
       catalogoIdMinExclusive: params.catalogoIdMinExclusive,
@@ -100,6 +104,8 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
     limit?: number;
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
+    numeroDocumento?: string;
+    fornecedor?: string;
     chavesAcesso?: string[];
     catalogoIds?: number[];
     catalogoIdMinExclusive?: number;
@@ -116,6 +122,8 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
       limit: params.limit,
       dataEmissaoInicio: params.dataEmissaoInicio,
       dataEmissaoFim: params.dataEmissaoFim,
+      numeroDocumento: params.numeroDocumento,
+      fornecedor: params.fornecedor,
       chavesAcesso: params.chavesAcesso,
       catalogoIds: params.catalogoIds,
       catalogoIdMinExclusive: params.catalogoIdMinExclusive,
