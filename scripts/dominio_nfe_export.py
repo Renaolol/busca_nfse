@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import sys
+import unicodedata
 from datetime import datetime
 
 python_path = os.environ.get('PYTHONPATH', '')
@@ -17,6 +18,14 @@ def normalize_digits(value):
     if value is None:
         return None
     return ''.join(ch for ch in str(value) if ch.isdigit())
+
+
+def normalize_search_text(value):
+    if value is None:
+        return ''
+    normalized = unicodedata.normalize('NFD', str(value))
+    without_accents = ''.join(ch for ch in normalized if unicodedata.category(ch) != 'Mn')
+    return without_accents.upper()
 
 
 def parse_payload():
@@ -51,6 +60,13 @@ def to_bytes(value):
     if isinstance(value, str):
         return value.encode('utf-8')
     return bytes(value)
+
+
+def decode_xml_bytes(value):
+    try:
+        return value.decode('utf-8-sig')
+    except UnicodeDecodeError:
+        return value.decode('latin-1', errors='ignore')
 
 
 def build_query(payload):
@@ -121,21 +137,10 @@ SELECT TOP {payload['limit']}
         query += "   AND cat.EMISSAO <= ?\n"
         params.append(payload['dataEmissaoFim'])
 
-    xml_expression = "CONVERT(LONG VARCHAR, COALESCE(nfe_xml_v2.CONTEUDO_XML, nfe_xml.CONTEUDO_XML))"
     numero_documento = payload.get('numeroDocumento')
-    if numero_documento:
+    if numero_documento and payload['mode'] == 'catalog':
         like_value = f"%{numero_documento}%"
-        if payload['mode'] == 'catalog':
-            query += "   AND cat.CHAVE LIKE ?\n"
-            params.append(like_value)
-        else:
-            query += f"   AND (cat.CHAVE LIKE ? OR {xml_expression} LIKE ?)\n"
-            params.extend([like_value, like_value])
-
-    fornecedor = payload.get('fornecedor')
-    if fornecedor and payload['mode'] != 'catalog':
-        like_value = f"%{fornecedor}%"
-        query += f"   AND {xml_expression} LIKE ?\n"
+        query += "   AND cat.CHAVE LIKE ?\n"
         params.append(like_value)
 
     chaves = payload.get('chavesAcesso') or []
@@ -200,6 +205,14 @@ def main():
             xml_bytes = to_bytes(row.conteudo_xml)
             if not xml_bytes:
                 continue
+            xml_text = decode_xml_bytes(xml_bytes)
+            normalized_xml_text = normalize_search_text(xml_text)
+            numero_documento = normalize_search_text(payload.get('numeroDocumento'))
+            fornecedor = normalize_search_text(payload.get('fornecedor'))
+            if numero_documento and numero_documento not in normalized_xml_text:
+                continue
+            if fornecedor and fornecedor not in normalized_xml_text:
+                continue
 
             emitted_at = None
             if row.data_emissao is not None:
@@ -214,7 +227,7 @@ def main():
                 'cnpj_empresa': normalize_digits(row.cnpj_empresa) or '',
                 'chave_acesso': normalize_digits(row.chave_acesso),
                 'data_emissao': emitted_at,
-                'xml_base64': base64.b64encode(xml_bytes).decode('ascii')
+                'xml_base64': base64.b64encode(xml_text.encode('utf-8')).decode('ascii')
             }
             sys.stdout.write(json.dumps(record, ensure_ascii=False) + '\n')
     finally:
