@@ -8925,7 +8925,9 @@ function extractXmlReader30AuthorizationDate(xml) {
     return null;
   }
 
-  const protocolMatch = /<(?:\w+:)?(?:dhRecbto|dhAut)\b[^>]*>([\s\S]*?)<\/(?:\w+:)?(?:dhRecbto|dhAut)>/i.exec(content);
+  const protocolBlock = /<(?:\w+:)?(?:protNFe|protCTe)\b[^>]*>([\s\S]*?)<\/(?:\w+:)?(?:protNFe|protCTe)>/i.exec(content)?.[1] || content;
+  const infProtBlock = /<(?:\w+:)?infProt\b[^>]*>([\s\S]*?)<\/(?:\w+:)?infProt>/i.exec(protocolBlock)?.[1] || protocolBlock;
+  const protocolMatch = /<(?:\w+:)?(?:dhRecbto|dhAut)\b[^>]*>([\s\S]*?)<\/(?:\w+:)?(?:dhRecbto|dhAut)>/i.exec(infProtBlock);
   return protocolMatch?.[1]?.trim() || null;
 }
 

@@ -158,7 +158,7 @@ export class NfeXmlParserService {
       modelo: inspected.modelo,
       tpAmb: this.extract(xml, ['tpAmb']),
       dataEmissao: this.parseDate(this.extract(xml, ['dhEmi', 'dEmi'])),
-      dataAutorizacao: this.parseDate(this.extract(xml, ['dhRecbto', 'dhAut'])),
+      dataAutorizacao: this.parseDate(this.extractDataAutorizacao(xml)),
       status: this.extract(xml, ['cStat', 'cSitNFe', 'xMotivo']),
       cnpjEmitente:
         this.normalizeCnpj(this.extractNestedAny(xml, ['emit'], ['CNPJ', 'CPF'])) ??
@@ -275,6 +275,14 @@ export class NfeXmlParserService {
         /<(?:\w+:)?procEvento\b/i.test(xml) ||
         /<(?:\w+:)?evento\b/i.test(xml)) &&
       /<(?:\w+:)?infEvento\b/i.test(xml)
+    );
+  }
+
+  private extractDataAutorizacao(xml: string): string | undefined {
+    return (
+      this.extractNestedAny(xml, ['protNFe'], ['dhRecbto', 'dhAut']) ??
+      this.extractNestedAny(xml, ['infProt'], ['dhRecbto', 'dhAut']) ??
+      this.extract(xml, ['dhAut'])
     );
   }
 

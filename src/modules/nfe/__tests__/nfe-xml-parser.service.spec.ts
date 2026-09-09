@@ -1,4 +1,4 @@
-import { NfeXmlParserService } from '../nfe-xml-parser.service';
+﻿import { NfeXmlParserService } from '../nfe-xml-parser.service';
 
 describe('NfeXmlParserService', () => {
   const service = new NfeXmlParserService();
@@ -56,6 +56,31 @@ describe('NfeXmlParserService', () => {
       schemaDoc: 'procNFe_v4.00',
       contentType: 'completo'
     });
+  });
+
+  it('prioriza a data de autorizacao do protocolo da NF-e sobre datas de evento', () => {
+    const parsed = service.parse(`<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <historicoImportacao><dhRecbto>2026-08-01T08:00:00-03:00</dhRecbto></historicoImportacao>
+  <NFe>
+    <infNFe Id="NFe35260705867856000182550070001327501003399509">
+      <ide>
+        <mod>55</mod>
+        <serie>7</serie>
+        <nNF>132750</nNF>
+        <dhEmi>2026-07-31T21:12:00-03:00</dhEmi>
+      </ide>
+      <emit><CNPJ>05867856000182</CNPJ><xNome>AUTO POSTO MONTE CARLO ONDA VERDE LTDA</xNome></emit>
+      <dest><CNPJ>00907302000148</CNPJ><xNome>BAIERLE E BAIERLE LTDA</xNome></dest>
+      <total><ICMSTot><vNF>2943.45</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat><dhRecbto>2026-07-31T21:12:31-03:00</dhRecbto></infProt></protNFe>
+</nfeProc>`);
+
+    expect(parsed.numeroNfe).toBe('132750');
+    expect(parsed.dataAutorizacao?.toISOString()).toBe('2026-08-01T00:12:31.000Z');
+    expect(parsed.dataEmissao?.toISOString()).toBe('2026-08-01T00:12:00.000Z');
   });
 
   it('parseia resumo resNFe', () => {
@@ -199,3 +224,4 @@ describe('NfeXmlParserService', () => {
     });
   });
 });
+
