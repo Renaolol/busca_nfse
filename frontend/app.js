@@ -7769,7 +7769,7 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
   const items = extractNfeLineItems(row?.raw?.conteudoXml || '');
   const baseStatusLabel = resolveNfeLineItemStatusLabel(row?.raw || row);
   const baseStatusTone = row?.raw?.cancelada ? 'danger' : isAutorizadaFiscalStatus(row?.raw?.statusFiscal) ? 'success' : row?.statusTone || 'info';
-  const baseDataEmissao = formatDate(row?.raw?.dataEmissao || row?.dataEmissao || '');
+  const baseDataEmissao = formatDate(resolveXmlReader30FiscalDate(row?.documentType || 'nfe', row) || '');
   const baseNumero = row?.numeroLabel || '-';
   const baseValorTotal = row?.valorLabel || formatOptionalCurrency(row?.raw?.valor) || '-';
   const baseEvento = normalizeXmlReader30InlineText(row?.raw?.eventosResumo || '-');
@@ -7781,7 +7781,7 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
     }
 
     const monofasicValues = computeXmlReader30MonofasicValues(
-      row?.raw?.dataEmissao || row?.dataEmissao || '',
+      resolveXmlReader30FiscalDate(row?.documentType || 'nfe', row) || '',
       '0',
       '0',
       row?.productLabel || '',
@@ -7856,7 +7856,7 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
     vICMSMonoRet: item.vICMSMonoRet || '0',
     vICMSMonoRetRaw: item.vICMSMonoRetRaw || '0',
     ...computeXmlReader30MonofasicValues(
-      row?.raw?.dataEmissao || row?.dataEmissao || '',
+      resolveXmlReader30FiscalDate(row?.documentType || 'nfe', row) || '',
       item.cstCsosn || '0',
       item.qBCMonoRetRaw || item.qBCMonoRet || '0',
       item.description || '',
@@ -7872,7 +7872,7 @@ function getXmlReader30NfeGroupKey(row) {
   const clientId = String(raw?.clientId || row?.clientId || '').trim();
   const numeroNfe = String(raw?.numeroNfe || row?.numeroLabel || row?.numeroNf || '').trim();
   const serie = String(raw?.serie || row?.serie || '').trim();
-  const dataEmissao = String(raw?.dataEmissao || row?.dataEmissao || '').trim();
+  const dataEmissao = String(resolveXmlReader30FiscalDate('nfe', row) || '').trim();
   const emitenteCnpj = normalizeDigits(String(raw?.emitenteCnpj || row?.emitenteCnpj || ''));
   const destinatarioCnpj = normalizeDigits(String(raw?.destinatarioCnpj || row?.destinatarioCnpj || ''));
 
@@ -8385,7 +8385,7 @@ function buildDifalReaderChartPoints(itemRows, grouping) {
   const buckets = new Map();
 
   (Array.isArray(itemRows) ? itemRows : []).forEach((row) => {
-    const timestamp = Date.parse(row?.dataEmissao || row?.raw?.dataEmissao || '');
+    const timestamp = Date.parse(resolveXmlReader30FiscalDate(row?.documentType, row) || '');
     if (!Number.isFinite(timestamp)) {
       return;
     }
@@ -8911,6 +8911,24 @@ function summarizeXmlReader30Products(documentType, doc) {
   };
 }
 
+function resolveXmlReader30FiscalDate(documentType, doc) {
+  const raw = doc?.raw || doc || {};
+  if (documentType === 'nfe' || documentType === 'cte') {
+    return raw.dataAutorizacao || extractXmlReader30AuthorizationDate(raw.conteudoXml) || raw.dataEmissao || raw.dataDownload || null;
+  }
+  return raw.dataEmissao || raw.dataAutorizacao || raw.dataDownload || null;
+}
+
+function extractXmlReader30AuthorizationDate(xml) {
+  const content = String(xml || '');
+  if (!content) {
+    return null;
+  }
+
+  const protocolMatch = /<(?:\w+:)?(?:dhRecbto|dhAut)\b[^>]*>([\s\S]*?)<\/(?:\w+:)?(?:dhRecbto|dhAut)>/i.exec(content);
+  return protocolMatch?.[1]?.trim() || null;
+}
+
 function mapXmlReader30Item(documentType, doc) {
   if (documentType === 'nfse') {
     const xml = doc;
@@ -8969,7 +8987,7 @@ function mapXmlReader30Item(documentType, doc) {
       cnpjLabel: formatCnpj(nfe.emitenteCnpj || nfe.destinatarioCnpj || ''),
       numeroLabel: nfe.numeroNfe || '-',
       chaveLabel: nfe.chaveAcesso ? `Chave ${nfe.chaveAcesso}` : 'Chave nao informada',
-      dataEmissao: nfe.dataEmissao || nfe.dataAutorizacao || null,
+      dataEmissao: resolveXmlReader30FiscalDate('nfe', nfe),
       statusLabel: nfe.statusFiscal || '-',
       statusTone: nfe.cancelada ? 'danger' : isAutorizadaFiscalStatus(nfe.statusFiscal) ? 'success' : 'info',
       storageLabel: nfe.xmlCompletoDisponivel ? 'XML completo' : 'Resumo XML',
@@ -9010,7 +9028,7 @@ function mapXmlReader30Item(documentType, doc) {
         ...nfeItems.map((item) => item.vICMSMonoRetRaw || item.vICMSMonoRet || ''),
         ...nfeItems.map((item) =>
           computeXmlReader30MonofasicValues(
-            nfe.dataEmissao || nfe.dataAutorizacao || '',
+            resolveXmlReader30FiscalDate('nfe', nfe) || '',
             item.cstCsosn || '0',
             item.qBCMonoRetRaw || item.qBCMonoRet || '0',
             item.description || '',
@@ -9019,7 +9037,7 @@ function mapXmlReader30Item(documentType, doc) {
         ),
         ...nfeItems.map((item) =>
           computeXmlReader30MonofasicValues(
-            nfe.dataEmissao || nfe.dataAutorizacao || '',
+            resolveXmlReader30FiscalDate('nfe', nfe) || '',
             item.cstCsosn || '0',
             item.qBCMonoRetRaw || item.qBCMonoRet || '0',
             item.description || '',
@@ -9044,7 +9062,7 @@ function mapXmlReader30Item(documentType, doc) {
     cnpjLabel: formatCnpj(cte.emitenteCnpj || cte.destinatarioCnpj || ''),
     numeroLabel: cte.numeroCte || '-',
     chaveLabel: cte.chaveAcesso ? `Chave ${cte.chaveAcesso}` : 'Chave nao informada',
-    dataEmissao: cte.dataEmissao || cte.dataAutorizacao || null,
+    dataEmissao: resolveXmlReader30FiscalDate('cte', cte),
     statusLabel: cte.statusFiscal || '-',
     statusTone: cte.cancelada ? 'danger' : isAutorizadaFiscalStatus(cte.statusFiscal) ? 'success' : 'info',
     storageLabel: cte.xmlCompletoDisponivel ? 'XML completo' : 'Resumo XML',
@@ -9860,7 +9878,7 @@ function mapXmlReader30ItemLegacyUnused(documentType, doc) {
       cnpjLabel: formatCnpj(nfe.emitenteCnpj || nfe.destinatarioCnpj || ''),
       numeroLabel: nfe.numeroNfe || '-',
       chaveLabel: nfe.chaveAcesso ? `Chave ${nfe.chaveAcesso}` : 'Chave nao informada',
-      dataEmissao: nfe.dataEmissao || nfe.dataAutorizacao || null,
+      dataEmissao: resolveXmlReader30FiscalDate('nfe', nfe),
       statusLabel: nfe.statusFiscal || '-',
       statusTone: nfe.cancelada ? 'danger' : isAutorizadaFiscalStatus(nfe.statusFiscal) ? 'success' : 'info',
       cancelLabel: nfe.cancelada ? 'Sim' : 'Nao',
@@ -9901,7 +9919,7 @@ function mapXmlReader30ItemLegacyUnused(documentType, doc) {
     cnpjLabel: formatCnpj(cte.emitenteCnpj || cte.destinatarioCnpj || ''),
     numeroLabel: cte.numeroCte || '-',
     chaveLabel: cte.chaveAcesso ? `Chave ${cte.chaveAcesso}` : 'Chave nao informada',
-    dataEmissao: cte.dataEmissao || cte.dataAutorizacao || null,
+    dataEmissao: resolveXmlReader30FiscalDate('cte', cte),
     statusLabel: cte.statusFiscal || '-',
     statusTone: cte.cancelada ? 'danger' : isAutorizadaFiscalStatus(cte.statusFiscal) ? 'success' : 'info',
     cancelLabel: cte.cancelada ? 'Sim' : 'Nao',
