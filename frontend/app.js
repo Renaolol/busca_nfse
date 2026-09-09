@@ -20700,8 +20700,11 @@ function composeCodigoServicoPrestado(doc) {
   const codigoNacional = String(doc?.codigoServicoNacional || '').trim();
   const codigoMunicipal = String(doc?.itemListaServico || '').trim();
 
-  if (codigoNacional && codigoMunicipal && codigoNacional !== codigoMunicipal) {
-    return `${codigoNacional} / ${codigoMunicipal}`;
+  if (isSixDigitServiceCode(codigoNacional)) {
+    return codigoNacional;
+  }
+  if (isSixDigitServiceCode(codigoMunicipal)) {
+    return codigoMunicipal;
   }
   if (codigoNacional) {
     return codigoNacional;
@@ -20710,6 +20713,10 @@ function composeCodigoServicoPrestado(doc) {
     return codigoMunicipal;
   }
   return '-';
+}
+
+function isSixDigitServiceCode(value) {
+  return /^\d{6}$/.test(String(value || '').trim());
 }
 
 function resolveFiscalStatus(status, dataCancelamento, cancelamentoEvento) {

@@ -709,7 +709,7 @@ export class NfseDanfseService {
       columns: 4,
       fields: [
         field('Codigo de Tributacao Nacional', input.codigoServicoNacional),
-        field('Codigo de Tributacao Municipal', input.codigoServicoMunicipal ?? input.itemListaServico),
+        field('Codigo de Tributacao Municipal', this.resolveCodigoTributacaoMunicipalDisplay(input)),
         field('Local da Prestacao', municipio(input.localPrestacao)),
         field('Pais da Prestacao', this.extractPais(input.localPrestacao)),
         field('Codigo da NBS', input.codigoNbs),
@@ -1182,7 +1182,7 @@ export class NfseDanfseService {
 
     pushSection('SERVICO PRESTADO');
     pushField('Codigo de Tributacao Nacional', this.safeValue(input.codigoServicoNacional));
-    pushField('Codigo de Tributacao Municipal', this.safeValue(input.codigoServicoMunicipal ?? input.itemListaServico));
+    pushField('Codigo de Tributacao Municipal', this.safeValue(this.resolveCodigoTributacaoMunicipalDisplay(input)));
     pushField('Codigo da NBS', this.safeValue(input.codigoNbs));
     pushField('Local da Prestacao', this.safeValue(this.formatMunicipioUfLabel(input.localPrestacao)));
     pushField('Pais da Prestacao', this.safeValue(this.extractPais(input.localPrestacao)));
@@ -2302,6 +2302,19 @@ export class NfseDanfseService {
     }
 
     return this.normalizePrintable(raw);
+  }
+
+  private resolveCodigoTributacaoMunicipalDisplay(input: DanfseRenderInput): string | null | undefined {
+    const nacional = this.safeValue(input.codigoServicoNacional);
+    const municipal = this.safeValue(input.codigoServicoMunicipal ?? input.itemListaServico);
+
+    if (/^\d{6}$/.test(nacional)) {
+      return nacional;
+    }
+    if (/^\d{6}$/.test(municipal)) {
+      return municipal;
+    }
+    return municipal !== '-' ? municipal : input.codigoServicoNacional;
   }
 
   private combineSlash(left?: string | null, right?: string | null): string {

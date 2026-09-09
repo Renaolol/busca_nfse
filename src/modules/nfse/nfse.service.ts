@@ -317,7 +317,7 @@ export class NfseService {
           this.extractMunicipioTomadorFromXml(xml) ??
           (await this.resolveMunicipioNomeByCnpj(doc.cnpjTomador ?? parsed.cnpjTomador)) ??
           null;
-        const codigoServicoPrestado = [doc.codigoServicoNacional, doc.itemListaServico].filter(Boolean).join(' / ') || null;
+        const codigoServicoPrestado = this.composeCodigoServicoPrestado(doc.codigoServicoNacional, doc.itemListaServico);
 
         rows.push({
           id: doc.id,
@@ -371,7 +371,7 @@ export class NfseService {
           municipioTomador,
           cnpjTomador: doc.cnpjTomador ?? null,
           municipio: doc.municipioPrestacaoNome ?? null,
-          codigoServicoPrestado: [doc.codigoServicoNacional, doc.itemListaServico].filter(Boolean).join(' / ') || null,
+          codigoServicoPrestado: this.composeCodigoServicoPrestado(doc.codigoServicoNacional, doc.itemListaServico),
           descricaoServico: doc.descricaoServico ?? null,
           layout: 'desconhecido',
           statusProcessamento: 'Erro',
@@ -1357,6 +1357,23 @@ export class NfseService {
     return this.prisma.nfseContaContabilConfig.delete({
       where: { id }
     });
+  }
+
+  private composeCodigoServicoPrestado(codigoNacional?: string | null, codigoMunicipal?: string | null): string | null {
+    const nacional = String(codigoNacional ?? '').trim();
+    const municipal = String(codigoMunicipal ?? '').trim();
+
+    if (this.isSixDigitServiceCode(nacional)) {
+      return nacional;
+    }
+    if (this.isSixDigitServiceCode(municipal)) {
+      return municipal;
+    }
+    return nacional || municipal || null;
+  }
+
+  private isSixDigitServiceCode(value: string): boolean {
+    return /^\d{6}$/.test(value.trim());
   }
 
   private async lookupContaContabilPorCodigoServico(clienteId: string): Promise<Map<string, string>> {
