@@ -1385,6 +1385,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         })
         .filter((entry): entry is [string, (typeof establishments)[number]] => entry !== null)
     );
+    const codigosEmpresaDominio = await this.resolveCodigosEmpresaDominio(params.clienteId);
 
     const effectiveRange =
       params.defaultCurrentMonthDateRange && !params.dataEmissaoInicio && !params.dataEmissaoFim
@@ -1469,7 +1470,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     for (const document of documents) {
       maxCatalogoIdEncontrado = Math.max(maxCatalogoIdEncontrado, document.catalogoId);
       const cnpjEmpresa = this.normalizeCnpj(document.cnpjEmpresa);
-      const establishment = cnpjEmpresa ? establishmentByCnpj.get(cnpjEmpresa) : undefined;
+      const codigoEmpresa = Number(document.codigoEmpresa);
+      const establishment =
+        (cnpjEmpresa ? establishmentByCnpj.get(cnpjEmpresa) : undefined) ??
+        (codigosEmpresaDominio.includes(codigoEmpresa) ? establishments[0] : undefined);
       const xml = this.decodeXml(document.xmlBase64);
       const inspectedXml = this.parser.inspect(xml);
       const classifiedXml = this.parser.classify(xml);
@@ -1652,9 +1656,11 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const cnpjs = establishments
       .map((establishment) => this.normalizeCnpj(establishment.cnpj))
       .filter((value): value is string => Boolean(value));
+    const codigosEmpresaDominio = await this.resolveCodigosEmpresaDominio(params.clienteId);
 
     return this.dominioXmlSource.listDocuments({
       cnpjs,
+      codigosEmpresaDominio,
       limit: params.limit,
       dataEmissaoInicio: params.dataEmissaoInicio,
       dataEmissaoFim: params.dataEmissaoFim,
@@ -1706,9 +1712,11 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const cnpjs = establishments
       .map((establishment) => this.normalizeCnpj(establishment.cnpj))
       .filter((value): value is string => Boolean(value));
+    const codigosEmpresaDominio = await this.resolveCodigosEmpresaDominio(params.clienteId);
 
     return this.dominioXmlSource.listCatalog({
       cnpjs,
+      codigosEmpresaDominio,
       limit: params.limit,
       dataEmissaoInicio: params.dataEmissaoInicio,
       dataEmissaoFim: params.dataEmissaoFim,
@@ -1774,6 +1782,15 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
 
     return entries;
+  }
+
+  private async resolveCodigosEmpresaDominio(clienteId: string): Promise<number[]> {
+    const cliente = await this.prisma.cliente.findUnique({
+      where: { id: clienteId },
+      select: { codigoEmpresaDominio: true }
+    });
+    const codigo = Number(cliente?.codigoEmpresaDominio);
+    return Number.isInteger(codigo) && codigo > 0 ? [codigo] : [];
   }
 
   private async tryImportDominioAsNfse(params: {

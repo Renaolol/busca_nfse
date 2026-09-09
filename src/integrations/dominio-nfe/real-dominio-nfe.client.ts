@@ -60,6 +60,7 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
 
   async listDocuments(params: {
     cnpjs: string[];
+    codigosEmpresaDominio?: number[];
     limit?: number;
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
@@ -77,6 +78,7 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
     const payload = JSON.stringify({
       connectionString: this.connectionString,
       cnpjs: params.cnpjs,
+      codigosEmpresaDominio: params.codigosEmpresaDominio,
       limit: params.limit,
       dataEmissaoInicio: params.dataEmissaoInicio,
       dataEmissaoFim: params.dataEmissaoFim,
@@ -101,6 +103,7 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
 
   async listCatalog(params: {
     cnpjs: string[];
+    codigosEmpresaDominio?: number[];
     limit?: number;
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
@@ -119,6 +122,7 @@ export class RealDominioNfeClient implements DominioNfeXmlSource {
       mode: 'catalog',
       connectionString: this.connectionString,
       cnpjs: params.cnpjs,
+      codigosEmpresaDominio: params.codigosEmpresaDominio,
       limit: params.limit,
       dataEmissaoInicio: params.dataEmissaoInicio,
       dataEmissaoFim: params.dataEmissaoFim,

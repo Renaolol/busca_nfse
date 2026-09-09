@@ -36,6 +36,15 @@ def parse_payload():
     requested_mode = str(payload.get('mode') or '').lower()
     payload['mode'] = requested_mode if requested_mode in {'catalog', 'address'} else 'xml'
     payload['cnpjs'] = [normalize_digits(item) for item in payload.get('cnpjs', []) if normalize_digits(item)]
+    codigos_empresa = []
+    for item in payload.get('codigosEmpresaDominio', []):
+        try:
+            codigo_empresa = int(item)
+        except (TypeError, ValueError):
+            continue
+        if codigo_empresa > 0:
+            codigos_empresa.append(codigo_empresa)
+    payload['codigosEmpresaDominio'] = codigos_empresa
     payload['chavesAcesso'] = [normalize_digits(item) for item in payload.get('chavesAcesso', []) if normalize_digits(item)]
     payload['catalogoIds'] = [int(item) for item in payload.get('catalogoIds', []) if str(item).strip()]
     payload['limit'] = int(payload.get('limit') or 200)
@@ -71,7 +80,8 @@ def decode_xml_bytes(value):
 
 def build_query(payload):
     cnpjs = payload['cnpjs']
-    if not cnpjs:
+    codigos_empresa = payload.get('codigosEmpresaDominio') or []
+    if not cnpjs and not codigos_empresa:
         raise ValueError('Nenhum CNPJ informado para consulta Dominio')
     has_xml_content_filter = payload['mode'] == 'xml' and (payload.get('numeroDocumento') or payload.get('fornecedor'))
     sql_limit = min(max(payload['limit'] * 50, 5000), 50000) if has_xml_content_filter else payload['limit']
@@ -101,7 +111,6 @@ SELECT TOP {sql_limit}
   JOIN bethadba.geempre emp
     ON emp.codi_emp = cat.CODI_EMP
  WHERE cat.CHAVE IS NOT NULL
-   AND emp.cgce_emp IN ({','.join('?' for _ in cnpjs)})
 """
     else:
         query = f"""
@@ -120,12 +129,21 @@ SELECT TOP {sql_limit}
   JOIN bethadba.geempre emp
     ON emp.codi_emp = cat.CODI_EMP
  WHERE COALESCE(nfe_xml_v2.CONTEUDO_XML, nfe_xml.CONTEUDO_XML) IS NOT NULL
-   AND emp.cgce_emp IN ({','.join('?' for _ in cnpjs)})
 """
 
-    params = list(cnpjs)
+    params = []
     if payload['mode'] == 'address':
+        params.extend(cnpjs)
         return query, params
+
+    company_filters = []
+    if cnpjs:
+        company_filters.append(f"emp.cgce_emp IN ({','.join('?' for _ in cnpjs)})")
+        params.extend(cnpjs)
+    if codigos_empresa:
+        company_filters.append(f"cat.CODI_EMP IN ({','.join('?' for _ in codigos_empresa)})")
+        params.extend(codigos_empresa)
+    query += f"   AND ({' OR '.join(company_filters)})\n"
 
     if payload['catalogoIdMinExclusive'] > 0:
         query += "   AND cat.I_CATALOGO > ?\n"

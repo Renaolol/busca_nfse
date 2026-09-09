@@ -31,6 +31,7 @@ export interface DominioNfeXmlSource {
   listCompanyAddresses(cnpjs: string[]): Promise<DominioEmpresaEnderecoRecord[]>;
   listDocuments(params: {
     cnpjs: string[];
+    codigosEmpresaDominio?: number[];
     limit?: number;
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;
@@ -43,6 +44,7 @@ export interface DominioNfeXmlSource {
   }): Promise<DominioNfeXmlRecord[]>;
   listCatalog(params: {
     cnpjs: string[];
+    codigosEmpresaDominio?: number[];
     limit?: number;
     dataEmissaoInicio?: string;
     dataEmissaoFim?: string;

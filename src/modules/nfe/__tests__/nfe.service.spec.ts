@@ -91,7 +91,7 @@ describe('NfeService', () => {
     jest.clearAllMocks();
     delete process.env.NFE_SYNC_SOURCE_MODE;
     delete process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN;
-    prisma.cliente.findUnique.mockResolvedValue({ id: 'cliente-1', nfeHabilitado: true });
+    prisma.cliente.findUnique.mockResolvedValue({ id: 'cliente-1', nfeHabilitado: true, codigoEmpresaDominio: 57 });
     prisma.cliente.findMany.mockResolvedValue([
       { id: 'cliente-1', ativo: true, nfeHabilitado: true, createdAt: new Date('2026-06-29T00:00:00.000Z') }
     ]);
@@ -673,6 +673,7 @@ describe('NfeService', () => {
 
     expect(dominioXmlSource.listDocuments).toHaveBeenCalledWith({
       cnpjs: ['12345678000199'],
+      codigosEmpresaDominio: [57],
       limit: undefined,
       dataEmissaoInicio: undefined,
       dataEmissaoFim: undefined,
@@ -717,6 +718,7 @@ describe('NfeService', () => {
     expect(dominioXmlSource.listDocuments).toHaveBeenCalledWith(
       expect.objectContaining({
         cnpjs: ['12345678000199'],
+        codigosEmpresaDominio: [57],
         dataEmissaoInicio: '2026-08-12',
         dataEmissaoFim: '2026-08-12',
         numeroDocumento: '99656206',
@@ -803,6 +805,54 @@ describe('NfeService', () => {
         })
       ])
     );
+  });
+
+  it('vincula XML da Dominio pelo codigo da empresa quando o CNPJ retornado nao encontra estabelecimento', async () => {
+    (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
+      {
+        catalogoId: 99671960,
+        codigoEmpresa: 57,
+        cnpjEmpresa: '00000000000000',
+        chaveAcesso: undefined,
+        dataEmissao: '2026-08-17',
+        xmlBase64: Buffer.from(
+          `<?xml version="1.0" encoding="UTF-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse>
+    <InfNfse>
+      <Numero>99671960</Numero>
+      <DataEmissao>2026-08-17T15:58:38</DataEmissao>
+      <PrestadorServico>
+        <IdentificacaoPrestador><Cnpj>02535864000133</Cnpj></IdentificacaoPrestador>
+        <RazaoSocial>VR BENEFICIOS E SERVICOS DE PROCESSAMENTOS S.A</RazaoSocial>
+      </PrestadorServico>
+      <TomadorServico>
+        <IdentificacaoTomador><CpfCnpj><Cnpj>95849600000135</Cnpj></CpfCnpj></IdentificacaoTomador>
+        <RazaoSocial>TRANSPORTES DIZA LTDA</RazaoSocial>
+      </TomadorServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`,
+          'utf8'
+        ).toString('base64')
+      }
+    ]);
+
+    const result = await service.importFromDominio({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.producao,
+      numeroDocumento: '99671960',
+      fornecedor: 'VR BENEFICIOS'
+    });
+
+    expect(nfseService.importXml).toHaveBeenCalledWith({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      xml: expect.stringContaining('99671960'),
+      ambiente: 'producao'
+    });
+    expect(result.xmlsPersistidos).toBe(1);
+    expect(result.ignoradosSemVinculo).toBe(0);
   });
 
   it('redireciona XML de evento de cancelamento nacional da Dominio para o armazenamento de NFS-e e vincula pela chave', async () => {
@@ -1335,6 +1385,7 @@ describe('NfeService', () => {
 
     expect(dominioXmlSource.listDocuments).toHaveBeenCalledWith({
       cnpjs: ['12345678000199'],
+      codigosEmpresaDominio: [57],
       limit: 300,
       dataEmissaoInicio: undefined,
       dataEmissaoFim: undefined,
@@ -1439,6 +1490,7 @@ describe('NfeService', () => {
 
       expect(dominioXmlSource.listDocuments).toHaveBeenCalledWith({
         cnpjs: ['12345678000199'],
+        codigosEmpresaDominio: [57],
         limit: 500,
         dataEmissaoInicio: '2026-08-01',
         dataEmissaoFim: '2026-08-31',
@@ -1508,6 +1560,7 @@ describe('NfeService', () => {
 
     expect(dominioXmlSource.listCatalog).toHaveBeenCalledWith({
       cnpjs: ['12345678000199'],
+      codigosEmpresaDominio: [57],
       limit: 300,
       dataEmissaoInicio: '2026-01-02',
       dataEmissaoFim: undefined,
@@ -1683,6 +1736,7 @@ describe('NfeService', () => {
 
     expect(dominioXmlSource.listCatalog).toHaveBeenNthCalledWith(1, {
       cnpjs: ['12345678000199'],
+      codigosEmpresaDominio: [57],
       limit: 2,
       dataEmissaoInicio: '2026-01-02',
       dataEmissaoFim: undefined,
@@ -1693,6 +1747,7 @@ describe('NfeService', () => {
     });
     expect(dominioXmlSource.listCatalog).toHaveBeenNthCalledWith(2, {
       cnpjs: ['12345678000199'],
+      codigosEmpresaDominio: [57],
       limit: 2,
       dataEmissaoInicio: '2026-01-02',
       dataEmissaoFim: undefined,
@@ -1757,6 +1812,7 @@ describe('NfeService', () => {
 
     expect(dominioXmlSource.listCatalog).toHaveBeenCalledWith({
       cnpjs: ['12345678000199'],
+      codigosEmpresaDominio: [57],
       limit: 2,
       dataEmissaoInicio: '2026-01-01',
       dataEmissaoFim: undefined,
@@ -1871,6 +1927,7 @@ describe('NfeService', () => {
 
     expect(dominioXmlSource.listCatalog).toHaveBeenCalledWith({
       cnpjs: ['12345678000199'],
+      codigosEmpresaDominio: [57],
       limit: 300,
       dataEmissaoInicio: '2026-01-02',
       dataEmissaoFim: undefined,
@@ -1981,6 +2038,7 @@ describe('NfeService', () => {
 
     expect(dominioXmlSource.listCatalog).toHaveBeenCalledWith({
       cnpjs: ['12345678000199'],
+      codigosEmpresaDominio: [57],
       limit: 300,
       dataEmissaoInicio: '2026-01-01',
       dataEmissaoFim: undefined,
@@ -2510,6 +2568,7 @@ describe('NfeService', () => {
 
     expect(dominioXmlSource.listDocuments).toHaveBeenCalledWith({
       cnpjs: ['12345678000199'],
+      codigosEmpresaDominio: [57],
       limit: 10,
       dataEmissaoInicio: undefined,
       dataEmissaoFim: undefined,
