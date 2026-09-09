@@ -8204,7 +8204,7 @@ async function submitDifalReaderForm(form) {
   try {
     const sourceResult = await fetchDifalReaderDocuments({ cliente, emissaoInicio, emissaoFim });
     const fetchedNoteRows = Array.isArray(sourceResult.items) ? sourceResult.items : [];
-    const noteRows = fetchedNoteRows.filter((noteRow) => matchesDateRange(noteRow?.dataEmissao, emissaoInicio, emissaoFim));
+    const noteRows = fetchedNoteRows.filter((noteRow) => matchesDateRange(resolveXmlReader30FiscalDate(noteRow?.documentType || 'nfe', noteRow), emissaoInicio, emissaoFim));
     const lineItems = noteRows.flatMap((noteRow) => buildXmlReader30NfeItemRows(noteRow, { includeFallback: true }));
     const { rows: decoratedItemRows, summary } = computeDifalReaderTotals(lineItems, aliquotaInterna, noteRows.length);
 
@@ -8304,7 +8304,8 @@ async function fetchDifalReaderNfeSource(filters) {
   const docs = buildNfeDocumentsFromApi(payload.items, state.clients);
   await enrichXmlReader30DocumentsWithContent('nfe', docs);
   state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, docs);
-  return createXmlReader30FetchResult('NF-e', docs.map((doc) => mapXmlReader30Item('nfe', doc)), payload);
+  const rows = docs.map((doc) => mapXmlReader30Item('nfe', doc)).filter((row) => matchesDateRange(row.dataEmissao, filters.emissaoInicio, filters.emissaoFim));
+  return createXmlReader30FetchResult('NF-e', rows, payload);
 }
 
 function buildDifalReaderNfeSourceFromState(clienteId, emissaoInicio, emissaoFim) {
@@ -8312,8 +8313,8 @@ function buildDifalReaderNfeSourceFromState(clienteId, emissaoInicio, emissaoFim
     .filter((doc) => doc.clientId === clienteId)
     .filter((doc) => doc.tipo === 'Recebida')
     .filter((doc) => doc.ambiente === 'producao')
-    .filter((doc) => matchesDateRange(doc.dataEmissao, emissaoInicio, emissaoFim))
-    .map((doc) => mapXmlReader30Item('nfe', doc));
+    .map((doc) => mapXmlReader30Item('nfe', doc))
+    .filter((row) => matchesDateRange(row.dataEmissao, emissaoInicio, emissaoFim));
 }
 
 function computeDifalPorDentro(baseCalculoIcms, aliquotaInterestadual, aliquotaInterna) {
@@ -8749,7 +8750,8 @@ async function fetchXmlReader30NfeSource(filters) {
   const docs = buildNfeDocumentsFromApi(payload.items, state.clients).filter((doc) => doc.xmlCompletoDisponivel);
   await enrichXmlReader30DocumentsWithContent('nfe', docs);
   state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, docs);
-  return createXmlReader30FetchResult('NF-e', docs.map((doc) => mapXmlReader30Item('nfe', doc)), payload);
+  const rows = docs.map((doc) => mapXmlReader30Item('nfe', doc)).filter((row) => matchesDateRange(row.dataEmissao, filters.emissaoInicio, filters.emissaoFim));
+  return createXmlReader30FetchResult('NF-e', rows, payload);
 }
 
 function buildXmlReader30NfeSourceFromState(clienteId, emissaoInicio, emissaoFim, tipo = 'Todos') {
@@ -8757,8 +8759,8 @@ function buildXmlReader30NfeSourceFromState(clienteId, emissaoInicio, emissaoFim
     .filter((doc) => doc.clientId === clienteId)
     .filter((doc) => tipo === 'Todos' || doc.tipo === tipo)
     .filter((doc) => doc.xmlCompletoDisponivel)
-    .filter((doc) => matchesDateRange(doc.dataEmissao, emissaoInicio, emissaoFim))
-    .map((doc) => mapXmlReader30Item('nfe', doc));
+    .map((doc) => mapXmlReader30Item('nfe', doc))
+    .filter((row) => matchesDateRange(row.dataEmissao, emissaoInicio, emissaoFim));
 }
 
 async function fetchXmlReader30CteSource(filters) {
@@ -8788,7 +8790,8 @@ async function fetchXmlReader30CteSource(filters) {
   const docs = buildCteDocumentsFromApi(payload.items, state.clients).filter((doc) => doc.xmlCompletoDisponivel);
   await enrichXmlReader30DocumentsWithContent('cte', docs);
   state.cteDocuments = mergeCteDocumentsById(state.cteDocuments, docs);
-  return createXmlReader30FetchResult('CT-e', docs.map((doc) => mapXmlReader30Item('cte', doc)), payload);
+  const rows = docs.map((doc) => mapXmlReader30Item('cte', doc)).filter((row) => matchesDateRange(row.dataEmissao, filters.emissaoInicio, filters.emissaoFim));
+  return createXmlReader30FetchResult('CT-e', rows, payload);
 }
 
 function buildXmlReader30CteSourceFromState(clienteId, emissaoInicio, emissaoFim) {
@@ -9166,16 +9169,18 @@ function buildXmlReader30SearchText(values) {
 }
 
 function matchesDateRange(value, start, end) {
-  const timestamp = Date.parse(value || '');
-  if (Number.isNaN(timestamp)) {
+  const dateKey = extractCalendarDateKey(value);
+  if (!dateKey) {
     return true;
   }
 
-  if (start && timestamp < Date.parse(`${start}T00:00:00`)) {
+  const startKey = extractCalendarDateKey(start);
+  if (startKey && dateKey < startKey) {
     return false;
   }
 
-  if (end && timestamp > Date.parse(`${end}T23:59:59`)) {
+  const endKey = extractCalendarDateKey(end);
+  if (endKey && dateKey > endKey) {
     return false;
   }
 
