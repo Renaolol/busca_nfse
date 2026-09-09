@@ -1337,13 +1337,15 @@ export class NfseDanfseService {
 
     const municipioPrestacaoNome = this.extract(xml, ['municipioPrestacaoNome', 'xLocPrestacao', 'xLocIncid']);
     const codigoServicoNacional = this.extractFromPaths(xml, [
+      ['DPS', 'infDPS', 'serv', 'cServ', 'cTribNac'],
       ['infDPS', 'serv', 'cServ', 'cTribNac'],
       ['serv', 'cServ', 'cTribNac']
-    ]);
+    ]) ?? this.extract(xml, ['codigoServicoNacional', 'cTribNac']);
     const codigoServicoMunicipal = this.extractFromPaths(xml, [
+      ['DPS', 'infDPS', 'serv', 'cServ', 'cTribMun'],
       ['infDPS', 'serv', 'cServ', 'cTribMun'],
       ['serv', 'cServ', 'cTribMun']
-    ]);
+    ]) ?? this.extract(xml, ['codigoServicoMunicipal', 'cTribMun']);
     const descricaoCodigoTributacao =
       this.extractFromPaths(xml, [
         ['infDPS', 'serv', 'cServ', 'xTribMun'],
@@ -3444,7 +3446,7 @@ export class NfseDanfseService {
   }
 
   private looksLikeDescricaoMunicipio(value: string): boolean {
-    return /[A-Za-zÀ-ÿ]/.test(value);
+    return /\p{L}/u.test(value);
   }
 
   private normalizeMunicipioDisplayFields<T extends Partial<DanfseRenderInput>>(input: T): T {
@@ -3540,4 +3542,3 @@ export class NfseDanfseService {
     return `${municipioNome}${suffix}`;
   }
 }
-

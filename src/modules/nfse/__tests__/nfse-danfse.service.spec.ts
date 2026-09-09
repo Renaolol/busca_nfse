@@ -44,6 +44,46 @@ describe('NfseDanfseService', () => {
     expect(content.match(/\/Type \/Page\b/g)).toHaveLength(1);
   });
 
+  it('imprime codigo de tributacao nacional completo quando XML nacional usa DPS/infDPS', () => {
+    const xml = `
+      <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+        <infNFSe Id="NFS42076502210413042000108000000000009026091464565822">
+          <nNFSe>90</nNFSe>
+          <emit>
+            <CNPJ>10413042000108</CNPJ>
+            <xNome>KLAGENBERG &amp; KLAGENBERG LTDA</xNome>
+          </emit>
+          <DPS>
+            <infDPS>
+              <toma>
+                <CNPJ>80912108000190</CNPJ>
+                <xNome>MUNICIPIO DE BELMONTE</xNome>
+              </toma>
+              <serv>
+                <locPrest><cLocPrestacao>4207650</cLocPrestacao></locPrest>
+                <cServ>
+                  <cTribNac>170601</cTribNac>
+                  <cTribMun>1706</cTribMun>
+                  <xDescServ>Servicos de insercao de midia</xDescServ>
+                </cServ>
+              </serv>
+              <valores><vServPrest><vServ>2432.72</vServ></vServPrest></valores>
+            </infDPS>
+          </DPS>
+        </infNFSe>
+      </NFSe>
+    `;
+
+    const pdf = service.generateFromXml(xml, {
+      chaveAcesso: '42076502210413042000108000000000009026091464565822'
+    });
+
+    const content = pdf.toString('latin1');
+    expect(content).toContain('Codigo de Tributacao Nacional');
+    expect(content).toContain('170601');
+    expect(content).toContain('Codigo de Tributacao Municipal');
+    expect(content).toContain('1706');
+  });
   it('marca visualmente DANFSE cancelada', () => {
     const pdf = service.generatePdf({
       chaveAcesso: '42110092206960810000176000000000033326062205552016',
