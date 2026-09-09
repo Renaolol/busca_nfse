@@ -58,7 +58,7 @@ describe('NfeXmlParserService', () => {
     });
   });
 
-  it('prioriza a data de autorizacao do protocolo da NF-e sobre datas de evento', () => {
+  it('mantem data de emissao separada da data de autorizacao do protocolo', () => {
     const parsed = service.parse(`<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
   <historicoImportacao><dhRecbto>2026-08-01T08:00:00-03:00</dhRecbto></historicoImportacao>
@@ -79,8 +79,32 @@ describe('NfeXmlParserService', () => {
 </nfeProc>`);
 
     expect(parsed.numeroNfe).toBe('132750');
-    expect(parsed.dataAutorizacao?.toISOString()).toBe('2026-08-01T00:12:31.000Z');
     expect(parsed.dataEmissao?.toISOString()).toBe('2026-08-01T00:12:00.000Z');
+    expect(parsed.dataAutorizacao?.toISOString()).toBe('2026-08-01T00:12:31.000Z');
+  });
+
+  it('parseia emissao em agosto e autorizacao posterior em setembro sem trocar as datas', () => {
+    const parsed = service.parse(`<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">
+  <NFe>
+    <infNFe Id="NFe41260809428424000126550050002928671603343500">
+      <ide>
+        <mod>55</mod>
+        <serie>5</serie>
+        <nNF>292867</nNF>
+        <dhEmi>2026-08-31T16:06:00-03:00</dhEmi>
+      </ide>
+      <emit><CNPJ>09428424000126</CNPJ><xNome>POSTO ALDO MARINGA LTDA</xNome></emit>
+      <dest><CNPJ>00907302000148</CNPJ><xNome>BAIERLE BAIERLE LTDA</xNome></dest>
+      <total><ICMSTot><vNF>1935.42</vNF></ICMSTot></total>
+    </infNFe>
+  </NFe>
+  <protNFe><infProt><cStat>100</cStat><dhRecbto>2026-09-02T11:46:47-03:00</dhRecbto></infProt></protNFe>
+</nfeProc>`);
+
+    expect(parsed.numeroNfe).toBe('292867');
+    expect(parsed.dataEmissao?.toISOString()).toBe('2026-08-31T19:06:00.000Z');
+    expect(parsed.dataAutorizacao?.toISOString()).toBe('2026-09-02T14:46:47.000Z');
   });
 
   it('parseia resumo resNFe', () => {

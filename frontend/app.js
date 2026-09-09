@@ -8914,26 +8914,25 @@ function summarizeXmlReader30Products(documentType, doc) {
 function resolveXmlReader30FiscalDate(documentType, doc) {
   const raw = doc?.raw || doc || {};
   if (documentType === 'nfe' || documentType === 'cte') {
-    const xmlAuthorizationDate = extractXmlReader30AuthorizationDate(raw.conteudoXml);
-    return xmlAuthorizationDate || raw.dataAutorizacao || raw.dataEmissao || raw.dataDownload || null;
+    const xmlIssueDate = extractXmlReader30IssueDate(raw.conteudoXml);
+    return xmlIssueDate || raw.dataEmissao || raw.dataAutorizacao || raw.dataDownload || null;
   }
   return raw.dataEmissao || raw.dataAutorizacao || raw.dataDownload || null;
 }
 
-function extractXmlReader30AuthorizationDate(xml) {
+function extractXmlReader30IssueDate(xml) {
   const content = String(xml || '');
   if (!content) {
     return null;
   }
 
-  const protocolBlock = /<(?:\w+:)?(?:protNFe|protCTe)\b[^>]*>([\s\S]*?)<\/(?:\w+:)?(?:protNFe|protCTe)>/i.exec(content)?.[1];
-  if (!protocolBlock) {
+  const ideBlock = /<(?:\w+:)?ide\b[^>]*>([\s\S]*?)<\/(?:\w+:)?ide>/i.exec(content)?.[1];
+  if (!ideBlock) {
     return null;
   }
 
-  const infProtBlock = /<(?:\w+:)?infProt\b[^>]*>([\s\S]*?)<\/(?:\w+:)?infProt>/i.exec(protocolBlock)?.[1] || protocolBlock;
-  const protocolMatch = /<(?:\w+:)?(?:dhRecbto|dhAut)\b[^>]*>([\s\S]*?)<\/(?:\w+:)?(?:dhRecbto|dhAut)>/i.exec(infProtBlock);
-  return protocolMatch?.[1]?.trim() || null;
+  const issueMatch = /<(?:\w+:)?(?:dhEmi|dEmi)\b[^>]*>([\s\S]*?)<\/(?:\w+:)?(?:dhEmi|dEmi)>/i.exec(ideBlock);
+  return issueMatch?.[1]?.trim() || null;
 }
 
 function mapXmlReader30Item(documentType, doc) {
