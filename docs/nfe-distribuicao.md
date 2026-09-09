@@ -61,7 +61,7 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - O fluxo atual implementa `distNSU`, `consNSU` e `consChNFe`.
 - O modulo `cte` implementa consulta manual por chave via `CteConsultaV4` e tentativa de captura de eventos retornados pelo autorizador.
 - As rotas manuais permitem testar o ambiente real e recuperar documentos pontuais sem depender do ciclo incremental.
-- A importacao via Dominio consulta `bethadba.EFATENDIMENTO_NFE_CATALOGO` e prioriza XMLs em `bethadba.EFATENDIMENTO_NFE_XML_V2`, usando `bethadba.EFATENDIMENTO_NFE_XML` como fallback. O vinculo local continua sendo feito pelo CNPJ de `bethadba.geempre.cgce_emp`.
+- A importacao via Dominio consulta `bethadba.EFATENDIMENTO_NFE_CATALOGO` e prioriza XMLs em `bethadba.EFATENDIMENTO_NFE_XML_V2`, usando `bethadba.EFATENDIMENTO_NFE_XML` como fallback. O vinculo local e feito pelo CNPJ de `bethadba.geempre.cgce_emp` e, quando o cliente tiver `codigoEmpresaDominio`, tambem por `EFATENDIMENTO_NFE_CATALOGO.CODI_EMP`.
 - `POST /nfe/importar-dominio` aceita filtros por `chavesAcesso` e `catalogoIds`, permitindo reimportacao pontual a partir do painel operacional.
 - `POST /nfe/dominio/xml` devolve o XML bruto de um `catalogoId` da Dominio para visualizacao interna mesmo quando a persistencia falhou por chave ausente.
 - O adapter real da Dominio fica desacoplado em `src/integrations/dominio-nfe` e usa `pyodbc` via script Python para evitar acoplamento de driver nativo ao build Node.
@@ -101,3 +101,4 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - Portal NF-e - FAQ de consulta na internet: `https://www.nfe.fazenda.gov.br/Portal/perguntasFrequentes.aspx?AspxAutoDetectCookieSupport=1&tipoConteudo=auR4yGlWmRY%3D`
 - Portal NF-e - Informe de manifestacao do destinatario em 90 dias (publicado em 27/05/2026, vigente a partir de 01/06/2026): `https://www.nfe.fazenda.gov.br/portal/informe.aspx?AspxAutoDetectCookieSupport=1&Informe=f9R6A+5SmSE%3D&ehCTG=false`
 - Portal CT-e - FAQ de consulta na internet: `https://www.cte.fazenda.gov.br/portal/perguntasFrequentes.aspx?tipoConteudo=HC%2Fiuy94%2FRk%3D`
+

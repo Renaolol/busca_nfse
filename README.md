@@ -381,7 +381,7 @@ Observacoes:
 - Em XMLs de subcontratacao, a chave de `infCteSub/chCTe` e tratada somente como referencia ao CT-e principal; o CT-e subcontratado e identificado e persistido pela chave do `infCte`.
 - O CNPJ presente em `toma4` e usado para classificar CT-e subcontratado como `Recebido` quando o estabelecimento do cliente for o tomador.
 - A deduplicacao de NF-e tambem ocorre por `ambiente + chave_acesso`.
-- `POST /nfe/importar-dominio` consulta a base da Dominio via ODBC, relaciona `bethadba.geempre.cgce_emp` com `cliente_estabelecimentos.cnpj` e reaproveita o mesmo pipeline de persistencia/deduplicacao do endpoint manual. O exportador prioriza `bethadba.EFATENDIMENTO_NFE_XML_V2` e usa `bethadba.EFATENDIMENTO_NFE_XML` como fallback quando necessario.
+- `POST /nfe/importar-dominio` consulta a base da Dominio via ODBC, relaciona `bethadba.geempre.cgce_emp` com `cliente_estabelecimentos.cnpj` e tambem usa `clientes.codigo_empresa_dominio` contra `EFATENDIMENTO_NFE_CATALOGO.CODI_EMP` quando cadastrado, reaproveitando o mesmo pipeline de persistencia/deduplicacao do endpoint manual. O exportador prioriza `bethadba.EFATENDIMENTO_NFE_XML_V2` e usa `bethadba.EFATENDIMENTO_NFE_XML` como fallback quando necessario.
 - `POST /nfe/importar-dominio` tambem aceita `catalogoIds` para reimportacao pontual de XMLs ja localizados pela Dominio.
 - `POST /nfe/dominio/xml` retorna o XML bruto de um `catalogoId` da Dominio para visualizacao interna sem depender de persistencia previa.
 - O ambiente salvo da NF-e passa a ser inferido do XML fiscal: `tpAmb=2` grava `homologacao`; qualquer outro valor, inclusive ausencia de `tpAmb`, grava `producao`.
@@ -399,7 +399,7 @@ Observacoes:
 - Opcionalmente configure `NFE_DOMINIO_IMPORT_LIMIT_PER_RUN` para limitar quantos registros por controle sao lidos em cada execucao automatica/manual do painel.
 - O importador usa o script `scripts/dominio_nfe_export.py`, que depende de `pyodbc` no host onde a API estiver rodando.
 - A importacao manual `POST /nfe/importar-dominio` aceita filtros opcionais `numeroDocumento` e `fornecedor` para localizar XMLs pontuais pelo conteudo salvo na Dominio, alem dos filtros de emissao, chave e catalogo.
-- A vinculacao com o cliente local ocorre por CNPJ do estabelecimento ativo; nao foi necessario adicionar coluna de codigo da empresa da Dominio no schema.
+- A vinculacao com o cliente local ocorre primeiro por CNPJ do estabelecimento ativo. Quando o cliente possui `codigoEmpresaDominio`, a busca e a vinculacao tambem aceitam `EFATENDIMENTO_NFE_CATALOGO.CODI_EMP`, cobrindo casos em que o XML/NFS-e esta na empresa correta da Dominio, mas o CNPJ retornado pelo catalogo nao coincide com o estabelecimento local.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio`, o backend reaproveita `nfe_sync_controle` como cursor incremental usando `EFATENDIMENTO_NFE_CATALOGO.ID`, evitando reler o historico inteiro a cada execucao.
 - Mesmo quando `NFE_SYNC_SOURCE_MODE=dominio`, o painel passa a expor o botao manual `Download por chave`, que usa `POST /nfe/sync/download-por-chave/preview` e `POST /nfe/sync/download-por-chave/executar` como fluxo complementar para consultar documentos faltantes no gov por chave de acesso.
 - Esse fluxo manual faz uma varredura retroativa desde `2026-01-02` (data maior que `2026-01-01`), ignorando temporariamente o cursor salvo em `nfe_sync_controle` e sem sobrescrever esse cursor ao finalizar a execucao.
@@ -493,3 +493,4 @@ Quando houver pendencias (sem certificado, sem sync ou sem notas), o painel exib
 - Portal Nacional: https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual
 - Manual ADN: https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/manual-contribuintes-apis-adn-sistema-nacional-nfse.pdf
 - Manual Emissor Publico API: https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/manual-contribuintes-emissor-publico-api-sistema-nacional-nfs-e-v1-2-out2025.pdf
+
