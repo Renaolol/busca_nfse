@@ -44,7 +44,7 @@ describe('NfseDanfseService', () => {
     expect(content.match(/\/Type \/Page\b/g)).toHaveLength(1);
   });
 
-  it('imprime codigo de tributacao nacional completo quando XML nacional usa DPS/infDPS', () => {
+  it('imprime codigos de tributacao completos quando XML nacional usa DPS/infDPS', () => {
     const xml = `
       <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
         <infNFSe Id="NFS42076502210413042000108000000000009026091464565822">
@@ -63,7 +63,8 @@ describe('NfseDanfseService', () => {
                 <locPrest><cLocPrestacao>4207650</cLocPrestacao></locPrest>
                 <cServ>
                   <cTribNac>170601</cTribNac>
-                  <cTribMun>1706</cTribMun>
+                  <ItemListaServico>1706</ItemListaServico>
+                  <cTribMun>114063100</cTribMun>
                   <xDescServ>Servicos de insercao de midia</xDescServ>
                 </cServ>
               </serv>
@@ -80,9 +81,9 @@ describe('NfseDanfseService', () => {
 
     const content = pdf.toString('latin1');
     expect(content).toContain('Codigo de Tributacao Nacional');
-    expect(content).toContain('170601');
+    expect(content).toContain('17.06.01');
     expect(content).toContain('Codigo de Tributacao Municipal');
-    expect(content).toContain('1706');
+    expect(content).toContain('1.1406.31.00');
   });
   it('marca visualmente DANFSE cancelada', () => {
     const pdf = service.generatePdf({

@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import * as QRCode from 'qrcode';
 import { replaceMunicipioCodigoComNome, resolveMunicipioIbge } from '../../common/utils/municipio-ibge.util';
 
@@ -708,7 +708,7 @@ export class NfseDanfseService {
       title: 'SERVICO PRESTADO',
       columns: 4,
       fields: [
-        field('Codigo de Tributacao Nacional', input.codigoServicoNacional),
+        field('Codigo de Tributacao Nacional', this.formatCodigoTributacaoNacional(input.codigoServicoNacional)),
         field('Codigo de Tributacao Municipal', this.resolveCodigoTributacaoMunicipalDisplay(input)),
         field('Local da Prestacao', municipio(input.localPrestacao)),
         field('Pais da Prestacao', this.extractPais(input.localPrestacao)),
@@ -1181,7 +1181,7 @@ export class NfseDanfseService {
     }
 
     pushSection('SERVICO PRESTADO');
-    pushField('Codigo de Tributacao Nacional', this.safeValue(input.codigoServicoNacional));
+    pushField('Codigo de Tributacao Nacional', this.safeValue(this.formatCodigoTributacaoNacional(input.codigoServicoNacional)));
     pushField('Codigo de Tributacao Municipal', this.safeValue(this.resolveCodigoTributacaoMunicipalDisplay(input)));
     pushField('Codigo da NBS', this.safeValue(input.codigoNbs));
     pushField('Local da Prestacao', this.safeValue(this.formatMunicipioUfLabel(input.localPrestacao)));
@@ -1336,16 +1336,8 @@ export class NfseDanfseService {
       ]) ?? this.extract(xml, ['municipioPrestacaoCodigo', 'codigoMunicipioPrestacao', 'cLocPrestacao']);
 
     const municipioPrestacaoNome = this.extract(xml, ['municipioPrestacaoNome', 'xLocPrestacao', 'xLocIncid']);
-    const codigoServicoNacional = this.extractFromPaths(xml, [
-      ['DPS', 'infDPS', 'serv', 'cServ', 'cTribNac'],
-      ['infDPS', 'serv', 'cServ', 'cTribNac'],
-      ['serv', 'cServ', 'cTribNac']
-    ]) ?? this.extract(xml, ['codigoServicoNacional', 'cTribNac']);
-    const codigoServicoMunicipal = this.extractFromPaths(xml, [
-      ['DPS', 'infDPS', 'serv', 'cServ', 'cTribMun'],
-      ['infDPS', 'serv', 'cServ', 'cTribMun'],
-      ['serv', 'cServ', 'cTribMun']
-    ]) ?? this.extract(xml, ['codigoServicoMunicipal', 'cTribMun']);
+    const codigoServicoNacional = this.extractBestServiceCode(xml, ['codigoServicoNacional', 'cTribNac']);
+    const codigoServicoMunicipal = this.extractBestServiceCode(xml, ['codigoServicoMunicipal', 'cTribMun']);
     const descricaoCodigoTributacao =
       this.extractFromPaths(xml, [
         ['infDPS', 'serv', 'cServ', 'xTribMun'],
@@ -1698,7 +1690,7 @@ export class NfseDanfseService {
       codigoServicoMunicipal,
       codigoNbs: this.extractFromPaths(xml, [['infDPS', 'serv', 'cServ', 'cNBS']]),
       descricaoCodigoTributacao,
-      itemListaServico: this.extract(xml, ['itemListaServico', 'ItemListaServico', 'cItemListaServ', 'cTribMun']),
+      itemListaServico: this.extractBestServiceCode(xml, ['cTribMun', 'itemListaServico', 'ItemListaServico', 'cItemListaServ']),
       descricaoServico,
       infoComplementares: this.extractFromPaths(xml, [['infDPS', 'serv', 'infoCompl', 'xInfComp'], ['infDPS', 'serv', 'infoComp', 'xInfComp']]),
       chaveNfseSubstituida: this.extractFromPaths(xml, [['infDPS', 'subst', 'chSubstda'], ['infDPS', 'subst', 'chSubstda']]),
@@ -2305,16 +2297,46 @@ export class NfseDanfseService {
   }
 
   private resolveCodigoTributacaoMunicipalDisplay(input: DanfseRenderInput): string | null | undefined {
-    const nacional = this.safeValue(input.codigoServicoNacional);
-    const municipal = this.safeValue(input.codigoServicoMunicipal ?? input.itemListaServico);
+    const municipal = this.bestServiceCode(input.codigoServicoMunicipal, input.itemListaServico);
+    return this.formatCodigoTributacaoMunicipal(municipal);
+  }
 
-    if (/^\d{6}$/.test(nacional)) {
-      return nacional;
+  private formatCodigoTributacaoNacional(value?: string | null): string | null | undefined {
+    const normalized = this.safeValue(value);
+    const digits = normalized.replace(/\D/g, '');
+
+    if (digits.length === 6) {
+      return `${digits.slice(0, 2)}.${digits.slice(2, 4)}.${digits.slice(4, 6)}`;
     }
-    if (/^\d{6}$/.test(municipal)) {
-      return municipal;
+
+    return normalized !== '-' ? normalized : value;
+  }
+
+  private formatCodigoTributacaoMunicipal(value?: string | null): string | null | undefined {
+    const normalized = this.safeValue(value);
+    const digits = normalized.replace(/\D/g, '');
+
+    if (digits.length === 9) {
+      return `${digits.slice(0, 1)}.${digits.slice(1, 5)}.${digits.slice(5, 7)}.${digits.slice(7, 9)}`;
     }
-    return municipal !== '-' ? municipal : input.codigoServicoNacional;
+    if (digits.length === 8) {
+      return `${digits.slice(0, 4)}.${digits.slice(4, 6)}.${digits.slice(6, 8)}`;
+    }
+
+    return normalized !== '-' ? normalized : value;
+  }
+
+  private bestServiceCode(...values: Array<string | null | undefined>): string | null | undefined {
+    return values
+      .map((value, index) => ({ value: this.safeValue(value), index }))
+      .filter((candidate) => candidate.value !== '-')
+      .sort((left, right) => {
+        const digitDiff = right.value.replace(/\D/g, '').length - left.value.replace(/\D/g, '').length;
+        if (digitDiff !== 0) {
+          return digitDiff;
+        }
+        return left.index - right.index;
+      })[0]?.value;
   }
 
   private combineSlash(left?: string | null, right?: string | null): string {
@@ -3212,6 +3234,43 @@ export class NfseDanfseService {
     return undefined;
   }
 
+  private extractBestServiceCode(xml: string, tagNames: string[]): string | undefined {
+    const candidates = tagNames.flatMap((tagName) => this.extractAll(xml, tagName));
+    if (!candidates.length) {
+      return undefined;
+    }
+
+    return candidates
+      .map((value, index) => ({ value: value.trim(), digits: value.replace(/\D/g, ''), index }))
+      .filter((candidate) => candidate.value !== '')
+      .sort((left, right) => {
+        const lengthDiff = right.digits.length - left.digits.length;
+        if (lengthDiff !== 0) {
+          return lengthDiff;
+        }
+        return left.index - right.index;
+      })[0]?.value;
+  }
+
+  private extractAll(xml: string, tagName: string): string[] {
+    const escaped = tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(
+      '<(?:\\w+:)?' + escaped + '\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?' + escaped + '>',
+      'gi'
+    );
+    const values: string[] = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(xml))) {
+      const value = this.cleanText(match[1]);
+      if (value) {
+        values.push(value);
+      }
+    }
+
+    return values;
+  }
+
   private extractFromPaths(xml: string, paths: string[][]): string | undefined {
     for (const path of paths) {
       const value = this.extractFromPath(xml, path);
@@ -3555,3 +3614,4 @@ export class NfseDanfseService {
     return `${municipioNome}${suffix}`;
   }
 }
+

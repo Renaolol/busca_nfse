@@ -126,7 +126,7 @@ describe('NfseXmlParserService', () => {
     expect(parsed.competencia?.toISOString()).toBe('2024-08-01T00:00:00.000Z');
   });
 
-  it('preserva codigo nacional completo e codigo municipal da NFS-e nacional', () => {
+  it('preserva codigo nacional completo e prefere codigo municipal completo da NFS-e nacional', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
   <infNFSe Id="NFS42076502210413042000108000000000008826091464565822">
@@ -136,7 +136,8 @@ describe('NfseXmlParserService', () => {
         <serv>
           <cServ>
             <cTribNac>170601</cTribNac>
-            <cTribMun>1706</cTribMun>
+            <ItemListaServico>1706</ItemListaServico>
+            <cTribMun>114063100</cTribMun>
             <xDescServ>servico de divulgacao de publicidade</xDescServ>
           </cServ>
         </serv>
@@ -148,7 +149,7 @@ describe('NfseXmlParserService', () => {
     const parsed = parser.parse(xml);
 
     expect(parsed.codigoServicoNacional).toBe('170601');
-    expect(parsed.itemListaServico).toBe('1706');
+    expect(parsed.itemListaServico).toBe('114063100');
   });
   it('extrai municipio do tomador quando o XML nacional traz o nome do municipio', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>

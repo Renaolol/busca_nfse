@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 import { resolveMunicipioIbge, resolveMunicipioNome } from '../../common/utils/municipio-ibge.util';
 
@@ -134,8 +134,8 @@ export class NfseXmlParserService {
         this.extract(xml, ['tpRetISSQN', 'IssRetido']) ??
         this.extractNestedAny(xml, ['tribMun', 'Servico'], ['tpRetISSQN', 'IssRetido']),
       aliquotaIss: this.extract(xml, ['aliquotaIss', 'aliquotaISS', 'pAliqAplic', 'pAliq', 'pAliquota']),
-      codigoServicoNacional: this.extract(xml, ['codigoServicoNacional', 'cTribNac']),
-      itemListaServico: this.extract(xml, ['itemListaServico', 'ItemListaServico', 'cItemListaServ', 'cTribMun']),
+      codigoServicoNacional: this.extractBestServiceCode(xml, ['codigoServicoNacional', 'cTribNac']),
+      itemListaServico: this.extractBestServiceCode(xml, ['cTribMun', 'itemListaServico', 'ItemListaServico', 'cItemListaServ']),
       descricaoServico: this.extract(xml, ['descricaoServico', 'Discriminacao', 'xDescServ']),
       chaveSubstituida: this.normalizeChaveAcesso(this.extractNestedAny(xml, ['subst'], ['chSubstda'])),
       motivoSubstituicao: this.extractNestedAny(xml, ['subst'], ['xMotivo'])
@@ -278,6 +278,43 @@ export class NfseXmlParserService {
     return undefined;
   }
 
+  private extractBestServiceCode(xml: string, tagNames: string[]): string | undefined {
+    const candidates = tagNames.flatMap((tagName) => this.extractAll(xml, tagName));
+    if (!candidates.length) {
+      return undefined;
+    }
+
+    return candidates
+      .map((value, index) => ({ value: value.trim(), digits: value.replace(/\D/g, ''), index }))
+      .filter((candidate) => candidate.value !== '')
+      .sort((left, right) => {
+        const lengthDiff = right.digits.length - left.digits.length;
+        if (lengthDiff !== 0) {
+          return lengthDiff;
+        }
+        return left.index - right.index;
+      })[0]?.value;
+  }
+
+  private extractAll(xml: string, tagName: string): string[] {
+    const escaped = tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const regex = new RegExp(
+      '<(?:\\w+:)?' + escaped + '\\b[^>]*>([\\s\\S]*?)<\\/(?:\\w+:)?' + escaped + '>',
+      'gi'
+    );
+    const values: string[] = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = regex.exec(xml))) {
+      const value = this.cleanText(match[1]);
+      if (value) {
+        values.push(value);
+      }
+    }
+
+    return values;
+  }
+
   private extractNestedAny(xml: string, parentTags: string[], childTags: string[]): string | undefined {
     for (const parentTag of parentTags) {
       const value = this.extractNested(xml, parentTag, childTags);
@@ -412,7 +449,7 @@ export class NfseXmlParserService {
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'xMun'],
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'Municipio'],
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Tomador', 'Endereco', 'MunicipioNome']
-      ]) ?? (codigoMunicipio && /[A-Za-zÀ-ÿ]/.test(codigoMunicipio) ? codigoMunicipio : undefined);
+      ]) ?? (codigoMunicipio && /\p{L}/u.test(codigoMunicipio) ? codigoMunicipio : undefined);
     if (!nomeMunicipio) {
       return undefined;
     }
@@ -581,4 +618,5 @@ export class NfseXmlParserService {
     return new Date(Date.UTC(year, month - 1, day));
   }
 }
+
 
