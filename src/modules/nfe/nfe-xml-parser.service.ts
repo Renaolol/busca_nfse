@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
 
 export interface ParsedNfe {
@@ -469,3 +469,4 @@ export class NfeXmlParserService {
     return parsed;
   }
 }
+
