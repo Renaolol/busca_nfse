@@ -135,7 +135,7 @@ export class NfseXmlParserService {
         this.extractNestedAny(xml, ['tribMun', 'Servico'], ['tpRetISSQN', 'IssRetido']),
       aliquotaIss: this.extract(xml, ['aliquotaIss', 'aliquotaISS', 'pAliqAplic', 'pAliq', 'pAliquota']),
       codigoServicoNacional: this.extract(xml, ['codigoServicoNacional', 'cTribNac']),
-      itemListaServico: this.extract(xml, ['itemListaServico', 'ItemListaServico', 'cItemListaServ']),
+      itemListaServico: this.extract(xml, ['itemListaServico', 'ItemListaServico', 'cItemListaServ', 'cTribMun']),
       descricaoServico: this.extract(xml, ['descricaoServico', 'Discriminacao', 'xDescServ']),
       chaveSubstituida: this.normalizeChaveAcesso(this.extractNestedAny(xml, ['subst'], ['chSubstda'])),
       motivoSubstituicao: this.extractNestedAny(xml, ['subst'], ['xMotivo'])
@@ -581,3 +581,4 @@ export class NfseXmlParserService {
     return new Date(Date.UTC(year, month - 1, day));
   }
 }
+

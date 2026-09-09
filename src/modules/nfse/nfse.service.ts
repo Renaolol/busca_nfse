@@ -2199,6 +2199,8 @@ export class NfseService {
       return {
         ...doc,
         ambiente: this.resolveNfseAmbienteFromParsed(parsed, doc.ambiente),
+        codigoServicoNacional: this.preferCompleteServiceCode(parsed.codigoServicoNacional, doc.codigoServicoNacional),
+        itemListaServico: this.preferCompleteServiceCode(parsed.itemListaServico, doc.itemListaServico),
         razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
         razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
         municipioTomador,
@@ -2215,6 +2217,26 @@ export class NfseService {
     }
   }
 
+  private preferCompleteServiceCode(parsed?: string | null, stored?: string | null): string | null {
+    const parsedValue = String(parsed ?? '').trim();
+    const storedValue = String(stored ?? '').trim();
+
+    if (!parsedValue) {
+      return storedValue || null;
+    }
+
+    if (!storedValue) {
+      return parsedValue;
+    }
+
+    const parsedDigits = parsedValue.replace(/\D/g, '');
+    const storedDigits = storedValue.replace(/\D/g, '');
+    if (parsedDigits.length > storedDigits.length && parsedDigits.startsWith(storedDigits)) {
+      return parsedValue;
+    }
+
+    return storedValue;
+  }
   private async enrichDocumentoDetails(
     doc: NfseDocumento & {
       eventos?: Array<{ tipoEvento?: string | null; descricao?: string | null; dataEvento?: Date | null }>;
@@ -2254,6 +2276,8 @@ export class NfseService {
       return {
         ...doc,
         ambiente: this.resolveNfseAmbienteFromParsed(parsed, doc.ambiente),
+        codigoServicoNacional: this.preferCompleteServiceCode(parsed.codigoServicoNacional, doc.codigoServicoNacional),
+        itemListaServico: this.preferCompleteServiceCode(parsed.itemListaServico, doc.itemListaServico),
         razaoSocialPrestador: doc.razaoSocialPrestador ?? parsed.razaoSocialPrestador ?? null,
         razaoSocialTomador: doc.razaoSocialTomador ?? parsed.razaoSocialTomador ?? null,
         municipioTomador,
@@ -5149,3 +5173,4 @@ export class NfseService {
     return Object.keys(next).length > 0 ? next : undefined;
   }
 }
+

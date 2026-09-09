@@ -1696,7 +1696,7 @@ export class NfseDanfseService {
       codigoServicoMunicipal,
       codigoNbs: this.extractFromPaths(xml, [['infDPS', 'serv', 'cServ', 'cNBS']]),
       descricaoCodigoTributacao,
-      itemListaServico: this.extract(xml, ['itemListaServico', 'ItemListaServico', 'cItemListaServ']),
+      itemListaServico: this.extract(xml, ['itemListaServico', 'ItemListaServico', 'cItemListaServ', 'cTribMun']),
       descricaoServico,
       infoComplementares: this.extractFromPaths(xml, [['infDPS', 'serv', 'infoCompl', 'xInfComp'], ['infDPS', 'serv', 'infoComp', 'xInfComp']]),
       chaveNfseSubstituida: this.extractFromPaths(xml, [['infDPS', 'subst', 'chSubstda'], ['infDPS', 'subst', 'chSubstda']]),
@@ -3540,3 +3540,4 @@ export class NfseDanfseService {
     return `${municipioNome}${suffix}`;
   }
 }
+
