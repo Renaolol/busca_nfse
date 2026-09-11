@@ -16192,11 +16192,13 @@ function buildXmlSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE, all
   }
 
   if (filters.emissaoInicio) {
-    query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
+    // Os campos date representam dias do calendario fiscal brasileiro. Enviar
+    // UTC aqui fazia o limite final terminar tres horas antes do fim do dia.
+    query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000-03:00`);
   }
 
   if (filters.emissaoFim) {
-    query.set('dataFim', `${filters.emissaoFim}T23:59:59.999Z`);
+    query.set('dataFim', `${filters.emissaoFim}T23:59:59.999-03:00`);
   }
 
   const client = findClientById(filters.cliente);
@@ -16243,11 +16245,11 @@ function buildNfeSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE, all
   }
 
   if (filters.emissaoInicio) {
-    query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
+    query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000-03:00`);
   }
 
   if (filters.emissaoFim) {
-    query.set('dataFim', `${filters.emissaoFim}T23:59:59.999Z`);
+    query.set('dataFim', `${filters.emissaoFim}T23:59:59.999-03:00`);
   }
 
   const client = findClientById(filters.cliente);
@@ -16310,11 +16312,11 @@ function buildCteSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE, all
   }
 
   if (filters.emissaoInicio) {
-    query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000Z`);
+    query.set('dataInicio', `${filters.emissaoInicio}T00:00:00.000-03:00`);
   }
 
   if (filters.emissaoFim) {
-    query.set('dataFim', `${filters.emissaoFim}T23:59:59.999Z`);
+    query.set('dataFim', `${filters.emissaoFim}T23:59:59.999-03:00`);
   }
 
   const client = findClientById(filters.cliente);

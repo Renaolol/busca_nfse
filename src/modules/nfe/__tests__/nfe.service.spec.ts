@@ -233,6 +233,28 @@ describe('NfeService', () => {
         updatedAt: new Date('2026-08-01T00:40:00-03:00'),
         createdAt: new Date('2026-08-01T00:40:00-03:00'),
         eventos: []
+      },
+      {
+        // Emissoes no fim do dia em Brasilia sao persistidas no dia seguinte em UTC.
+        // A NF-e 32340 e um caso real desta situacao.
+        id: 'doc-32340',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: NfeAmbiente.producao,
+        chaveAcesso: '35260612345678000199550010000323401000001234',
+        numeroNfe: '32340',
+        serie: '1',
+        dataEmissao: new Date('2026-09-01T02:30:00.000Z'),
+        dataAutorizacao: null,
+        cnpjEmitente: '12345678000199',
+        cnpjDestinatario: '99887766000155',
+        xmlCompletoDisponivel: true,
+        resumoDisponivel: true,
+        xmlResumoPath: 'nfe/producao/12345678000199/2026/08/resumos/32340.xml',
+        xmlCompletoPath: 'nfe/producao/12345678000199/2026/08/xml/32340.xml',
+        updatedAt: new Date('2026-09-01T02:40:00.000Z'),
+        createdAt: new Date('2026-09-01T02:40:00.000Z'),
+        eventos: []
       }
     ];
 
@@ -253,12 +275,12 @@ describe('NfeService', () => {
 
     const result = await service.findAll({
       clienteId: 'cliente-1',
-      dataInicio: '2026-08-01T00:00:00.000Z',
-      dataFim: '2026-08-31T23:59:59.999Z',
+      dataInicio: '2026-08-01T00:00:00.000-03:00',
+      dataFim: '2026-08-31T23:59:59.999-03:00',
       all: true
     });
 
-    expect(result.items.map((item) => item.id)).toEqual(['doc-agosto']);
+    expect(result.items.map((item) => item.id)).toEqual(['doc-32340', 'doc-agosto']);
     const dateRange = getDateRange((prisma.nfeDocumento.findMany as jest.Mock).mock.calls[0][0].where);
     expect(dateRange?.gte).toBeInstanceOf(Date);
     expect(dateRange?.lte).toBeInstanceOf(Date);
@@ -266,8 +288,8 @@ describe('NfeService', () => {
     expect(dateRange?.gte?.getHours()).toBe(0);
     expect(dateRange?.lte?.getDate()).toBe(31);
     expect(dateRange?.lte?.getHours()).toBe(23);
-    expect(dateRange?.gte?.toISOString()).toBe('2026-08-01T00:00:00.000Z');
-    expect(dateRange?.lte?.toISOString()).toBe('2026-08-31T23:59:59.999Z');
+    expect(dateRange?.gte?.toISOString()).toBe('2026-08-01T03:00:00.000Z');
+    expect(dateRange?.lte?.toISOString()).toBe('2026-09-01T02:59:59.999Z');
   });
 
   it('colapsa duplicatas legadas por ambiente e chave_acesso na listagem ampla', async () => {
