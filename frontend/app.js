@@ -12320,9 +12320,7 @@ function renderCteDisagreementAlertsModal() {
 }
 
 function renderNfeAddressAlertsModal() {
-  const alerts = getNfeAddressMismatchAlerts();
-  const openAlerts = alerts.filter((alert) => alert.status !== 'Resolvido');
-  const resolvedAlerts = alerts.filter((alert) => alert.status === 'Resolvido');
+  const alerts = getOpenNfeAddressMismatchAlerts();
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -12332,11 +12330,10 @@ function renderNfeAddressAlertsModal() {
           <p class="modal-subtitle">Acompanhe notas recebidas que chegaram com endereco diferente do cadastro da empresa e abra o documento para conferir os dados.</p>
         </div>
         <div class="modal-body">
-          <div class="form-grid four" style="margin-bottom:18px;">
+          <div class="form-grid three" style="margin-bottom:18px;">
             ${detailItem('Total', String(alerts.length))}
-            ${detailItem('Em aberto', String(openAlerts.length))}
-            ${detailItem('Resolvidos', String(resolvedAlerts.length))}
-            ${detailItem('Empresas afetadas', String(new Set(openAlerts.map((alert) => alert.clientId).filter(Boolean)).size))}
+            ${detailItem('Em aberto', String(alerts.length))}
+            ${detailItem('Empresas afetadas', String(new Set(alerts.map((alert) => alert.clientId).filter(Boolean)).size))}
           </div>
           ${
             alerts.length
