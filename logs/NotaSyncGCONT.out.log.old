@@ -1,4 +1,5 @@
 <<<<<<< Updated upstream
+<<<<<<< Updated upstream
 [32m[Nest] 9364  - [39m04/09/2026, 17:30:25 [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
 [32m[Nest] 9364  - [39m04/09/2026, 17:30:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPrismaModule dependencies initialized[39m[38;5;3m +28ms[39m
 [32m[Nest] 9364  - [39m04/09/2026, 17:30:25 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mStorageModule dependencies initialized[39m[38;5;3m +0ms[39m
@@ -396,4 +397,313 @@
 [32m[Nest] 20388  - [39m12/09/2026, 02:00:00 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mBusca noturna: clientes=138, controles_ativados=138, falhas=0[39m
 [32m[Nest] 20388  - [39m12/09/2026, 04:00:10 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mRecuperacao noturna de NSUs: controles=10, nsus_consultados=8, documentos_salvos=0, falhas=0[39m
 [32m[Nest] 20388  - [39m12/09/2026, 06:00:02 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mBusca noturna: clientes=138, controles_ativados=138, falhas=0[39m
+>>>>>>> Stashed changes
+=======
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPrismaModule dependencies initialized[39m[38;5;3m +232ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mStorageModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mSharedModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAppModule dependencies initialized[39m[38;5;3m +24ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mHealthModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigHostModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mDominioNfeModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mDanfeModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mDocumentChecksModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mClientsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mEstablishmentsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mCompareSpedModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mNfseAdnModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mNfseEmissorPublicoModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mNfeDistribuicaoModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mCteConsultaModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAlertsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mCertificatesModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAuditModule dependencies initialized[39m[38;5;3m +12ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAuthModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mNfseModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mCteModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mSyncModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mNfeModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mJobsModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAppController {/}:[39m[38;5;3m +3ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAuthController {/auth}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/login, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/refresh, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/logout, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/me, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/usuarios, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/usuarios, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/usuarios/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/usuarios/:id/reset-password, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/sessoes, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/eventos-acesso, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auth/relatorio-tempo-acesso, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mHealthController {/health}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/health, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAlertsController {/alertas}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/alertas, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/alertas/resolucoes, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/alertas/cte-desacordo/:eventId/resolucao, PUT} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/alertas/resolucoes/:alertId, PUT} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mNfseController {/nfse}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/dashboard-stats, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/auditoria-lacunas, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/leitura-fiscal, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/leitura-fiscal/exportar-dominio, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/numeracao-excecoes, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/numeracao-excecoes, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/numeracao-excecoes/:id, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/contas-contabeis, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/contas-contabeis, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/contas-contabeis/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/contas-contabeis/:id, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/dominio/codigo-empresa, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/:id/validacao-numeracao, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/separadas, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/:id/xml, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/:id/danfse, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/importar-xml, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/recuperar-por-chave, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/recuperar-por-dps, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/download-lote, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/reprocessar-xmls, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/reprocessar-danfses, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfse/eventos/sincronizar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mNfeController {/nfe}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/dashboard-stats, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/status, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/scheduler-status, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/:id/xml, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/:id/danfe, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/download-lote, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/importar-xml, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/eventos/sincronizar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/importar-dominio, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/dominio/documentos/preview, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/dominio/xml, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/iniciar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/ativar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/ativar-todos, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/pausar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/scheduler-settings, PUT} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/xml-reader30/aliquotas-monofasico, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/xml-reader30/aliquotas-monofasico, PUT} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/rodar-agora, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/rodar-agora-geral, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/download-por-chave/preview, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/download-por-chave/preview-global, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/download-por-chave/executar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/download-por-chave/executar-global, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/consultar-nsu, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/nfe/sync/consultar-chave, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mCteController {/cte}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/cte/dashboard-stats, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/cte, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/cte/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/cte/:id/xml, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/cte/consultar-chave, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/cte/eventos/sincronizar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mDocumentChecksController {/conferencias-documentos}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/conferencias-documentos, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/conferencias-documentos/consulta, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/conferencias-documentos, PUT} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mClientsController {/clientes}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:id/ativar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:id/pausar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:id/nfe/ativar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:id/nfe/pausar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mEstablishmentsController {/}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/estabelecimentos, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/estabelecimentos, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/estabelecimentos/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mCertificatesController {/}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/certificados, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/certificados, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/ativar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/desativar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/desvincular, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/validar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/anotacoes, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/download, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id/senha, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/certificados/:id, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mCompareSpedController {/comparacoes-sped}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/comparacoes-sped, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/comparacoes-sped, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mSyncController {/}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/sync/iniciar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/sync/pausar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/sync/retomar, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/clientes/:clienteId/sync/status, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/scheduler-status, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/scheduler-settings, PUT} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/rodar-agora, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/eventos/sincronizar-empresas, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/eventos/sincronizar-empresas/execucao, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/eventos/sincronizar-empresas/execucao/:executionId, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/reprocessar-nsus-passados, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/reprocessar-nsus-passados/execucao, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/reprocessar-nsus-passados/execucao/:executionId, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/testar-nsu, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/sync/logs, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAuditController {/auditoria}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/auditoria, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[NfeService] [39m[32mExecucao automatica de NF-e habilitada a cada 300000ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[NfeService] [39m[32mBusca noturna NF-e habilitada para 23:00 (UTC-3)[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mExecucao automatica de sync habilitada a cada 30000ms[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:45 [32m    LOG[39m [38;5;3m[SyncService] [39m[32mBusca noturna habilitada para 18:00, 20:00, 22:00, 00:00, 02:00, 04:00, 06:00 (UTC-3)[39m
+[32m[Nest] 9476  - [39m14/09/2026, 07:11:46 [32m    LOG[39m [38;5;3m[NestApplication] [39m[32mNest application successfully started[39m[38;5;3m +320ms[39m
+[33m[Nest] 9476  - [39m14/09/2026, 07:54:53 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 07:54:53 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 07:54:53 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 07:55:08 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42110092206960810000176000000000041726076498386302 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\06960810000176\2026\07\xml\42110092206960810000176000000000041726076498386302.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:13:53 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:13:53 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:13:54 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:14:57 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:14:57 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:14:57 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:15:11 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42110092208560957000102000000000007026080173641607 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\08560957000102\2026\08\xml\42110092208560957000102000000000007026080173641607.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:16:46 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:16:46 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:16:46 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:28:54 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:28:54 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:28:54 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:36:50 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:36:50 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:36:51 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:46:54 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:46:54 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:46:54 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:54:05 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:54:05 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:54:05 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:54:19 [33m   WARN[39m [38;5;3m[SyncService] [39m[33mFalha ao carregar estado da rotina automatica de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\settings\nfse-event-auto-sync-state.json'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:59:20 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:59:20 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 08:59:20 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:00:41 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:00:41 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:00:41 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:00:55 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42172042202570797000198000000000063526064580574574 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\02570797000198\2026\06\xml\42172042202570797000198000000000063526064580574574.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:12:42 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:12:42 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:12:43 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:20:37 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:20:37 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:20:37 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:21:58 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:21:58 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:21:59 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:22:12 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42042022231711911000150000000000008126076565031464 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\31711911000150\2026\07\xml\42042022231711911000150000000000008126076565031464.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:22:58 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:22:58 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:22:58 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:23:12 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42110092218474690000186000000000016826063816648964 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\18474690000186\2026\06\xml\42110092218474690000186000000000016826063816648964.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:23:58 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:23:58 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:23:59 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:24:12 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42110092248013922000160000000000001326070564543945 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\48013922000160\2026\07\xml\42110092248013922000160000000000001326070564543945.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:24:58 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:24:58 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:24:59 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:25:59 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:25:59 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:25:59 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:26:59 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:26:59 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:26:59 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:56:49 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:56:49 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:56:49 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 09:57:03 [33m   WARN[39m [38;5;3m[SyncService] [39m[33mFalha ao carregar estado da rotina automatica de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\settings\nfse-event-auto-sync-state.json'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:03:05 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:03:05 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:03:06 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:04:53 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:04:53 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:04:53 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:05:07 [33m   WARN[39m [38;5;3m[SyncService] [39m[33mFalha ao carregar estado da rotina automatica de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\settings\nfse-event-auto-sync-state.json'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:07:38 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:07:38 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:07:38 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:07:52 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42162552249792809000192000000000005126061697039499 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\49792809000192\2026\06\xml\42162552249792809000192000000000005126061697039499.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:19:45 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:19:45 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:19:45 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:20:33 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:20:33 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:20:33 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:20:47 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42110092239929582000120000000000004926083541551568 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\39929582000120\2026\08\xml\42110092239929582000120000000000004926083541551568.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:31:19 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:31:19 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:31:19 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 10:33:43 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 2 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 11:50:18 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 11:50:18 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 11:50:18 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 11:51:43 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 11:51:43 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 11:51:43 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 11:53:00 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 11:53:00 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 11:53:00 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 11:53:13 [33m   WARN[39m [38;5;3m[SyncService] [39m[33mFalha ao carregar estado da rotina automatica de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\settings\nfse-event-auto-sync-state.json'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:26:28 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:26:28 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:26:28 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:26:42 [33m   WARN[39m [38;5;3m[SyncService] [39m[33mFalha ao carregar estado da rotina automatica de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\settings\nfse-event-auto-sync-state.json'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:31:36 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:31:36 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:31:36 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:31:50 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42172042230792991000153000000000059426060653935577 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\30792991000153\2026\06\xml\42172042230792991000153000000000059426060653935577.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:34:08 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:34:08 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:34:08 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:34:22 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42110092210311493000134000000000017426066470977456 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\10311493000134\2026\06\xml\42110092210311493000134000000000017426066470977456.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:34:37 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:34:37 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:34:37 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:35:55 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:35:55 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:35:55 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:36:55 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:36:55 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:36:55 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:37:55 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:37:55 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:37:55 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:38:08 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42131531205677519000122000000000243426070000000019 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\05677519000122\2026\07\xml\42131531205677519000122000000000243426070000000019.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:39:08 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:39:08 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:39:08 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:42:24 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:42:24 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:42:24 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:45:19 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:45:19 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:45:19 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:45:32 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42110092297471452000193000000000002726078732045558 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\97471452000193\2026\07\xml\42110092297471452000193000000000002726078732045558.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:49:51 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:49:51 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:49:51 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:50:05 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mFalha ao reconciliar ambiente da NFS-e 42084012220070221000143000000000007326078005056565 antes da consulta de eventos: EMFILE: too many open files, open 'C:\Users\Administrador\Documents\GitHub\busca_nfse\storage\nfse\producao\20070221000143\2026\07\xml\42084012220070221000143000000000007326078005056565.xml'[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:50:21 [33m   WARN[39m [38;5;3m[NfseService] [39m[33mListagem de NFS-e ocultou 4 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:50:21 [33m   WARN[39m [38;5;3m[NfeService] [39m[33mListagem de NF-e ocultou 63 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
+[33m[Nest] 9476  - [39m14/09/2026, 13:50:21 [33m   WARN[39m [38;5;3m[CteService] [39m[33mListagem de CT-e ocultou 35 duplicata(s) legada(s) por ambiente + chave_acesso.[39m
 >>>>>>> Stashed changes
