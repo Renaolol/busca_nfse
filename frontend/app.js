@@ -22,12 +22,14 @@ const appRoot = document.getElementById('app');
 const modalRoot = document.getElementById('modalRoot');
 const drawerRoot = document.getElementById('drawerRoot');
 const toastRoot = document.getElementById('toastRoot');
-const API_TIMEOUT_MS = 20000;
+// Chamadas usuais da interface nao devem manter o primeiro acesso bloqueado
+// por ate 20 segundos quando a API estiver indisponivel.
+const API_TIMEOUT_MS = 5000;
 const API_CACHE_TTL_MS = 30000;
-const INITIAL_LOADING_MIN_MS = 1200;
+const INITIAL_LOADING_MIN_MS = 500;
 const SEARCH_PAGE_SIZE = 100;
 const DASHBOARD_AUTO_REFRESH_INTERVAL_MS = 60000;
-const AUTH_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
+const AUTH_IDLE_TIMEOUT_MS = 20 * 60 * 1000;
 const AUTH_ACTIVE_REQUEST_WINDOW_MS = 30 * 1000;
 const AUTH_ACTIVITY_PING_INTERVAL_MS = 60 * 1000;
 const AUTH_STORAGE_KEY = 'gcont:auth:v1';
@@ -681,7 +683,7 @@ async function initializeApp() {
     return;
   }
 
-  await initializeData({ maxLoadingMs: 2500 });
+  await initializeData({ maxLoadingMs: 1500 });
 }
 
 async function initializeData(options = {}) {
@@ -10791,7 +10793,7 @@ function renderCertificateFormModal() {
               </label>
               <label class="field">
                 Arquivo do certificado
-                <input name="arquivo" type="file" accept=".pfx,.p12" ${fileRequired ? 'required' : ''} />
+                <input class="certificate-file-input" name="arquivo" type="file" accept=".pfx,.p12" ${fileRequired ? 'required' : ''} />
                 ${draft.fileName ? `<span class="row-sub">Selecionado: ${escapeHtml(draft.fileName)}</span>` : ''}
               </label>
               <label class="field">
@@ -19860,7 +19862,7 @@ async function submitAuthLoginForm(form) {
     state.auth.authenticating = false;
     state.dataSource = 'api';
     pushToast(`Sessao iniciada para ${state.auth.user?.nome || state.auth.user?.username || username}.`, 'success');
-    void initializeData({ blocking: true, maxLoadingMs: 2500 });
+    void initializeData({ blocking: true, maxLoadingMs: 1500 });
   } catch (error) {
     pushToast(`Falha no login: ${toErrorMessage(error)}`, 'error');
   } finally {
