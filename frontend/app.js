@@ -25,6 +25,7 @@ const toastRoot = document.getElementById('toastRoot');
 // Chamadas usuais da interface nao devem manter o primeiro acesso bloqueado
 // por ate 20 segundos quando a API estiver indisponivel.
 const API_TIMEOUT_MS = 3000;
+const INITIAL_ALERTS_TIMEOUT_MS = 10000;
 const API_CACHE_TTL_MS = 30000;
 const INITIAL_LOADING_MIN_MS = 500;
 const SEARCH_PAGE_SIZE = 100;
@@ -793,6 +794,17 @@ async function hydrateFromApi(options = {}) {
     persistAuthState();
   }
 
+  // A geracao dos alertas percorre documentos fiscais e pode levar mais que o
+  // timeout comum. Inicia em paralelo para nao atrasar as demais cargas.
+  const persistedAlertsPromise = apiRequest('/alertas', { timeoutMs: INITIAL_ALERTS_TIMEOUT_MS }).catch((error) => {
+    console.error('Falha ao carregar alertas da API.', error);
+    return [];
+  });
+  const persistedAlertResolutionsPromise = apiRequest('/alertas/resolucoes', { timeoutMs: INITIAL_ALERTS_TIMEOUT_MS }).catch((error) => {
+    console.error('Falha ao carregar resolucoes de alertas da API.', error);
+    return [];
+  });
+
   onProgress?.('Carregando clientes');
   const apiClientsRaw = await apiRequest('/clientes');
   if (!Array.isArray(apiClientsRaw)) {
@@ -838,8 +850,8 @@ async function hydrateFromApi(options = {}) {
     apiRequest(`/nfse?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
     apiRequest(`/nfe?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
     apiRequest(`/cte?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
-    apiRequest('/alertas').catch(() => []),
-    apiRequest('/alertas/resolucoes').catch(() => []),
+    persistedAlertsPromise,
+    persistedAlertResolutionsPromise,
     apiRequest('/auditoria').catch(() => []),
     apiRequest('/sync/scheduler-status').catch(() => null),
     apiRequest(`/comparacoes-sped?limit=${COMPARE_SPED_HISTORY_LIMIT}`).catch(() => []),
