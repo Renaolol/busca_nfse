@@ -42,6 +42,7 @@ export class Cst060AnalysisItemDto {
   @ApiProperty() desconto!: number;
   @ApiProperty() baseCalculada!: number;
   @ApiProperty() aliquotaInterna!: number;
+  @ApiProperty({ enum: ['informada', 'regra-pneu'] }) origemAliquota!: 'informada' | 'regra-pneu';
   @ApiProperty() icmsStXml!: number;
   @ApiProperty() icmsCalculado!: number;
   @ApiProperty() diferenca!: number;

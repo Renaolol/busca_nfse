@@ -652,13 +652,24 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         return [];
       }
     });
-    const items = rows.flat();
+    const seenItems = new Set<string>();
+    const items = rows
+      .flat()
+      .filter((item) => {
+        const key = `${item.chaveAcesso}:${item.itemNumero}`;
+        if (seenItems.has(key)) {
+          this.logger.warn(`CST 060: item duplicado ignorado (${key}).`);
+          return false;
+        }
+        seenItems.add(key);
+        return true;
+      });
     const notasComCst060 = new Set(items.map((item) => item.nfeId)).size;
     const sum = (key: keyof (typeof items)[number]) =>
       this.roundMoney(items.reduce((total, item) => total + (Number(item[key]) || 0), 0));
 
     return {
-      notasAnalisadas: documents.length,
+      notasAnalisadas: new Set(documents.map((document) => document.chaveAcesso)).size,
       notasComCst060,
       itensCst060: items.length,
       totalValorProdutos: sum('valorProduto'),
@@ -672,8 +683,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private toCst060AnalysisItem(document: any, item: ParsedCst060Item, aliquotaInterna: number) {
+    const isPneu = this.isCst060Pneu(item);
+    const aliquotaAplicada = isPneu ? 4 : aliquotaInterna;
     const baseCalculada = this.roundMoney(item.valorProduto - item.desconto);
-    const icmsCalculado = this.roundMoney(baseCalculada * (aliquotaInterna / 100));
+    const icmsCalculado = this.roundMoney(baseCalculada * (aliquotaAplicada / 100));
     const diferenca = this.roundMoney(item.vICMSSTRet - icmsCalculado);
     return {
       nfeId: document.id,
@@ -693,7 +706,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       valorProduto: item.valorProduto,
       desconto: item.desconto,
       baseCalculada,
-      aliquotaInterna,
+      aliquotaInterna: aliquotaAplicada,
+      origemAliquota: isPneu ? 'regra-pneu' as const : 'informada' as const,
       icmsStXml: item.vICMSSTRet,
       icmsCalculado,
       diferenca,
@@ -708,6 +722,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       cnpjDestinatario: document.cnpjDestinatario ?? undefined,
       razaoSocialDestinatario: document.razaoSocialDestinatario ?? undefined
     };
+  }
+
+  private isCst060Pneu(item: ParsedCst060Item): boolean {
+    const description = String(item.descricaoProduto || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase();
+    return /\bPNEU(?:S|MATICO|MATICOS)?\b/.test(description);
   }
 
   private async mapWithConcurrency<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {

@@ -162,6 +162,17 @@ describe('NfeService', () => {
     (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([]);
   });
 
+  it('aplica aliquota fixa de 4% para pneus na conferencia CST 060', () => {
+    const row = (service as any).toCst060AnalysisItem(
+      { id: 'nfe-1', chaveAcesso: '1'.repeat(44), dataEmissao: new Date('2026-07-29'), cnpjEmitente: null },
+      { itemNumero: 1, descricaoProduto: 'PNEU 295/80R22.5', quantidade: 1, valorUnitario: 7164, valorProduto: 7164, desconto: 0, vICMSSTRet: 1217.88 },
+      17
+    );
+    expect(row.aliquotaInterna).toBe(4);
+    expect(row.origemAliquota).toBe('regra-pneu');
+    expect(row.icmsCalculado).toBe(286.56);
+  });
+
   it('pagina a listagem de NF-e armazenadas', async () => {
     prisma.nfeDocumento.count.mockResolvedValueOnce(275);
     prisma.nfeDocumento.findMany.mockResolvedValueOnce([]);

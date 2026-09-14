@@ -1166,6 +1166,10 @@ function onDocumentClick(event) {
       exportXmlReader30ProductsToExcel();
       return;
     }
+    case 'cst060-export-excel': {
+      exportCst060ToExcel();
+      return;
+    }
     case 'nfse-fiscal-sort': {
       const key = actionNode.getAttribute('data-sort-key');
       if (!key) {
@@ -6247,7 +6251,7 @@ function renderCst060Section() {
   const rows = result?.items || [];
   return `
     <article class="card compare-reader-card">
-      <div class="compare-card-header"><div><h3 class="card-title">Conferencia CST 060</h3><p class="card-subtitle">Analise itens de NF-e de entrada com ICMS ST retido, sem alterar documentos fiscais.</p></div>${statusBadge(`${rows.length} item(ns)`, rows.length ? 'success' : 'neutral')}</div>
+      <div class="compare-card-header"><div><h3 class="card-title">Conferencia CST 060</h3><p class="card-subtitle">Analise itens de NF-e de entrada com ICMS ST retido, sem alterar documentos fiscais.</p></div><div class="stack-actions" style="align-items:center;">${statusBadge(`${rows.length} item(ns)`, rows.length ? 'success' : 'neutral')}<button class="btn secondary" type="button" data-action="cst060-export-excel" ${rows.length ? '' : 'disabled'}>Exportar Excel</button></div></div>
       <form id="cst060ReaderForm" class="form-grid compare-form">
         <label class="field compare-span-2">Empresa<select name="clienteId" required ${hasClients ? '' : 'disabled'}>${renderOptions(state.clients.map((client) => client.id), query?.clienteId || '', mapClientOptions(), 'Selecione a empresa')}</select></label>
         <label class="field">Data inicial<input name="dataInicial" type="date" required value="${escapeHtml(query?.dataInicial || '')}" /></label>
@@ -6261,8 +6265,8 @@ function renderCst060Section() {
 
 function renderCst060Results(result) {
   if (!result) return '<p class="row-sub">Consultando NF-e e XMLs...</p>';
-  const cards = [['NF-e analisadas', result.notasAnalisadas], ['NF-e com CST 060', result.notasComCst060], ['Itens CST 060', result.itensCst060], ['ICMS ST XML', formatCurrency(result.totalIcmsStXml)], ['ICMS recalculado', formatCurrency(result.totalIcmsCalculado)], ['Diferenca', formatCurrency(result.totalDiferenca)]];
-  return `<div class="stats-grid">${cards.map(([label, value]) => statCard('file', label, String(value), '', 'neutral')).join('')}</div><div class="table-wrap"><table class="xml-reader30-table" style="min-width:1300px;"><thead><tr><th>Data</th><th>NF-e</th><th>Emitente</th><th>Produto</th><th>NCM</th><th>CFOP</th><th>CST</th><th>V. Produto</th><th>Desconto</th><th>Base</th><th>Aliq.</th><th>ICMS ST XML</th><th>ICMS calculado</th><th>Diferenca</th><th>Status</th></tr></thead><tbody>${result.items.map((row) => `<tr><td>${escapeHtml(formatDate(row.dataEmissao))}</td><td>${escapeHtml(row.numeroNfe || '-')}</td><td>${escapeHtml(row.razaoSocialEmitente || '-')}</td><td>${escapeHtml(row.descricaoProduto || '-')}</td><td>${escapeHtml(row.ncm || '-')}</td><td>${escapeHtml(row.cfop || '-')}</td><td>060</td><td>${escapeHtml(formatCurrency(row.valorProduto))}</td><td>${escapeHtml(formatCurrency(row.desconto))}</td><td>${escapeHtml(formatCurrency(row.baseCalculada))}</td><td>${escapeHtml(String(row.aliquotaInterna))}%</td><td>${escapeHtml(formatCurrency(row.icmsStXml))}</td><td>${escapeHtml(formatCurrency(row.icmsCalculado))}</td><td>${escapeHtml(formatCurrency(row.diferenca))}</td><td>${statusBadge(row.status, row.status === 'OK' ? 'success' : 'warning')}</td></tr>`).join('') || '<tr><td colspan="15" class="table-state">Nenhum item CST 060 encontrado.</td></tr>'}</tbody></table></div>`;
+  const cards = [['NF-e analisadas', result.notasAnalisadas], ['NF-e com CST 060', result.notasComCst060], ['Diferenca', formatCurrency(result.totalDiferenca)], ['ICMS ST XML', formatCurrency(result.totalIcmsStXml)], ['ICMS recalculado', formatCurrency(result.totalIcmsCalculado)]];
+  return `<div class="stats-grid">${cards.map(([label, value]) => statCard('file', label, String(value), '', 'neutral')).join('')}</div><div class="table-wrap"><table class="xml-reader30-table" style="min-width:1360px;"><thead><tr><th>Data</th><th>NF-e</th><th>Item</th><th>Emitente</th><th>Produto</th><th>NCM</th><th>CFOP</th><th>CST</th><th>V. Produto</th><th>Desconto</th><th>Base</th><th>Aliq.</th><th>ICMS ST XML</th><th>ICMS calculado</th><th>Diferenca</th><th>Status</th></tr></thead><tbody>${result.items.map((row) => `<tr><td>${escapeHtml(formatDate(row.dataEmissao))}</td><td>${escapeHtml(row.numeroNfe || '-')}</td><td>${escapeHtml(String(row.itemNumero || '-'))}</td><td>${escapeHtml(row.razaoSocialEmitente || '-')}</td><td>${escapeHtml(row.descricaoProduto || '-')}</td><td>${escapeHtml(row.ncm || '-')}</td><td>${escapeHtml(row.cfop || '-')}</td><td>060</td><td>${escapeHtml(formatCurrency(row.valorProduto))}</td><td>${escapeHtml(formatCurrency(row.desconto))}</td><td>${escapeHtml(formatCurrency(row.baseCalculada))}</td><td>${escapeHtml(String(row.aliquotaInterna))}%${row.origemAliquota === 'regra-pneu' ? ' <span class="row-sub">(pneu)</span>' : ''}</td><td>${escapeHtml(formatCurrency(row.icmsStXml))}</td><td>${escapeHtml(formatCurrency(row.icmsCalculado))}</td><td>${escapeHtml(formatCurrency(row.diferenca))}</td><td>${statusBadge(row.status, row.status === 'OK' ? 'success' : 'warning')}</td></tr>`).join('') || '<tr><td colspan="16" class="table-state">Nenhum item CST 060 encontrado.</td></tr>'}</tbody></table></div>`;
 }
 
 async function submitCst060ReaderForm(form) {
@@ -6275,6 +6279,22 @@ async function submitCst060ReaderForm(form) {
     state.cst060Reader.result = await apiRequest(`/nfe/cst-060-analysis?clienteId=${encodeURIComponent(query.clienteId)}&dataInicial=${encodeURIComponent(query.dataInicial)}&dataFinal=${encodeURIComponent(query.dataFinal)}&aliquotaInterna=${encodeURIComponent(query.aliquotaInterna)}`, { timeoutMs: 60000 });
   } catch (error) { pushToast(`Falha na conferencia CST 060: ${toErrorMessage(error)}`, 'error'); }
   render();
+}
+
+function exportCst060ToExcel() {
+  const result = state.cst060Reader?.result;
+  const rows = Array.isArray(result?.items) ? result.items : [];
+  if (!rows.length) {
+    pushToast('Consulte itens CST 060 antes de exportar.', 'error');
+    return;
+  }
+  const headers = ['Data', 'NF-e', 'Item', 'Emitente', 'Produto', 'NCM', 'CFOP', 'CST', 'Valor produto', 'Desconto', 'Base calculada', 'Aliquota aplicada', 'Regra aliquota', 'ICMS ST XML', 'ICMS calculado', 'Diferenca', 'Status'];
+  const body = rows.map((row) => [formatDate(row.dataEmissao), row.numeroNfe || '', row.itemNumero, row.razaoSocialEmitente || '', row.descricaoProduto || '', row.ncm || '', row.cfop || '', '060', row.valorProduto, row.desconto, row.baseCalculada, `${row.aliquotaInterna}%`, row.origemAliquota === 'regra-pneu' ? 'Pneu (4%)' : 'Informada', row.icmsStXml, row.icmsCalculado, row.diferenca, row.status]);
+  const table = `<table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead><tbody>${body.map((row) => `<tr>${row.map((value) => `<td>${escapeHtml(String(value ?? ''))}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  const blob = new Blob([`\ufeff<html><head><meta charset="utf-8"></head><body>${table}</body></html>`], { type: 'application/vnd.ms-excel;charset=utf-8' });
+  const query = state.cst060Reader.lastQuery || {};
+  triggerBrowserDownload(`cst-060-${query.dataInicial || 'inicio'}-${query.dataFinal || 'fim'}.xls`, blob);
+  pushToast(`${rows.length} item(ns) exportado(s) para Excel.`, 'success');
 }
 
 function renderXmlReader30DifalResults() {
