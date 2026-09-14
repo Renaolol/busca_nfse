@@ -2508,6 +2508,25 @@ input[type='checkbox'] {
   height: 1px;
   opacity: 0;
   pointer-events: none;
+  padding: 6px 10px 2px;
+  line-height: 1;
+}
+
+.certificate-file-input::file-selector-button,
+.certificate-file-input::-webkit-file-upload-button {
+  box-sizing: border-box;
+  height: 22px !important;
+  margin: 0 8px 0 0;
+  padding: 0 8px !important;
+  border: 1px solid #85858d !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  color: #2f2f34 !important;
+  font-family: inherit;
+  font-size: 0.75rem !important;
+  line-height: 1;
+  vertical-align: middle;
+  cursor: pointer;
 }
 
 .certificate-file-button {
@@ -2530,6 +2549,7 @@ input[type='checkbox'] {
   font-weight: 400;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
 }
 
 .field-inline {
@@ -3844,12 +3864,22 @@ tbody tr.cert-row-a-vencer:hover {
 [data-theme='Escuro'] .row-actions-menu-trigger,
 [data-theme='Escuro'] .row-actions-menu-panel,
 [data-theme='Escuro'] .xml-reader30-column-menu-panel,
+[data-theme='Escuro'] .certificate-file-control,
 [data-theme='Escuro'] input,
 [data-theme='Escuro'] select,
 [data-theme='Escuro'] textarea {
   background: var(--surface);
   color: var(--text-primary);
   border-color: var(--line-strong);
+}
+
+[data-theme='Escuro'] .certificate-file-button {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+}
+
+[data-theme='Escuro'] .certificate-file-name {
+  color: var(--text-secondary);
 }
 
 [data-theme='Escuro'] .dashboard-alert-overlay-card.resolved {

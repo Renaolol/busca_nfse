@@ -23,7 +23,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 const DEFAULT_ACCESS_EXPIRES_IN_SECONDS = 12 * 60 * 60;
 const DEFAULT_REFRESH_EXPIRES_IN_SECONDS = 7 * 24 * 60 * 60;
 const DEFAULT_SESSION_TOUCH_INTERVAL_SECONDS = 60;
-const DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS = 10 * 60;
+const DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS = 20 * 60;
 
 type SessionWithUser = SessaoUsuario & {
   usuario: Usuario;
