@@ -3818,12 +3818,22 @@ tbody tr.cert-row-a-vencer:hover {
 [data-theme='Escuro'] .row-actions-menu-trigger,
 [data-theme='Escuro'] .row-actions-menu-panel,
 [data-theme='Escuro'] .xml-reader30-column-menu-panel,
+[data-theme='Escuro'] .certificate-file-control,
 [data-theme='Escuro'] input,
 [data-theme='Escuro'] select,
 [data-theme='Escuro'] textarea {
   background: var(--surface);
   color: var(--text-primary);
   border-color: var(--line-strong);
+}
+
+[data-theme='Escuro'] .certificate-file-button {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+}
+
+[data-theme='Escuro'] .certificate-file-name {
+  color: var(--text-secondary);
 }
 
 [data-theme='Escuro'] .dashboard-alert-overlay-card.resolved {
