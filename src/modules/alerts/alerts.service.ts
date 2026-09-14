@@ -98,6 +98,9 @@ export class AlertsService {
     ]);
 
     const dominioAddresses = await this.loadDominioAddresses(nfeRows);
+    console.log('ALERTAS DEBUG - cteRows:', cteRows.length);
+    console.log('ALERTAS DEBUG - nfseRows:', nfseRows.length);
+    console.log('ALERTAS DEBUG - nfeRows:', nfeRows.length);
     const cteAlerts = cteRows.filter((row) => this.isDesacordoEvent(row)).map((row) => this.toCteAlertDto(row));
     const nfseAlertsRaw = await Promise.all(nfseRows.map((row) => this.toNfseRetentionAlertDto(row)));
     const nfeAddressAlertsRaw = await Promise.all(
@@ -108,6 +111,9 @@ export class AlertsService {
         })
       )
     );
+    console.log('ALERTAS DEBUG - cteAlerts:', cteAlerts.length);
+    console.log('ALERTAS DEBUG - nfseAlerts:', nfseAlertsRaw.filter(Boolean).length);
+    console.log('ALERTAS DEBUG - nfeAddressAlerts:', nfeAddressAlertsRaw.filter(Boolean).length);
     const alerts = [
       ...cteAlerts,
       ...nfseAlertsRaw.filter((row): row is AlertResponseDto => Boolean(row)),
