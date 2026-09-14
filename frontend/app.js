@@ -24,7 +24,7 @@ const drawerRoot = document.getElementById('drawerRoot');
 const toastRoot = document.getElementById('toastRoot');
 // Chamadas usuais da interface nao devem manter o primeiro acesso bloqueado
 // por ate 20 segundos quando a API estiver indisponivel.
-const API_TIMEOUT_MS = 5000;
+const API_TIMEOUT_MS = 3000;
 const API_CACHE_TTL_MS = 30000;
 const INITIAL_LOADING_MIN_MS = 500;
 const SEARCH_PAGE_SIZE = 100;
@@ -784,12 +784,14 @@ function hydrateFromMocks() {
 async function hydrateFromApi(options = {}) {
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
   onProgress?.('Validando usuario autenticado');
-  const me = await apiRequest('/auth/me');
-  if (!me?.user) {
-    throw new Error('Resposta inesperada em /auth/me');
+  if (!state.auth.user) {
+    const me = await apiRequest('/auth/me');
+    if (!me?.user) {
+      throw new Error('Resposta inesperada em /auth/me');
+    }
+    state.auth.user = me.user;
+    persistAuthState();
   }
-  state.auth.user = me.user;
-  persistAuthState();
 
   onProgress?.('Carregando clientes');
   const apiClientsRaw = await apiRequest('/clientes');

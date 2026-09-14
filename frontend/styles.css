@@ -2490,7 +2490,7 @@ input[type='checkbox'] {
 
 .certificate-file-input {
   height: 38px;
-  padding: 4px 10px;
+  padding: 6px 10px 2px;
   line-height: 1;
 }
 
