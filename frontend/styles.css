@@ -2494,6 +2494,7 @@ input[type='checkbox'] {
   line-height: 1;
 }
 
+<<<<<<< Updated upstream
 .certificate-file-input::file-selector-button {
   height: 28px;
   margin: 0 8px 0 0;
@@ -2504,6 +2505,30 @@ input[type='checkbox'] {
   height: 28px;
   margin: 0 8px 0 0;
   vertical-align: middle;
+=======
+.certificate-file-name {
+  overflow: hidden;
+  color: #6b6b73;
+  font-size: 0.78rem;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+>>>>>>> Stashed changes
+}
+
+[data-theme='Escuro'] .certificate-file-control {
+  background: var(--surface);
+  border-color: var(--line-strong);
+}
+
+[data-theme='Escuro'] .certificate-file-button {
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  border-color: var(--line-strong);
+}
+
+[data-theme='Escuro'] .certificate-file-name {
+  color: var(--text-secondary);
 }
 
 .field-inline {
