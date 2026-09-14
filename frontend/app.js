@@ -2417,6 +2417,15 @@ function onDocumentChange(event) {
     return;
   }
 
+  if (target instanceof HTMLInputElement && target.name === 'arquivo' && target.closest('#certificatesModalForm')) {
+    const fileName = target.files?.[0]?.name || 'Nenhum arquivo escolhido';
+    const fileNameElement = target.closest('.certificate-file-control')?.querySelector('.certificate-file-name');
+    if (fileNameElement) {
+      fileNameElement.textContent = fileName;
+    }
+    return;
+  }
+
   if (target instanceof HTMLInputElement && target.getAttribute('data-action') === 'alert-toggle-resolved') {
     const alertId = target.getAttribute('data-alert-id');
     if (!alertId) {
@@ -10820,8 +10829,11 @@ function renderCertificateFormModal() {
               </label>
               <label class="field">
                 Arquivo do certificado
-                <input name="arquivo" type="file" accept=".pfx,.p12" ${fileRequired ? 'required' : ''} />
-                ${draft.fileName ? `<span class="row-sub">Selecionado: ${escapeHtml(draft.fileName)}</span>` : ''}
+                <span class="certificate-file-control">
+                  <input class="certificate-file-input" name="arquivo" type="file" accept=".pfx,.p12" ${fileRequired ? 'required' : ''} />
+                  <span class="certificate-file-button">Escolher arquivo</span>
+                  <span class="certificate-file-name">${escapeHtml(draft.fileName || 'Nenhum arquivo escolhido')}</span>
+                </span>
               </label>
               <label class="field">
                 ${escapeHtml(passwordLabel)}

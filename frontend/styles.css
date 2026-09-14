@@ -2488,6 +2488,50 @@ input[type='checkbox'] {
   accent-color: var(--accent-dark);
 }
 
+.certificate-file-control {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 38px;
+  min-width: 0;
+  padding: 4px 10px;
+  gap: 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+}
+
+.certificate-file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.certificate-file-button {
+  flex: none;
+  padding: 3px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: #f7f7fa;
+  color: #2f2f34;
+  font-size: 0.75rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.certificate-file-name {
+  overflow: hidden;
+  color: #d7d7df;
+  font-size: 0.78rem;
+  font-weight: 400;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .field-inline {
   display: flex;
   align-items: center;
