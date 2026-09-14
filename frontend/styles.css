@@ -2495,29 +2495,35 @@ input[type='checkbox'] {
 }
 
 .certificate-file-input::file-selector-button {
-  height: 22px;
+  box-sizing: border-box;
+  height: 22px !important;
   margin: 0 8px 0 0;
-  padding: 0 8px;
-  border: 1px solid #85858d;
-  border-radius: 6px;
-  background: #fff;
-  color: #2f2f34;
-  font-size: 0.75rem;
+  padding: 0 8px !important;
+  border: 1px solid #85858d !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  color: #2f2f34 !important;
+  font-family: inherit;
+  font-size: 0.75rem !important;
   line-height: 1;
   vertical-align: middle;
+  cursor: pointer;
 }
 
 .certificate-file-input::-webkit-file-upload-button {
-  height: 22px;
+  box-sizing: border-box;
+  height: 22px !important;
   margin: 0 8px 0 0;
-  padding: 0 8px;
-  border: 1px solid #85858d;
-  border-radius: 6px;
-  background: #fff;
-  color: #2f2f34;
-  font-size: 0.75rem;
+  padding: 0 8px !important;
+  border: 1px solid #85858d !important;
+  border-radius: 6px !important;
+  background: #fff !important;
+  color: #2f2f34 !important;
+  font-family: inherit;
+  font-size: 0.75rem !important;
   line-height: 1;
   vertical-align: middle;
+  cursor: pointer;
 }
 
 .field-inline {
