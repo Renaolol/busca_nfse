@@ -3,6 +3,14 @@
 describe('NfeXmlParserService', () => {
   const service = new NfeXmlParserService();
 
+  it('extrai somente itens ICMS60, incluindo valores de retencao', () => {
+    const xml = `<NFe><infNFe><det nItem="1"><prod><cProd>A</cProd><vProd>100.00</vProd></prod><imposto><ICMS><ICMS00><CST>00</CST></ICMS00></ICMS></imposto></det><det nItem="2"><prod><cProd>OLEO</cProd><xProd>OLEO DE MOTOR</xProd><NCM>27101932</NCM><CFOP>5656</CFOP><qCom>2.0000</qCom><vUnCom>635.60</vUnCom><vProd>1271.20</vProd><vDesc>31.78</vDesc></prod><imposto><ICMS><ICMS60><orig>0</orig><CST>60</CST><vBCSTRet>1354.50</vBCSTRet><pST>17.0026</pST><vICMSSubstituto>0.00</vICMSSubstituto><vICMSSTRet>230.30</vICMSSTRet></ICMS60></ICMS></imposto></det><det nItem="3"><prod><cProd>B</cProd><xProd>OLEO</xProd><vProd>720.63</vProd><vDesc>18.02</vDesc></prod><imposto><ICMS><ICMS60><orig>0</orig><CST>60</CST><vICMSSTRet>130.56</vICMSSTRet></ICMS60></ICMS></imposto></det></infNFe></NFe>`;
+    const items = service.extractCst060Items(xml);
+    expect(items).toHaveLength(2);
+    expect(items[0]).toMatchObject({ itemNumero: 2, codigoProduto: 'OLEO', valorProduto: 1271.2, desconto: 31.78, vICMSSTRet: 230.3 });
+    expect(items[1]).toMatchObject({ itemNumero: 3, valorProduto: 720.63, desconto: 18.02, vICMSSTRet: 130.56 });
+  });
+
   it('parseia XML completo de NF-e', () => {
     const parsed = service.parse(`<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">

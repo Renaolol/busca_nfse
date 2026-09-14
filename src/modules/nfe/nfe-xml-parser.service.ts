@@ -54,8 +54,63 @@ export interface ParsedDfeEvento {
   isCancelamento: boolean;
 }
 
+export interface ParsedCst060Item {
+  itemNumero: number;
+  codigoProduto?: string;
+  descricaoProduto?: string;
+  ncm?: string;
+  cest?: string;
+  cfop?: string;
+  unidade?: string;
+  quantidade: number;
+  valorUnitario: number;
+  valorProduto: number;
+  desconto: number;
+  origemMercadoria?: string;
+  vBCSTRet?: number;
+  pST?: number;
+  vICMSSubstituto?: number;
+  vICMSSTRet: number;
+}
+
 @Injectable()
 export class NfeXmlParserService {
+  extractCst060Items(xml: string): ParsedCst060Item[] {
+    const items: ParsedCst060Item[] = [];
+    const detRegex = /<(?:\w+:)?det\b([^>]*)>([\s\S]*?)<\/(?:\w+:)?det>/gi;
+    let match: RegExpExecArray | null;
+
+    while ((match = detRegex.exec(xml))) {
+      const detAttributes = match[1] || '';
+      const detXml = match[2] || '';
+      const icms60Match = /<(?:\w+:)?ICMS60\b[^>]*>([\s\S]*?)<\/(?:\w+:)?ICMS60>/i.exec(detXml);
+      if (!icms60Match || this.extract(icms60Match[1], ['CST']) !== '60') {
+        continue;
+      }
+
+      const itemNumero = Number(/\bnItem\s*=\s*["'](\d+)["']/i.exec(detAttributes)?.[1] || items.length + 1);
+      items.push({
+        itemNumero,
+        codigoProduto: this.extract(detXml, ['cProd']),
+        descricaoProduto: this.extract(detXml, ['xProd']),
+        ncm: this.extract(detXml, ['NCM']),
+        cest: this.extract(detXml, ['CEST']),
+        cfop: this.extract(detXml, ['CFOP']),
+        unidade: this.extract(detXml, ['uCom']),
+        quantidade: this.toNumber(this.extract(detXml, ['qCom'])),
+        valorUnitario: this.toNumber(this.extract(detXml, ['vUnCom'])),
+        valorProduto: this.toNumber(this.extract(detXml, ['vProd'])),
+        desconto: this.toNumber(this.extract(detXml, ['vDesc'])),
+        origemMercadoria: this.extract(icms60Match[1], ['orig']),
+        vBCSTRet: this.optionalNumber(this.extract(icms60Match[1], ['vBCSTRet'])),
+        pST: this.optionalNumber(this.extract(icms60Match[1], ['pST'])),
+        vICMSSubstituto: this.optionalNumber(this.extract(icms60Match[1], ['vICMSSubstituto'])),
+        vICMSSTRet: this.toNumber(this.extract(icms60Match[1], ['vICMSSTRet']))
+      });
+    }
+
+    return items;
+  }
   inspect(xml: string): InspectedNfeXml {
     return {
       chaveAcesso: this.extractChaveAcesso(xml),
@@ -417,6 +472,15 @@ export class NfeXmlParserService {
       .replace(/&gt;/gi, '>')
       .replace(/&quot;/gi, '"')
       .replace(/&apos;/gi, "'");
+  }
+
+  private toNumber(value?: string): number {
+    const parsed = Number(String(value || '0').replace(',', '.'));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private optionalNumber(value?: string): number | undefined {
+    return value === undefined ? undefined : this.toNumber(value);
   }
 
   private normalizeChaveAcesso(value?: string): string | undefined {

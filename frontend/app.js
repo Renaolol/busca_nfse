@@ -486,6 +486,7 @@ const state = {
     chartRenderPoints: [],
     chartViewBox: null
   },
+  cst060Reader: { hasSearched: false, lastQuery: null, result: null },
   alerts: [],
   serverResolvedAlerts: {},
   resolvedAlerts: loadResolvedAlertsStore(),
@@ -1128,7 +1129,7 @@ function onDocumentClick(event) {
       if (!tab) {
         return;
       }
-      state.xmlReader30.activeTab = tab === 'nfse-fiscal' || tab === 'difal' ? tab : 'nfe';
+      state.xmlReader30.activeTab = tab === 'nfse-fiscal' || tab === 'difal' || tab === 'cst-060' ? tab : 'nfe';
       render();
       return;
     }
@@ -2339,6 +2340,11 @@ function onDocumentSubmit(event) {
     case 'difalReaderForm': {
       event.preventDefault();
       void submitDifalReaderForm(target);
+      return;
+    }
+    case 'cst060ReaderForm': {
+      event.preventDefault();
+      void submitCst060ReaderForm(target);
       return;
     }
     case 'nfseFiscalDominioExportForm': {
@@ -5999,13 +6005,14 @@ function renderXmlReader30Page() {
 }
 
 function renderXmlReader30Tabs() {
-  const activeTab = ['nfse-fiscal', 'difal'].includes(state.xmlReader30.activeTab) ? state.xmlReader30.activeTab : 'nfe';
+  const activeTab = ['nfse-fiscal', 'difal', 'cst-060'].includes(state.xmlReader30.activeTab) ? state.xmlReader30.activeTab : 'nfe';
   return `
     <article class="card" style="padding-bottom:14px;">
       <div class="tabs" style="margin-bottom:0;">
         <button class="tab-btn ${activeTab === 'nfe' ? 'active' : ''}" type="button" data-action="xml-reader30-switch-tab" data-tab="nfe">NF-e</button>
         <button class="tab-btn ${activeTab === 'nfse-fiscal' ? 'active' : ''}" type="button" data-action="xml-reader30-switch-tab" data-tab="nfse-fiscal">NFS-e fiscal</button>
         <button class="tab-btn ${activeTab === 'difal' ? 'active' : ''}" type="button" data-action="xml-reader30-switch-tab" data-tab="difal">DIFAL</button>
+        <button class="tab-btn ${activeTab === 'cst-060' ? 'active' : ''}" type="button" data-action="xml-reader30-switch-tab" data-tab="cst-060">CST 060</button>
       </div>
     </article>
   `;
@@ -6018,6 +6025,9 @@ function renderXmlReader30Section() {
 
   if (state.xmlReader30.activeTab === 'difal') {
     return renderXmlReader30DifalSection();
+  }
+  if (state.xmlReader30.activeTab === 'cst-060') {
+    return renderCst060Section();
   }
 
   const reader = state.xmlReader30;
@@ -6227,6 +6237,44 @@ function renderXmlReader30DifalSection() {
       ${isLoading ? '<p class="row-sub">Lendo as NF-e do periodo...</p>' : renderXmlReader30DifalResults()}
     </article>
   `;
+}
+
+function renderCst060Section() {
+  const reader = state.cst060Reader;
+  const query = reader.lastQuery;
+  const result = reader.result;
+  const hasClients = state.clients.length > 0;
+  const rows = result?.items || [];
+  return `
+    <article class="card compare-reader-card">
+      <div class="compare-card-header"><div><h3 class="card-title">Conferencia CST 060</h3><p class="card-subtitle">Analise itens de NF-e de entrada com ICMS ST retido, sem alterar documentos fiscais.</p></div>${statusBadge(`${rows.length} item(ns)`, rows.length ? 'success' : 'neutral')}</div>
+      <form id="cst060ReaderForm" class="form-grid compare-form">
+        <label class="field compare-span-2">Empresa<select name="clienteId" required ${hasClients ? '' : 'disabled'}>${renderOptions(state.clients.map((client) => client.id), query?.clienteId || '', mapClientOptions(), 'Selecione a empresa')}</select></label>
+        <label class="field">Data inicial<input name="dataInicial" type="date" required value="${escapeHtml(query?.dataInicial || '')}" /></label>
+        <label class="field">Data final<input name="dataFinal" type="date" required value="${escapeHtml(query?.dataFinal || '')}" /></label>
+        <label class="field">Aliquota interna (%)<input name="aliquotaInterna" type="number" min="0.01" max="100" step="0.01" required value="${escapeHtml(query?.aliquotaInterna || '')}" /></label>
+        <div class="stack-actions compare-actions compare-span-4"><button class="btn primary" type="submit" ${hasClients ? '' : 'disabled'}>Consultar</button></div>
+      </form>
+      ${!reader.hasSearched ? renderXmlReader30EmptyState() : renderCst060Results(result)}
+    </article>`;
+}
+
+function renderCst060Results(result) {
+  if (!result) return '<p class="row-sub">Consultando NF-e e XMLs...</p>';
+  const cards = [['NF-e analisadas', result.notasAnalisadas], ['NF-e com CST 060', result.notasComCst060], ['Itens CST 060', result.itensCst060], ['ICMS ST XML', formatCurrency(result.totalIcmsStXml)], ['ICMS recalculado', formatCurrency(result.totalIcmsCalculado)], ['Diferenca', formatCurrency(result.totalDiferenca)]];
+  return `<div class="stats-grid">${cards.map(([label, value]) => statCard('file', label, String(value), '', 'neutral')).join('')}</div><div class="table-wrap"><table class="xml-reader30-table" style="min-width:1300px;"><thead><tr><th>Data</th><th>NF-e</th><th>Emitente</th><th>Produto</th><th>NCM</th><th>CFOP</th><th>CST</th><th>V. Produto</th><th>Desconto</th><th>Base</th><th>Aliq.</th><th>ICMS ST XML</th><th>ICMS calculado</th><th>Diferenca</th><th>Status</th></tr></thead><tbody>${result.items.map((row) => `<tr><td>${escapeHtml(formatDate(row.dataEmissao))}</td><td>${escapeHtml(row.numeroNfe || '-')}</td><td>${escapeHtml(row.razaoSocialEmitente || '-')}</td><td>${escapeHtml(row.descricaoProduto || '-')}</td><td>${escapeHtml(row.ncm || '-')}</td><td>${escapeHtml(row.cfop || '-')}</td><td>060</td><td>${escapeHtml(formatCurrency(row.valorProduto))}</td><td>${escapeHtml(formatCurrency(row.desconto))}</td><td>${escapeHtml(formatCurrency(row.baseCalculada))}</td><td>${escapeHtml(String(row.aliquotaInterna))}%</td><td>${escapeHtml(formatCurrency(row.icmsStXml))}</td><td>${escapeHtml(formatCurrency(row.icmsCalculado))}</td><td>${escapeHtml(formatCurrency(row.diferenca))}</td><td>${statusBadge(row.status, row.status === 'OK' ? 'success' : 'warning')}</td></tr>`).join('') || '<tr><td colspan="15" class="table-state">Nenhum item CST 060 encontrado.</td></tr>'}</tbody></table></div>`;
+}
+
+async function submitCst060ReaderForm(form) {
+  const data = new FormData(form);
+  const query = { clienteId: String(data.get('clienteId') || ''), dataInicial: String(data.get('dataInicial') || ''), dataFinal: String(data.get('dataFinal') || ''), aliquotaInterna: String(data.get('aliquotaInterna') || '').replace(',', '.') };
+  if (!query.clienteId || !query.dataInicial || !query.dataFinal || !query.aliquotaInterna) { pushToast('Informe empresa, periodo e aliquota interna.', 'error'); return; }
+  state.cst060Reader = { hasSearched: true, lastQuery: query, result: null };
+  render();
+  try {
+    state.cst060Reader.result = await apiRequest(`/nfe/cst-060-analysis?clienteId=${encodeURIComponent(query.clienteId)}&dataInicial=${encodeURIComponent(query.dataInicial)}&dataFinal=${encodeURIComponent(query.dataFinal)}&aliquotaInterna=${encodeURIComponent(query.aliquotaInterna)}`, { timeoutMs: 60000 });
+  } catch (error) { pushToast(`Falha na conferencia CST 060: ${toErrorMessage(error)}`, 'error'); }
+  render();
 }
 
 function renderXmlReader30DifalResults() {

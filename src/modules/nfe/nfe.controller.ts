@@ -7,6 +7,7 @@ import {
   DashboardNfeStatsQueryDto,
   DashboardNfeStatsResponseDto
 } from './dto/dashboard-stats.dto';
+import { Cst060AnalysisResponseDto, QueryCst060AnalysisDto } from './dto/cst-060-analysis.dto';
 import { DownloadDominioNfeXmlDto, GetDominioNfeXmlDto } from './dto/dominio-xml.dto';
 import { ImportNfeFromDominioDto } from './dto/import-dominio.dto';
 import { EnableAllNfeSyncDto } from './dto/enable-all-sync.dto';
@@ -56,6 +57,13 @@ export class NfeController {
   @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })
   findAll(@Query() query: QueryNfeDto) {
     return this.nfeService.findAll(query);
+  }
+
+  @Get('cst-060-analysis')
+  @ApiOkResponse({ type: Cst060AnalysisResponseDto })
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  cst060Analysis(@Query() query: QueryCst060AnalysisDto) {
+    return this.nfeService.analyzeCst060(query);
   }
 
   @Get(':id')

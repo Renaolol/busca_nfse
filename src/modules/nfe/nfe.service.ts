@@ -27,6 +27,7 @@ import {
   NfeDistribuicaoResult
 } from '../../integrations/nfe-distribuicao/nfe-distribuicao.types';
 import { DashboardNfeStatsQueryDto } from './dto/dashboard-stats.dto';
+import { Cst060AnalysisResponseDto, QueryCst060AnalysisDto } from './dto/cst-060-analysis.dto';
 import { GetDominioNfeXmlDto } from './dto/dominio-xml.dto';
 import { ImportNfeFromDominioDto } from './dto/import-dominio.dto';
 import { EnableAllNfeSyncDto } from './dto/enable-all-sync.dto';
@@ -43,7 +44,7 @@ import { SincronizarNfeEventosDto } from './dto/sincronizar-eventos.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
 import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
 import { MonofasicoAliquotaPeriodoDto, UpdateMonofasicoAliquotasDto } from './dto/update-monofasico-aliquotas.dto';
-import { NfeXmlParserService, ParsedDfeEvento, ParsedNfe } from './nfe-xml-parser.service';
+import { NfeXmlParserService, ParsedCst060Item, ParsedDfeEvento, ParsedNfe } from './nfe-xml-parser.service';
 
 type NfeNightlySweepConfigFile = {
   enabled?: boolean;
@@ -630,6 +631,99 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       pageSize: effectivePageSize,
       totalPages: effectiveTotalPages
     };
+  }
+
+  async analyzeCst060(query: QueryCst060AnalysisDto): Promise<Cst060AnalysisResponseDto> {
+    const documents = await this.prisma.nfeDocumento.findMany({
+      where: {
+        clienteId: query.clienteId,
+        tipoRelacao: 'recebida',
+        dataEmissao: { gte: new Date(`${query.dataInicial}T00:00:00.000Z`), lte: new Date(`${query.dataFinal}T23:59:59.999Z`) },
+        xmlCompletoPath: { not: null }
+      },
+      orderBy: { dataEmissao: 'desc' }
+    });
+    const rows = await this.mapWithConcurrency(documents, 8, async (document) => {
+      try {
+        const xml = (await this.storage.getObject(document.xmlCompletoPath!)).toString('utf8');
+        return this.parser.extractCst060Items(xml).map((item) => this.toCst060AnalysisItem(document, item, query.aliquotaInterna));
+      } catch (error) {
+        this.logger.warn(`CST 060: nao foi possivel ler XML ${document.chaveAcesso}: ${this.toErrorMessage(error)}`);
+        return [];
+      }
+    });
+    const items = rows.flat();
+    const notasComCst060 = new Set(items.map((item) => item.nfeId)).size;
+    const sum = (key: keyof (typeof items)[number]) =>
+      this.roundMoney(items.reduce((total, item) => total + (Number(item[key]) || 0), 0));
+
+    return {
+      notasAnalisadas: documents.length,
+      notasComCst060,
+      itensCst060: items.length,
+      totalValorProdutos: sum('valorProduto'),
+      totalDescontos: sum('desconto'),
+      totalBaseCalculada: sum('baseCalculada'),
+      totalIcmsStXml: sum('icmsStXml'),
+      totalIcmsCalculado: sum('icmsCalculado'),
+      totalDiferenca: sum('diferenca'),
+      items
+    };
+  }
+
+  private toCst060AnalysisItem(document: any, item: ParsedCst060Item, aliquotaInterna: number) {
+    const baseCalculada = this.roundMoney(item.valorProduto - item.desconto);
+    const icmsCalculado = this.roundMoney(baseCalculada * (aliquotaInterna / 100));
+    const diferenca = this.roundMoney(item.vICMSSTRet - icmsCalculado);
+    return {
+      nfeId: document.id,
+      chaveAcesso: document.chaveAcesso,
+      numeroNfe: document.numeroNfe ?? undefined,
+      serie: document.serie ?? undefined,
+      dataEmissao: document.dataEmissao?.toISOString() ?? '',
+      itemNumero: item.itemNumero,
+      codigoProduto: item.codigoProduto,
+      descricaoProduto: item.descricaoProduto,
+      ncm: item.ncm,
+      cest: item.cest,
+      cfop: item.cfop,
+      unidade: item.unidade,
+      quantidade: item.quantidade,
+      valorUnitario: item.valorUnitario,
+      valorProduto: item.valorProduto,
+      desconto: item.desconto,
+      baseCalculada,
+      aliquotaInterna,
+      icmsStXml: item.vICMSSTRet,
+      icmsCalculado,
+      diferenca,
+      diferencaAbsoluta: this.roundMoney(Math.abs(diferenca)),
+      status: Math.abs(diferenca) <= 0.01 ? 'OK' as const : 'Divergente' as const,
+      vBCSTRet: item.vBCSTRet,
+      pST: item.pST,
+      vICMSSubstituto: item.vICMSSubstituto,
+      origemMercadoria: item.origemMercadoria,
+      cnpjEmitente: document.cnpjEmitente ?? undefined,
+      razaoSocialEmitente: document.razaoSocialEmitente ?? undefined,
+      cnpjDestinatario: document.cnpjDestinatario ?? undefined,
+      razaoSocialDestinatario: document.razaoSocialDestinatario ?? undefined
+    };
+  }
+
+  private async mapWithConcurrency<T, R>(items: T[], limit: number, worker: (item: T) => Promise<R>): Promise<R[]> {
+    const results: R[] = new Array(items.length);
+    let nextIndex = 0;
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (nextIndex < items.length) {
+        const index = nextIndex++;
+        results[index] = await worker(items[index]);
+      }
+    }));
+    return results;
+  }
+
+  private roundMoney(value: number): number {
+    return Math.round((value + Number.EPSILON) * 100) / 100;
   }
 
   async getDashboardStats(query: DashboardNfeStatsQueryDto) {
