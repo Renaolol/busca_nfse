@@ -2494,41 +2494,30 @@ input[type='checkbox'] {
   line-height: 1;
 }
 
-<<<<<<< Updated upstream
 .certificate-file-input::file-selector-button {
-  height: 28px;
+  height: 22px;
   margin: 0 8px 0 0;
+  padding: 0 8px;
+  border: 1px solid #85858d;
+  border-radius: 6px;
+  background: #fff;
+  color: #2f2f34;
+  font-size: 0.75rem;
+  line-height: 1;
   vertical-align: middle;
 }
 
 .certificate-file-input::-webkit-file-upload-button {
-  height: 28px;
+  height: 22px;
   margin: 0 8px 0 0;
+  padding: 0 8px;
+  border: 1px solid #85858d;
+  border-radius: 6px;
+  background: #fff;
+  color: #2f2f34;
+  font-size: 0.75rem;
+  line-height: 1;
   vertical-align: middle;
-=======
-.certificate-file-name {
-  overflow: hidden;
-  color: #6b6b73;
-  font-size: 0.78rem;
-  font-weight: 400;
-  text-overflow: ellipsis;
-  white-space: nowrap;
->>>>>>> Stashed changes
-}
-
-[data-theme='Escuro'] .certificate-file-control {
-  background: var(--surface);
-  border-color: var(--line-strong);
-}
-
-[data-theme='Escuro'] .certificate-file-button {
-  background: var(--surface-alt);
-  color: var(--text-primary);
-  border-color: var(--line-strong);
-}
-
-[data-theme='Escuro'] .certificate-file-name {
-  color: var(--text-secondary);
 }
 
 .field-inline {
