@@ -2421,6 +2421,10 @@ body.xml-reader30-cell-selecting * {
   gap: 12px;
 }
 
+.compare-reader-card > .stats-grid + .table-wrap {
+  margin-top: 16px;
+}
+
 .form-grid.two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
