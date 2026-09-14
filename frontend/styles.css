@@ -2488,6 +2488,24 @@ input[type='checkbox'] {
   accent-color: var(--accent-dark);
 }
 
+.certificate-file-input {
+  height: 38px;
+  padding: 4px 10px;
+  line-height: 1;
+}
+
+.certificate-file-input::file-selector-button {
+  height: 28px;
+  margin: 0 8px 0 0;
+  vertical-align: middle;
+}
+
+.certificate-file-input::-webkit-file-upload-button {
+  height: 28px;
+  margin: 0 8px 0 0;
+  vertical-align: middle;
+}
+
 .field-inline {
   display: flex;
   align-items: center;
