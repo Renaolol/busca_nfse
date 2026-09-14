@@ -895,7 +895,7 @@ async function hydrateFromApi(options = {}) {
   applySchedulerStatusToSettings(schedulerStatus);
   applyMonofasicoAliquotasToSettings(monofasicoAliquotasConfig);
   syncExecutionMonitorWithData();
-  // void refreshDashboardAlertsInBackground();
+  void refreshDashboardAlertsInBackground();
 }
 
 async function refreshDashboardAlertsInBackground() {
