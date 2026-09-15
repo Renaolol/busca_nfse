@@ -112,6 +112,7 @@ function extractNfeLineItems(xmlString) {
         index: String(index + 1),
         code: getXmlText(prodNode, 'cProd') || '-',
         description: getXmlText(prodNode, 'xProd') || '-',
+        ncm: getXmlText(prodNode, 'NCM') || '-',
         quantity: quantity || '-',
         unit: getXmlText(prodNode, 'uCom') || '-',
         unitValue: unitValue ? formatXmlReader30CurrencyValue(unitValue) : '-',

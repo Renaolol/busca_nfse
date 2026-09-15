@@ -49,6 +49,7 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'nfCancelada',
   'dataEmissao',
   'produto',
+  'ncm',
   'quantidade',
   'valorUnitario',
   'valorTotal',
@@ -67,6 +68,7 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'evento'
 ];
 const XML_READER30_NFE_SIMPLE_NATIONAL_HIDDEN_COLUMNS = [
+  'ncm',
   'nfCancelada',
   'icmsStRet',
   'baseCalculoIcms',
@@ -7073,6 +7075,13 @@ function getXmlReader30NfeColumnDefinitions() {
       render: (row) => renderXmlReader30ProductLabel(row.produto)
     },
     {
+      key: 'ncm',
+      label: 'NCM',
+      className: 'xml-reader30-icms-code',
+      html: false,
+      render: (row) => row.ncm || '-'
+    },
+    {
       key: 'quantidade',
       label: 'Quantidade',
       className: 'xml-reader30-quantity',
@@ -7936,6 +7945,7 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
     nfCancelada: row?.raw?.cancelada ? 'Sim' : 'Nao',
     dataEmissaoLabel: baseDataEmissao,
     produto: normalizeXmlReader30InlineText(item.description),
+    ncm: item.ncm || '-',
     quantidade: formatXmlReader30QuantityValue(item.quantity),
     valorUnitario: item.unitValueRaw || item.unitValue || '-',
     valorTotal: item.totalValueRaw || item.totalValue || '-',
