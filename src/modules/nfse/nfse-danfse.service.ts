@@ -3071,21 +3071,22 @@ export class NfseDanfseService {
 
   private detectLeituraFiscalLayout(xml: string): NfseLeituraFiscal['layout'] {
     if (
+      /<(?:\w+:)?infDPS\b/.test(xml) ||
+      /<(?:\w+:)?DPS\b/.test(xml) ||
+      /<(?:\w+:)?infNFSe\b/.test(xml) ||
+      /<(?:\w+:)?tpRetISSQN\b/.test(xml) ||
+      /sped\.fazenda\.gov\.br\/nfse/i.test(xml)
+    ) {
+      return 'padrao_nacional';
+    }
+
+    if (
       /<(?:\w+:)?CompNfse\b/.test(xml) ||
       /<(?:\w+:)?InfNfse\b/.test(xml) ||
       /<(?:\w+:)?DeclaracaoPrestacaoServico\b/.test(xml) ||
       /abrasf/i.test(xml)
     ) {
       return 'abrasf';
-    }
-
-    if (
-      /<(?:\w+:)?infDPS\b/.test(xml) ||
-      /<(?:\w+:)?DPS\b/.test(xml) ||
-      /<(?:\w+:)?infNFSe\b/.test(xml) ||
-      /sped\.fazenda\.gov\.br\/nfse/i.test(xml)
-    ) {
-      return 'padrao_nacional';
     }
 
     return 'desconhecido';

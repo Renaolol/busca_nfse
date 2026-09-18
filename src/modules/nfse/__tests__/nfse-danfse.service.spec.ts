@@ -354,6 +354,30 @@ describe('NfseDanfseService', () => {
     expect(retencoes).toEqual({ hasRetention: false, entries: [] });
   });
 
+  it('prioriza tpRetISSQN na identificacao do layout quando o XML tambem possui marcador legado', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe>
+    <valores>
+      <vISSRet>9.00</vISSRet>
+      <trib>
+        <tribMun>
+          <tpRetISSQN>1</tpRetISSQN>
+        </tribMun>
+      </trib>
+    </valores>
+  </infNFSe>
+  <observacao>abrasf</observacao>
+</NFSe>`;
+
+    const leitura = service.extractLeituraFiscal(xml);
+    const retencoes = service.extractRetentionAlertData(xml);
+
+    expect(leitura.layout).toBe('padrao_nacional');
+    expect(leitura.retencaoIss).toBe('Nao Retido');
+    expect(retencoes).toEqual({ hasRetention: false, entries: [] });
+  });
+
   it('usa o municipio da nota como fallback do local da prestacao quando o local explicito nao vier preenchido', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
