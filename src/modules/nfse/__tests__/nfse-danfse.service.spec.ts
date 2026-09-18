@@ -335,6 +335,25 @@ describe('NfseDanfseService', () => {
     expect(leitura.camposComProblema).toEqual([]);
   });
 
+  it('nao alerta ISS retido no layout nacional somente por vISSRet sem tpRetISSQN', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe>
+    <valores>
+      <vServ>180.00</vServ>
+      <vISSRet>9.00</vISSRet>
+    </valores>
+  </infNFSe>
+</NFSe>`;
+
+    const leitura = service.extractLeituraFiscal(xml);
+    const retencoes = service.extractRetentionAlertData(xml);
+
+    expect(leitura.retencaoIss).toBeUndefined();
+    expect(leitura.valorIssRetidoReal).toBeUndefined();
+    expect(retencoes).toEqual({ hasRetention: false, entries: [] });
+  });
+
   it('usa o municipio da nota como fallback do local da prestacao quando o local explicito nao vier preenchido', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">

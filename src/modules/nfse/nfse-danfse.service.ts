@@ -3008,12 +3008,7 @@ export class NfseDanfseService {
   ): boolean {
     const normalized = this.safeValue(value);
     if (layout === 'padrao_nacional') {
-      if (normalized === '1') {
-        return false;
-      }
-      if (normalized === '2' || normalized === '3') {
-        return true;
-      }
+      return normalized === '2' || normalized === '3';
     }
 
     const valorRetido = this.toNumber(valorIssRetido);
