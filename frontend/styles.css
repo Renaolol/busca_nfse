@@ -2433,6 +2433,10 @@ body.xml-reader30-cell-selecting * {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.nfse-dominio-export-form {
+  align-items: start;
+}
+
 .auth-login-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

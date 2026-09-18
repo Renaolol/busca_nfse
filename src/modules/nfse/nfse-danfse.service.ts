@@ -303,9 +303,12 @@ export class NfseDanfseService {
       }) ?? 0;
     const possuiRetencoesFederais = totalRetencoesFederais > 0 || retencoes.some((entry) => entry.code !== 'iss');
     const retencaoIss = this.describeRetencaoIss(extracted.retencaoIss, extracted.valorIssRetido, layoutNfse);
+    const issRetido = this.isIssRetido(extracted.retencaoIss, extracted.valorIssRetido, layoutNfse);
     const valorIssRetidoReal =
-      valorIssRetido ??
-      (valorTotalRetencoes !== undefined ? Math.max(valorTotalRetencoes - totalRetencoesFederais, 0) : undefined);
+      issRetido
+        ? (valorIssRetido ??
+          (valorTotalRetencoes !== undefined ? Math.max(valorTotalRetencoes - totalRetencoesFederais, 0) : undefined))
+        : undefined;
     const aliquotaRealIss =
       valorIssRetidoReal !== undefined && valorServico > 0 ? Number(((valorIssRetidoReal / valorServico) * 100).toFixed(2)) : undefined;
 
@@ -3001,18 +3004,23 @@ export class NfseDanfseService {
     valorIssRetido?: string | null,
     layout?: DanfseRenderInput['layoutNfse']
   ): boolean {
+    const normalized = this.safeValue(value);
+    if (layout === 'padrao_nacional') {
+      if (normalized === '1') {
+        return false;
+      }
+      if (normalized === '2' || normalized === '3') {
+        return true;
+      }
+    }
+
     const valorRetido = this.toNumber(valorIssRetido);
     if (valorRetido !== undefined && valorRetido > 0) {
       return true;
     }
 
-    const normalized = this.safeValue(value);
     if (normalized === '-') {
       return false;
-    }
-
-    if (layout === 'padrao_nacional') {
-      return normalized === '2' || normalized === '3';
     }
 
     if (layout === 'abrasf') {

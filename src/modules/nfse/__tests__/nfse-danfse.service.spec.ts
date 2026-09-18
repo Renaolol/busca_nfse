@@ -415,6 +415,7 @@ describe('NfseDanfseService', () => {
     <valores>
       <vLiq>2000.00</vLiq>
       <vISSQN>100.00</vISSQN>
+      <vISSRet>100.00</vISSRet>
       <trib>
         <tribMun>
           <tpRetISSQN>1</tpRetISSQN>
@@ -447,6 +448,7 @@ describe('NfseDanfseService', () => {
 
     expect(leitura.layout).toBe('padrao_nacional');
     expect(leitura.retencaoIss).toBe('Nao Retido');
+    expect(leitura.valorIssRetidoReal).toBeUndefined();
     expect(retencoes.hasRetention).toBe(false);
     expect(retencoes.entries).toEqual([]);
     expect(content).toContain('Optante - ME/EPP');

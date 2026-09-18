@@ -3948,7 +3948,7 @@ function renderSearchRunsPage() {
           </label>
           <label class="field">
             Status
-            <select name="status">${renderOptions(['Todos', 'Concluida', 'Concluida com avisos', 'Falha critica', 'Em execucao'], state.filters.runs.status)}</select>
+            <select name="status">${renderOptions(['Todos', 'Concluida', 'Falha critica', 'Em execucao'], state.filters.runs.status)}</select>
           </label>
           <label class="field">
             Tipo de execucao
@@ -12617,7 +12617,7 @@ function renderNfseFiscalReaderCard() {
     `
       : '';
   const exportForm = `
-    <form id="nfseFiscalDominioExportForm" class="form-grid four" style="margin:0 0 18px;">
+    <form id="nfseFiscalDominioExportForm" class="form-grid four nfse-dominio-export-form" style="margin:0 0 18px;">
       <label class="field">
         Codigo empresa Dominio
         <input
@@ -20854,6 +20854,7 @@ function mapFiscalStatusCode(status) {
     '100': 'Autorizada',
     '107': 'Autorizada - MEI',
     '101': 'Cancelada',
+    '102': 'Inutilizada',
     '110': 'Uso denegado',
     '128': 'Lote de evento processado',
     '135': 'Evento registrado e vinculado',
@@ -22153,9 +22154,9 @@ function mapLogToRunStatus(logStatus) {
 
   if (status === 'sem_documento') {
     return {
-      runStatus: 'Concluida com avisos',
-      summary: 'Aviso',
-      clientStatus: 'Pendente',
+      runStatus: 'Concluida',
+      summary: 'Sucesso',
+      clientStatus: 'Sucesso',
       hasFailure: false
     };
   }
@@ -22170,10 +22171,10 @@ function mapLogToRunStatus(logStatus) {
   }
 
   return {
-    runStatus: 'Concluida com avisos',
-    summary: 'Aviso',
-    clientStatus: 'Aviso',
-    hasFailure: false
+    runStatus: 'Falha critica',
+    summary: 'Erro',
+    clientStatus: 'Erro',
+    hasFailure: true
   };
 }
 
@@ -22856,7 +22857,7 @@ function mapCteTipoLabel(tipoRelacao) {
 
 function toneFromFiscalStatus(status) {
   const normalized = normalizeSearchText(status);
-  if (normalized.includes('cancel')) {
+  if (normalized.includes('cancel') || normalized.includes('inutiliz')) {
     return 'danger';
   }
   if (normalized.includes('autoriz')) {
