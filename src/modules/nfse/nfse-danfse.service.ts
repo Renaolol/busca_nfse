@@ -1641,6 +1641,8 @@ export class NfseDanfseService {
       ]),
       retencaoIss: this.extractFromPaths(xml, [
         ['infDPS', 'valores', 'trib', 'tribMun', 'tpRetISSQN'],
+        ['infNFSe', 'valores', 'trib', 'tribMun', 'tpRetISSQN'],
+        ['valores', 'trib', 'tribMun', 'tpRetISSQN'],
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'IssRetido']
       ]),
       aliquotaIss: this.extractFromPaths(xml, [

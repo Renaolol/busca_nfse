@@ -285,7 +285,7 @@ describe('NfseDanfseService', () => {
     expect(content).toContain('R$ 34,31');
   });
 
-  it('extrai leitura fiscal consolidada do layout nacional', () => {
+  it('respeita tpRetISSQN=1 do layout nacional mesmo com vISSRet informado', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
   <infNFSe Id="NFS42110092206960810000176000000000033326062205552016">
@@ -325,10 +325,10 @@ describe('NfseDanfseService', () => {
     expect(leitura.valorServico).toBe('180.00');
     expect(leitura.valorLiquidoNfse).toBe('162.00');
     expect(leitura.valorTotalRetencoes).toBe('18.00');
-    expect(leitura.valorIssRetidoReal).toBe('9.00');
+    expect(leitura.valorIssRetidoReal).toBeUndefined();
     expect(leitura.aliquotaIss).toBe('5.00');
     expect(leitura.aliquotaRealIss).toBe('5.00');
-    expect(leitura.retencaoIss).toBe('Retido');
+    expect(leitura.retencaoIss).toBe('Nao Retido');
     expect(leitura.retencaoFederal).toBe('Retido');
     expect(leitura.totalRetencoesFederais).toBe('6.50');
     expect(leitura.statusProcessamento).toBe('OK');
