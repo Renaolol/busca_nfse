@@ -173,6 +173,19 @@ describe('NfeService', () => {
     expect(row.icmsCalculado).toBe(286.56);
   });
 
+  it('zera o ICMS recalculado quando o ICMS ST retido no XML esta zerado', () => {
+    const row = (service as any).toCst060AnalysisItem(
+      { id: 'nfe-1', chaveAcesso: '1'.repeat(44), dataEmissao: new Date('2026-07-29'), cnpjEmitente: null },
+      { itemNumero: 1, descricaoProduto: 'PRODUTO CST 060', quantidade: 1, valorUnitario: 100, valorProduto: 100, desconto: 0, vICMSSTRet: 0 },
+      17
+    );
+
+    expect(row.icmsStXml).toBe(0);
+    expect(row.icmsCalculado).toBe(0);
+    expect(row.diferenca).toBe(0);
+    expect(row.status).toBe('OK');
+  });
+
   it('pagina a listagem de NF-e armazenadas', async () => {
     prisma.nfeDocumento.count.mockResolvedValueOnce(275);
     prisma.nfeDocumento.findMany.mockResolvedValueOnce([]);

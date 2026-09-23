@@ -686,7 +686,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const isPneu = this.isCst060Pneu(item);
     const aliquotaAplicada = isPneu ? 4 : aliquotaInterna;
     const baseCalculada = this.roundMoney(item.valorProduto - item.desconto);
-    const icmsCalculado = this.roundMoney(baseCalculada * (aliquotaAplicada / 100));
+    // Sem ICMS ST retido no XML, nao ha credito a aproveitar no CST 060.
+    const icmsCalculado = item.vICMSSTRet === 0
+      ? 0
+      : this.roundMoney(baseCalculada * (aliquotaAplicada / 100));
     const diferenca = this.roundMoney(item.vICMSSTRet - icmsCalculado);
     return {
       nfeId: document.id,
