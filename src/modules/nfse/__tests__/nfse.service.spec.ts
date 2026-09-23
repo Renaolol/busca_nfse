@@ -2211,6 +2211,7 @@ describe('NfseService', () => {
     expect(content).toContain('|1020|18||180,00|5,00|9,00');
     expect(content).toContain('|1030|557|1|180,00');
     expect(content).toContain('|1300|10/07/2026|0|183|9,00||ISS RETIDO SOBRE NFS-E N 333 Prestador Exportacao|||');
+    expect(content).toContain('|1500|10/07/2026|180,00|2,22|4,00|3,00|9,00|2,00||1,00|1,50|1,50||333|');
   });
 
   it('ignora NFS-e cancelada na exportacao da leitura fiscal para a Dominio', async () => {
@@ -2602,6 +2603,7 @@ describe('NfseService', () => {
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
     expect(content).toContain('|3000|39|11111111000111|SC|900||333|U||');
     expect(content).toContain('|3030|A|1|180,00');
+    expect(content).toContain('|3500|10/07/2026|180,00|');
     expect(prisma.nfseContaContabilConfig.findMany).not.toHaveBeenCalled();
   });
 

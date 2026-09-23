@@ -736,6 +736,21 @@ export class NfseService {
       if (valorIssRetidoReal > 0) {
         linhas.push(this.createDominioRegistro1300(dataEmissao, '0', '183', valorIssRetidoReal, numeroNfse, nomeDescricao, 'ISS RETIDO SOBRE'));
       }
+      linhas.push(
+        this.createDominioRegistro1500({
+          vencimento: dataEmissao,
+          valor: valorServico,
+          aliquotaCrf: this.calculateDominioAliquota(valorCrf, valorServico),
+          valorCrf,
+          valorIrrf,
+          valorIssRetido: valorIssRetidoReal,
+          valorInss,
+          valorPisRetido,
+          valorCofinsRetido,
+          valorCsll,
+          numeroTitulo: numeroNfse
+        })
+      );
       return linhas;
     }
 
@@ -759,6 +774,22 @@ export class NfseService {
     if (valorCsll > 0) {
       linhas.push(this.createDominioRegistro3300(dataEmissao, '724', '0', valorCsll, numeroNfse, nomeDescricao, 'CSOC RETIDO SOBRE'));
     }
+
+    linhas.push(
+      this.createDominioRegistro3500({
+        vencimento: dataEmissao,
+        valor: valorServico,
+        aliquotaCrf: this.calculateDominioAliquota(valorCrf, valorServico),
+        valorCrf,
+        valorIrrf,
+        valorIssRetido: valorIssRetidoReal,
+        valorInss,
+        valorPisRetido,
+        valorCofinsRetido,
+        valorCsll,
+        numeroTitulo: numeroNfse
+      })
+    );
 
     return linhas;
   }
@@ -996,6 +1027,75 @@ export class NfseService {
     imposto: string
   ): string {
     return `|3300|${dataEmissao}|${contaDebito}|${contaCredito}|${this.formatDominioNumber(valor)}||${imposto} NFS-E N ${numeroDocumento} ${emissor}|||`;
+  }
+
+  private createDominioRegistro1500(params: {
+    vencimento: string;
+    valor: number;
+    aliquotaCrf: number;
+    valorCrf: number;
+    valorIrrf: number;
+    valorIssRetido: number;
+    valorInss: number;
+    valorPisRetido: number;
+    valorCofinsRetido: number;
+    valorCsll: number;
+    numeroTitulo: string;
+  }): string {
+    return `|${[
+      '1500',
+      params.vencimento,
+      this.formatDominioNumber(params.valor),
+      this.formatDominioNumber(params.aliquotaCrf),
+      this.formatDominioNumber(params.valorCrf),
+      this.formatDominioNumber(params.valorIrrf),
+      this.formatDominioNumber(params.valorIssRetido),
+      this.formatDominioNumber(params.valorInss),
+      '',
+      this.formatDominioNumber(params.valorPisRetido),
+      this.formatDominioNumber(params.valorCofinsRetido),
+      this.formatDominioNumber(params.valorCsll),
+      '',
+      params.numeroTitulo
+    ].join('|')}|`;
+  }
+
+  private createDominioRegistro3500(params: {
+    vencimento: string;
+    valor: number;
+    aliquotaCrf: number;
+    valorCrf: number;
+    valorIrrf: number;
+    valorIssRetido: number;
+    valorInss: number;
+    valorPisRetido: number;
+    valorCofinsRetido: number;
+    valorCsll: number;
+    numeroTitulo: string;
+  }): string {
+    return `|${[
+      '3500',
+      params.vencimento,
+      this.formatDominioNumber(params.valor),
+      this.formatDominioNumber(params.aliquotaCrf),
+      this.formatDominioNumber(params.valorCrf),
+      this.formatDominioNumber(params.valorIrrf),
+      this.formatDominioNumber(params.valorIssRetido),
+      this.formatDominioNumber(params.valorInss),
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      '',
+      this.formatDominioNumber(params.valorPisRetido),
+      this.formatDominioNumber(params.valorCofinsRetido),
+      this.formatDominioNumber(params.valorCsll),
+      params.numeroTitulo
+    ].join('|')}|`;
   }
 
   private async lookupDominioSupplierAccounts(codigoEmpresa: number, cnpjs: string[]): Promise<Map<string, string>> {

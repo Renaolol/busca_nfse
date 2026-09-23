@@ -37,6 +37,7 @@ As integracoes oficiais devem ser encapsuladas em adapters separados:
 
 - O leitor fiscal de NFS-e expõe `POST /nfse/leitura-fiscal/exportar-dominio` para gerar o TXT no layout padrao do LeitorXML.
 - O endpoint reutiliza a leitura fiscal do DANFSE e aplica a logica fiscal corrigida do projeto para ISS e retencoes federais.
+- A exportacao tambem inclui uma parcela por NFS-e: registro `1500` para Entrada e `3500` para Servico. Como o XML nacional nao informa vencimento comercial, o vencimento gerado e a data de emissao da nota; o valor e o total do servico e as retencoes seguem em seus campos proprios do registro.
 - No layout nacional, a retencao de ISS segue `tpRetISSQN`: `1` nao retido, `2` retido pelo tomador e `3` retido pelo intermediario. O campo `vISSRet` isoladamente nao substitui essa classificacao.
 - O campo `produtoPadrao` aceita codigos alfanumericos (por exemplo, `557`, `A` ou `A12`) e e usado nos registros `1030` e `3030`.
 - Informe os acumuladores conforme o tipo de registro: `acumuladorEntradaSemRetencoes` e `acumuladorEntradaComRetencoes` para `Entrada`; `acumuladorServicoSemRetencoes` e `acumuladorServicoComRetencoes` para `Servico`. A nota usa o acumulador **com retencoes** quando houver ISS, IRRF, INSS, CSLL, PIS ou COFINS retido; caso contrario, usa o acumulador **sem retencoes**. Os valores iniciais sao `802`/`804` para Entrada e `900`/`900` para Servico, mas podem ser alterados antes da exportacao.
