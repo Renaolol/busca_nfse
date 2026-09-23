@@ -155,7 +155,8 @@ Veja `.env.example`.
 - `SYNC_DAILY_MAX_NSU_PER_RUN`: quantidade maxima de NSUs processados por ciclo para controles no modo diario (padrao `10`).
 - `SYNC_DAILY_STOP_ON_FIRST_DOCUMENT`: quando `true`, no modo diario encerra o ciclo apos sincronizar 1 documento e agenda a proxima tentativa; por padrao fica `false` para buscar mais XMLs por lote.
 - `SYNC_DAILY_SUCCESS_COOLDOWN_MS`: espera minima entre lotes diarios apos sucesso de documento (padrao `120000`).
-- `SYNC_ADN_REQUEST_INTERVAL_MS`: intervalo minimo entre chamadas ao ADN (padrao `1000`). Em caso de `HTTP 429`, a rotina para e aplica o cooldown global configurado antes de novas consultas.
+- `SYNC_ADN_REQUEST_INTERVAL_MS`: intervalo minimo entre chamadas ao ADN (padrao `250`). Em caso de `HTTP 429`, a rotina para e aplica o cooldown global configurado antes de novas consultas.
+- `SYNC_PAST_NSU_RETRY_DELAY_MS`: espera antes de repetir uma consulta de NSU que falhou temporariamente (padrao `1000`).
 - `SYNC_ADN_RATE_LIMIT_COOLDOWN_MS`: cooldown global apos `HTTP 429` (padrao `300000`).
 - `SYNC_NIGHTLY_SWEEP_ENABLED`: habilita busca noturna automatica para todos os clientes cadastrados (padrao `true`).
 - `SYNC_NIGHTLY_SWEEP_SLOTS`: lista de horarios noturnos separados por virgula (ex.: `18:00,20:00,22:00,00:00,02:00,04:00,06:00`). Pode ser sobrescrita pelo painel.

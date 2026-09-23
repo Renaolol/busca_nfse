@@ -275,9 +275,11 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   private readonly dailySyncMaxNsuPerRun = this.parsePositiveNumberEnv('SYNC_DAILY_MAX_NSU_PER_RUN', 10);
   private readonly dailySyncStopOnFirstDocument = process.env.SYNC_DAILY_STOP_ON_FIRST_DOCUMENT === 'true';
   private readonly dailySyncSuccessCooldownMs = this.parsePositiveNumberEnv('SYNC_DAILY_SUCCESS_COOLDOWN_MS', 120000);
-  private readonly adnRequestIntervalMs = this.parsePositiveNumberEnv('SYNC_ADN_REQUEST_INTERVAL_MS', 1000);
+  // Mantem um ritmo controlado no ADN, sem acrescentar 1 segundo a cada NSU recuperado.
+  // O valor pode ser ajustado por ambiente caso o provedor imponha um limite menor.
+  private readonly adnRequestIntervalMs = this.parsePositiveNumberEnv('SYNC_ADN_REQUEST_INTERVAL_MS', 250);
   private readonly pastNsuRetryCount = this.parseBoundedIntegerEnv('SYNC_PAST_NSU_RETRY_COUNT', 2, 0, 10);
-  private readonly pastNsuRetryDelayMs = this.parsePositiveNumberEnv('SYNC_PAST_NSU_RETRY_DELAY_MS', 5000);
+  private readonly pastNsuRetryDelayMs = this.parsePositiveNumberEnv('SYNC_PAST_NSU_RETRY_DELAY_MS', 1000);
   private readonly apiRetryJitterMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_JITTER_MS', 60000);
   private readonly rateLimitGlobalCooldownMs = this.parsePositiveNumberEnv('SYNC_ADN_RATE_LIMIT_COOLDOWN_MS', 300000);
   private readonly controlClaimTtlMs = this.parsePositiveNumberEnv('SYNC_CONTROL_CLAIM_TTL_MS', 10 * 60 * 1000);
