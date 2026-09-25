@@ -298,6 +298,12 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   );
   private rateLimitCooldownUntil: Date | null = null;
   private lastAdnRequestAtMs = 0;
+  /**
+   * Fila unica para o ADN. A recuperacao manual de NSUs e o agendador podem
+   * coexistir; apenas comparar `lastAdnRequestAtMs` deixava duas chamadas
+   * passarem juntas quando ambas chegavam no mesmo instante.
+   */
+  private adnRequestSlot: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly prisma: PrismaService,
@@ -3710,17 +3716,26 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async waitForAdnRequestSlot(): Promise<void> {
-    if (this.adnRequestIntervalMs <= 0) {
-      return;
-    }
+    const previousSlot = this.adnRequestSlot;
+    let releaseSlot!: () => void;
+    this.adnRequestSlot = new Promise<void>((resolve) => {
+      releaseSlot = resolve;
+    });
 
-    const now = Date.now();
-    const elapsed = now - this.lastAdnRequestAtMs;
-    if (elapsed < this.adnRequestIntervalMs) {
-      await this.sleep(this.adnRequestIntervalMs - elapsed);
-    }
+    await previousSlot;
+    try {
+      if (this.adnRequestIntervalMs > 0) {
+        const now = Date.now();
+        const elapsed = now - this.lastAdnRequestAtMs;
+        if (elapsed < this.adnRequestIntervalMs) {
+          await this.sleep(this.adnRequestIntervalMs - elapsed);
+        }
+      }
 
-    this.lastAdnRequestAtMs = Date.now();
+      this.lastAdnRequestAtMs = Date.now();
+    } finally {
+      releaseSlot();
+    }
   }
 
   private async fetchPastNsuWithRetries(params: {
