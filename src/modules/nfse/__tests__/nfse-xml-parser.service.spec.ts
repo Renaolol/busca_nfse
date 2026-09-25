@@ -28,6 +28,12 @@ describe('NfseXmlParserService', () => {
     });
   });
 
+  it('extrai desconto incondicionado do total IBS/CBS da NFS-e autorizada', () => {
+    const xml = `<NFSe><chaveAcesso>123</chaveAcesso><infNFSe><IBSCBS><valores><vDescIncond>340.36</vDescIncond></valores></IBSCBS></infNFSe></NFSe>`;
+
+    expect(parser.parse(xml).valorDescontoIncondicionado).toBe('340.36');
+  });
+
   it('falha sem chave de acesso', () => {
     expect(() => parser.parse('<NFSe></NFSe>')).toThrow('Nao foi possivel localizar chave de acesso no XML');
   });

@@ -3644,7 +3644,7 @@ export class NfseService {
     if (doc.danfsePath) {
       try {
         const existingPdf = await this.storage.getObject(doc.danfsePath);
-        if (!this.isLegacyDanfse(existingPdf)) {
+        if (!this.isLegacyDanfse(existingPdf) && !(await this.isDanfseMissingDiscount(doc, existingPdf))) {
           return { danfsePath: doc.danfsePath, pdf: existingPdf };
         }
       } catch (error) {
@@ -3669,7 +3669,7 @@ export class NfseService {
 
     try {
       const existingPdf = await this.storage.getObject(doc.danfsePath);
-      return this.isLegacyDanfse(existingPdf);
+      return this.isLegacyDanfse(existingPdf) || (await this.isDanfseMissingDiscount(doc, existingPdf));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message.includes('ENOENT')) {
@@ -3738,6 +3738,30 @@ export class NfseService {
     }
 
     return { danfsePath: danfseKey, pdf };
+  }
+
+  private async isDanfseMissingDiscount(doc: NfseDocumento, pdf: Buffer): Promise<boolean> {
+    if (!doc.xmlPath) {
+      return false;
+    }
+
+    try {
+      const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
+      const leitura = this.danfse.extractLeituraFiscal(xml);
+      const desconto = this.toNumber(leitura.valorDescontoIncondicionado);
+      if (!desconto || desconto <= 0) {
+        return false;
+      }
+
+      const valorFormatado = `R$ ${desconto.toLocaleString('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      })}`;
+      return !pdf.includes(Buffer.from(valorFormatado, 'utf8'));
+    } catch (error) {
+      this.logger.warn(`Falha ao conferir desconto no DANFSE da NFS-e ${doc.id}: ${this.toErrorMessage(error)}`);
+      return false;
+    }
   }
 
   private isLegacyDanfse(pdf: Buffer): boolean {

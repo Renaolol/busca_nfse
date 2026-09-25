@@ -1377,11 +1377,20 @@ export class NfseDanfseService {
     const valorDeducoes = this.extract(xml, ['valorDeducoes', 'vDeducao']);
     const valorDescontoIncondicionado = this.extractFromPaths(xml, [
       ['infDPS', 'valores', 'vDescCondIncond', 'vDescIncond'],
-      ['valores', 'vDescCondIncond', 'vDescIncond']
+      ['infNFSe', 'valores', 'vDescCondIncond', 'vDescIncond'],
+      ['infNFSe', 'valores', 'vDescIncond'],
+      // Nas NFS-e do novo grupo IBS/CBS o desconto incondicionado vem no
+      // total tributario autorizado, sem o agrupador vDescCondIncond da DPS.
+      ['infNFSe', 'IBSCBS', 'valores', 'vDescIncond'],
+      ['valores', 'vDescCondIncond', 'vDescIncond'],
+      ['valores', 'vDescIncond']
     ]);
     const valorDescontoCondicionado = this.extractFromPaths(xml, [
       ['infDPS', 'valores', 'vDescCondIncond', 'vDescCond'],
-      ['valores', 'vDescCondIncond', 'vDescCond']
+      ['infNFSe', 'valores', 'vDescCondIncond', 'vDescCond'],
+      ['infNFSe', 'valores', 'vDescCond'],
+      ['valores', 'vDescCondIncond', 'vDescCond'],
+      ['valores', 'vDescCond']
     ]);
 
     const valorIrrf = this.extractFromPaths(xml, [
