@@ -34,7 +34,6 @@ if (-not $nodeCommand) {
   throw "Node.js nao encontrado no PATH. Instale Node.js 24 LTS e abra um novo PowerShell."
 }
 
-$nodePath = $nodeCommand.Source
 $winSwPath = Join-Path $ProjectPath "$ServiceName.exe"
 $xmlPath = Join-Path $ProjectPath "$ServiceName.xml"
 $distPath = Join-Path $ProjectPath "dist\main.js"
@@ -76,8 +75,8 @@ $xml = @"
   <id>$(Escape-XmlValue $ServiceName)</id>
   <name>$(Escape-XmlValue $DisplayName)</name>
   <description>$(Escape-XmlValue $Description)</description>
-  <executable>$(Escape-XmlValue $nodePath)</executable>
-  <arguments>dist\main.js</arguments>
+  <executable>C:\Windows\System32\cmd.exe</executable>
+  <arguments>/d /c deploy\windows\start-notasync.cmd</arguments>
   <workingdirectory>$(Escape-XmlValue $ProjectPath)</workingdirectory>
   <env name="NODE_ENV" value="production" />
   <env name="PORT" value="$Port" />

@@ -2,8 +2,8 @@
   <id>NotaSyncGCONT</id>
   <name>NotaSync GCONT</name>
   <description>Servico interno NotaSync GCONT para busca e consulta de NFS-e.</description>
-  <executable>C:\Program Files\nodejs\node.exe</executable>
-  <arguments>dist\main.js</arguments>
+  <executable>C:\Windows\System32\cmd.exe</executable>
+  <arguments>/d /c deploy\windows\start-notasync.cmd</arguments>
   <workingdirectory>C:\Users\Administrador\Documents\GitHub\busca_nfse</workingdirectory>
   <env name="NODE_ENV" value="production" />
   <env name="PORT" value="3000" />
