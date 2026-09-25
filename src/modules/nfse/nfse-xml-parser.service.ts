@@ -139,7 +139,7 @@ export class NfseXmlParserService {
         ['valores', 'vDescCondIncond', 'vDescIncond'],
         ['valores', 'vDescIncond'],
         ['Valores', 'ValorDescontoIncondicionado']
-      ]),
+      ]) ?? this.extract(xml, ['vDescIncond', 'ValorDescontoIncondicionado']),
       valorDescontoCondicionado: this.extractFromPaths(xml, [
         ['infDPS', 'valores', 'vDescCondIncond', 'vDescCond'],
         ['infNFSe', 'valores', 'vDescCondIncond', 'vDescCond'],
@@ -147,7 +147,7 @@ export class NfseXmlParserService {
         ['valores', 'vDescCondIncond', 'vDescCond'],
         ['valores', 'vDescCond'],
         ['Valores', 'ValorDescontoCondicionado']
-      ]),
+      ]) ?? this.extract(xml, ['vDescCond', 'ValorDescontoCondicionado']),
       valorIss: this.extract(xml, ['valorIss', 'valorISS', 'vISSQN', 'vISS']),
       retencaoIss:
         this.extract(xml, ['tpRetISSQN', 'IssRetido']) ??

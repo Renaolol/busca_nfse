@@ -1384,14 +1384,14 @@ export class NfseDanfseService {
       ['infNFSe', 'IBSCBS', 'valores', 'vDescIncond'],
       ['valores', 'vDescCondIncond', 'vDescIncond'],
       ['valores', 'vDescIncond']
-    ]);
+    ]) ?? this.extract(xml, ['vDescIncond', 'ValorDescontoIncondicionado']);
     const valorDescontoCondicionado = this.extractFromPaths(xml, [
       ['infDPS', 'valores', 'vDescCondIncond', 'vDescCond'],
       ['infNFSe', 'valores', 'vDescCondIncond', 'vDescCond'],
       ['infNFSe', 'valores', 'vDescCond'],
       ['valores', 'vDescCondIncond', 'vDescCond'],
       ['valores', 'vDescCond']
-    ]);
+    ]) ?? this.extract(xml, ['vDescCond', 'ValorDescontoCondicionado']);
 
     const valorIrrf = this.extractFromPaths(xml, [
       ['infDPS', 'valores', 'trib', 'tribFed', 'vRetIRRF'],
