@@ -133,6 +133,9 @@ export interface NfseLeituraFiscal {
   localPrestacao?: string;
   localIncidenciaIss?: string;
   valorServico?: string;
+  valorDescontoIncondicionado?: string;
+  valorDescontoCondicionado?: string;
+  valorDescontoTotal?: string;
   valorLiquidoNfse?: string;
   valorTotalRetencoes?: string;
   valorIss?: string;
@@ -269,6 +272,12 @@ export class NfseDanfseService {
     const layoutNfse = extracted.layoutNfse ?? this.detectLeituraFiscalLayout(xml);
     const retencoes = this.extractRetentionAlertData(xml).entries;
     const valorServico = this.toNumber(extracted.valorServico) ?? 0;
+    const valorDescontoIncondicionado = this.toNumber(extracted.valorDescontoIncondicionado);
+    const valorDescontoCondicionado = this.toNumber(extracted.valorDescontoCondicionado);
+    const valorDescontoTotal =
+      valorDescontoIncondicionado === undefined && valorDescontoCondicionado === undefined
+        ? undefined
+        : (valorDescontoIncondicionado ?? 0) + (valorDescontoCondicionado ?? 0);
     const valorIss = this.toNumber(extracted.valorIss) ?? 0;
     const valorTotalRetencoesInformado = this.toNumber(extracted.valorTotalRetencoes);
     const valorIssRetido = this.toNumber(extracted.valorIssRetido);
@@ -348,6 +357,9 @@ export class NfseDanfseService {
       localPrestacao: replaceMunicipioCodigoComNome(localPrestacaoFallback),
       localIncidenciaIss: replaceMunicipioCodigoComNome(localIncidenciaIssBruto),
       valorServico: this.toFixedCurrencyString(valorServico),
+      valorDescontoIncondicionado: this.toFixedCurrencyString(valorDescontoIncondicionado),
+      valorDescontoCondicionado: this.toFixedCurrencyString(valorDescontoCondicionado),
+      valorDescontoTotal: this.toFixedCurrencyString(valorDescontoTotal),
       valorLiquidoNfse: this.toFixedCurrencyString(this.toNumber(extracted.valorLiquidoNfse)),
       valorTotalRetencoes: this.toFixedCurrencyString(valorTotalRetencoes),
       valorIss: this.toFixedCurrencyString(valorIss),

@@ -59,6 +59,15 @@ export class NfseLeituraFiscalRowDto {
   valorServico?: string;
 
   @ApiPropertyOptional()
+  valorDescontoIncondicionado?: string;
+
+  @ApiPropertyOptional()
+  valorDescontoCondicionado?: string;
+
+  @ApiPropertyOptional()
+  valorDescontoTotal?: string;
+
+  @ApiPropertyOptional()
   valorLiquidoNfse?: string;
 
   @ApiPropertyOptional()

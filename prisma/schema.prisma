@@ -225,6 +225,8 @@ model NfseDocumento {
   municipioPrestacaoNome   String?          @map("municipio_prestacao_nome") @db.VarChar(120)
   valorServico             Decimal?         @map("valor_servico") @db.Decimal(15, 2)
   valorDeducoes            Decimal?         @map("valor_deducoes") @db.Decimal(15, 2)
+  valorDescontoIncondicionado Decimal?      @map("valor_desconto_incondicionado") @db.Decimal(15, 2)
+  valorDescontoCondicionado Decimal?        @map("valor_desconto_condicionado") @db.Decimal(15, 2)
   valorIss                 Decimal?         @map("valor_iss") @db.Decimal(15, 2)
   aliquotaIss              Decimal?         @map("aliquota_iss") @db.Decimal(8, 4)
   codigoServicoNacional    String?          @map("codigo_servico_nacional") @db.VarChar(50)

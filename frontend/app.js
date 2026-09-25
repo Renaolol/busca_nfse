@@ -12098,6 +12098,9 @@ function renderDocumentInsightsSection(documentType, doc) {
       detailItem('Local ISS', leituraFiscal.localIncidenciaIss || '-'),
       detailItem('Retencao ISS', leituraFiscal.retencaoIss || '-'),
       detailItem('Retencao federal', leituraFiscal.retencaoFederal || '-'),
+      detailItem('Desconto incondicionado', formatOptionalCurrency(leituraFiscal.valorDescontoIncondicionado)),
+      detailItem('Desconto condicionado', formatOptionalCurrency(leituraFiscal.valorDescontoCondicionado)),
+      detailItem('Desconto total', formatOptionalCurrency(leituraFiscal.valorDescontoTotal)),
       detailItem('Valor retido total', formatOptionalCurrency(leituraFiscal.valorTotalRetencoes)),
       detailItem('ISS retido real', formatOptionalCurrency(leituraFiscal.valorIssRetidoReal)),
       detailItem('Aliquota ISS', formatOptionalPercentage(leituraFiscal.aliquotaIss)),
@@ -12902,6 +12905,13 @@ function getNfseFiscalReaderColumnDefinitions() {
       className: 'nfse-fiscal-reader-cnpj',
       html: false,
       render: (row) => formatCnpj(row.cnpjTomador || '') || '-'
+    },
+    {
+      key: 'valorDescontoTotal',
+      label: 'Desconto',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatOptionalCurrency(row.valorDescontoTotal)
     },
     {
       key: 'valorLiquidoNfse',
@@ -19475,6 +19485,9 @@ function normalizeNfseFiscalReaderResponse(payload) {
         localPrestacao: String(row?.localPrestacao || '').trim(),
         localIncidenciaIss: String(row?.localIncidenciaIss || '').trim(),
         valorServico: row?.valorServico ?? '',
+        valorDescontoIncondicionado: row?.valorDescontoIncondicionado ?? '',
+        valorDescontoCondicionado: row?.valorDescontoCondicionado ?? '',
+        valorDescontoTotal: row?.valorDescontoTotal ?? '',
         valorLiquidoNfse: row?.valorLiquidoNfse ?? '',
         valorTotalRetencoes: row?.valorTotalRetencoes ?? '',
         valorIss: row?.valorIss ?? '',

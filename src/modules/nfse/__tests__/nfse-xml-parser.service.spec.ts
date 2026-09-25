@@ -19,6 +19,15 @@ describe('NfseXmlParserService', () => {
     expect(hash1).toBe(hash2);
   });
 
+  it('extrai descontos condicionado e incondicionado do XML nacional', () => {
+    const xml = `<NFSe><chaveAcesso>123</chaveAcesso><infDPS><valores><vDescCondIncond><vDescIncond>340.36</vDescIncond><vDescCond>12.00</vDescCond></vDescCondIncond></valores></infDPS></NFSe>`;
+
+    expect(parser.parse(xml)).toMatchObject({
+      valorDescontoIncondicionado: '340.36',
+      valorDescontoCondicionado: '12.00'
+    });
+  });
+
   it('falha sem chave de acesso', () => {
     expect(() => parser.parse('<NFSe></NFSe>')).toThrow('Nao foi possivel localizar chave de acesso no XML');
   });
