@@ -138,16 +138,20 @@ export class NfseXmlParserService {
         ['infNFSe', 'IBSCBS', 'valores', 'vDescIncond'],
         ['valores', 'vDescCondIncond', 'vDescIncond'],
         ['valores', 'vDescIncond'],
-        ['Valores', 'ValorDescontoIncondicionado']
-      ]) ?? this.extract(xml, ['vDescIncond', 'ValorDescontoIncondicionado']),
+        ['Valores', 'ValorDescontoIncondicionado'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'DescontoIncondicionado'],
+        ['InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'DescontoIncondicionado']
+      ]) ?? this.extract(xml, ['vDescIncond', 'ValorDescontoIncondicionado', 'DescontoIncondicionado']),
       valorDescontoCondicionado: this.extractFromPaths(xml, [
         ['infDPS', 'valores', 'vDescCondIncond', 'vDescCond'],
         ['infNFSe', 'valores', 'vDescCondIncond', 'vDescCond'],
         ['infNFSe', 'valores', 'vDescCond'],
         ['valores', 'vDescCondIncond', 'vDescCond'],
         ['valores', 'vDescCond'],
-        ['Valores', 'ValorDescontoCondicionado']
-      ]) ?? this.extract(xml, ['vDescCond', 'ValorDescontoCondicionado']),
+        ['Valores', 'ValorDescontoCondicionado'],
+        ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'DescontoCondicionado'],
+        ['InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'DescontoCondicionado']
+      ]) ?? this.extract(xml, ['vDescCond', 'ValorDescontoCondicionado', 'DescontoCondicionado']),
       valorIss: this.extract(xml, ['valorIss', 'valorISS', 'vISSQN', 'vISS']),
       retencaoIss:
         this.extract(xml, ['tpRetISSQN', 'IssRetido']) ??

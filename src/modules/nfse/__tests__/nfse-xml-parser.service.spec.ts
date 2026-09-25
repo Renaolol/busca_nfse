@@ -34,6 +34,12 @@ describe('NfseXmlParserService', () => {
     expect(parser.parse(xml).valorDescontoIncondicionado).toBe('340.36');
   });
 
+  it('extrai desconto incondicionado de NFS-e ABRASF', () => {
+    const xml = `<CompNfse><Nfse><InfNfse><chaveAcesso>123</chaveAcesso><DeclaracaoPrestacaoServico><InfDeclaracaoPrestacaoServico><Servico><Valores><ValorServicos>433.41</ValorServicos><DescontoIncondicionado>340.36</DescontoIncondicionado></Valores></Servico></InfDeclaracaoPrestacaoServico></DeclaracaoPrestacaoServico></InfNfse></Nfse></CompNfse>`;
+
+    expect(parser.parse(xml).valorDescontoIncondicionado).toBe('340.36');
+  });
+
   it('falha sem chave de acesso', () => {
     expect(() => parser.parse('<NFSe></NFSe>')).toThrow('Nao foi possivel localizar chave de acesso no XML');
   });

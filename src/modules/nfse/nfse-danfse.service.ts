@@ -1383,15 +1383,19 @@ export class NfseDanfseService {
       // total tributario autorizado, sem o agrupador vDescCondIncond da DPS.
       ['infNFSe', 'IBSCBS', 'valores', 'vDescIncond'],
       ['valores', 'vDescCondIncond', 'vDescIncond'],
-      ['valores', 'vDescIncond']
-    ]) ?? this.extract(xml, ['vDescIncond', 'ValorDescontoIncondicionado']);
+      ['valores', 'vDescIncond'],
+      ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'DescontoIncondicionado'],
+      ['InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'DescontoIncondicionado']
+    ]) ?? this.extract(xml, ['vDescIncond', 'ValorDescontoIncondicionado', 'DescontoIncondicionado']);
     const valorDescontoCondicionado = this.extractFromPaths(xml, [
       ['infDPS', 'valores', 'vDescCondIncond', 'vDescCond'],
       ['infNFSe', 'valores', 'vDescCondIncond', 'vDescCond'],
       ['infNFSe', 'valores', 'vDescCond'],
       ['valores', 'vDescCondIncond', 'vDescCond'],
-      ['valores', 'vDescCond']
-    ]) ?? this.extract(xml, ['vDescCond', 'ValorDescontoCondicionado']);
+      ['valores', 'vDescCond'],
+      ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'DescontoCondicionado'],
+      ['InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'DescontoCondicionado']
+    ]) ?? this.extract(xml, ['vDescCond', 'ValorDescontoCondicionado', 'DescontoCondicionado']);
 
     const valorIrrf = this.extractFromPaths(xml, [
       ['infDPS', 'valores', 'trib', 'tribFed', 'vRetIRRF'],
