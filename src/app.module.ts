@@ -14,6 +14,7 @@ import { EstablishmentsModule } from './modules/establishments/establishments.mo
 import { HealthModule } from './modules/health/health.module';
 import { NfeModule } from './modules/nfe/nfe.module';
 import { NfseModule } from './modules/nfse/nfse.module';
+import { SimplesNacionalModule } from './modules/simples-nacional/simples-nacional.module';
 import { StorageModule } from './modules/storage/storage.module';
 import { SyncModule } from './modules/sync/sync.module';
 import { PrismaModule } from './prisma/prisma.module';
@@ -35,6 +36,7 @@ import { PrismaModule } from './prisma/prisma.module';
     SyncModule,
     NfseModule,
     NfeModule,
+    SimplesNacionalModule,
     AuditModule,
     JobsModule
   ],

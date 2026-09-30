@@ -44,6 +44,7 @@ A aplicacao segue arquitetura backend-first:
 - `nfse`
 - `compare-sped`
 - `nfe`
+- `simples-nacional`
 - `audit`
 - `storage`
 - `jobs`
@@ -55,6 +56,12 @@ A aplicacao segue arquitetura backend-first:
 - O backend salva o relatorio completo em `compare_sped_historicos` para permitir reabertura e download novamente mesmo apos atualizar a aba.
 - A listagem de `GET /comparacoes-sped` devolve os ultimos itens persistidos e alimenta o bloco `Ultimas comparacoes` da interface.
 - O frontend tambem espelha o historico em `localStorage` para manter a experiencia caso a API fique indisponivel temporariamente.
+
+## Tabela de empresas do Simples Nacional
+
+- A aba `Configuracoes > Empresas do Simples Nacional` envia a planilha em Base64 para `POST /simples-nacional/importacoes`.
+- `SimplesNacionalPlanilhaParserService` le `.xlsx` (via `jszip`, sem dependencia nova), `.csv` e `.txt`, detecta as colunas de CNPJ e razao social e valida o digito verificador.
+- `SimplesNacionalService` substitui a tabela inteira em uma unica transacao e expoe `consultarCnpj` e `filtrarOptantes` para outros modulos identificarem empresas do Simples Nacional pela raiz do CNPJ.
 
 ## Pontos arquiteturais que merecem atencao
 

@@ -38,6 +38,10 @@ const THEME_STORAGE_KEY = 'gcont:theme:v1';
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
 const COMPARE_SPED_HISTORY_LIMIT = 10;
+const SIMPLES_NACIONAL_PAGE_SIZE = 50;
+const SIMPLES_NACIONAL_MAX_FILE_BYTES = 7 * 1024 * 1024;
+const SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS = 15000;
+const SIMPLES_NACIONAL_IMPORT_TIMEOUT_MS = 2 * 60 * 1000;
 const XML_READER30_NFE_COLUMN_ORDER_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-order:v1';
 const XML_READER30_NFE_COLUMN_WIDTHS_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-widths:v1';
 const XML_READER30_NFE_REGIME_STORAGE_KEY = 'gcont:xml-reader30-nfe-regime:v1';
@@ -543,6 +547,21 @@ const state = {
       draftPeriodos: null,
       saving: false,
       errorMessage: ''
+    },
+    simplesNacional: {
+      loading: false,
+      loadingEmpresas: false,
+      errorMessage: '',
+      resumo: null,
+      empresas: null,
+      busca: '',
+      page: 1,
+      importing: false,
+      clearing: false,
+      lastImport: null,
+      consultaCnpj: '',
+      consultando: false,
+      consulta: null
     },
     acessos: {
       creatingUser: false
@@ -2186,6 +2205,33 @@ function onDocumentClick(event) {
       if (tab === 'acessos' && state.auth.user?.role === 'admin') {
         void loadAuthAdminData();
       }
+      if (tab === 'simples-nacional') {
+        void loadSimplesNacionalSettings();
+      }
+      return;
+    }
+    case 'settings-simples-reload': {
+      void loadSimplesNacionalSettings();
+      return;
+    }
+    case 'settings-simples-page': {
+      const page = Number(actionNode.getAttribute('data-page'));
+      if (!Number.isInteger(page) || page < 1) {
+        return;
+      }
+      state.settings.simplesNacional.page = page;
+      void loadSimplesNacionalEmpresas();
+      return;
+    }
+    case 'settings-simples-clear': {
+      openModal({
+        kind: 'confirm',
+        title: 'Remover tabela do Simples Nacional',
+        subtitle: 'Confirmar a remocao de todas as empresas da tabela? O sistema deixara de identificar empresas do Simples Nacional ate que uma nova tabela seja anexada.',
+        confirmLabel: 'Remover tabela',
+        intent: 'warning',
+        payload: { type: 'clear-simples-nacional' }
+      });
       return;
     }
     case 'settings-auth-reload': {
@@ -2430,6 +2476,21 @@ function onDocumentSubmit(event) {
     case 'settingsAliquotasForm': {
       event.preventDefault();
       void submitSettingsAliquotasForm(target);
+      return;
+    }
+    case 'settingsSimplesNacionalImportForm': {
+      event.preventDefault();
+      void submitSimplesNacionalImportForm(target);
+      return;
+    }
+    case 'settingsSimplesNacionalConsultaForm': {
+      event.preventDefault();
+      void submitSimplesNacionalConsultaForm(target);
+      return;
+    }
+    case 'settingsSimplesNacionalBuscaForm': {
+      event.preventDefault();
+      submitSimplesNacionalBuscaForm(target);
       return;
     }
     case 'settingsAuthUserForm': {
@@ -5780,6 +5841,7 @@ function renderSettingsPage() {
           ${renderTabButton('servidor', 'Servidor de XMLs')}
           ${renderTabButton('notificacoes', 'Notificacoes')}
           ${renderTabButton('aliquotas', 'Aliquotas')}
+          ${renderTabButton('simples-nacional', 'Empresas do Simples Nacional')}
           ${authTab}
           ${renderTabButton('manutencao', 'Manutencao')}
         </div>
@@ -10096,6 +10158,223 @@ function renderAliquotaPeriodoRow(periodo, index, total) {
   `;
 }
 
+function renderSimplesNacionalSettingsPanel() {
+  if (state.dataSource !== 'api') {
+    return '<div class="table-state">A tabela do Simples Nacional fica disponivel quando o painel esta conectado a API.</div>';
+  }
+
+  const simples = state.settings.simplesNacional;
+  const isAdmin = state.auth.user?.role === 'admin';
+  const ultimaImportacao = simples.resumo?.ultimaImportacao || null;
+  const totalEmpresas = Number(simples.resumo?.totalEmpresas || 0);
+  const statusLabel = simples.loading
+    ? 'Carregando'
+    : ultimaImportacao
+      ? `${formatInteger(totalEmpresas)} empresa(s)`
+      : 'Sem tabela';
+  const statusTone = simples.loading ? 'info' : ultimaImportacao ? 'success' : 'neutral';
+  const statusDescription = ultimaImportacao
+    ? `Anexada em ${formatDateTime(ultimaImportacao.importadoEm)}${ultimaImportacao.importadoPor ? ` por ${ultimaImportacao.importadoPor}` : ''}`
+    : 'Anexe uma planilha para o sistema identificar as empresas do Simples Nacional.';
+
+  return `
+    <div class="simples-nacional-panel">
+      <p class="card-subtitle" style="margin:0;">
+        Tabela com as empresas optantes pelo Simples Nacional. O NotaSync identifica a empresa pela raiz do CNPJ (8 primeiros digitos), valendo para matriz e filiais. Cada nova tabela anexada substitui a anterior.
+      </p>
+      ${simples.errorMessage ? `<div class="table-state error" style="padding:12px;">${escapeHtml(simples.errorMessage)}</div>` : ''}
+
+      <div class="maintenance-row">
+        <div>
+          <strong>${escapeHtml(ultimaImportacao ? ultimaImportacao.nomeArquivo : 'Nenhuma tabela anexada')}</strong>
+          <span class="row-sub">${escapeHtml(statusDescription)}</span>
+        </div>
+        <div class="maintenance-actions">
+          ${statusBadge(statusLabel, statusTone)}
+          <button class="btn secondary" type="button" data-action="settings-simples-reload" ${simples.loading ? 'disabled' : ''}>Atualizar</button>
+        </div>
+      </div>
+
+      ${
+        isAdmin
+          ? renderSimplesNacionalImportForm(simples, totalEmpresas)
+          : '<p class="row-sub" style="margin:0;">Somente administradores podem anexar ou remover a tabela do Simples Nacional.</p>'
+      }
+
+      ${simples.lastImport ? renderSimplesNacionalLastImport(simples.lastImport) : ''}
+
+      <form id="settingsSimplesNacionalConsultaForm" class="form-grid three">
+        <label class="field">
+          Verificar CNPJ
+          <input name="cnpj" value="${escapeHtml(simples.consultaCnpj)}" placeholder="00.000.000/0000-00" />
+        </label>
+        <div class="stack-actions" style="justify-content:flex-start; align-self:end;">
+          <button class="btn secondary" type="submit" ${simples.consultando ? 'disabled' : ''}>${simples.consultando ? 'Verificando...' : 'Verificar'}</button>
+        </div>
+        <div style="align-self:end;">${renderSimplesNacionalConsulta(simples.consulta)}</div>
+      </form>
+
+      ${renderSimplesNacionalEmpresasTable(simples)}
+    </div>
+  `;
+}
+
+function renderSimplesNacionalImportForm(simples, totalEmpresas) {
+  const busy = simples.importing || simples.clearing;
+
+  return `
+    <form id="settingsSimplesNacionalImportForm" class="form-grid three compare-form">
+      <label class="field" style="grid-column: span 2;">
+        Tabela de empresas (.xlsx, .csv ou .txt)
+        <input name="arquivo" type="file" accept=".xlsx,.csv,.txt" required ${busy ? 'disabled' : ''} />
+        <small class="row-sub">A planilha precisa ter uma coluna "CNPJ". A coluna "Razao Social" (ou "Nome") e opcional. Todas as linhas com CNPJ valido serao consideradas optantes. Limite de 7 MB.</small>
+      </label>
+      <div class="stack-actions" style="justify-content:flex-start; align-self:start; margin-top:22px;">
+        <button class="btn primary" type="submit" ${busy ? 'disabled' : ''}>${simples.importing ? 'Anexando...' : 'Anexar tabela'}</button>
+        ${
+          totalEmpresas
+            ? `<button class="btn secondary" type="button" data-action="settings-simples-clear" ${busy ? 'disabled' : ''}>${simples.clearing ? 'Removendo...' : 'Remover tabela'}</button>`
+            : ''
+        }
+      </div>
+    </form>
+  `;
+}
+
+function renderSimplesNacionalLastImport(result) {
+  const importacao = result?.importacao || {};
+  const linhasIgnoradas = Array.isArray(result?.linhasIgnoradas) ? result.linhasIgnoradas : [];
+  const totalIgnoradas = Number(importacao.totalIgnoradas || 0);
+  const colunas = `Colunas identificadas: CNPJ = "${result?.colunaCnpj || '-'}"${
+    result?.colunaRazaoSocial ? `, razao social = "${result.colunaRazaoSocial}"` : ', sem coluna de razao social'
+  }.`;
+
+  return `
+    <div class="simples-nacional-section">
+      <div class="kpi-grid">
+        ${kpiItem('Linhas lidas', formatInteger(importacao.totalLinhas))}
+        ${kpiItem('Empresas gravadas', formatInteger(importacao.totalEmpresas))}
+        ${kpiItem('Repetidas (mesma raiz)', formatInteger(importacao.totalDuplicadas))}
+        ${kpiItem('Linhas ignoradas', formatInteger(importacao.totalIgnoradas))}
+      </div>
+      <span class="row-sub">${escapeHtml(colunas)}</span>
+      ${
+        linhasIgnoradas.length
+          ? `
+            <div class="card" style="padding:0; overflow:auto; max-height:260px;">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Linha</th>
+                    <th>Valor na coluna CNPJ</th>
+                    <th>Motivo</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${linhasIgnoradas
+                    .map(
+                      (linha) => `
+                        <tr>
+                          <td>${escapeHtml(String(linha.linha))}</td>
+                          <td>${escapeHtml(linha.valor || '-')}</td>
+                          <td>${statusBadge(linha.motivo, 'warning')}</td>
+                        </tr>
+                      `
+                    )
+                    .join('')}
+                </tbody>
+              </table>
+            </div>
+            ${
+              totalIgnoradas > linhasIgnoradas.length
+                ? `<span class="row-sub">Mostrando as primeiras ${escapeHtml(String(linhasIgnoradas.length))} de ${escapeHtml(formatInteger(totalIgnoradas))} linhas ignoradas.</span>`
+                : ''
+            }
+          `
+          : ''
+      }
+    </div>
+  `;
+}
+
+function renderSimplesNacionalConsulta(consulta) {
+  if (!consulta) {
+    return '';
+  }
+
+  if (consulta.error) {
+    return `<span class="row-sub" style="color:var(--danger);">${escapeHtml(consulta.error)}</span>`;
+  }
+
+  if (!consulta.optante) {
+    return statusBadge('Nao consta na tabela do Simples Nacional', 'neutral');
+  }
+
+  const razaoSocial = consulta.empresa?.razaoSocial;
+  return `${statusBadge('Empresa do Simples Nacional', 'success')}${razaoSocial ? `<span class="row-sub">${escapeHtml(razaoSocial)}</span>` : ''}`;
+}
+
+function renderSimplesNacionalEmpresasTable(simples) {
+  const page = simples.empresas;
+  const items = Array.isArray(page?.items) ? page.items : [];
+  const currentPage = Number(page?.page || 1);
+  const totalPages = Number(page?.totalPages || 1);
+  const total = Number(page?.total || 0);
+  const loading = simples.loading || simples.loadingEmpresas;
+  const emptyMessage = simples.busca
+    ? 'Nenhuma empresa encontrada para a busca informada.'
+    : 'Nenhuma empresa cadastrada na tabela do Simples Nacional.';
+
+  return `
+    <form id="settingsSimplesNacionalBuscaForm" class="form-grid three">
+      <label class="field" style="grid-column: span 2;">
+        Buscar na tabela
+        <input name="busca" value="${escapeHtml(simples.busca)}" placeholder="CNPJ ou razao social" />
+      </label>
+      <div class="stack-actions" style="justify-content:flex-start; align-self:end;">
+        <button class="btn secondary" type="submit" ${loading ? 'disabled' : ''}>Buscar</button>
+      </div>
+    </form>
+
+    <div class="card" style="padding:0; overflow:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>CNPJ</th>
+            <th>Razao social</th>
+            <th>Linha na planilha</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${
+            items.length
+              ? items
+                  .map(
+                    (empresa) => `
+                      <tr>
+                        <td>${escapeHtml(empresa.cnpj ? formatCnpj(empresa.cnpj) : `${empresa.cnpjBase} (raiz)`)}</td>
+                        <td>${escapeHtml(empresa.razaoSocial || '-')}</td>
+                        <td>${escapeHtml(empresa.linhaOrigem ? String(empresa.linhaOrigem) : '-')}</td>
+                      </tr>
+                    `
+                  )
+                  .join('')
+              : `<tr><td colspan="3"><div class="table-state${loading ? ' loading' : ''}">${escapeHtml(loading ? 'Carregando empresas...' : emptyMessage)}</div></td></tr>`
+          }
+        </tbody>
+      </table>
+    </div>
+
+    <div class="stack-actions" style="justify-content:space-between; align-items:center;">
+      <span class="row-sub">${escapeHtml(`${formatInteger(total)} empresa(s) - pagina ${currentPage} de ${totalPages}`)}</span>
+      <div class="stack-actions">
+        <button class="btn secondary" type="button" data-action="settings-simples-page" data-page="${currentPage - 1}" ${loading || currentPage <= 1 ? 'disabled' : ''}>Anterior</button>
+        <button class="btn secondary" type="button" data-action="settings-simples-page" data-page="${currentPage + 1}" ${loading || currentPage >= totalPages ? 'disabled' : ''}>Proxima</button>
+      </div>
+    </div>
+  `;
+}
+
 function renderSettingsTabPanel() {
   switch (state.settings.tab) {
     case 'geral':
@@ -10238,6 +10517,8 @@ function renderSettingsTabPanel() {
         </form>
       `;
     }
+    case 'simples-nacional':
+      return renderSimplesNacionalSettingsPanel();
     case 'acessos':
       return renderAuthAccessSettingsPanel();
     case 'manutencao': {
@@ -18054,6 +18335,10 @@ async function executeConfirmAction(payload) {
       await reprocessLegacyDanfses();
       return;
     }
+    case 'clear-simples-nacional': {
+      await clearSimplesNacionalTable();
+      return;
+    }
     default:
       return;
   }
@@ -20252,6 +20537,201 @@ async function submitSettingsAliquotasForm(form) {
     state.settings.aliquotas.errorMessage = toErrorMessage(error);
     render();
     pushToast(`Falha ao salvar aliquotas: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+function buildSimplesNacionalEmpresasPath() {
+  const simples = state.settings.simplesNacional;
+  const params = new URLSearchParams({
+    page: String(simples.page),
+    pageSize: String(SIMPLES_NACIONAL_PAGE_SIZE)
+  });
+  if (simples.busca) {
+    params.set('busca', simples.busca);
+  }
+  return `/simples-nacional/empresas?${params.toString()}`;
+}
+
+function readSimplesNacionalErrorMessage(error) {
+  const message = toErrorMessage(error);
+  const jsonStart = message.indexOf('{');
+  if (jsonStart < 0) {
+    return message;
+  }
+
+  try {
+    const parsed = JSON.parse(message.slice(jsonStart));
+    const detail = Array.isArray(parsed?.message) ? parsed.message.join('; ') : parsed?.message;
+    return detail ? String(detail) : message;
+  } catch {
+    return message;
+  }
+}
+
+async function loadSimplesNacionalSettings(options = {}) {
+  if (state.dataSource !== 'api') {
+    return;
+  }
+
+  const simples = state.settings.simplesNacional;
+  simples.loading = true;
+  simples.errorMessage = '';
+  if (!options.silent) {
+    render();
+  }
+
+  try {
+    const [resumo, empresas] = await Promise.all([
+      apiRequest('/simples-nacional', { cache: false, timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS }),
+      apiRequest(buildSimplesNacionalEmpresasPath(), { cache: false, timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS })
+    ]);
+    simples.resumo = resumo;
+    simples.empresas = empresas;
+  } catch (error) {
+    simples.errorMessage = `Falha ao carregar a tabela do Simples Nacional: ${readSimplesNacionalErrorMessage(error)}`;
+  } finally {
+    simples.loading = false;
+    render();
+  }
+}
+
+async function loadSimplesNacionalEmpresas() {
+  if (state.dataSource !== 'api') {
+    return;
+  }
+
+  const simples = state.settings.simplesNacional;
+  simples.loadingEmpresas = true;
+  render();
+
+  try {
+    simples.empresas = await apiRequest(buildSimplesNacionalEmpresasPath(), {
+      cache: false,
+      timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS
+    });
+  } catch (error) {
+    pushToast(`Falha ao carregar empresas do Simples Nacional: ${readSimplesNacionalErrorMessage(error)}`, 'error');
+  } finally {
+    simples.loadingEmpresas = false;
+    render();
+  }
+}
+
+async function submitSimplesNacionalImportForm(form) {
+  const simples = state.settings.simplesNacional;
+  const file = form.querySelector('input[name="arquivo"]')?.files?.[0];
+  if (!file) {
+    pushToast('Selecione o arquivo da tabela do Simples Nacional.', 'error');
+    return;
+  }
+
+  if (!/\.(xlsx|csv|txt)$/i.test(file.name)) {
+    pushToast('Envie a tabela em .xlsx, .csv ou .txt.', 'error');
+    return;
+  }
+
+  if (file.size > SIMPLES_NACIONAL_MAX_FILE_BYTES) {
+    pushToast('O arquivo excede o limite de 7 MB. Remova colunas desnecessarias ou envie em .csv.', 'error');
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('A importacao da tabela do Simples Nacional exige conexao com a API.', 'info');
+    return;
+  }
+
+  simples.importing = true;
+  simples.errorMessage = '';
+  render();
+
+  try {
+    const arquivoBase64 = await fileToBase64(file);
+    const result = await apiRequest('/simples-nacional/importacoes', {
+      method: 'POST',
+      body: { nomeArquivo: file.name, arquivoBase64 },
+      timeoutMs: SIMPLES_NACIONAL_IMPORT_TIMEOUT_MS
+    });
+    simples.lastImport = result;
+    simples.page = 1;
+    simples.busca = '';
+    simples.consulta = null;
+    pushToast(`Tabela do Simples Nacional anexada: ${formatInteger(result?.importacao?.totalEmpresas)} empresa(s).`, 'success');
+    await loadSimplesNacionalSettings({ silent: true });
+  } catch (error) {
+    simples.errorMessage = readSimplesNacionalErrorMessage(error);
+    pushToast(`Falha ao anexar tabela: ${simples.errorMessage}`, 'error');
+  } finally {
+    simples.importing = false;
+    render();
+  }
+}
+
+async function submitSimplesNacionalConsultaForm(form) {
+  const simples = state.settings.simplesNacional;
+  const cnpj = String(new FormData(form).get('cnpj') || '').trim();
+  const normalized = cnpj.toUpperCase().replace(/[\s./-]/g, '');
+  simples.consultaCnpj = cnpj;
+
+  if (!/^[0-9A-Z]{12}\d{2}$/.test(normalized) && !/^\d{8}$/.test(normalized)) {
+    simples.consulta = { error: 'Informe um CNPJ com 14 caracteres ou a raiz com 8 digitos.' };
+    render();
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    pushToast('A consulta ao Simples Nacional exige conexao com a API.', 'info');
+    return;
+  }
+
+  simples.consultando = true;
+  render();
+
+  try {
+    simples.consulta = await apiRequest(`/simples-nacional/empresas/${encodeURIComponent(normalized)}`, {
+      cache: false,
+      timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS
+    });
+  } catch (error) {
+    simples.consulta = { error: readSimplesNacionalErrorMessage(error) };
+  } finally {
+    simples.consultando = false;
+    render();
+  }
+}
+
+function submitSimplesNacionalBuscaForm(form) {
+  const simples = state.settings.simplesNacional;
+  simples.busca = String(new FormData(form).get('busca') || '').trim();
+  simples.page = 1;
+  void loadSimplesNacionalEmpresas();
+}
+
+async function clearSimplesNacionalTable() {
+  if (state.dataSource !== 'api') {
+    pushToast('A remocao da tabela do Simples Nacional exige conexao com a API.', 'info');
+    return;
+  }
+
+  const simples = state.settings.simplesNacional;
+  simples.clearing = true;
+  render();
+
+  try {
+    const result = await apiRequest('/simples-nacional/empresas', {
+      method: 'DELETE',
+      timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS
+    });
+    simples.lastImport = null;
+    simples.consulta = null;
+    simples.page = 1;
+    simples.busca = '';
+    pushToast(`Tabela do Simples Nacional removida (${formatInteger(result?.removidas)} empresa(s)).`, 'success');
+    await loadSimplesNacionalSettings({ silent: true });
+  } catch (error) {
+    pushToast(`Falha ao remover tabela: ${readSimplesNacionalErrorMessage(error)}`, 'error');
+  } finally {
+    simples.clearing = false;
+    render();
   }
 }
 

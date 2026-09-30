@@ -3062,6 +3062,16 @@ tbody tr.cert-row-a-vencer:hover {
   flex-wrap: wrap;
 }
 
+.simples-nacional-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.simples-nacional-section {
+  display: grid;
+  gap: 10px;
+}
+
 .dual-grid {
   display: grid;
   grid-template-columns: 1.8fr 1fr;

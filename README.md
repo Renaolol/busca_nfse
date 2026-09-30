@@ -335,6 +335,26 @@ Exemplo de body para lote:
 }
 ```
 
+## Empresas do Simples Nacional
+
+Na tela `Configuracoes > Empresas do Simples Nacional`, o administrador anexa a tabela de empresas optantes que o sistema usa para identificar empresas do Simples Nacional.
+
+- Formatos aceitos: `.xlsx`, `.csv` ou `.txt` (separador `;`, `,`, tab ou `|`; UTF-8 ou Windows-1252). O `.xls` antigo (Excel 97-2003) nao e aceito.
+- A planilha precisa ter uma coluna com cabecalho contendo `CNPJ`; a coluna de razao social (`Razao Social`, `Nome Empresarial`, `Nome`, `Empresa`...) e opcional. Sem cabecalho, a coluna de CNPJ e detectada pelo conteudo.
+- Todas as linhas com CNPJ valido (digito verificador conferido, inclusive CNPJ alfanumerico) sao consideradas optantes. CNPJ numerico sem zero a esquerda (celula numerica do Excel) e completado. A raiz de 8 digitos tambem e aceita.
+- A identificacao e feita pela raiz do CNPJ (8 primeiros caracteres), valendo para matriz e filiais. Linhas repetidas da mesma raiz sao agrupadas.
+- Cada nova tabela substitui a anterior por completo. Se a planilha nao tiver nenhum CNPJ valido, a tabela atual e mantida.
+
+Endpoints (perfis `admin` e `comum`; usuarios `cliente` nao tem acesso):
+
+- `GET /simples-nacional`: total de empresas e dados da ultima importacao.
+- `GET /simples-nacional/empresas?busca=&page=&pageSize=`: lista paginada (padrao `50`, maximo `200`) com filtro por CNPJ parcial ou razao social.
+- `GET /simples-nacional/empresas/:cnpj`: informa se o CNPJ (14 caracteres, com ou sem pontuacao) ou a raiz (8 digitos) consta na tabela (`optante: true|false`).
+- `POST /simples-nacional/importacoes` (admin): recebe `{ "nomeArquivo": "empresas.xlsx", "arquivoBase64": "..." }`, substitui a tabela e retorna totais, colunas identificadas e ate 50 linhas ignoradas com o motivo.
+- `DELETE /simples-nacional/empresas` (admin): remove a tabela inteira.
+
+Para outros modulos, `SimplesNacionalService` (exportado por `SimplesNacionalModule`) oferece `consultarCnpj(cnpj)` e `filtrarOptantes(cnpjs)` para identificar empresas em lote.
+
 ## NF-e de compra e venda
 
 - A base de NF-e reaproveita `cliente`, `estabelecimento`, `certificado` e `storage` ja existentes.

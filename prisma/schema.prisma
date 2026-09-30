@@ -473,6 +473,7 @@ model Usuario {
   eventosAcesso EventoAcesso[]
   auditorias    AuditoriaUsuario[]
   conferenciasDocumentos DocumentoConferencia[]
+  simplesNacionalImportacoes SimplesNacionalImportacao[]
 
   @@index([clienteId, ativo], map: "usuarios_cliente_id_ativo_idx")
   @@map("usuarios")
@@ -576,4 +577,37 @@ model CompareSpedHistorico {
   @@index([clienteId, generatedAt], map: "compare_sped_historicos_cliente_id_generated_at_idx")
   @@index([createdAt], map: "compare_sped_historicos_created_at_idx")
   @@map("compare_sped_historicos")
+}
+
+model SimplesNacionalImportacao {
+  id              String   @id @default(uuid()) @db.Uuid
+  nomeArquivo     String   @map("nome_arquivo") @db.VarChar(255)
+  totalLinhas     Int      @default(0) @map("total_linhas")
+  totalEmpresas   Int      @default(0) @map("total_empresas")
+  totalIgnoradas  Int      @default(0) @map("total_ignoradas")
+  totalDuplicadas Int      @default(0) @map("total_duplicadas")
+  usuarioId       String?  @map("usuario_id") @db.Uuid
+  usuarioNome     String?  @map("usuario_nome") @db.VarChar(255)
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  usuario  Usuario?                 @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  empresas SimplesNacionalEmpresa[]
+
+  @@index([createdAt], map: "simples_nacional_importacoes_created_at_idx")
+  @@map("simples_nacional_importacoes")
+}
+
+model SimplesNacionalEmpresa {
+  id           String   @id @default(uuid()) @db.Uuid
+  importacaoId String   @map("importacao_id") @db.Uuid
+  cnpjBase     String   @unique @map("cnpj_base") @db.VarChar(8)
+  cnpj         String?  @db.VarChar(14)
+  razaoSocial  String?  @map("razao_social") @db.VarChar(255)
+  linhaOrigem  Int?     @map("linha_origem")
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  importacao SimplesNacionalImportacao @relation(fields: [importacaoId], references: [id], onDelete: Cascade)
+
+  @@index([importacaoId], map: "simples_nacional_empresas_importacao_id_idx")
+  @@map("simples_nacional_empresas")
 }
