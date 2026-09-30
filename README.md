@@ -339,13 +339,14 @@ Exemplo de body para lote:
 
 Na tela `Configuracoes > Empresas do Simples Nacional`, o administrador anexa a tabela de empresas optantes que o sistema usa para identificar empresas do Simples Nacional. Em `Armazenados`, a contraparte que emitiu o documento (prestador da NFS-e tomada, emitente da NF-e/CT-e recebidos) recebe o selo `Simples Nacional`, e as exportacoes CSV ganham a coluna `Prestador/Emitente no Simples Nacional`.
 
-- Formatos aceitos: `.zip` (com o `.csv` dentro), `.csv`, `.txt` e `.xlsx`, ate 5 GB (`.xlsx` ate 100 MB). O `.xls` antigo (Excel 97-2003) nao e aceito. Texto em UTF-8 ou Windows-1252; separador `;`, `,`, tab ou `|`.
+- Formatos aceitos: `.zip` (com o `.csv` dentro), `.csv`, `.txt`, `.gz` e `.xlsx`, ate 5 GB (`.xlsx` ate 100 MB). O `.xls` antigo (Excel 97-2003) nao e aceito. Texto em UTF-8 ou Windows-1252; separador `;`, `,`, tab ou `|`.
+- CSV/TXT a partir de 20 MB e compactado em gzip pelo proprio navegador antes do envio (`CompressionStream`); o backend reconhece o gzip pelo conteudo, independentemente da extensao. Num teste com arquivo sintetico de 2,2 GB no layout da Receita, o envio caiu para 92 MB e a compactacao levou cerca de 7 s.
 - Arquivo `Simples` dos dados abertos do CNPJ (Receita Federal): detectado automaticamente (sem cabecalho, CNPJ basico + opcao S/N + datas). Entram apenas as empresas com opcao `S`; as demais contam como nao optantes. Pode ser enviado como o `.zip` baixado da Receita.
 - Planilha propria: precisa de uma coluna com cabecalho contendo `CNPJ`; razao social (`Razao Social`, `Nome Empresarial`, `Nome`, `Empresa`...) e opcional. Se houver coluna de opcao/regime (`Opcao pelo Simples`, `Optante`, `Regime`...), entram apenas as linhas marcadas como optantes (`S`, `Sim`, `Simples Nacional`...); sem essa coluna, todas as linhas com CNPJ valido entram. Sem cabecalho, a coluna de CNPJ e detectada pelo conteudo.
 - CNPJ validado pelo digito verificador (inclusive CNPJ alfanumerico); CNPJ numerico sem zero a esquerda e completado; raiz de 8 digitos tambem e aceita.
 - A identificacao e feita pela raiz do CNPJ (8 primeiros caracteres), valendo para matriz e filiais.
 - O arquivo e recebido em streaming e processado em segundo plano. A tela mostra o envio e o andamento; a tabela atual continua valendo ate a nova ser gravada por completo, e e mantida se a importacao falhar. Uma importacao sem sinal de vida por 2 minutos (ex.: servidor reiniciado) e marcada como interrompida.
-- A leitura do arquivo processa cerca de 1 milhao de linhas por segundo; o tempo total da base nacional depende principalmente da gravacao no PostgreSQL (dezenas de milhoes de linhas ocupam alguns GB). O Node encerra envios que demorem mais de 5 minutos (`requestTimeout` padrao), por isso prefira enviar o `.zip`.
+- A leitura do arquivo processa cerca de 1 milhao de linhas por segundo; o tempo total da base nacional depende principalmente da gravacao no PostgreSQL (dezenas de milhoes de linhas ocupam alguns GB). O Node encerra envios que demorem mais de 5 minutos (`requestTimeout` padrao); a compactacao automatica evita isso na pratica, e em navegadores sem `CompressionStream` envie o `.zip`.
 
 Endpoints (perfis `admin` e `comum`, exceto quando indicado):
 

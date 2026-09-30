@@ -37,7 +37,7 @@ export class SimplesNacionalService {
   private static readonly LIMITE_SEM_BATIMENTO_MS = 2 * 60 * 1000;
   private static readonly TIMEOUT_TRANSACAO_MS = 6 * 60 * 60 * 1000;
   private static readonly PREFIXO_TEMPORARIO = 'nfse-simples-';
-  private static readonly EXTENSOES_ACEITAS = /\.(csv|txt|xlsx|zip)$/i;
+  private static readonly EXTENSOES_ACEITAS = /\.(csv|txt|xlsx|zip|gz)$/i;
 
   private readonly logger = new Logger(SimplesNacionalService.name);
   private processamento: Promise<void> | null = null;

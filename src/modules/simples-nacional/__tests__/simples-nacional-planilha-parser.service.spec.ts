@@ -3,6 +3,7 @@ import JSZip from 'jszip';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gzipSync } from 'node:zlib';
 import {
   PlanilhaSimplesEmpresa,
   SimplesNacionalPlanilhaParserService
@@ -210,6 +211,23 @@ describe('SimplesNacionalPlanilhaParserService', () => {
     );
     expect(lotes.map((lote) => lote.length)).toEqual([5000, 4000]);
     expect(lotes[0][0]).toEqual({ cnpjBase: '10000001', cnpj: null, razaoSocial: null, linha: 2 });
+  });
+
+  it('le CSV compactado em gzip pelo navegador mesmo com nome .csv', async () => {
+    const csv = [linhaReceita('11222333', 'S'), linhaReceita('04252011', 'N'), linhaReceita('98765432', 'S')].join('\n');
+
+    const { resumo, empresas } = await processar('Simples.csv', gzipSync(Buffer.from(csv, 'latin1')));
+
+    expect(resumo).toEqual(expect.objectContaining({ layout: 'receita_simples', totalOptantes: 2, totalNaoOptantes: 1 }));
+    expect(empresas.map((empresa) => empresa.cnpjBase)).toEqual(['11222333', '98765432']);
+  });
+
+  it('informa arquivo compactado corrompido', async () => {
+    const compactado = gzipSync(Buffer.from(Array.from({ length: 5000 }, (_, i) => linhaReceita(String(10000000 + i), 'S')).join('\n')));
+
+    await expect(processar('Simples.csv', compactado.subarray(0, Math.floor(compactado.length / 2)))).rejects.toThrow(
+      'corrompido ou incompleto'
+    );
   });
 
   it('le XLSX com textos compartilhados e CNPJ numerico sem zero a esquerda', async () => {

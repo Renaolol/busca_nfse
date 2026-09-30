@@ -43,6 +43,7 @@ const SIMPLES_NACIONAL_MAX_FILE_BYTES = 5 * 1024 * 1024 * 1024;
 const SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS = 15000;
 const SIMPLES_NACIONAL_POLL_INTERVAL_MS = 4000;
 const SIMPLES_NACIONAL_LOOKUP_BATCH_SIZE = 5000;
+const SIMPLES_NACIONAL_COMPRESS_MIN_BYTES = 20 * 1024 * 1024;
 const XML_READER30_NFE_COLUMN_ORDER_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-order:v1';
 const XML_READER30_NFE_COLUMN_WIDTHS_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-widths:v1';
 const XML_READER30_NFE_REGIME_STORAGE_KEY = 'gcont:xml-reader30-nfe-regime:v1';
@@ -559,6 +560,7 @@ const state = {
       page: 1,
       importing: false,
       uploadProgress: null,
+      uploadPhase: null,
       clearing: false,
       consultaCnpj: '',
       consultando: false,
@@ -10241,7 +10243,7 @@ function renderSimplesNacionalImportForm(simples, totalEmpresas) {
       <label class="field" style="grid-column: span 2;">
         Tabela de empresas (.zip, .csv, .txt ou .xlsx)
         <input name="arquivo" type="file" accept=".zip,.csv,.txt,.xlsx" required ${busy ? 'disabled' : ''} />
-        <small class="row-sub">Aceita o arquivo Simples dos dados abertos do CNPJ da Receita Federal (.zip ou .csv, entram apenas as empresas com opcao "S") ou uma planilha com coluna "CNPJ" (razao social opcional; se houver coluna de opcao/regime, entram apenas as linhas optantes). Limite de 5 GB; prefira enviar o .zip.</small>
+        <small class="row-sub">Aceita o arquivo Simples dos dados abertos do CNPJ da Receita Federal (.zip ou .csv, entram apenas as empresas com opcao "S") ou uma planilha com coluna "CNPJ" (razao social opcional; se houver coluna de opcao/regime, entram apenas as linhas optantes). Limite de 5 GB; CSVs grandes sao compactados automaticamente pelo navegador antes do envio.</small>
       </label>
       <div class="stack-actions" style="justify-content:flex-start; align-self:start; margin-top:22px;">
         <button class="btn primary" type="submit" ${busy ? 'disabled' : ''}>${simples.importing ? 'Enviando...' : 'Anexar tabela'}</button>
@@ -10258,14 +10260,19 @@ function renderSimplesNacionalImportForm(simples, totalEmpresas) {
 function renderSimplesNacionalAndamento(simples) {
   if (simples.importing && simples.uploadProgress !== null) {
     const percentual = Math.min(100, Math.floor(Number(simples.uploadProgress || 0) * 100));
+    const compactando = simples.uploadPhase === 'compactando';
     return `
       <div class="progress-card">
         <div class="progress-meta">
-          <strong>Enviando arquivo para o servidor</strong>
+          <strong>${compactando ? 'Compactando o arquivo antes do envio' : 'Enviando arquivo para o servidor'}</strong>
           <span>${escapeHtml(`${percentual}%`)}</span>
         </div>
         <div class="progress-track"><div class="progress-fill" style="width:${percentual}%;"></div></div>
-        <span class="row-sub">Mantenha esta pagina aberta ate o envio terminar. Depois o processamento continua no servidor.</span>
+        <span class="row-sub">${
+          compactando
+            ? 'O navegador compacta o CSV para enviar um arquivo bem menor. Mantenha esta pagina aberta.'
+            : 'Mantenha esta pagina aberta ate o envio terminar. Depois o processamento continua no servidor.'
+        }</span>
       </div>
     `;
   }
@@ -20717,10 +20724,32 @@ function scheduleSimplesNacionalPolling() {
   }, SIMPLES_NACIONAL_POLL_INTERVAL_MS);
 }
 
-function uploadSimplesNacionalFile(file, onProgress) {
+// CSV grande (ex.: arquivo Simples da Receita, ~2 GB) vai compactado em gzip: fica ~10x menor e o envio
+// termina antes do limite de 5 minutos do servidor. O backend reconhece o gzip pelo conteudo.
+function shouldCompressSimplesNacionalFile(file) {
+  return (
+    typeof CompressionStream === 'function' &&
+    /\.(csv|txt)$/i.test(file.name) &&
+    file.size >= SIMPLES_NACIONAL_COMPRESS_MIN_BYTES
+  );
+}
+
+async function compressSimplesNacionalFile(file, onProgress) {
+  let bytesLidos = 0;
+  const contador = new TransformStream({
+    transform(chunk, controller) {
+      bytesLidos += chunk.byteLength;
+      onProgress(bytesLidos / file.size);
+      controller.enqueue(chunk);
+    }
+  });
+  return new Response(file.stream().pipeThrough(contador).pipeThrough(new CompressionStream('gzip'))).blob();
+}
+
+function uploadSimplesNacionalFile(file, nomeArquivo, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', `/simples-nacional/importacoes?nomeArquivo=${encodeURIComponent(file.name)}`);
+    xhr.open('POST', `/simples-nacional/importacoes?nomeArquivo=${encodeURIComponent(nomeArquivo)}`);
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
     xhr.setRequestHeader('X-Session-Activity', 'active');
     if (state.auth.accessToken) {
@@ -20742,11 +20771,19 @@ function uploadSimplesNacionalFile(file, onProgress) {
         return;
       }
 
-      const error = new Error(`HTTP ${xhr.status}${xhr.responseText ? ` - ${xhr.responseText}` : ''}`);
+      const error =
+        xhr.status === 408
+          ? new Error('O envio passou do tempo limite do servidor (5 minutos). Compacte o arquivo em .zip e tente novamente.')
+          : new Error(`HTTP ${xhr.status}${xhr.responseText ? ` - ${xhr.responseText}` : ''}`);
       error.status = xhr.status;
       reject(error);
     };
-    xhr.onerror = () => reject(new Error('Falha de conexao durante o envio do arquivo.'));
+    xhr.onerror = () =>
+      reject(
+        new Error(
+          'A conexao caiu durante o envio do arquivo. Se o envio passou de 5 minutos, compacte o arquivo em .zip e tente novamente.'
+        )
+      );
     xhr.onabort = () => reject(new Error('Envio do arquivo cancelado.'));
     xhr.send(file);
   });
@@ -20891,21 +20928,27 @@ async function submitSimplesNacionalImportForm(form) {
 
   simples.importing = true;
   simples.uploadProgress = 0;
+  simples.uploadPhase = shouldCompressSimplesNacionalFile(file) ? 'compactando' : 'enviando';
   simples.errorMessage = '';
   render();
 
+  let lastPercent = -1;
+  const updateProgress = (fraction) => {
+    simples.uploadProgress = fraction;
+    const percent = Math.floor(fraction * 100);
+    if (percent !== lastPercent) {
+      lastPercent = percent;
+      refreshSimplesNacionalAndamentoNode();
+    }
+  };
+
   try {
+    const conteudo = simples.uploadPhase === 'compactando' ? await compressSimplesNacionalFile(file, updateProgress) : file;
+    simples.uploadPhase = 'enviando';
+    updateProgress(0);
     // Garante um token valido antes de iniciar um envio que pode levar minutos.
     await apiRequest('/auth/me', { cache: false, timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS });
-    let lastPercent = 0;
-    const importacao = await uploadSimplesNacionalFile(file, (fraction) => {
-      simples.uploadProgress = fraction;
-      const percent = Math.floor(fraction * 100);
-      if (percent !== lastPercent) {
-        lastPercent = percent;
-        refreshSimplesNacionalAndamentoNode();
-      }
-    });
+    const importacao = await uploadSimplesNacionalFile(conteudo, file.name, updateProgress);
     if (importacao?.id) {
       simples.resumo = { ...(simples.resumo || {}), ultimaTentativa: importacao };
     }
@@ -20918,6 +20961,7 @@ async function submitSimplesNacionalImportForm(form) {
   } finally {
     simples.importing = false;
     simples.uploadProgress = null;
+    simples.uploadPhase = null;
   }
 
   await loadSimplesNacionalSettings({ silent: true });

@@ -1,8 +1,8 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { createReadStream } from 'node:fs';
 import { open, readFile, stat } from 'node:fs/promises';
-import { Readable } from 'node:stream';
-import { createInflateRaw } from 'node:zlib';
+import { Readable, Transform } from 'node:stream';
+import { createGunzip, createInflateRaw } from 'node:zlib';
 import JSZip from 'jszip';
 
 export type PlanilhaSimplesLayout = 'planilha' | 'receita_simples';
@@ -330,6 +330,11 @@ export class SimplesNacionalPlanilhaParserService {
       );
     }
 
+    // Gzip: o navegador compacta CSVs grandes antes do envio (o nome continua o do arquivo original).
+    if (inicio[0] === 0x1f && inicio[1] === 0x8b) {
+      return [() => this.lerLinhasTexto(this.descompactar(createReadStream(caminho), createGunzip()))];
+    }
+
     if (inicio.length < 4 || inicio.readUInt32LE(0) !== 0x04034b50) {
       return [() => this.lerLinhasTexto(createReadStream(caminho))];
     }
@@ -477,22 +482,28 @@ export class SimplesNacionalPlanilhaParserService {
     }
 
     const bruto = createReadStream(caminho, { start: inicioDados, end: inicioDados + entrada.tamanhoComprimido - 1 });
-    if (entrada.metodo === 0) {
-      return bruto;
-    }
+    return entrada.metodo === 0 ? bruto : this.descompactar(bruto, createInflateRaw());
+  }
 
-    const descompactado = createInflateRaw();
-    bruto.on('error', (error) => descompactado.destroy(error));
-    return bruto.pipe(descompactado);
+  private descompactar(bruto: Readable, descompactador: Transform): Readable {
+    bruto.on('error', (error) => descompactador.destroy(error));
+    return bruto.pipe(descompactador);
   }
 
   private async *lerLinhasTexto(bytes: AsyncIterable<Buffer>): AsyncGenerator<PlanilhaLinha[]> {
     const leitor = new LeitorCsv();
-    for await (const texto of this.decodificarTexto(bytes)) {
-      const linhas = leitor.processar(texto);
-      if (linhas.length) {
-        yield linhas;
+    try {
+      for await (const texto of this.decodificarTexto(bytes)) {
+        const linhas = leitor.processar(texto);
+        if (linhas.length) {
+          yield linhas;
+        }
       }
+    } catch (error) {
+      if (String((error as { code?: unknown })?.code ?? '').startsWith('Z_')) {
+        throw new BadRequestException('O arquivo compactado esta corrompido ou incompleto. Envie o arquivo novamente.');
+      }
+      throw error;
     }
 
     const finais = leitor.finalizar();
