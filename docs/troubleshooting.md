@@ -134,6 +134,17 @@ npm run prisma:deploy
 
 O servico Windows (`deploy/windows/start-notasync.cmd`) roda `npm run prisma:deploy` antes de `node dist\main.js`. Enquanto uma migration demorada roda, a porta nao abre; se ela falhar, o servico reinicia a cada 10 s sem nunca abrir.
 
+Recuperacao automatica (PowerShell como Administrador, na raiz do projeto no servidor):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\windows\recuperar-notasync.ps1 -SomenteDiagnostico
+powershell -ExecutionPolicy Bypass -File .\deploy\windows\recuperar-notasync.ps1 -ExcluirTabelaSimples
+```
+
+O script mostra o diagnostico (logs, espaco em disco, PostgreSQL, `.env`, dependencias), para o servico e os processos do Prisma presos, reinstala as dependencias se o `node_modules` estiver quebrado, opcionalmente esvazia a tabela do Simples Nacional, libera migrations do Simples Nacional marcadas como falha (`migrate resolve --rolled-back`), roda `npm run build` e `npm run prisma:deploy`, inicia o servico e espera `/health` responder. Sem `-ExcluirTabelaSimples`, a criacao do indice de busca sobre uma tabela cheia pode levar muitos minutos.
+
+Passos manuais equivalentes:
+
 - Ver o log: `Get-Content .\logs\NotaSyncGCONT.out.log -Tail 40` e `Get-Content .\logs\NotaSyncGCONT.err.log -Tail 40`.
 - Parado em ``Applying migration `20260930190000_simples_nacional_busca_nome` ``: o indice de busca por nome esta sendo criado sobre a tabela do Simples Nacional ja carregada. Aguarde; o progresso aparece em `SELECT phase, blocks_done, blocks_total, tuples_done, tuples_total FROM pg_stat_progress_create_index;`.
 - `P3009` / `migrate found failed migrations`: a migration foi interrompida. Rode `npx prisma migrate resolve --rolled-back <nome_da_migration>` e depois `npm run prisma:deploy` (sem fechar a janela ate terminar).
