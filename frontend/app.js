@@ -39,9 +39,10 @@ const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
 const COMPARE_SPED_HISTORY_LIMIT = 10;
 const SIMPLES_NACIONAL_PAGE_SIZE = 50;
-const SIMPLES_NACIONAL_MAX_FILE_BYTES = 7 * 1024 * 1024;
+const SIMPLES_NACIONAL_MAX_FILE_BYTES = 5 * 1024 * 1024 * 1024;
 const SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS = 15000;
-const SIMPLES_NACIONAL_IMPORT_TIMEOUT_MS = 2 * 60 * 1000;
+const SIMPLES_NACIONAL_POLL_INTERVAL_MS = 4000;
+const SIMPLES_NACIONAL_LOOKUP_BATCH_SIZE = 5000;
 const XML_READER30_NFE_COLUMN_ORDER_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-order:v1';
 const XML_READER30_NFE_COLUMN_WIDTHS_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-widths:v1';
 const XML_READER30_NFE_REGIME_STORAGE_KEY = 'gcont:xml-reader30-nfe-regime:v1';
@@ -557,8 +558,8 @@ const state = {
       busca: '',
       page: 1,
       importing: false,
+      uploadProgress: null,
       clearing: false,
-      lastImport: null,
       consultaCnpj: '',
       consultando: false,
       consulta: null
@@ -568,6 +569,8 @@ const state = {
     },
     danfseReprocessRunning: false
   },
+  // Raiz do CNPJ -> true (Simples Nacional), false (nao consta) ou null (consulta em andamento).
+  simplesNacionalOptantes: {},
   filters: {
     clients: {
       query: '',
@@ -4813,6 +4816,7 @@ function renderNfeSearchSummary() {
 }
 
 function renderNfeDocumentsTableCard(docs) {
+  ensureSimplesNacionalFlags(docs, 'nfe');
   const selectableDocs = docs.filter((doc) => Boolean(doc.apiNfeId));
   const selectedVisibleCount = selectableDocs.filter((doc) => state.selectedNfeIds.has(doc.id)).length;
   const allVisibleSelected = selectableDocs.length > 0 && selectedVisibleCount === selectableDocs.length;
@@ -4881,6 +4885,7 @@ function renderNfeDocumentsTableCard(docs) {
                     <td>
                       <span class="row-title">${escapeHtml(doc.contraparteNome || '-')}</span>
                       <span class="row-sub">${escapeHtml(formatCnpj(doc.contraparteCnpj || ''))}</span>
+                      ${renderSimplesNacionalSupplierBadge(doc, 'nfe')}
                     </td>
                     <td>${escapeHtml(formatDateTime(doc.dataEmissao))}</td>
                     <td>${escapeHtml(formatOptionalCurrency(doc.valor))}</td>
@@ -5063,6 +5068,7 @@ function renderCteSearchSummary() {
 }
 
 function renderCteDocumentsTableCard(docs) {
+  ensureSimplesNacionalFlags(docs, 'cte');
   const totalValue = sumListedDocumentValues(docs);
   const totalResults = Number(state.cteSearch.total || docs.length || 0);
   const syncDisabled =
@@ -5119,6 +5125,7 @@ function renderCteDocumentsTableCard(docs) {
                     <td>
                       <span class="row-title">${escapeHtml(doc.contraparteNome || '-')}</span>
                       <span class="row-sub">${escapeHtml(formatCnpj(doc.contraparteCnpj || ''))}</span>
+                      ${renderSimplesNacionalSupplierBadge(doc, 'cte')}
                     </td>
                     <td>${escapeHtml(formatDateTime(doc.dataEmissao))}</td>
                     <td>${escapeHtml(formatOptionalCurrency(doc.valor))}</td>
@@ -5571,6 +5578,7 @@ function renderNfseGapAuditPreview(gaps) {
 }
 
 function renderXmlsTableCard(xmls) {
+  ensureSimplesNacionalFlags(xmls, 'nfse');
   const selectableXmls = xmls.filter((xml) => Boolean(xml.apiNfseId));
   const informativeRowsCount = xmls.filter((xml) => Boolean(xml?.isNumberingException)).length;
   const syncableRowsCount = xmls.filter((xml) => canSyncXmlEvents(xml)).length;
@@ -5672,7 +5680,7 @@ function renderXmlsTableCard(xmls) {
                     <td><input type="checkbox" data-action="xml-select" data-xml-id="${escapeHtml(xml.id)}" ${state.selectedXmlIds.has(xml.id) ? 'checked' : ''} ${xml.apiNfseId ? '' : 'disabled'} aria-label="Selecionar NFS-e ${escapeHtml(xml.numeroNfse || '-')}" /></td>
                     <td>${renderNfseNumber(xml)}</td>
                     <td>${escapeHtml(xml.cliente)}</td>
-                    <td>${escapeHtml(xml.contraparteNome || '-')}</td>
+                    <td>${escapeHtml(xml.contraparteNome || '-')}${renderSimplesNacionalSupplierBadge(xml, 'nfse')}</td>
                     <td>${escapeHtml(xml.municipio)}</td>
                     <td>${escapeHtml(formatDate(xml.dataEmissao))}</td>
                     <td>${escapeHtml(formatDateTime(xml.dataDownload))}</td>
@@ -10167,20 +10175,20 @@ function renderSimplesNacionalSettingsPanel() {
   const isAdmin = state.auth.user?.role === 'admin';
   const ultimaImportacao = simples.resumo?.ultimaImportacao || null;
   const totalEmpresas = Number(simples.resumo?.totalEmpresas || 0);
-  const statusLabel = simples.loading
+  const statusLabel = simples.loading && !simples.resumo
     ? 'Carregando'
     : ultimaImportacao
       ? `${formatInteger(totalEmpresas)} empresa(s)`
       : 'Sem tabela';
-  const statusTone = simples.loading ? 'info' : ultimaImportacao ? 'success' : 'neutral';
+  const statusTone = simples.loading && !simples.resumo ? 'info' : ultimaImportacao ? 'success' : 'neutral';
   const statusDescription = ultimaImportacao
-    ? `Anexada em ${formatDateTime(ultimaImportacao.importadoEm)}${ultimaImportacao.importadoPor ? ` por ${ultimaImportacao.importadoPor}` : ''}`
-    : 'Anexe uma planilha para o sistema identificar as empresas do Simples Nacional.';
+    ? `Tabela em uso desde ${formatDateTime(ultimaImportacao.concluidoEm || ultimaImportacao.importadoEm)}${ultimaImportacao.importadoPor ? `, anexada por ${ultimaImportacao.importadoPor}` : ''}`
+    : 'Anexe uma tabela para o sistema identificar as empresas do Simples Nacional.';
 
   return `
     <div class="simples-nacional-panel">
       <p class="card-subtitle" style="margin:0;">
-        Tabela com as empresas optantes pelo Simples Nacional. O NotaSync identifica a empresa pela raiz do CNPJ (8 primeiros digitos), valendo para matriz e filiais. Cada nova tabela anexada substitui a anterior.
+        Tabela com as empresas optantes pelo Simples Nacional. O NotaSync identifica a empresa pela raiz do CNPJ (8 primeiros digitos), valendo para matriz e filiais, e sinaliza os fornecedores/emitentes do Simples em Armazenados. Cada nova tabela anexada substitui a anterior.
       </p>
       ${simples.errorMessage ? `<div class="table-state error" style="padding:12px;">${escapeHtml(simples.errorMessage)}</div>` : ''}
 
@@ -10195,13 +10203,15 @@ function renderSimplesNacionalSettingsPanel() {
         </div>
       </div>
 
+      <div data-simples-nacional-andamento>${renderSimplesNacionalAndamento(simples)}</div>
+
       ${
         isAdmin
           ? renderSimplesNacionalImportForm(simples, totalEmpresas)
           : '<p class="row-sub" style="margin:0;">Somente administradores podem anexar ou remover a tabela do Simples Nacional.</p>'
       }
 
-      ${simples.lastImport ? renderSimplesNacionalLastImport(simples.lastImport) : ''}
+      ${ultimaImportacao ? renderSimplesNacionalImportacaoAtiva(ultimaImportacao) : ''}
 
       <form id="settingsSimplesNacionalConsultaForm" class="form-grid three">
         <label class="field">
@@ -10219,18 +10229,22 @@ function renderSimplesNacionalSettingsPanel() {
   `;
 }
 
+function isSimplesNacionalProcessando(simples) {
+  return simples.resumo?.ultimaTentativa?.status === 'processando';
+}
+
 function renderSimplesNacionalImportForm(simples, totalEmpresas) {
-  const busy = simples.importing || simples.clearing;
+  const busy = simples.importing || simples.clearing || isSimplesNacionalProcessando(simples);
 
   return `
     <form id="settingsSimplesNacionalImportForm" class="form-grid three compare-form">
       <label class="field" style="grid-column: span 2;">
-        Tabela de empresas (.xlsx, .csv ou .txt)
-        <input name="arquivo" type="file" accept=".xlsx,.csv,.txt" required ${busy ? 'disabled' : ''} />
-        <small class="row-sub">A planilha precisa ter uma coluna "CNPJ". A coluna "Razao Social" (ou "Nome") e opcional. Todas as linhas com CNPJ valido serao consideradas optantes. Limite de 7 MB.</small>
+        Tabela de empresas (.zip, .csv, .txt ou .xlsx)
+        <input name="arquivo" type="file" accept=".zip,.csv,.txt,.xlsx" required ${busy ? 'disabled' : ''} />
+        <small class="row-sub">Aceita o arquivo Simples dos dados abertos do CNPJ da Receita Federal (.zip ou .csv, entram apenas as empresas com opcao "S") ou uma planilha com coluna "CNPJ" (razao social opcional; se houver coluna de opcao/regime, entram apenas as linhas optantes). Limite de 5 GB; prefira enviar o .zip.</small>
       </label>
       <div class="stack-actions" style="justify-content:flex-start; align-self:start; margin-top:22px;">
-        <button class="btn primary" type="submit" ${busy ? 'disabled' : ''}>${simples.importing ? 'Anexando...' : 'Anexar tabela'}</button>
+        <button class="btn primary" type="submit" ${busy ? 'disabled' : ''}>${simples.importing ? 'Enviando...' : 'Anexar tabela'}</button>
         ${
           totalEmpresas
             ? `<button class="btn secondary" type="button" data-action="settings-simples-clear" ${busy ? 'disabled' : ''}>${simples.clearing ? 'Removendo...' : 'Remover tabela'}</button>`
@@ -10241,23 +10255,71 @@ function renderSimplesNacionalImportForm(simples, totalEmpresas) {
   `;
 }
 
-function renderSimplesNacionalLastImport(result) {
-  const importacao = result?.importacao || {};
-  const linhasIgnoradas = Array.isArray(result?.linhasIgnoradas) ? result.linhasIgnoradas : [];
+function renderSimplesNacionalAndamento(simples) {
+  if (simples.importing && simples.uploadProgress !== null) {
+    const percentual = Math.min(100, Math.floor(Number(simples.uploadProgress || 0) * 100));
+    return `
+      <div class="progress-card">
+        <div class="progress-meta">
+          <strong>Enviando arquivo para o servidor</strong>
+          <span>${escapeHtml(`${percentual}%`)}</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill" style="width:${percentual}%;"></div></div>
+        <span class="row-sub">Mantenha esta pagina aberta ate o envio terminar. Depois o processamento continua no servidor.</span>
+      </div>
+    `;
+  }
+
+  const tentativa = simples.resumo?.ultimaTentativa;
+  if (tentativa?.status === 'processando') {
+    return `
+      <div class="progress-card">
+        <div class="progress-meta">
+          <strong>${escapeHtml(`Processando ${tentativa.nomeArquivo}`)}</strong>
+          <span>${escapeHtml(
+            Number(tentativa.linhasProcessadas) > 0
+              ? `${formatInteger(tentativa.linhasProcessadas)} linha(s) lida(s)`
+              : 'Preparando a importacao...'
+          )}</span>
+        </div>
+        <div class="progress-track"><div class="progress-fill simples-nacional-progress-indeterminate"></div></div>
+        <span class="row-sub">${escapeHtml(`Iniciado em ${formatDateTime(tentativa.importadoEm)}${tentativa.importadoPor ? ` por ${tentativa.importadoPor}` : ''}. Arquivos com milhoes de linhas podem levar varios minutos; a tabela atual continua valendo ate o fim. Voce pode sair desta tela.`)}</span>
+      </div>
+    `;
+  }
+
+  if (tentativa?.status === 'erro') {
+    return `
+      <div class="table-state error" style="padding:12px; text-align:left;">
+        <strong>${escapeHtml(`A importacao de ${tentativa.nomeArquivo} falhou.`)}</strong>
+        <div>${escapeHtml(tentativa.mensagem || 'Erro desconhecido.')}</div>
+      </div>
+    `;
+  }
+
+  return '';
+}
+
+function renderSimplesNacionalImportacaoAtiva(importacao) {
+  const linhasIgnoradas = Array.isArray(importacao?.linhasIgnoradas) ? importacao.linhasIgnoradas : [];
   const totalIgnoradas = Number(importacao.totalIgnoradas || 0);
-  const colunas = `Colunas identificadas: CNPJ = "${result?.colunaCnpj || '-'}"${
-    result?.colunaRazaoSocial ? `, razao social = "${result.colunaRazaoSocial}"` : ', sem coluna de razao social'
-  }.`;
+  const origem =
+    importacao.layout === 'receita_simples'
+      ? 'Arquivo Simples da Receita Federal (dados abertos do CNPJ).'
+      : `Colunas identificadas: CNPJ = "${importacao.colunaCnpj || '-'}"${
+          importacao.colunaRazaoSocial ? `, razao social = "${importacao.colunaRazaoSocial}"` : ', sem coluna de razao social'
+        }${importacao.colunaOpcao ? `, optantes pela coluna "${importacao.colunaOpcao}"` : ''}.`;
 
   return `
     <div class="simples-nacional-section">
       <div class="kpi-grid">
         ${kpiItem('Linhas lidas', formatInteger(importacao.totalLinhas))}
-        ${kpiItem('Empresas gravadas', formatInteger(importacao.totalEmpresas))}
+        ${kpiItem('Empresas do Simples', formatInteger(importacao.totalEmpresas))}
+        ${kpiItem('Nao optantes', formatInteger(importacao.totalNaoOptantes))}
         ${kpiItem('Repetidas (mesma raiz)', formatInteger(importacao.totalDuplicadas))}
         ${kpiItem('Linhas ignoradas', formatInteger(importacao.totalIgnoradas))}
       </div>
-      <span class="row-sub">${escapeHtml(colunas)}</span>
+      <span class="row-sub">${escapeHtml(origem)}</span>
       ${
         linhasIgnoradas.length
           ? `
@@ -20568,29 +20630,216 @@ function readSimplesNacionalErrorMessage(error) {
   }
 }
 
+let simplesNacionalPollTimer = null;
+
 async function loadSimplesNacionalSettings(options = {}) {
   if (state.dataSource !== 'api') {
     return;
   }
 
   const simples = state.settings.simplesNacional;
+  const tentativaAnterior = simples.resumo?.ultimaTentativa || null;
   simples.loading = true;
   simples.errorMessage = '';
   if (!options.silent) {
     render();
   }
 
+  let renderizarPagina = !options.somenteResumo;
   try {
     const [resumo, empresas] = await Promise.all([
       apiRequest('/simples-nacional', { cache: false, timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS }),
-      apiRequest(buildSimplesNacionalEmpresasPath(), { cache: false, timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS })
+      options.somenteResumo
+        ? Promise.resolve(simples.empresas)
+        : apiRequest(buildSimplesNacionalEmpresasPath(), { cache: false, timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS })
     ]);
     simples.resumo = resumo;
     simples.empresas = empresas;
+
+    const finalizada = tentativaAnterior?.status === 'processando' && resumo?.ultimaTentativa?.status !== 'processando';
+    if (finalizada) {
+      renderizarPagina = true;
+      notifySimplesNacionalImportFinished(tentativaAnterior, resumo);
+    }
   } catch (error) {
+    renderizarPagina = true;
     simples.errorMessage = `Falha ao carregar a tabela do Simples Nacional: ${readSimplesNacionalErrorMessage(error)}`;
   } finally {
     simples.loading = false;
+    if (renderizarPagina) {
+      render();
+    } else {
+      refreshSimplesNacionalAndamentoNode();
+    }
+    scheduleSimplesNacionalPolling();
+  }
+}
+
+function notifySimplesNacionalImportFinished(tentativa, resumo) {
+  const simples = state.settings.simplesNacional;
+  if (resumo?.ultimaImportacao?.id === tentativa.id) {
+    state.simplesNacionalOptantes = {};
+    simples.page = 1;
+    pushToast(
+      `Tabela do Simples Nacional atualizada: ${formatInteger(resumo.ultimaImportacao.totalEmpresas)} empresa(s).`,
+      'success'
+    );
+    void loadSimplesNacionalEmpresas();
+    return;
+  }
+
+  if (resumo?.ultimaTentativa?.id === tentativa.id && resumo.ultimaTentativa.status === 'erro') {
+    pushToast(`Falha ao importar a tabela do Simples Nacional: ${resumo.ultimaTentativa.mensagem || 'erro desconhecido'}`, 'error');
+  }
+}
+
+// Atualiza apenas o bloco de andamento, sem redesenhar a pagina (preserva o que o usuario estiver digitando).
+function refreshSimplesNacionalAndamentoNode() {
+  const node = document.querySelector('[data-simples-nacional-andamento]');
+  if (node) {
+    node.innerHTML = renderSimplesNacionalAndamento(state.settings.simplesNacional);
+  }
+}
+
+function scheduleSimplesNacionalPolling() {
+  window.clearTimeout(simplesNacionalPollTimer);
+  simplesNacionalPollTimer = null;
+  if (!isSimplesNacionalProcessando(state.settings.simplesNacional)) {
+    return;
+  }
+
+  simplesNacionalPollTimer = window.setTimeout(() => {
+    simplesNacionalPollTimer = null;
+    if (state.route.name !== 'configuracoes' || state.settings.tab !== 'simples-nacional') {
+      return;
+    }
+    void loadSimplesNacionalSettings({ silent: true, somenteResumo: true });
+  }, SIMPLES_NACIONAL_POLL_INTERVAL_MS);
+}
+
+function uploadSimplesNacionalFile(file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/simples-nacional/importacoes?nomeArquivo=${encodeURIComponent(file.name)}`);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.setRequestHeader('X-Session-Activity', 'active');
+    if (state.auth.accessToken) {
+      xhr.setRequestHeader('Authorization', `Bearer ${state.auth.accessToken}`);
+    }
+    xhr.upload.onprogress = (event) => {
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(event.loaded / event.total);
+      }
+    };
+    xhr.onload = () => {
+      apiResponseCache.clear();
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          resolve(xhr.responseText ? JSON.parse(xhr.responseText) : null);
+        } catch {
+          resolve(null);
+        }
+        return;
+      }
+
+      const error = new Error(`HTTP ${xhr.status}${xhr.responseText ? ` - ${xhr.responseText}` : ''}`);
+      error.status = xhr.status;
+      reject(error);
+    };
+    xhr.onerror = () => reject(new Error('Falha de conexao durante o envio do arquivo.'));
+    xhr.onabort = () => reject(new Error('Envio do arquivo cancelado.'));
+    xhr.send(file);
+  });
+}
+
+function getSimplesNacionalCnpjBase(cnpj) {
+  const normalized = String(cnpj || '').toUpperCase().replace(/[^0-9A-Z]/g, '');
+  return /^[0-9A-Z]{12}\d{2}$/.test(normalized) ? normalized.slice(0, 8) : '';
+}
+
+// CNPJ de quem emitiu o documento: o prestador na NFS-e e o emitente na NF-e/CT-e.
+function getDocumentEmitterCnpj(doc, kind) {
+  return kind === 'nfse' ? doc?.prestadorCnpj || '' : doc?.emitenteCnpj || '';
+}
+
+// Fornecedor = contraparte que emitiu o documento (NFS-e tomada, NF-e/CT-e recebidos).
+function isCounterpartyDocumentEmitter(doc, kind) {
+  if (kind === 'nfse') {
+    return doc?.tipo === 'Tomada';
+  }
+  return Boolean(doc?.contraparteCnpj) && doc.contraparteCnpj === doc.emitenteCnpj;
+}
+
+function getSimplesNacionalStatus(cnpj) {
+  const base = getSimplesNacionalCnpjBase(cnpj);
+  return base ? state.simplesNacionalOptantes[base] : undefined;
+}
+
+function renderSimplesNacionalSupplierBadge(doc, kind) {
+  if (!isCounterpartyDocumentEmitter(doc, kind)) {
+    return '';
+  }
+
+  return getSimplesNacionalStatus(getDocumentEmitterCnpj(doc, kind)) === true
+    ? `<span class="row-sub">${statusBadge('Simples Nacional', 'info')}</span>`
+    : '';
+}
+
+function formatSimplesNacionalExportValue(cnpj) {
+  const status = getSimplesNacionalStatus(cnpj);
+  return status === true ? 'Sim' : status === false ? 'Nao' : '';
+}
+
+// Chamado pelas tabelas de Armazenados: consulta em lote as raizes ainda desconhecidas e redesenha ao terminar.
+function ensureSimplesNacionalFlags(docs, kind) {
+  if (state.dataSource !== 'api' || !Array.isArray(docs) || !docs.length) {
+    return;
+  }
+
+  const bases = [
+    ...new Set(
+      docs
+        .map((doc) => getSimplesNacionalCnpjBase(getDocumentEmitterCnpj(doc, kind)))
+        .filter((base) => base && state.simplesNacionalOptantes[base] === undefined)
+    )
+  ];
+  if (!bases.length) {
+    return;
+  }
+
+  bases.forEach((base) => {
+    state.simplesNacionalOptantes[base] = null;
+  });
+  window.setTimeout(() => {
+    void fetchSimplesNacionalFlags(bases);
+  }, 0);
+}
+
+async function fetchSimplesNacionalFlags(bases) {
+  const lookup = state.simplesNacionalOptantes;
+  try {
+    for (let index = 0; index < bases.length; index += SIMPLES_NACIONAL_LOOKUP_BATCH_SIZE) {
+      const chunk = bases.slice(index, index + SIMPLES_NACIONAL_LOOKUP_BATCH_SIZE);
+      const response = await apiRequest('/simples-nacional/consultas', {
+        method: 'POST',
+        body: { cnpjs: chunk },
+        timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS
+      });
+      const optantes = new Set(Array.isArray(response?.cnpjBases) ? response.cnpjBases : []);
+      chunk.forEach((base) => {
+        lookup[base] = optantes.has(base);
+      });
+    }
+  } catch (error) {
+    console.warn('Falha ao consultar a tabela do Simples Nacional.', error);
+    bases.forEach((base) => {
+      if (lookup[base] === null) {
+        lookup[base] = false;
+      }
+    });
+  }
+
+  if (lookup === state.simplesNacionalOptantes) {
     render();
   }
 }
@@ -20625,13 +20874,13 @@ async function submitSimplesNacionalImportForm(form) {
     return;
   }
 
-  if (!/\.(xlsx|csv|txt)$/i.test(file.name)) {
-    pushToast('Envie a tabela em .xlsx, .csv ou .txt.', 'error');
+  if (!/\.(zip|csv|txt|xlsx)$/i.test(file.name)) {
+    pushToast('Envie a tabela em .zip, .csv, .txt ou .xlsx.', 'error');
     return;
   }
 
   if (file.size > SIMPLES_NACIONAL_MAX_FILE_BYTES) {
-    pushToast('O arquivo excede o limite de 7 MB. Remova colunas desnecessarias ou envie em .csv.', 'error');
+    pushToast('O arquivo excede o limite de 5 GB. Envie o arquivo compactado em .zip.', 'error');
     return;
   }
 
@@ -20641,29 +20890,37 @@ async function submitSimplesNacionalImportForm(form) {
   }
 
   simples.importing = true;
+  simples.uploadProgress = 0;
   simples.errorMessage = '';
   render();
 
   try {
-    const arquivoBase64 = await fileToBase64(file);
-    const result = await apiRequest('/simples-nacional/importacoes', {
-      method: 'POST',
-      body: { nomeArquivo: file.name, arquivoBase64 },
-      timeoutMs: SIMPLES_NACIONAL_IMPORT_TIMEOUT_MS
+    // Garante um token valido antes de iniciar um envio que pode levar minutos.
+    await apiRequest('/auth/me', { cache: false, timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS });
+    let lastPercent = 0;
+    const importacao = await uploadSimplesNacionalFile(file, (fraction) => {
+      simples.uploadProgress = fraction;
+      const percent = Math.floor(fraction * 100);
+      if (percent !== lastPercent) {
+        lastPercent = percent;
+        refreshSimplesNacionalAndamentoNode();
+      }
     });
-    simples.lastImport = result;
-    simples.page = 1;
+    if (importacao?.id) {
+      simples.resumo = { ...(simples.resumo || {}), ultimaTentativa: importacao };
+    }
     simples.busca = '';
     simples.consulta = null;
-    pushToast(`Tabela do Simples Nacional anexada: ${formatInteger(result?.importacao?.totalEmpresas)} empresa(s).`, 'success');
-    await loadSimplesNacionalSettings({ silent: true });
+    pushToast('Arquivo recebido. A tabela do Simples Nacional esta sendo processada no servidor.', 'info');
   } catch (error) {
-    simples.errorMessage = readSimplesNacionalErrorMessage(error);
-    pushToast(`Falha ao anexar tabela: ${simples.errorMessage}`, 'error');
+    simples.errorMessage = `Falha ao anexar tabela: ${readSimplesNacionalErrorMessage(error)}`;
+    pushToast(simples.errorMessage, 'error');
   } finally {
     simples.importing = false;
-    render();
+    simples.uploadProgress = null;
   }
+
+  await loadSimplesNacionalSettings({ silent: true });
 }
 
 async function submitSimplesNacionalConsultaForm(form) {
@@ -20719,9 +20976,9 @@ async function clearSimplesNacionalTable() {
   try {
     const result = await apiRequest('/simples-nacional/empresas', {
       method: 'DELETE',
-      timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS
+      timeoutMs: 10 * 60 * 1000
     });
-    simples.lastImport = null;
+    state.simplesNacionalOptantes = {};
     simples.consulta = null;
     simples.page = 1;
     simples.busca = '';
@@ -25060,6 +25317,7 @@ function exportXmlListToCsv() {
     'Situacao fiscal',
     'Data cancelamento',
     'Prestador',
+    'Prestador no Simples Nacional',
     'Tomador',
     'ISS',
     'Codigo verificacao'
@@ -25077,6 +25335,7 @@ function exportXmlListToCsv() {
     xml.statusFiscal,
     xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '',
     xml.prestador,
+    formatSimplesNacionalExportValue(xml.prestadorCnpj),
     xml.tomador,
     formatCurrency(xml.iss),
     xml.codigoVerificacao
@@ -25118,6 +25377,7 @@ function exportNfeListToCsv() {
     'Schema',
     'Emitente',
     'CNPJ emitente',
+    'Emitente no Simples Nacional',
     'Destinatario',
     'CNPJ destinatario',
     'Arquivo completo',
@@ -25136,6 +25396,7 @@ function exportNfeListToCsv() {
     doc.schemaDoc,
     doc.emitenteNome,
     formatCnpj(doc.emitenteCnpj),
+    formatSimplesNacionalExportValue(doc.emitenteCnpj),
     doc.destinatarioNome,
     formatCnpj(doc.destinatarioCnpj),
     doc.xmlCompletoDisponivel ? 'Sim' : 'Nao',
@@ -25178,6 +25439,7 @@ function exportCteListToCsv() {
     'Schema',
     'Emitente',
     'CNPJ emitente',
+    'Emitente no Simples Nacional',
     'Destinatario',
     'CNPJ destinatario',
     'Arquivo completo',
@@ -25196,6 +25458,7 @@ function exportCteListToCsv() {
     doc.schemaDoc,
     doc.emitenteNome,
     formatCnpj(doc.emitenteCnpj),
+    formatSimplesNacionalExportValue(doc.emitenteCnpj),
     doc.destinatarioNome,
     formatCnpj(doc.destinatarioCnpj),
     doc.xmlCompletoDisponivel ? 'Sim' : 'Nao',

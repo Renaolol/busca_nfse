@@ -3072,6 +3072,28 @@ tbody tr.cert-row-a-vencer:hover {
   gap: 10px;
 }
 
+.simples-nacional-progress-indeterminate {
+  width: 35%;
+  animation: simples-nacional-progress 1.4s ease-in-out infinite;
+}
+
+@keyframes simples-nacional-progress {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .simples-nacional-progress-indeterminate {
+    width: 100%;
+    opacity: 0.6;
+    animation: none;
+  }
+}
+
 .dual-grid {
   display: grid;
   grid-template-columns: 1.8fr 1fr;

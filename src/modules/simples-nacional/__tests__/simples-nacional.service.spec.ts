@@ -1,4 +1,5 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
+import { Readable } from 'node:stream';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { SimplesNacionalPlanilhaParserService } from '../simples-nacional-planilha-parser.service';
 import { SimplesNacionalService } from '../simples-nacional.service';
@@ -10,6 +11,8 @@ describe('SimplesNacionalService', () => {
     simplesNacionalImportacao: {
       findFirst: jest.Mock;
       create: jest.Mock;
+      update: jest.Mock;
+      updateMany: jest.Mock;
       deleteMany: jest.Mock;
     };
     simplesNacionalEmpresa: {
@@ -30,132 +33,211 @@ describe('SimplesNacionalService', () => {
     sessionExpiresAt: '2026-09-30T18:00:00.000Z'
   };
 
-  const importacaoRegistro = {
+  const registroImportacao = (dados: Record<string, unknown> = {}) => ({
     id: '550e8400-e29b-41d4-a716-446655440200',
     nomeArquivo: 'empresas.csv',
-    totalLinhas: 3,
-    totalEmpresas: 2,
-    totalIgnoradas: 1,
+    status: 'processando',
+    layout: null,
+    colunaCnpj: null,
+    colunaRazaoSocial: null,
+    colunaOpcao: null,
+    linhasProcessadas: 0,
+    totalLinhas: 0,
+    totalEmpresas: 0,
+    totalIgnoradas: 0,
     totalDuplicadas: 0,
+    totalNaoOptantes: 0,
+    linhasIgnoradas: null,
+    mensagem: null,
     usuarioId: authUser.userId,
     usuarioNome: 'Renan',
-    createdAt: new Date('2026-09-30T12:00:00.000Z')
-  };
+    createdAt: new Date('2026-09-30T12:00:00.000Z'),
+    updatedAt: new Date('2026-09-30T12:00:00.000Z'),
+    concluidoEm: null,
+    ...dados
+  });
 
-  const toBase64 = (texto: string) => Buffer.from(texto, 'utf-8').toString('base64');
+  const arquivo = (texto: string) => Readable.from([Buffer.from(texto, 'utf-8')]);
+
+  async function importar(nomeArquivo: string, conteudo: string) {
+    const result = await service.iniciarImportacao(arquivo(conteudo), nomeArquivo, authUser);
+    await service.aguardarImportacaoEmAndamento();
+    return result;
+  }
 
   beforeEach(() => {
     prisma = {
-      $transaction: jest.fn(async (operacoes: Promise<unknown>[]) => Promise.all(operacoes)),
+      $transaction: jest.fn(async (arg: unknown) =>
+        typeof arg === 'function' ? (arg as (tx: unknown) => unknown)(prisma) : Promise.all(arg as Promise<unknown>[])
+      ),
       simplesNacionalImportacao: {
-        findFirst: jest.fn(),
-        create: jest.fn(),
-        deleteMany: jest.fn()
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue(registroImportacao()),
+        update: jest.fn().mockResolvedValue({}),
+        updateMany: jest.fn().mockResolvedValue({ count: 0 }),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
       },
       simplesNacionalEmpresa: {
         count: jest.fn(),
         findMany: jest.fn(),
         findUnique: jest.fn(),
-        createMany: jest.fn(),
-        deleteMany: jest.fn()
+        createMany: jest.fn(async ({ data }: { data: unknown[] }) => ({ count: data.length })),
+        deleteMany: jest.fn().mockResolvedValue({ count: 0 })
       }
     };
 
-    service = new SimplesNacionalService(
-      prisma as unknown as PrismaService,
-      new SimplesNacionalPlanilhaParserService()
-    );
+    service = new SimplesNacionalService(prisma as unknown as PrismaService, new SimplesNacionalPlanilhaParserService());
   });
 
-  it('substitui a tabela anterior ao importar uma nova planilha', async () => {
-    prisma.simplesNacionalImportacao.deleteMany.mockResolvedValue({ count: 1 });
-    prisma.simplesNacionalImportacao.create.mockResolvedValue(importacaoRegistro);
-    prisma.simplesNacionalEmpresa.createMany.mockResolvedValue({ count: 2 });
-
-    const result = await service.importar(
-      {
-        nomeArquivo: 'empresas.csv',
-        arquivoBase64: toBase64('CNPJ;Razao Social\n11222333000181;PADARIA\n04252011000110;OFICINA\nxx;INVALIDA\n')
-      },
-      authUser
+  it('recebe o arquivo, responde em processamento e grava a nova tabela em segundo plano', async () => {
+    const result = await importar(
+      'empresas.csv',
+      'CNPJ;Razao Social\n11222333000181;PADARIA\n11222333000262;PADARIA FILIAL\n04252011000110;OFICINA\nxx;INVALIDA\n'
     );
 
-    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
-    expect(prisma.simplesNacionalImportacao.deleteMany).toHaveBeenCalledWith({});
-    const importacaoId = prisma.simplesNacionalImportacao.create.mock.calls[0][0].data.id;
+    expect(result).toEqual(expect.objectContaining({ status: 'processando', nomeArquivo: 'empresas.csv', importadoPor: 'Renan' }));
+    expect(prisma.simplesNacionalImportacao.deleteMany).toHaveBeenCalledWith({ where: { status: 'erro' } });
     expect(prisma.simplesNacionalImportacao.create).toHaveBeenCalledWith({
-      data: {
-        id: importacaoId,
-        nomeArquivo: 'empresas.csv',
-        totalLinhas: 3,
-        totalEmpresas: 2,
-        totalIgnoradas: 1,
-        totalDuplicadas: 0,
-        usuarioId: authUser.userId,
-        usuarioNome: 'Renan'
-      }
+      data: { nomeArquivo: 'empresas.csv', status: 'processando', usuarioId: authUser.userId, usuarioNome: 'Renan' }
     });
+    expect(prisma.simplesNacionalEmpresa.deleteMany).toHaveBeenCalledWith({});
     expect(prisma.simplesNacionalEmpresa.createMany).toHaveBeenCalledWith({
       data: [
-        { importacaoId, cnpjBase: '11222333', cnpj: '11222333000181', razaoSocial: 'PADARIA', linhaOrigem: 2 },
-        { importacaoId, cnpjBase: '04252011', cnpj: '04252011000110', razaoSocial: 'OFICINA', linhaOrigem: 3 }
-      ]
+        { cnpjBase: '11222333', cnpj: '11222333000181', razaoSocial: 'PADARIA', linhaOrigem: 2 },
+        { cnpjBase: '04252011', cnpj: '04252011000110', razaoSocial: 'OFICINA', linhaOrigem: 4 }
+      ],
+      skipDuplicates: true
     });
-    expect(result).toEqual({
-      importacao: {
-        id: importacaoRegistro.id,
-        nomeArquivo: 'empresas.csv',
-        importadoEm: '2026-09-30T12:00:00.000Z',
-        importadoPor: 'Renan',
-        totalLinhas: 3,
+    expect(prisma.simplesNacionalImportacao.deleteMany).toHaveBeenCalledWith({
+      where: { id: { not: '550e8400-e29b-41d4-a716-446655440200' } }
+    });
+    expect(prisma.simplesNacionalImportacao.update).toHaveBeenCalledWith({
+      where: { id: '550e8400-e29b-41d4-a716-446655440200' },
+      data: expect.objectContaining({
+        status: 'concluida',
+        layout: 'planilha',
+        colunaCnpj: 'CNPJ',
+        colunaRazaoSocial: 'Razao Social',
+        totalLinhas: 4,
         totalEmpresas: 2,
         totalIgnoradas: 1,
-        totalDuplicadas: 0
-      },
-      colunaCnpj: 'CNPJ',
-      colunaRazaoSocial: 'Razao Social',
-      linhasIgnoradas: [{ linha: 4, valor: 'xx', motivo: 'CNPJ invalido' }]
+        totalDuplicadas: 1,
+        totalNaoOptantes: 0,
+        linhasIgnoradas: [{ linha: 5, valor: 'xx', motivo: 'CNPJ invalido' }]
+      })
     });
   });
 
-  it('grava empresas em lotes para planilhas grandes', async () => {
-    const linhas = ['CNPJ'];
-    for (let indice = 1; indice <= 2500; indice += 1) {
-      linhas.push(String(indice).padStart(8, '0'));
-    }
-    prisma.simplesNacionalImportacao.create.mockResolvedValue({ ...importacaoRegistro, totalEmpresas: 2500 });
+  it('conta como repetidas as raizes que ja estavam em lotes anteriores', async () => {
+    prisma.simplesNacionalEmpresa.createMany.mockResolvedValue({ count: 1 });
 
-    await service.importar({ nomeArquivo: 'raizes.csv', arquivoBase64: toBase64(linhas.join('\n')) }, authUser);
+    await importar('empresas.csv', 'CNPJ\n11222333000181\n04252011000110\n');
 
-    expect(prisma.simplesNacionalEmpresa.createMany).toHaveBeenCalledTimes(3);
-    expect(prisma.simplesNacionalEmpresa.createMany.mock.calls.map(([args]) => args.data.length)).toEqual([
-      1000, 1000, 500
-    ]);
+    expect(prisma.simplesNacionalImportacao.update).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ totalEmpresas: 1, totalDuplicadas: 1 }) })
+    );
   });
 
-  it('mantem a tabela atual quando a planilha nao tem CNPJ valido', async () => {
-    await expect(
-      service.importar({ nomeArquivo: 'empresas.csv', arquivoBase64: toBase64('CNPJ\n123\nabc\n') }, authUser)
-    ).rejects.toThrow(BadRequestException);
+  it('grava so as empresas com opcao S do arquivo Simples da Receita', async () => {
+    const csv = ['"11222333";"S";"20180101";"00000000";"N";"00000000";"00000000"', '"04252011";"N";"20180101";"20240101";"N";"00000000";"00000000"'].join('\n');
 
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    await importar('Simples.csv', csv);
+
+    expect(prisma.simplesNacionalEmpresa.createMany).toHaveBeenCalledWith({
+      data: [{ cnpjBase: '11222333', cnpj: null, razaoSocial: null, linhaOrigem: 1 }],
+      skipDuplicates: true
+    });
+    expect(prisma.simplesNacionalImportacao.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'concluida', layout: 'receita_simples', totalEmpresas: 1, totalNaoOptantes: 1 })
+      })
+    );
   });
 
-  it('rejeita conteudo que nao esta em Base64', async () => {
-    await expect(
-      service.importar({ nomeArquivo: 'empresas.csv', arquivoBase64: '###' }, authUser)
-    ).rejects.toThrow('Base64');
+  it('marca erro e mantem a tabela atual quando a planilha nao tem CNPJ valido', async () => {
+    await importar('empresas.csv', 'CNPJ\n123\nabc\n');
+
+    expect(prisma.simplesNacionalImportacao.update).not.toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ status: 'concluida' }) })
+    );
+    expect(prisma.simplesNacionalImportacao.update).toHaveBeenCalledWith({
+      where: { id: '550e8400-e29b-41d4-a716-446655440200' },
+      data: {
+        status: 'erro',
+        mensagem: 'Nenhum CNPJ valido encontrado na coluna "CNPJ". A tabela atual foi mantida.',
+        linhasProcessadas: 2
+      }
+    });
+  });
+
+  it('marca erro quando o arquivo nao tem coluna de CNPJ', async () => {
+    await importar('empresas.csv', 'Nome;Cidade\nPADARIA;Cascavel\n');
+
+    expect(prisma.simplesNacionalImportacao.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ status: 'erro', mensagem: expect.stringContaining('coluna de CNPJ') })
+      })
+    );
+  });
+
+  it('rejeita extensao nao suportada sem criar importacao', async () => {
+    await expect(service.iniciarImportacao(arquivo('x'), 'empresas.pdf', authUser)).rejects.toThrow(BadRequestException);
+    expect(prisma.simplesNacionalImportacao.create).not.toHaveBeenCalled();
+  });
+
+  it('rejeita arquivo vazio', async () => {
+    await expect(service.iniciarImportacao(Readable.from([]), 'empresas.csv', authUser)).rejects.toThrow('vazio');
+    expect(prisma.simplesNacionalImportacao.create).not.toHaveBeenCalled();
+  });
+
+  it('bloqueia nova importacao enquanto outra esta em processamento', async () => {
+    prisma.simplesNacionalImportacao.findFirst.mockResolvedValue(registroImportacao());
+
+    await expect(service.iniciarImportacao(arquivo('CNPJ\n11222333000181\n'), 'empresas.csv', authUser)).rejects.toThrow(
+      ConflictException
+    );
+    expect(prisma.simplesNacionalImportacao.create).not.toHaveBeenCalled();
+  });
+
+  it('libera importacoes que pararam de enviar progresso', async () => {
+    await service.getResumo();
+
+    expect(prisma.simplesNacionalImportacao.updateMany).toHaveBeenCalledWith({
+      where: { status: 'processando', updatedAt: { lt: expect.any(Date) } },
+      data: { status: 'erro', mensagem: expect.stringContaining('interrompida') }
+    });
+  });
+
+  it('retorna a tabela ativa e a tentativa mais recente', async () => {
+    prisma.simplesNacionalImportacao.findFirst
+      .mockResolvedValueOnce(registroImportacao({ status: 'concluida', totalEmpresas: 24000000 }))
+      .mockResolvedValueOnce(
+        registroImportacao({ id: 'nova', status: 'processando', linhasProcessadas: 1500000, createdAt: new Date('2026-09-30T13:00:00.000Z') })
+      );
+
+    const result = await service.getResumo();
+
+    expect(result.totalEmpresas).toBe(24000000);
+    expect(result.ultimaImportacao).toEqual(expect.objectContaining({ status: 'concluida' }));
+    expect(result.ultimaTentativa).toEqual(expect.objectContaining({ id: 'nova', status: 'processando', linhasProcessadas: 1500000 }));
+  });
+
+  it('ignora tentativa com erro anterior a tabela ativa', async () => {
+    prisma.simplesNacionalImportacao.findFirst
+      .mockResolvedValueOnce(registroImportacao({ status: 'concluida', createdAt: new Date('2026-09-30T13:00:00.000Z') }))
+      .mockResolvedValueOnce(registroImportacao({ id: 'antiga', status: 'erro' }));
+
+    const result = await service.getResumo();
+
+    expect(result.ultimaTentativa).toBeNull();
   });
 
   it('consulta CNPJ de filial pela raiz cadastrada', async () => {
     prisma.simplesNacionalEmpresa.findUnique.mockResolvedValue({
-      id: 'empresa-1',
-      importacaoId: importacaoRegistro.id,
       cnpjBase: '11222333',
       cnpj: '11222333000181',
       razaoSocial: 'PADARIA',
-      linhaOrigem: 2,
-      createdAt: new Date('2026-09-30T12:00:00.000Z')
+      linhaOrigem: 2
     });
 
     const result = await service.consultarCnpj('11.222.333/0002-62');
@@ -182,49 +264,46 @@ describe('SimplesNacionalService', () => {
     expect(prisma.simplesNacionalEmpresa.findUnique).not.toHaveBeenCalled();
   });
 
-  it('filtra os CNPJs optantes em lote', async () => {
+  it('filtra as raizes optantes em lote', async () => {
     prisma.simplesNacionalEmpresa.findMany.mockResolvedValue([{ cnpjBase: '11222333' }]);
 
-    const result = await service.filtrarOptantes(['11222333000181', '11.222.333/0002-62', '04252011000110', '']);
+    const result = await service.filtrarBasesOptantes(['11222333000181', '11.222.333/0002-62', '04252011000110', '']);
 
     expect(prisma.simplesNacionalEmpresa.findMany).toHaveBeenCalledWith({
       where: { cnpjBase: { in: ['11222333', '04252011'] } },
       select: { cnpjBase: true }
     });
-    expect([...result]).toEqual(['11222333000181', '11222333000262']);
+    expect(result).toEqual(['11222333']);
   });
 
-  it('lista empresas paginadas filtrando por CNPJ ou razao social', async () => {
+  it.each([
+    ['11.222.333/0001-81', { cnpjBase: '11222333' }],
+    ['112', { cnpjBase: { gte: '11200000', lte: '11299999' } }],
+    ['padaria', { razaoSocial: { contains: 'padaria', mode: 'insensitive' } }]
+  ])('busca na tabela por "%s" usando o indice da raiz quando possivel', async (busca, where) => {
     prisma.simplesNacionalEmpresa.count.mockResolvedValue(51);
     prisma.simplesNacionalEmpresa.findMany.mockResolvedValue([]);
 
-    const result = await service.listEmpresas({ busca: '11.222', page: 2, pageSize: 50 });
+    const result = await service.listEmpresas({ busca, page: 2, pageSize: 50 });
 
-    const where = {
-      OR: [
-        { razaoSocial: { contains: '11.222', mode: 'insensitive' } },
-        { cnpj: { contains: '11222' } },
-        { cnpjBase: { contains: '11222' } }
-      ]
-    };
     expect(prisma.simplesNacionalEmpresa.count).toHaveBeenCalledWith({ where });
     expect(prisma.simplesNacionalEmpresa.findMany).toHaveBeenCalledWith({
       where,
-      orderBy: [{ razaoSocial: 'asc' }, { cnpjBase: 'asc' }],
+      orderBy: { cnpjBase: 'asc' },
       skip: 50,
       take: 50
     });
     expect(result).toEqual({ items: [], total: 51, page: 2, pageSize: 50, totalPages: 2 });
   });
 
-  it('retorna resumo com a ultima importacao', async () => {
-    prisma.simplesNacionalEmpresa.count.mockResolvedValue(2);
-    prisma.simplesNacionalImportacao.findFirst.mockResolvedValue(importacaoRegistro);
+  it('usa o total gravado na importacao ao listar sem filtro', async () => {
+    prisma.simplesNacionalEmpresa.findMany.mockResolvedValue([]);
+    prisma.simplesNacionalImportacao.findFirst.mockResolvedValue({ totalEmpresas: 24000000 });
 
-    const result = await service.getResumo();
+    const result = await service.listEmpresas({});
 
-    expect(result.totalEmpresas).toBe(2);
-    expect(result.ultimaImportacao).toEqual(expect.objectContaining({ nomeArquivo: 'empresas.csv', importadoPor: 'Renan' }));
+    expect(prisma.simplesNacionalEmpresa.count).not.toHaveBeenCalled();
+    expect(result.total).toBe(24000000);
   });
 
   it('remove a tabela inteira', async () => {
@@ -232,5 +311,12 @@ describe('SimplesNacionalService', () => {
     prisma.simplesNacionalImportacao.deleteMany.mockResolvedValue({ count: 1 });
 
     await expect(service.limpar()).resolves.toEqual({ removidas: 2 });
+  });
+
+  it('nao remove a tabela durante uma importacao', async () => {
+    prisma.simplesNacionalImportacao.findFirst.mockResolvedValue(registroImportacao());
+
+    await expect(service.limpar()).rejects.toThrow(ConflictException);
+    expect(prisma.simplesNacionalEmpresa.deleteMany).not.toHaveBeenCalled();
   });
 });

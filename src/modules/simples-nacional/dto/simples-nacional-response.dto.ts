@@ -10,8 +10,19 @@ export class SimplesNacionalEmpresaDto {
   @ApiPropertyOptional({ nullable: true })
   razaoSocial!: string | null;
 
-  @ApiPropertyOptional({ nullable: true, description: 'Linha da planilha de origem' })
+  @ApiPropertyOptional({ nullable: true, description: 'Linha do arquivo de origem' })
   linhaOrigem!: number | null;
+}
+
+export class SimplesNacionalLinhaIgnoradaDto {
+  @ApiProperty()
+  linha!: number;
+
+  @ApiProperty()
+  valor!: string;
+
+  @ApiProperty()
+  motivo!: string;
 }
 
 export class SimplesNacionalImportacaoDto {
@@ -21,11 +32,39 @@ export class SimplesNacionalImportacaoDto {
   @ApiProperty()
   nomeArquivo!: string;
 
-  @ApiProperty({ description: 'Data/hora da importacao em ISO 8601' })
+  @ApiProperty({ enum: ['processando', 'concluida', 'erro'] })
+  status!: 'processando' | 'concluida' | 'erro';
+
+  @ApiPropertyOptional({
+    nullable: true,
+    enum: ['planilha', 'receita_simples'],
+    description: 'receita_simples = arquivo Simples dos dados abertos do CNPJ (Receita Federal)'
+  })
+  layout!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Cabecalho (ou coluna) identificado como CNPJ' })
+  colunaCnpj!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Cabecalho (ou coluna) identificado como razao social' })
+  colunaRazaoSocial!: string | null;
+
+  @ApiPropertyOptional({ nullable: true, description: 'Coluna usada para filtrar apenas as linhas optantes' })
+  colunaOpcao!: string | null;
+
+  @ApiProperty({ description: 'Data/hora do envio em ISO 8601' })
   importadoEm!: string;
+
+  @ApiProperty({ description: 'Ultima atualizacao de progresso em ISO 8601' })
+  atualizadoEm!: string;
+
+  @ApiPropertyOptional({ nullable: true })
+  concluidoEm!: string | null;
 
   @ApiPropertyOptional({ nullable: true })
   importadoPor!: string | null;
+
+  @ApiProperty({ description: 'Linhas lidas ate o momento (progresso)' })
+  linhasProcessadas!: number;
 
   @ApiProperty({ description: 'Linhas com conteudo lidas apos o cabecalho' })
   totalLinhas!: number;
@@ -38,14 +77,30 @@ export class SimplesNacionalImportacaoDto {
 
   @ApiProperty({ description: 'Linhas repetidas da mesma raiz de CNPJ (ex.: filiais)' })
   totalDuplicadas!: number;
+
+  @ApiProperty({ description: 'Linhas de empresas nao optantes (ex.: opcao "N" no arquivo da Receita)' })
+  totalNaoOptantes!: number;
+
+  @ApiProperty({ type: [SimplesNacionalLinhaIgnoradaDto], description: 'Amostra das primeiras linhas ignoradas (ate 50)' })
+  linhasIgnoradas!: SimplesNacionalLinhaIgnoradaDto[];
+
+  @ApiPropertyOptional({ nullable: true, description: 'Motivo da falha quando status = erro' })
+  mensagem!: string | null;
 }
 
 export class SimplesNacionalResumoDto {
-  @ApiProperty()
+  @ApiProperty({ description: 'Empresas da tabela ativa' })
   totalEmpresas!: number;
 
-  @ApiPropertyOptional({ type: SimplesNacionalImportacaoDto, nullable: true })
+  @ApiPropertyOptional({ type: SimplesNacionalImportacaoDto, nullable: true, description: 'Tabela ativa' })
   ultimaImportacao!: SimplesNacionalImportacaoDto | null;
+
+  @ApiPropertyOptional({
+    type: SimplesNacionalImportacaoDto,
+    nullable: true,
+    description: 'Importacao mais recente que a tabela ativa, em processamento ou com erro'
+  })
+  ultimaTentativa!: SimplesNacionalImportacaoDto | null;
 }
 
 export class SimplesNacionalEmpresasPageDto {
@@ -79,32 +134,9 @@ export class SimplesNacionalConsultaDto {
   empresa!: SimplesNacionalEmpresaDto | null;
 }
 
-export class SimplesNacionalLinhaIgnoradaDto {
-  @ApiProperty()
-  linha!: number;
-
-  @ApiProperty()
-  valor!: string;
-
-  @ApiProperty()
-  motivo!: string;
-}
-
-export class SimplesNacionalImportacaoResultadoDto {
-  @ApiProperty({ type: SimplesNacionalImportacaoDto })
-  importacao!: SimplesNacionalImportacaoDto;
-
-  @ApiProperty({ description: 'Cabecalho (ou coluna) identificado como CNPJ' })
-  colunaCnpj!: string;
-
-  @ApiPropertyOptional({ nullable: true, description: 'Cabecalho (ou coluna) identificado como razao social' })
-  colunaRazaoSocial!: string | null;
-
-  @ApiProperty({
-    type: [SimplesNacionalLinhaIgnoradaDto],
-    description: 'Amostra das primeiras linhas ignoradas (ate 50)'
-  })
-  linhasIgnoradas!: SimplesNacionalLinhaIgnoradaDto[];
+export class SimplesNacionalConsultaLoteRespostaDto {
+  @ApiProperty({ type: [String], description: 'Raizes (8 caracteres) dos CNPJs informados que constam na tabela' })
+  cnpjBases!: string[];
 }
 
 export class SimplesNacionalLimpezaDto {

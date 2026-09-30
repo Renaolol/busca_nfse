@@ -1,6 +1,7 @@
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { APP_GUARD } from '@nestjs/core';
 import { Test } from '@nestjs/testing';
+import { Readable } from 'node:stream';
 import request from 'supertest';
 import { AuthGuard } from '../../src/modules/auth/auth.guard';
 import { AuthService } from '../../src/modules/auth/auth.service';
@@ -28,11 +29,20 @@ describe('Simples Nacional (e2e)', () => {
     registerAccessDenied: jest.fn().mockResolvedValue(undefined)
   };
 
+  let bytesRecebidos = '';
   const simplesNacionalService = {
-    getResumo: jest.fn().mockResolvedValue({ totalEmpresas: 0, ultimaImportacao: null }),
+    getResumo: jest.fn().mockResolvedValue({ totalEmpresas: 0, ultimaImportacao: null, ultimaTentativa: null }),
     listEmpresas: jest.fn().mockResolvedValue({ items: [], total: 0, page: 1, pageSize: 50, totalPages: 1 }),
     consultarCnpj: jest.fn().mockResolvedValue({ cnpj: '11222333000181', cnpjBase: '11222333', optante: true, empresa: null }),
-    importar: jest.fn().mockResolvedValue({ importacao: { id: 'imp-1' } }),
+    filtrarBasesOptantes: jest.fn().mockResolvedValue(['11222333']),
+    iniciarImportacao: jest.fn(async (arquivo: Readable) => {
+      const trechos: Buffer[] = [];
+      for await (const trecho of arquivo) {
+        trechos.push(Buffer.from(trecho));
+      }
+      bytesRecebidos = Buffer.concat(trechos).toString('utf-8');
+      return { id: 'imp-1', status: 'processando' };
+    }),
     limpar: jest.fn().mockResolvedValue({ removidas: 0 })
   };
 
@@ -63,6 +73,7 @@ describe('Simples Nacional (e2e)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    bytesRecebidos = '';
   });
 
   it('permite ao perfil comum consultar o resumo e um CNPJ', async () => {
@@ -84,39 +95,74 @@ describe('Simples Nacional (e2e)', () => {
     expect(simplesNacionalService.listEmpresas).not.toHaveBeenCalled();
   });
 
-  it('bloqueia usuario de cliente na tabela do Simples Nacional', async () => {
+  it('bloqueia usuario de cliente na gestao da tabela do Simples Nacional', async () => {
     await request(app.getHttpServer()).get('/simples-nacional').set('Authorization', 'Bearer cliente').expect(403);
     expect(simplesNacionalService.getResumo).not.toHaveBeenCalled();
+  });
+
+  it('permite a consulta em lote para usuario de cliente (tela Armazenados)', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/simples-nacional/consultas')
+      .set('Authorization', 'Bearer cliente')
+      .send({ cnpjs: ['11222333000181', '04252011000110'] })
+      .expect(200);
+
+    expect(response.body).toEqual({ cnpjBases: ['11222333'] });
+    expect(simplesNacionalService.filtrarBasesOptantes).toHaveBeenCalledWith(['11222333000181', '04252011000110']);
+  });
+
+  it('limita a consulta em lote a 5000 CNPJs', async () => {
+    await request(app.getHttpServer())
+      .post('/simples-nacional/consultas')
+      .set('Authorization', 'Bearer admin')
+      .send({ cnpjs: Array.from({ length: 5001 }, () => '11222333000181') })
+      .expect(400);
+    expect(simplesNacionalService.filtrarBasesOptantes).not.toHaveBeenCalled();
   });
 
   it('restringe a importacao ao perfil admin', async () => {
     await request(app.getHttpServer())
       .post('/simples-nacional/importacoes')
+      .query({ nomeArquivo: 'empresas.csv' })
       .set('Authorization', 'Bearer comum')
-      .send({ nomeArquivo: 'empresas.csv', arquivoBase64: 'Q05QSgo=' })
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from('CNPJ\n'))
       .expect(403);
-    expect(simplesNacionalService.importar).not.toHaveBeenCalled();
+    expect(simplesNacionalService.iniciarImportacao).not.toHaveBeenCalled();
   });
 
-  it('exige nome e conteudo do arquivo na importacao', async () => {
+  it('exige o nome do arquivo na importacao', async () => {
     await request(app.getHttpServer())
       .post('/simples-nacional/importacoes')
       .set('Authorization', 'Bearer admin')
-      .send({ nomeArquivo: 'empresas.csv' })
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from('CNPJ\n'))
       .expect(400);
-    expect(simplesNacionalService.importar).not.toHaveBeenCalled();
+    expect(simplesNacionalService.iniciarImportacao).not.toHaveBeenCalled();
   });
 
-  it('importa a planilha com o usuario autenticado', async () => {
-    const dto = { nomeArquivo: 'empresas.csv', arquivoBase64: 'Q05QSgo=' };
-
+  it('recusa envio em JSON', async () => {
     await request(app.getHttpServer())
       .post('/simples-nacional/importacoes')
+      .query({ nomeArquivo: 'empresas.csv' })
       .set('Authorization', 'Bearer admin')
-      .send(dto)
-      .expect(201);
+      .send({ arquivoBase64: 'Q05QSgo=' })
+      .expect(415);
+    expect(simplesNacionalService.iniciarImportacao).not.toHaveBeenCalled();
+  });
 
-    expect(simplesNacionalService.importar).toHaveBeenCalledWith(dto, usuarios.admin);
+  it('repassa o arquivo bruto ao service e responde 202 enquanto processa', async () => {
+    const response = await request(app.getHttpServer())
+      .post('/simples-nacional/importacoes')
+      .query({ nomeArquivo: 'Simples.zip' })
+      .set('Authorization', 'Bearer admin')
+      .set('Content-Type', 'application/octet-stream')
+      .send(Buffer.from('"11222333";"S";"20180101"\n'))
+      .expect(202);
+
+    expect(response.body).toEqual({ id: 'imp-1', status: 'processando' });
+    expect(simplesNacionalService.iniciarImportacao).toHaveBeenCalledWith(expect.anything(), 'Simples.zip', usuarios.admin);
+    expect(bytesRecebidos).toBe('"11222333";"S";"20180101"\n');
   });
 
   it('restringe a remocao da tabela ao perfil admin', async () => {

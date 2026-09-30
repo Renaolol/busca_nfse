@@ -1,13 +1,35 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Req } from '@nestjs/common';
-import { ApiCreatedResponse, ApiOkResponse, ApiParam, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  Req,
+  UnsupportedMediaTypeException
+} from '@nestjs/common';
+import {
+  ApiAcceptedResponse,
+  ApiBody,
+  ApiConsumes,
+  ApiOkResponse,
+  ApiParam,
+  ApiTags
+} from '@nestjs/swagger';
+import type { Request } from 'express';
 import { Roles } from '../auth/decorators/roles.decorator';
+import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { AuthenticatedRequest } from '../auth/auth.types';
-import { ImportarSimplesNacionalDto } from './dto/importar-simples-nacional.dto';
+import { ConsultarSimplesNacionalLoteDto } from './dto/consultar-simples-nacional-lote.dto';
+import { ImportarSimplesNacionalQueryDto } from './dto/importar-simples-nacional.dto';
 import { ListSimplesNacionalEmpresasQueryDto } from './dto/list-simples-nacional-empresas-query.dto';
 import {
   SimplesNacionalConsultaDto,
+  SimplesNacionalConsultaLoteRespostaDto,
   SimplesNacionalEmpresasPageDto,
-  SimplesNacionalImportacaoResultadoDto,
+  SimplesNacionalImportacaoDto,
   SimplesNacionalLimpezaDto,
   SimplesNacionalResumoDto
 } from './dto/simples-nacional-response.dto';
@@ -40,11 +62,31 @@ export class SimplesNacionalController {
     return this.simplesNacionalService.consultarCnpj(cnpj);
   }
 
+  @Post('consultas')
+  @HttpCode(200)
+  @Roles('admin', 'comum', 'cliente')
+  @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
+  @ApiOkResponse({ type: SimplesNacionalConsultaLoteRespostaDto })
+  async consultarLote(@Body() dto: ConsultarSimplesNacionalLoteDto): Promise<SimplesNacionalConsultaLoteRespostaDto> {
+    return { cnpjBases: await this.simplesNacionalService.filtrarBasesOptantes(dto.cnpjs) };
+  }
+
   @Post('importacoes')
+  @HttpCode(202)
   @Roles('admin')
-  @ApiCreatedResponse({ type: SimplesNacionalImportacaoResultadoDto })
-  importar(@Req() request: AuthenticatedRequest, @Body() dto: ImportarSimplesNacionalDto) {
-    return this.simplesNacionalService.importar(dto, request.authUser);
+  @ApiConsumes('application/octet-stream')
+  @ApiBody({
+    description: 'Conteudo bruto do arquivo (.csv, .txt, .xlsx ou .zip), ate 5 GB. O processamento continua em segundo plano.',
+    schema: { type: 'string', format: 'binary' }
+  })
+  @ApiAcceptedResponse({ type: SimplesNacionalImportacaoDto })
+  iniciarImportacao(@Req() request: Request & AuthenticatedRequest, @Query() query: ImportarSimplesNacionalQueryDto) {
+    const contentType = String(request.headers['content-type'] || '').toLowerCase();
+    if (/json|form/.test(contentType)) {
+      throw new UnsupportedMediaTypeException('Envie o arquivo com Content-Type application/octet-stream.');
+    }
+
+    return this.simplesNacionalService.iniciarImportacao(request, query.nomeArquivo, request.authUser);
   }
 
   @Delete('empresas')

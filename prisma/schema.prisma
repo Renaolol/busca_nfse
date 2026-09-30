@@ -579,35 +579,45 @@ model CompareSpedHistorico {
   @@map("compare_sped_historicos")
 }
 
-model SimplesNacionalImportacao {
-  id              String   @id @default(uuid()) @db.Uuid
-  nomeArquivo     String   @map("nome_arquivo") @db.VarChar(255)
-  totalLinhas     Int      @default(0) @map("total_linhas")
-  totalEmpresas   Int      @default(0) @map("total_empresas")
-  totalIgnoradas  Int      @default(0) @map("total_ignoradas")
-  totalDuplicadas Int      @default(0) @map("total_duplicadas")
-  usuarioId       String?  @map("usuario_id") @db.Uuid
-  usuarioNome     String?  @map("usuario_nome") @db.VarChar(255)
-  createdAt       DateTime @default(now()) @map("created_at")
+enum SimplesNacionalImportacaoStatus {
+  processando
+  concluida
+  erro
+}
 
-  usuario  Usuario?                 @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
-  empresas SimplesNacionalEmpresa[]
+model SimplesNacionalImportacao {
+  id                String                          @id @default(uuid()) @db.Uuid
+  nomeArquivo       String                          @map("nome_arquivo") @db.VarChar(255)
+  status            SimplesNacionalImportacaoStatus @default(processando)
+  layout            String?                         @db.VarChar(30)
+  colunaCnpj        String?                         @map("coluna_cnpj") @db.VarChar(255)
+  colunaRazaoSocial String?                         @map("coluna_razao_social") @db.VarChar(255)
+  colunaOpcao       String?                         @map("coluna_opcao") @db.VarChar(255)
+  linhasProcessadas Int                             @default(0) @map("linhas_processadas")
+  totalLinhas       Int                             @default(0) @map("total_linhas")
+  totalEmpresas     Int                             @default(0) @map("total_empresas")
+  totalIgnoradas    Int                             @default(0) @map("total_ignoradas")
+  totalDuplicadas   Int                             @default(0) @map("total_duplicadas")
+  totalNaoOptantes  Int                             @default(0) @map("total_nao_optantes")
+  linhasIgnoradas   Json?                           @map("linhas_ignoradas")
+  mensagem          String?                         @db.Text
+  usuarioId         String?                         @map("usuario_id") @db.Uuid
+  usuarioNome       String?                         @map("usuario_nome") @db.VarChar(255)
+  createdAt         DateTime                        @default(now()) @map("created_at")
+  updatedAt         DateTime                        @updatedAt @map("updated_at")
+  concluidoEm       DateTime?                       @map("concluido_em")
+
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
 
   @@index([createdAt], map: "simples_nacional_importacoes_created_at_idx")
   @@map("simples_nacional_importacoes")
 }
 
 model SimplesNacionalEmpresa {
-  id           String   @id @default(uuid()) @db.Uuid
-  importacaoId String   @map("importacao_id") @db.Uuid
-  cnpjBase     String   @unique @map("cnpj_base") @db.VarChar(8)
-  cnpj         String?  @db.VarChar(14)
-  razaoSocial  String?  @map("razao_social") @db.VarChar(255)
-  linhaOrigem  Int?     @map("linha_origem")
-  createdAt    DateTime @default(now()) @map("created_at")
+  cnpjBase    String  @id @map("cnpj_base") @db.VarChar(8)
+  cnpj        String? @db.VarChar(14)
+  razaoSocial String? @map("razao_social") @db.VarChar(255)
+  linhaOrigem Int?    @map("linha_origem")
 
-  importacao SimplesNacionalImportacao @relation(fields: [importacaoId], references: [id], onDelete: Cascade)
-
-  @@index([importacaoId], map: "simples_nacional_empresas_importacao_id_idx")
   @@map("simples_nacional_empresas")
 }

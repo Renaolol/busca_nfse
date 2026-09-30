@@ -337,23 +337,26 @@ Exemplo de body para lote:
 
 ## Empresas do Simples Nacional
 
-Na tela `Configuracoes > Empresas do Simples Nacional`, o administrador anexa a tabela de empresas optantes que o sistema usa para identificar empresas do Simples Nacional.
+Na tela `Configuracoes > Empresas do Simples Nacional`, o administrador anexa a tabela de empresas optantes que o sistema usa para identificar empresas do Simples Nacional. Em `Armazenados`, a contraparte que emitiu o documento (prestador da NFS-e tomada, emitente da NF-e/CT-e recebidos) recebe o selo `Simples Nacional`, e as exportacoes CSV ganham a coluna `Prestador/Emitente no Simples Nacional`.
 
-- Formatos aceitos: `.xlsx`, `.csv` ou `.txt` (separador `;`, `,`, tab ou `|`; UTF-8 ou Windows-1252). O `.xls` antigo (Excel 97-2003) nao e aceito.
-- A planilha precisa ter uma coluna com cabecalho contendo `CNPJ`; a coluna de razao social (`Razao Social`, `Nome Empresarial`, `Nome`, `Empresa`...) e opcional. Sem cabecalho, a coluna de CNPJ e detectada pelo conteudo.
-- Todas as linhas com CNPJ valido (digito verificador conferido, inclusive CNPJ alfanumerico) sao consideradas optantes. CNPJ numerico sem zero a esquerda (celula numerica do Excel) e completado. A raiz de 8 digitos tambem e aceita.
-- A identificacao e feita pela raiz do CNPJ (8 primeiros caracteres), valendo para matriz e filiais. Linhas repetidas da mesma raiz sao agrupadas.
-- Cada nova tabela substitui a anterior por completo. Se a planilha nao tiver nenhum CNPJ valido, a tabela atual e mantida.
+- Formatos aceitos: `.zip` (com o `.csv` dentro), `.csv`, `.txt` e `.xlsx`, ate 5 GB (`.xlsx` ate 100 MB). O `.xls` antigo (Excel 97-2003) nao e aceito. Texto em UTF-8 ou Windows-1252; separador `;`, `,`, tab ou `|`.
+- Arquivo `Simples` dos dados abertos do CNPJ (Receita Federal): detectado automaticamente (sem cabecalho, CNPJ basico + opcao S/N + datas). Entram apenas as empresas com opcao `S`; as demais contam como nao optantes. Pode ser enviado como o `.zip` baixado da Receita.
+- Planilha propria: precisa de uma coluna com cabecalho contendo `CNPJ`; razao social (`Razao Social`, `Nome Empresarial`, `Nome`, `Empresa`...) e opcional. Se houver coluna de opcao/regime (`Opcao pelo Simples`, `Optante`, `Regime`...), entram apenas as linhas marcadas como optantes (`S`, `Sim`, `Simples Nacional`...); sem essa coluna, todas as linhas com CNPJ valido entram. Sem cabecalho, a coluna de CNPJ e detectada pelo conteudo.
+- CNPJ validado pelo digito verificador (inclusive CNPJ alfanumerico); CNPJ numerico sem zero a esquerda e completado; raiz de 8 digitos tambem e aceita.
+- A identificacao e feita pela raiz do CNPJ (8 primeiros caracteres), valendo para matriz e filiais.
+- O arquivo e recebido em streaming e processado em segundo plano. A tela mostra o envio e o andamento; a tabela atual continua valendo ate a nova ser gravada por completo, e e mantida se a importacao falhar. Uma importacao sem sinal de vida por 2 minutos (ex.: servidor reiniciado) e marcada como interrompida.
+- A leitura do arquivo processa cerca de 1 milhao de linhas por segundo; o tempo total da base nacional depende principalmente da gravacao no PostgreSQL (dezenas de milhoes de linhas ocupam alguns GB). O Node encerra envios que demorem mais de 5 minutos (`requestTimeout` padrao), por isso prefira enviar o `.zip`.
 
-Endpoints (perfis `admin` e `comum`; usuarios `cliente` nao tem acesso):
+Endpoints (perfis `admin` e `comum`, exceto quando indicado):
 
-- `GET /simples-nacional`: total de empresas e dados da ultima importacao.
-- `GET /simples-nacional/empresas?busca=&page=&pageSize=`: lista paginada (padrao `50`, maximo `200`) com filtro por CNPJ parcial ou razao social.
+- `GET /simples-nacional`: tabela ativa (`ultimaImportacao`, com totais, colunas identificadas e ate 50 linhas ignoradas) e `ultimaTentativa` (importacao mais recente em `processando` ou `erro`, com `linhasProcessadas` e `mensagem`).
+- `GET /simples-nacional/empresas?busca=&page=&pageSize=`: lista paginada (padrao `50`, maximo `200`), ordenada pela raiz do CNPJ; `busca` aceita CNPJ/raiz (inicio ou completo) ou razao social.
 - `GET /simples-nacional/empresas/:cnpj`: informa se o CNPJ (14 caracteres, com ou sem pontuacao) ou a raiz (8 digitos) consta na tabela (`optante: true|false`).
-- `POST /simples-nacional/importacoes` (admin): recebe `{ "nomeArquivo": "empresas.xlsx", "arquivoBase64": "..." }`, substitui a tabela e retorna totais, colunas identificadas e ate 50 linhas ignoradas com o motivo.
-- `DELETE /simples-nacional/empresas` (admin): remove a tabela inteira.
+- `POST /simples-nacional/consultas` (tambem perfil `cliente`): recebe `{ "cnpjs": [...] }` (ate 5000) e devolve `{ "cnpjBases": [...] }` com as raizes que constam na tabela. Usado pela tela `Armazenados`.
+- `POST /simples-nacional/importacoes?nomeArquivo=Simples.zip` (admin): corpo bruto do arquivo com `Content-Type: application/octet-stream`. Responde `202` com a importacao em `processando`; `409` se ja houver uma em andamento.
+- `DELETE /simples-nacional/empresas` (admin): remove a tabela inteira (`409` durante uma importacao).
 
-Para outros modulos, `SimplesNacionalService` (exportado por `SimplesNacionalModule`) oferece `consultarCnpj(cnpj)` e `filtrarOptantes(cnpjs)` para identificar empresas em lote.
+Para outros modulos, `SimplesNacionalService` (exportado por `SimplesNacionalModule`) oferece `consultarCnpj(cnpj)` e `filtrarBasesOptantes(cnpjs)` para identificar empresas em lote.
 
 ## NF-e de compra e venda
 
