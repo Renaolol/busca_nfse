@@ -358,7 +358,7 @@ Endpoints (perfis `admin` e `comum`, exceto quando indicado):
 - `GET /simples-nacional/empresas/:cnpj`: informa se o CNPJ (14 caracteres, com ou sem pontuacao) ou a raiz (8 digitos) consta na tabela (`optante: true|false`).
 - `POST /simples-nacional/consultas` (tambem perfil `cliente`): recebe `{ "cnpjs": [...] }` (ate 5000) e devolve `{ "cnpjBases": [...] }` com as raizes que constam na tabela. Usado pela tela `Armazenados`.
 - `POST /simples-nacional/importacoes?nomeArquivo=Simples.zip` (admin): corpo bruto do arquivo com `Content-Type: application/octet-stream`. Responde `202` com a importacao em `processando`; `409` se ja houver uma em andamento.
-- `DELETE /simples-nacional/empresas` (admin): remove a tabela inteira (`409` durante uma importacao).
+- `DELETE /simples-nacional/empresas` (admin): exclui todas as empresas com `TRUNCATE` (instantaneo mesmo com dezenas de milhoes de linhas; `409` durante uma importacao). Botao `Excluir todas as empresas` na aba. Com o sistema fora do ar, use `npm run simples:limpar -- --yes` (ver `docs/troubleshooting.md`).
 
 Para outros modulos, `SimplesNacionalService` (exportado por `SimplesNacionalModule`) oferece `consultarCnpj(cnpj)` e `filtrarBasesOptantes(cnpjs)` para identificar empresas em lote.
 

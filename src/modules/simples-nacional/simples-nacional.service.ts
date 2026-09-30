@@ -223,14 +223,19 @@ export class SimplesNacionalService {
     await this.processamento;
   }
 
+  /**
+   * Exclui todas as empresas. TRUNCATE e instantaneo e devolve o espaco em disco na hora; um DELETE de dezenas de
+   * milhoes de linhas levaria muitos minutos e deixaria a tabela inchada ate o VACUUM.
+   */
   async limpar(): Promise<SimplesNacionalLimpezaDto> {
     await this.garantirSemImportacaoEmAndamento();
-    const [removidas] = await this.prisma.$transaction([
-      this.prisma.simplesNacionalEmpresa.deleteMany({}),
+    const removidas = await this.contarEmpresasAtivas();
+    await this.prisma.$transaction([
+      this.prisma.$executeRaw`TRUNCATE TABLE simples_nacional_empresas`,
       this.prisma.simplesNacionalImportacao.deleteMany({})
     ]);
 
-    return { removidas: removidas.count };
+    return { removidas };
   }
 
   private async processarImportacao(id: string, caminho: string, nomeArquivo: string): Promise<void> {

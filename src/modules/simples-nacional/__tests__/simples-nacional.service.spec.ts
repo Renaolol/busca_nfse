@@ -380,11 +380,17 @@ describe('SimplesNacionalService', () => {
     expect(prisma.$executeRaw.mock.calls[0][0].join('')).toBe('ANALYZE simples_nacional_empresas');
   });
 
-  it('remove a tabela inteira', async () => {
-    prisma.simplesNacionalEmpresa.deleteMany.mockResolvedValue({ count: 2 });
+  it('exclui todas as empresas com TRUNCATE (instantaneo mesmo com dezenas de milhoes de linhas)', async () => {
+    prisma.simplesNacionalImportacao.findFirst
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ totalEmpresas: 30000000 });
     prisma.simplesNacionalImportacao.deleteMany.mockResolvedValue({ count: 1 });
 
-    await expect(service.limpar()).resolves.toEqual({ removidas: 2 });
+    await expect(service.limpar()).resolves.toEqual({ removidas: 30000000 });
+
+    expect(prisma.$executeRaw.mock.calls[0][0].join('')).toBe('TRUNCATE TABLE simples_nacional_empresas');
+    expect(prisma.simplesNacionalEmpresa.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.simplesNacionalImportacao.deleteMany).toHaveBeenCalledWith({});
   });
 
   it('nao remove a tabela durante uma importacao', async () => {

@@ -2231,11 +2231,12 @@ function onDocumentClick(event) {
       return;
     }
     case 'settings-simples-clear': {
+      const totalEmpresas = Number(state.settings.simplesNacional.resumo?.totalEmpresas || 0);
       openModal({
         kind: 'confirm',
-        title: 'Remover tabela do Simples Nacional',
-        subtitle: 'Confirmar a remocao de todas as empresas da tabela? O sistema deixara de identificar empresas do Simples Nacional ate que uma nova tabela seja anexada.',
-        confirmLabel: 'Remover tabela',
+        title: 'Excluir todas as empresas do Simples Nacional',
+        subtitle: `Excluir as ${formatInteger(totalEmpresas)} empresa(s) da tabela? Nao e possivel desfazer. O sistema deixara de identificar empresas do Simples Nacional ate que uma nova tabela seja anexada.`,
+        confirmLabel: 'Excluir todas',
         intent: 'warning',
         payload: { type: 'clear-simples-nacional' }
       });
@@ -10251,7 +10252,7 @@ function renderSimplesNacionalImportForm(simples, totalEmpresas) {
         <button class="btn primary" type="submit" ${busy ? 'disabled' : ''}>${simples.importing ? 'Enviando...' : 'Anexar tabela'}</button>
         ${
           totalEmpresas
-            ? `<button class="btn secondary" type="button" data-action="settings-simples-clear" ${busy ? 'disabled' : ''}>${simples.clearing ? 'Removendo...' : 'Remover tabela'}</button>`
+            ? `<button class="btn secondary" type="button" data-action="settings-simples-clear" ${busy ? 'disabled' : ''}>${simples.clearing ? 'Excluindo...' : `Excluir todas as empresas (${formatInteger(totalEmpresas)})`}</button>`
             : ''
         }
       </div>
@@ -21049,10 +21050,10 @@ async function clearSimplesNacionalTable() {
     simples.consulta = null;
     simples.page = 1;
     simples.busca = '';
-    pushToast(`Tabela do Simples Nacional removida (${formatInteger(result?.removidas)} empresa(s)).`, 'success');
+    pushToast(`${formatInteger(result?.removidas)} empresa(s) excluida(s) da tabela do Simples Nacional.`, 'success');
     await loadSimplesNacionalSettings({ silent: true });
   } catch (error) {
-    pushToast(`Falha ao remover tabela: ${readSimplesNacionalErrorMessage(error)}`, 'error');
+    pushToast(`Falha ao excluir as empresas: ${readSimplesNacionalErrorMessage(error)}`, 'error');
   } finally {
     simples.clearing = false;
     render();

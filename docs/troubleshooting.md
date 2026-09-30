@@ -129,3 +129,16 @@ npm run prisma:deploy
   - `NFSE_ADN_REJECT_UNAUTHORIZED=true`
 - Se `/api/docs` nao abrir, verificar `ENABLE_SWAGGER` (em producao, o recomendado e `false`).
 - Valores placeholder iniciando com `CHANGE_ME` sao recusados por seguranca.
+
+## Sistema nao abre depois de atualizar (migrations no inicio do servico)
+
+O servico Windows (`deploy/windows/start-notasync.cmd`) roda `npm run prisma:deploy` antes de `node dist\main.js`. Enquanto uma migration demorada roda, a porta nao abre; se ela falhar, o servico reinicia a cada 10 s sem nunca abrir.
+
+- Ver o log: `Get-Content .\logs\NotaSyncGCONT.out.log -Tail 40` e `Get-Content .\logs\NotaSyncGCONT.err.log -Tail 40`.
+- Parado em ``Applying migration `20260930190000_simples_nacional_busca_nome` ``: o indice de busca por nome esta sendo criado sobre a tabela do Simples Nacional ja carregada. Aguarde; o progresso aparece em `SELECT phase, blocks_done, blocks_total, tuples_done, tuples_total FROM pg_stat_progress_create_index;`.
+- `P3009` / `migrate found failed migrations`: a migration foi interrompida. Rode `npx prisma migrate resolve --rolled-back <nome_da_migration>` e depois `npm run prisma:deploy` (sem fechar a janela ate terminar).
+- `P1002` / advisory lock: outro `prisma:deploy` esta rodando (por exemplo, um manual e o do servico ao mesmo tempo). Aguarde o que esta em andamento.
+
+### Esvaziar a tabela do Simples Nacional pela linha de comando
+
+Com o servico parado (`.\NotaSyncGCONT.exe stop`), `npm run simples:limpar` mostra o tamanho da tabela e `npm run simples:limpar -- --yes` cancela consultas em andamento nessas tabelas (inclusive a criacao do indice), esvazia `simples_nacional_empresas` e `simples_nacional_importacoes` com `TRUNCATE` e informa se a migration do indice precisa ser liberada com `migrate resolve`. Com a tabela vazia, a migration do indice aplica em segundos.
