@@ -41,6 +41,7 @@ const COMPARE_SPED_HISTORY_LIMIT = 10;
 const SIMPLES_NACIONAL_PAGE_SIZE = 50;
 const SIMPLES_NACIONAL_MAX_FILE_BYTES = 5 * 1024 * 1024 * 1024;
 const SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS = 15000;
+const SIMPLES_NACIONAL_SEARCH_TIMEOUT_MS = 45000;
 const SIMPLES_NACIONAL_POLL_INTERVAL_MS = 4000;
 const SIMPLES_NACIONAL_LOOKUP_BATCH_SIZE = 5000;
 const SIMPLES_NACIONAL_COMPRESS_MIN_BYTES = 20 * 1024 * 1024;
@@ -553,6 +554,7 @@ const state = {
     simplesNacional: {
       loading: false,
       loadingEmpresas: false,
+      empresasErro: '',
       errorMessage: '',
       resumo: null,
       empresas: null,
@@ -10385,22 +10387,28 @@ function renderSimplesNacionalConsulta(consulta) {
 
 function renderSimplesNacionalEmpresasTable(simples) {
   const page = simples.empresas;
-  const items = Array.isArray(page?.items) ? page.items : [];
-  const currentPage = Number(page?.page || 1);
-  const totalPages = Number(page?.totalPages || 1);
-  const total = Number(page?.total || 0);
   const loading = simples.loading || simples.loadingEmpresas;
-  const emptyMessage = simples.busca
-    ? 'Nenhuma empresa encontrada para a busca informada.'
-    : 'Nenhuma empresa cadastrada na tabela do Simples Nacional.';
+  const items = !loading && Array.isArray(page?.items) ? page.items : [];
+  const currentPage = Number(page?.page || simples.page || 1);
+  const hasTotal = page?.total !== null && page?.total !== undefined;
+  const hasNextPage = Boolean(page?.temMais);
+  const emptyMessage = simples.empresasErro
+    ? simples.empresasErro
+    : simples.busca
+      ? 'Nenhuma empresa encontrada para a busca informada.'
+      : 'Nenhuma empresa cadastrada na tabela do Simples Nacional.';
+  const pageLabel = hasTotal
+    ? `${formatInteger(page.total)} empresa(s) - pagina ${currentPage} de ${formatInteger(page.totalPages || 1)}`
+    : `Pagina ${currentPage}${!loading && !hasNextPage && items.length ? ' (fim dos resultados)' : ''}`;
 
   return `
     <form id="settingsSimplesNacionalBuscaForm" class="form-grid three">
       <label class="field" style="grid-column: span 2;">
         Buscar na tabela
-        <input name="busca" value="${escapeHtml(simples.busca)}" placeholder="CNPJ ou razao social" />
+        <input name="busca" value="${escapeHtml(simples.busca)}" placeholder="CNPJ, raiz, nome/razao social ou CPF do MEI" />
+        <small class="row-sub">Por nome, cada palavra pode ser o inicio da palavra (ex.: "adel silva"); acentos sao ignorados.</small>
       </label>
-      <div class="stack-actions" style="justify-content:flex-start; align-self:end;">
+      <div class="stack-actions" style="justify-content:flex-start; align-self:start; margin-top:22px;">
         <button class="btn secondary" type="submit" ${loading ? 'disabled' : ''}>Buscar</button>
       </div>
     </form>
@@ -10428,17 +10436,17 @@ function renderSimplesNacionalEmpresasTable(simples) {
                     `
                   )
                   .join('')
-              : `<tr><td colspan="3"><div class="table-state${loading ? ' loading' : ''}">${escapeHtml(loading ? 'Carregando empresas...' : emptyMessage)}</div></td></tr>`
+              : `<tr><td colspan="3"><div class="table-state${loading ? ' loading' : simples.empresasErro ? ' error' : ''}">${escapeHtml(loading ? (simples.busca ? 'Buscando...' : 'Carregando empresas...') : emptyMessage)}</div></td></tr>`
           }
         </tbody>
       </table>
     </div>
 
     <div class="stack-actions" style="justify-content:space-between; align-items:center;">
-      <span class="row-sub">${escapeHtml(`${formatInteger(total)} empresa(s) - pagina ${currentPage} de ${totalPages}`)}</span>
+      <span class="row-sub">${escapeHtml(pageLabel)}</span>
       <div class="stack-actions">
         <button class="btn secondary" type="button" data-action="settings-simples-page" data-page="${currentPage - 1}" ${loading || currentPage <= 1 ? 'disabled' : ''}>Anterior</button>
-        <button class="btn secondary" type="button" data-action="settings-simples-page" data-page="${currentPage + 1}" ${loading || currentPage >= totalPages ? 'disabled' : ''}>Proxima</button>
+        <button class="btn secondary" type="button" data-action="settings-simples-page" data-page="${currentPage + 1}" ${loading || !hasNextPage ? 'disabled' : ''}>Proxima</button>
       </div>
     </div>
   `;
@@ -20638,6 +20646,7 @@ function readSimplesNacionalErrorMessage(error) {
 }
 
 let simplesNacionalPollTimer = null;
+let simplesNacionalEmpresasRequestId = 0;
 
 async function loadSimplesNacionalSettings(options = {}) {
   if (state.dataSource !== 'api') {
@@ -20658,7 +20667,7 @@ async function loadSimplesNacionalSettings(options = {}) {
       apiRequest('/simples-nacional', { cache: false, timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS }),
       options.somenteResumo
         ? Promise.resolve(simples.empresas)
-        : apiRequest(buildSimplesNacionalEmpresasPath(), { cache: false, timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS })
+        : apiRequest(buildSimplesNacionalEmpresasPath(), { cache: false, timeoutMs: SIMPLES_NACIONAL_SEARCH_TIMEOUT_MS })
     ]);
     simples.resumo = resumo;
     simples.empresas = empresas;
@@ -20887,19 +20896,29 @@ async function loadSimplesNacionalEmpresas() {
   }
 
   const simples = state.settings.simplesNacional;
+  const requestId = (simplesNacionalEmpresasRequestId += 1);
   simples.loadingEmpresas = true;
+  simples.empresasErro = '';
   render();
 
   try {
-    simples.empresas = await apiRequest(buildSimplesNacionalEmpresasPath(), {
+    const empresas = await apiRequest(buildSimplesNacionalEmpresasPath(), {
       cache: false,
-      timeoutMs: SIMPLES_NACIONAL_REQUEST_TIMEOUT_MS
+      timeoutMs: SIMPLES_NACIONAL_SEARCH_TIMEOUT_MS
     });
+    if (requestId === simplesNacionalEmpresasRequestId) {
+      simples.empresas = empresas;
+    }
   } catch (error) {
-    pushToast(`Falha ao carregar empresas do Simples Nacional: ${readSimplesNacionalErrorMessage(error)}`, 'error');
+    if (requestId === simplesNacionalEmpresasRequestId) {
+      simples.empresas = null;
+      simples.empresasErro = readSimplesNacionalErrorMessage(error);
+    }
   } finally {
-    simples.loadingEmpresas = false;
-    render();
+    if (requestId === simplesNacionalEmpresasRequestId) {
+      simples.loadingEmpresas = false;
+      render();
+    }
   }
 }
 
@@ -20974,7 +20993,11 @@ async function submitSimplesNacionalConsultaForm(form) {
   simples.consultaCnpj = cnpj;
 
   if (!/^[0-9A-Z]{12}\d{2}$/.test(normalized) && !/^\d{8}$/.test(normalized)) {
-    simples.consulta = { error: 'Informe um CNPJ com 14 caracteres ou a raiz com 8 digitos.' };
+    simples.consulta = {
+      error: /^\d{11}$/.test(normalized)
+        ? 'Isso parece um CPF. Para achar o MEI pelo CPF do titular, use "Buscar na tabela".'
+        : 'Informe um CNPJ com 14 caracteres ou a raiz com 8 digitos. Para buscar por nome, use "Buscar na tabela".'
+    };
     render();
     return;
   }

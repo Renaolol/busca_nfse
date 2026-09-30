@@ -613,6 +613,9 @@ model SimplesNacionalImportacao {
   @@map("simples_nacional_importacoes")
 }
 
+// A busca por nome usa o indice GIN "simples_nacional_empresas_razao_social_busca_idx" e a funcao
+// simples_nacional_nome_tsvector(), criados em SQL na migration 20260930190000_simples_nacional_busca_nome
+// (o Prisma nao representa indices por expressao).
 model SimplesNacionalEmpresa {
   cnpjBase    String  @id @map("cnpj_base") @db.VarChar(8)
   cnpj        String? @db.VarChar(14)

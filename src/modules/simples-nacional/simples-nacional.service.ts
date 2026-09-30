@@ -27,6 +27,12 @@ import {
 } from './dto/simples-nacional-response.dto';
 import { PlanilhaSimplesResumo, SimplesNacionalPlanilhaParserService } from './simples-nacional-planilha-parser.service';
 
+type BuscaEmpresas =
+  | { tipo: 'todas' }
+  | { tipo: 'raiz'; cnpjBase: string }
+  | { tipo: 'faixa'; inicio: string; fim: string }
+  | { tipo: 'nome'; consulta: string };
+
 @Injectable()
 export class SimplesNacionalService {
   static readonly TAMANHO_MAXIMO_ARQUIVO = 5 * 1024 * 1024 * 1024;
@@ -38,6 +44,8 @@ export class SimplesNacionalService {
   private static readonly TIMEOUT_TRANSACAO_MS = 6 * 60 * 60 * 1000;
   private static readonly PREFIXO_TEMPORARIO = 'nfse-simples-';
   private static readonly EXTENSOES_ACEITAS = /\.(csv|txt|xlsx|zip|gz)$/i;
+  private static readonly TIMEOUT_BUSCA_NOME_MS = 20000;
+  private static readonly MAX_PALAVRAS_BUSCA = 6;
 
   private readonly logger = new Logger(SimplesNacionalService.name);
   private processamento: Promise<void> | null = null;
@@ -72,24 +80,42 @@ export class SimplesNacionalService {
   async listEmpresas(query: ListSimplesNacionalEmpresasQueryDto): Promise<SimplesNacionalEmpresasPageDto> {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? SimplesNacionalService.PAGE_SIZE_PADRAO;
-    const where = this.buildBuscaWhere(query.busca);
+    const skip = (page - 1) * pageSize;
+    const busca = this.interpretarBusca(query.busca);
 
-    const [total, items] = await Promise.all([
-      Object.keys(where).length ? this.prisma.simplesNacionalEmpresa.count({ where }) : this.contarEmpresasAtivas(),
-      this.prisma.simplesNacionalEmpresa.findMany({
-        where,
-        orderBy: { cnpjBase: 'asc' },
-        skip: (page - 1) * pageSize,
-        take: pageSize
-      })
-    ]);
+    if (busca.tipo === 'todas') {
+      const [total, items] = await Promise.all([
+        this.contarEmpresasAtivas(),
+        this.prisma.simplesNacionalEmpresa.findMany({ orderBy: { cnpjBase: 'asc' }, skip, take: pageSize })
+      ]);
+      return {
+        items: items.map((item) => this.mapEmpresa(item)),
+        total,
+        page,
+        pageSize,
+        totalPages: Math.max(1, Math.ceil(total / pageSize)),
+        temMais: skip + items.length < total
+      };
+    }
+
+    // Com filtro nao ha contagem exata: numa tabela com dezenas de milhoes de linhas ela custaria uma varredura.
+    const encontrados =
+      busca.tipo === 'nome'
+        ? await this.buscarPorNome(busca.consulta, skip, pageSize + 1)
+        : await this.prisma.simplesNacionalEmpresa.findMany({
+            where: { cnpjBase: busca.tipo === 'raiz' ? busca.cnpjBase : { gte: busca.inicio, lte: busca.fim } },
+            orderBy: { cnpjBase: 'asc' },
+            skip,
+            take: pageSize + 1
+          });
 
     return {
-      items: items.map((item) => this.mapEmpresa(item)),
-      total,
+      items: encontrados.slice(0, pageSize).map((item) => this.mapEmpresa(item)),
+      total: null,
       page,
       pageSize,
-      totalPages: Math.max(1, Math.ceil(total / pageSize))
+      totalPages: null,
+      temMais: encontrados.length > pageSize
     };
   }
 
@@ -268,6 +294,10 @@ export class SimplesNacionalService {
         },
         { maxWait: 10000, timeout: SimplesNacionalService.TIMEOUT_TRANSACAO_MS }
       );
+      // Estatisticas atualizadas para o planejador escolher entre o indice de nome e a chave primaria.
+      await this.prisma.$executeRaw`ANALYZE simples_nacional_empresas`.catch((error: unknown) =>
+        this.logger.warn(`ANALYZE da tabela do Simples Nacional falhou: ${error instanceof Error ? error.message : error}`)
+      );
     } catch (error) {
       const mensagem = this.mensagemErro(error);
       this.logger.warn(`Importacao ${id} da tabela do Simples Nacional falhou: ${mensagem}`);
@@ -349,23 +379,78 @@ export class SimplesNacionalService {
     return ativa?.totalEmpresas ?? 0;
   }
 
-  private buildBuscaWhere(busca?: string): Prisma.SimplesNacionalEmpresaWhereInput {
+  private interpretarBusca(busca?: string): BuscaEmpresas {
     const texto = String(busca || '').trim();
     if (!texto) {
-      return {};
+      return { tipo: 'todas' };
     }
 
-    const cnpjParcial = texto.toUpperCase().replace(/[\s./-]/g, '');
-    if (/^[0-9A-Z]{8,14}$/.test(cnpjParcial) && /\d/.test(cnpjParcial)) {
-      return { cnpjBase: cnpjParcial.slice(0, 8) };
+    const compacto = texto.toUpperCase().replace(/[\s./-]/g, '');
+    if (/^[0-9A-Z]{12}\d{2}$/.test(compacto) && /\d/.test(compacto.slice(0, 12))) {
+      return { tipo: 'raiz', cnpjBase: compacto.slice(0, 8) };
     }
 
-    if (/^\d{2,7}$/.test(cnpjParcial)) {
+    if (/^\d{12,13}$/.test(compacto)) {
+      return { tipo: 'raiz', cnpjBase: compacto.padStart(14, '0').slice(0, 8) };
+    }
+
+    if (/^\d{8,10}$/.test(compacto)) {
+      return { tipo: 'raiz', cnpjBase: compacto.slice(0, 8) };
+    }
+
+    if (/^\d{2,7}$/.test(compacto)) {
       // Faixa na chave primaria (usa o indice), equivalente a "comeca com" para raizes numericas.
-      return { cnpjBase: { gte: cnpjParcial.padEnd(8, '0'), lte: cnpjParcial.padEnd(8, '9') } };
+      return { tipo: 'faixa', inicio: compacto.padEnd(8, '0'), fim: compacto.padEnd(8, '9') };
     }
 
-    return { razaoSocial: { contains: texto, mode: 'insensitive' } };
+    // Nome, razao social ou CPF (os nomes de MEI trazem o CPF do titular): cada palavra vira um prefixo.
+    // Pontuacao entre digitos e removida para "113.387.678-10" virar um unico termo.
+    const palavras = texto
+      .replace(/(\d)[.\-/](?=\d)/g, '$1')
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((palavra) => palavra.length >= 2)
+      .slice(0, SimplesNacionalService.MAX_PALAVRAS_BUSCA);
+    if (!palavras.length) {
+      throw new BadRequestException('Digite ao menos 2 letras do nome ou o CNPJ para buscar.');
+    }
+
+    return {
+      tipo: 'nome',
+      consulta: palavras.map((palavra) => (palavra.length >= 3 ? `${palavra}:*` : palavra)).join(' & ')
+    };
+  }
+
+  /**
+   * Usa o indice GIN criado na migration 20260930190000_simples_nacional_busca_nome. Para termos raros o planejador
+   * estima mal e prefere varrer a tabela calculando o tsvector linha a linha (minutos em dezenas de milhoes de
+   * linhas), por isso a varredura sequencial e desligada nesta consulta. Sem ORDER BY a leitura para assim que
+   * completa a pagina; o resultado sai na ordem fisica (ordem de importacao do arquivo).
+   */
+  private async buscarPorNome(consulta: string, skip: number, take: number): Promise<SimplesNacionalEmpresa[]> {
+    try {
+      return await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT set_config('statement_timeout', ${String(SimplesNacionalService.TIMEOUT_BUSCA_NOME_MS)}, true), set_config('enable_seqscan', 'off', true)`;
+          return tx.$queryRaw<SimplesNacionalEmpresa[]>`
+            SELECT cnpj_base AS "cnpjBase", cnpj, razao_social AS "razaoSocial", linha_origem AS "linhaOrigem"
+            FROM simples_nacional_empresas
+            WHERE razao_social IS NOT NULL
+              AND simples_nacional_nome_tsvector(razao_social) @@ to_tsquery('simple', ${consulta})
+            LIMIT ${take} OFFSET ${skip}`;
+        },
+        { timeout: SimplesNacionalService.TIMEOUT_BUSCA_NOME_MS + 10000 }
+      );
+    } catch (error) {
+      if (/statement timeout|canceling statement|57014/i.test(error instanceof Error ? error.message : String(error))) {
+        throw new BadRequestException(
+          'A busca demorou demais. Digite o nome mais completo (ex.: nome e sobrenome) ou busque pelo CNPJ.'
+        );
+      }
+      throw error;
+    }
   }
 
   private normalizarCnpjConsulta(valor: string): { cnpj: string; cnpjBase: string } | null {

@@ -62,6 +62,7 @@ A aplicacao segue arquitetura backend-first:
 - A aba `Configuracoes > Empresas do Simples Nacional` compacta CSVs grandes em gzip no navegador (`CompressionStream`) e envia o arquivo bruto (XHR com progresso) para `POST /simples-nacional/importacoes`; o backend grava em `os.tmpdir()/nfse-simples-*`, responde `202` e processa em segundo plano. A tela acompanha por `GET /simples-nacional`.
 - `SimplesNacionalPlanilhaParserService` le em streaming `.csv`/`.txt`, gzip e `.zip` (diretorio central lido diretamente e entrada descompactada com `zlib`, com suporte a ZIP64) e le `.xlsx` em memoria via `jszip`. Detecta o layout do arquivo Simples da Receita, colunas de CNPJ, razao social e opcao, e valida o digito verificador. Entrega as empresas em lotes.
 - `SimplesNacionalService` regrava a tabela em uma unica transacao interativa (`createMany` com `skipDuplicates`), atualiza o progresso por batimento e marca como interrompida a importacao sem batimento recente (os jobs avulsos sobem o `AppModule`, por isso nao ha efeito colateral no startup). Expoe `consultarCnpj` e `filtrarBasesOptantes` para outros modulos.
+- A busca da aba (`GET /simples-nacional/empresas?busca=`) consulta CNPJ/raiz pela chave primaria e nomes pelo indice GIN de texto completo (`$queryRaw`), sem contagem exata e com `statement_timeout` de 20 s.
 - Em `Armazenados`, o frontend consulta em lote (`POST /simples-nacional/consultas`) as raizes dos emitentes listados e guarda o resultado em memoria ate a proxima importacao.
 
 ## Pontos arquiteturais que merecem atencao

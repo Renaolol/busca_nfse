@@ -107,8 +107,8 @@ export class SimplesNacionalEmpresasPageDto {
   @ApiProperty({ type: [SimplesNacionalEmpresaDto] })
   items!: SimplesNacionalEmpresaDto[];
 
-  @ApiProperty()
-  total!: number;
+  @ApiPropertyOptional({ nullable: true, description: 'Total da tabela; null quando ha filtro (sem contagem exata)' })
+  total!: number | null;
 
   @ApiProperty()
   page!: number;
@@ -116,8 +116,11 @@ export class SimplesNacionalEmpresasPageDto {
   @ApiProperty()
   pageSize!: number;
 
-  @ApiProperty()
-  totalPages!: number;
+  @ApiPropertyOptional({ nullable: true, description: 'null quando ha filtro (sem contagem exata)' })
+  totalPages!: number | null;
+
+  @ApiProperty({ description: 'true quando existe uma proxima pagina' })
+  temMais!: boolean;
 }
 
 export class SimplesNacionalConsultaDto {

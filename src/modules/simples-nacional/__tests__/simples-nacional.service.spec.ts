@@ -8,6 +8,8 @@ describe('SimplesNacionalService', () => {
   let service: SimplesNacionalService;
   let prisma: {
     $transaction: jest.Mock;
+    $queryRaw: jest.Mock;
+    $executeRaw: jest.Mock;
     simplesNacionalImportacao: {
       findFirst: jest.Mock;
       create: jest.Mock;
@@ -70,6 +72,8 @@ describe('SimplesNacionalService', () => {
       $transaction: jest.fn(async (arg: unknown) =>
         typeof arg === 'function' ? (arg as (tx: unknown) => unknown)(prisma) : Promise.all(arg as Promise<unknown>[])
       ),
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      $executeRaw: jest.fn().mockResolvedValue(0),
       simplesNacionalImportacao: {
         findFirst: jest.fn().mockResolvedValue(null),
         create: jest.fn().mockResolvedValue(registroImportacao()),
@@ -276,24 +280,87 @@ describe('SimplesNacionalService', () => {
     expect(result).toEqual(['11222333']);
   });
 
+  const empresa = (cnpjBase: string, razaoSocial: string | null = null) => ({
+    cnpjBase,
+    cnpj: null,
+    razaoSocial,
+    linhaOrigem: 1
+  });
+
   it.each([
-    ['11.222.333/0001-81', { cnpjBase: '11222333' }],
-    ['112', { cnpjBase: { gte: '11200000', lte: '11299999' } }],
-    ['padaria', { razaoSocial: { contains: 'padaria', mode: 'insensitive' } }]
-  ])('busca na tabela por "%s" usando o indice da raiz quando possivel', async (busca, where) => {
-    prisma.simplesNacionalEmpresa.count.mockResolvedValue(51);
-    prisma.simplesNacionalEmpresa.findMany.mockResolvedValue([]);
+    ['11.222.333/0001-81', '11222333'],
+    ['11222333000181', '11222333'],
+    ['4252011000110', '04252011'],
+    ['41273589', '41273589']
+  ])('busca por CNPJ ou raiz "%s" direto na chave primaria', async (busca, cnpjBase) => {
+    prisma.simplesNacionalEmpresa.findMany.mockResolvedValue([empresa(cnpjBase)]);
 
-    const result = await service.listEmpresas({ busca, page: 2, pageSize: 50 });
+    const result = await service.listEmpresas({ busca, page: 1, pageSize: 50 });
 
-    expect(prisma.simplesNacionalEmpresa.count).toHaveBeenCalledWith({ where });
     expect(prisma.simplesNacionalEmpresa.findMany).toHaveBeenCalledWith({
-      where,
+      where: { cnpjBase },
       orderBy: { cnpjBase: 'asc' },
-      skip: 50,
-      take: 50
+      skip: 0,
+      take: 51
     });
-    expect(result).toEqual({ items: [], total: 51, page: 2, pageSize: 50, totalPages: 2 });
+    expect(prisma.simplesNacionalEmpresa.count).not.toHaveBeenCalled();
+    expect(result).toEqual({
+      items: [{ cnpjBase, cnpj: null, razaoSocial: null, linhaOrigem: 1 }],
+      total: null,
+      page: 1,
+      pageSize: 50,
+      totalPages: null,
+      temMais: false
+    });
+  });
+
+  it('busca pelo inicio da raiz usando faixa na chave primaria e indica proxima pagina', async () => {
+    prisma.simplesNacionalEmpresa.findMany.mockResolvedValue([empresa('11200001'), empresa('11200002'), empresa('11200003')]);
+
+    const result = await service.listEmpresas({ busca: '112', page: 2, pageSize: 2 });
+
+    expect(prisma.simplesNacionalEmpresa.findMany).toHaveBeenCalledWith({
+      where: { cnpjBase: { gte: '11200000', lte: '11299999' } },
+      orderBy: { cnpjBase: 'asc' },
+      skip: 2,
+      take: 3
+    });
+    expect(result.items.map((item) => item.cnpjBase)).toEqual(['11200001', '11200002']);
+    expect(result.temMais).toBe(true);
+  });
+
+  it.each([
+    ['Adelar', 'adelar:*'],
+    ['José da Silva', 'jose:* & da & silva:*'],
+    ['113.387.678-10', '11338767810:*'],
+    ['IRENILDA OLIVEIRA SILVA 11338767810', 'irenilda:* & oliveira:* & silva:* & 11338767810:*']
+  ])('busca por nome "%s" no indice de texto com a consulta %s', async (busca, consulta) => {
+    prisma.$queryRaw.mockResolvedValueOnce([{}]).mockResolvedValueOnce([empresa('41273589', 'IRENILDA OLIVEIRA SILVA 11338767810')]);
+
+    const result = await service.listEmpresas({ busca, page: 3, pageSize: 10 });
+
+    expect(prisma.$transaction).toHaveBeenCalledWith(expect.any(Function), { timeout: 30000 });
+    const [configuracao, valoresConfiguracao] = prisma.$queryRaw.mock.calls[0];
+    expect(configuracao.join('?')).toContain("set_config('enable_seqscan', 'off', true)");
+    expect(valoresConfiguracao).toBe('20000');
+    const [sql, ...valores] = prisma.$queryRaw.mock.calls[1];
+    expect(sql.join('?')).toContain("simples_nacional_nome_tsvector(razao_social) @@ to_tsquery('simple', ?)");
+    expect(valores).toEqual([consulta, 11, 20]);
+    expect(prisma.simplesNacionalEmpresa.findMany).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({ total: null, temMais: false, items: [expect.objectContaining({ cnpjBase: '41273589' })] })
+    );
+  });
+
+  it('pede ao menos 2 letras na busca por nome', async () => {
+    await expect(service.listEmpresas({ busca: 'a' })).rejects.toThrow('ao menos 2 letras');
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
+  });
+
+  it('traduz o tempo limite do banco em mensagem para refinar a busca', async () => {
+    prisma.$transaction.mockRejectedValueOnce(new Error('Raw query failed. Code: `57014`. ERROR: canceling statement due to statement timeout'));
+
+    await expect(service.listEmpresas({ busca: 'silva' })).rejects.toThrow('A busca demorou demais');
   });
 
   it('usa o total gravado na importacao ao listar sem filtro', async () => {
@@ -303,7 +370,14 @@ describe('SimplesNacionalService', () => {
     const result = await service.listEmpresas({});
 
     expect(prisma.simplesNacionalEmpresa.count).not.toHaveBeenCalled();
-    expect(result.total).toBe(24000000);
+    expect(result).toEqual(expect.objectContaining({ total: 24000000, totalPages: 480000, temMais: true }));
+  });
+
+  it('atualiza as estatisticas da tabela depois de importar', async () => {
+    await importar('empresas.csv', 'CNPJ\n11222333000181\n');
+
+    expect(prisma.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(prisma.$executeRaw.mock.calls[0][0].join('')).toBe('ANALYZE simples_nacional_empresas');
   });
 
   it('remove a tabela inteira', async () => {
