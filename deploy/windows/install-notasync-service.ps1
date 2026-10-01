@@ -77,11 +77,11 @@ $xml = @"
   <description>$(Escape-XmlValue $Description)</description>
   <executable>C:\Windows\System32\cmd.exe</executable>
   <arguments>/d /c deploy\windows\start-notasync.cmd</arguments>
-  <workingdirectory>$(Escape-XmlValue $ProjectPath)</workingdirectory>
+  <workingdirectory>%BASE%</workingdirectory>
   <env name="NODE_ENV" value="production" />
   <env name="PORT" value="$Port" />
-  <env name="STORAGE_ROOT_PATH" value="$(Escape-XmlValue $storagePath)" />
-  <logpath>$(Escape-XmlValue $logsPath)</logpath>
+  <env name="STORAGE_ROOT_PATH" value="%BASE%\storage" />
+  <logpath>%BASE%\logs</logpath>
   <log mode="roll" />
   <onfailure action="restart" delay="10 sec" />
   <resetfailure>1 hour</resetfailure>
