@@ -432,7 +432,7 @@ const state = {
       codigoEmpresa: '',
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
-      produtoPadrao: '557',
+      produtoPadrao: '',
       acumuladorEntradaSemRetencoes: '802',
       acumuladorEntradaComRetencoes: '804',
       acumuladorServicoSemRetencoes: '900',
@@ -12939,7 +12939,7 @@ function renderNfseFiscalReaderCard() {
   const hiddenCount = hiddenColumns.size;
   const minWidth = Math.max(1480, visibleColumns.length * 138);
   const tipoRegistro = String(exportConfig.tipoRegistro || 'Entrada') === 'Servico' ? 'Servico' : 'Entrada';
-  const contas = String(exportConfig.contas || 'Padrao') === 'PorFornecedor' ? 'PorFornecedor' : 'Padrao';
+  const contas = ['Padrao', 'PorFornecedor', 'Caixa'].includes(String(exportConfig.contas)) ? String(exportConfig.contas) : 'Padrao';
   const clienteIdAtual = state.filters.xmls.cliente && state.filters.xmls.cliente !== 'Todos' ? state.filters.xmls.cliente : '';
   const clienteAtual = clienteIdAtual ? findClientById(clienteIdAtual) : null;
   const codigoEmpresaCadastrado =
@@ -13003,7 +13003,7 @@ function renderNfseFiscalReaderCard() {
       </label>
       <label class="field">
         Contas
-        <select name="contas" ${tipoRegistro !== 'Entrada' ? 'disabled' : ''}>${renderOptions(['Padrao', 'PorFornecedor'], contas, { Padrao: 'Padrao', PorFornecedor: 'Por Fornecedor' })}</select>
+        <select name="contas" ${tipoRegistro !== 'Entrada' ? 'disabled' : ''}>${renderOptions(['Padrao', 'PorFornecedor', 'Caixa'], contas, { Padrao: 'Padrao', PorFornecedor: 'Por Fornecedor', Caixa: 'Caixa (5)' })}</select>
       </label>
       <label class="field">
         Produto padrao
@@ -13013,10 +13013,10 @@ function renderNfseFiscalReaderCard() {
           inputmode="text"
           pattern="[A-Za-z0-9]+"
           title="Use apenas letras e numeros."
-          value="${escapeHtml(String(exportConfig.produtoPadrao || '557'))}"
-          required
+          value="${escapeHtml(String(exportConfig.produtoPadrao || ''))}"
+          placeholder="Opcional"
         />
-        <span style="color:var(--text-secondary); font-size:12px;">Aceita codigos numericos ou alfanumericos, como A ou A12.</span>
+        <span style="color:var(--text-secondary); font-size:12px;">Opcional. Aceita codigos numericos ou alfanumericos, como A ou A12.</span>
       </label>
       <label class="field">
         Acumulador Entrada sem retencoes
@@ -17445,8 +17445,9 @@ async function submitNfseFiscalDominioExportForm(form) {
   const data = new FormData(form);
   const codigoEmpresa = String(data.get('codigoEmpresa') || '').trim();
   const tipoRegistro = String(data.get('tipoRegistro') || 'Entrada').trim() === 'Servico' ? 'Servico' : 'Entrada';
-  const contas = tipoRegistro === 'Entrada' && String(data.get('contas') || '').trim() === 'PorFornecedor' ? 'PorFornecedor' : 'Padrao';
-  const produtoPadrao = String(data.get('produtoPadrao') || '557').trim();
+  const contasValue = String(data.get('contas') || '').trim();
+  const contas = tipoRegistro === 'Entrada' && ['PorFornecedor', 'Caixa'].includes(contasValue) ? contasValue : 'Padrao';
+  const produtoPadrao = String(data.get('produtoPadrao') || '').trim();
   const acumuladorEntradaSemRetencoes = String(data.get('acumuladorEntradaSemRetencoes') || '').trim();
   const acumuladorEntradaComRetencoes = String(data.get('acumuladorEntradaComRetencoes') || '').trim();
   const acumuladorServicoSemRetencoes = String(data.get('acumuladorServicoSemRetencoes') || '').trim();
@@ -17461,7 +17462,7 @@ async function submitNfseFiscalDominioExportForm(form) {
     return;
   }
 
-  if (!/^[A-Za-z0-9]+$/.test(produtoPadrao)) {
+  if (produtoPadrao && !/^[A-Za-z0-9]+$/.test(produtoPadrao)) {
     pushToast('Informe um produto padrao com apenas letras e numeros.', 'error');
     return;
   }

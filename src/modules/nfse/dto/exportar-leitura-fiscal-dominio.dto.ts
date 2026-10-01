@@ -18,18 +18,23 @@ export class ExportarLeituraFiscalDominioDto extends QueryNfseDto {
   @IsIn(['Entrada', 'Servico'])
   tipoRegistro!: 'Entrada' | 'Servico';
 
-  @ApiPropertyOptional({ enum: ['Padrao', 'PorFornecedor'], default: 'Padrao' })
+  @ApiPropertyOptional({ enum: ['Padrao', 'PorFornecedor', 'Caixa'], default: 'Padrao' })
   @IsOptional()
-  @IsIn(['Padrao', 'PorFornecedor'])
-  contas?: 'Padrao' | 'PorFornecedor';
+  @IsIn(['Padrao', 'PorFornecedor', 'Caixa'])
+  contas?: 'Padrao' | 'PorFornecedor' | 'Caixa';
 
   @ApiPropertyOptional({
-    description: 'Codigo alfanumerico do produto padrao para os registros 1030/3030',
-    default: '557',
+    description: 'Codigo alfanumerico opcional do produto para os registros 1030/3030',
     pattern: '^[A-Za-z0-9]+$'
   })
   @IsOptional()
-  @Transform(({ value }) => (value === undefined || value === null ? value : String(value).trim()))
+  @Transform(({ value }) => {
+    if (value === undefined || value === null) {
+      return undefined;
+    }
+    const normalized = String(value).trim();
+    return normalized || undefined;
+  })
   @IsString()
   @Matches(/^[A-Za-z0-9]+$/, { message: 'produtoPadrao deve conter apenas letras e numeros.' })
   produtoPadrao?: string;

@@ -457,8 +457,8 @@ export class NfseService {
 
   async exportarLeituraFiscalDominio(dto: ExportarLeituraFiscalDominioDto) {
     const tipoRegistro = dto.tipoRegistro === 'Servico' ? 'Servico' : 'Entrada';
-    const contas = dto.contas === 'PorFornecedor' ? 'PorFornecedor' : 'Padrao';
-    const produtoPadrao = String(dto.produtoPadrao ?? '557').trim();
+    const contas = dto.contas === 'PorFornecedor' || dto.contas === 'Caixa' ? dto.contas : 'Padrao';
+    const produtoPadrao = String(dto.produtoPadrao ?? '').trim();
 
     if (contas === 'PorFornecedor' && tipoRegistro !== 'Entrada') {
       throw new BadRequestException('O modo Por Fornecedor so pode ser usado na exportacao de Entrada.');
@@ -518,7 +518,8 @@ export class NfseService {
           produtoPadrao,
           acumuladores,
           contaFornecedorByCnpj,
-          contaServicoByCodigo
+          contaServicoByCodigo,
+          contas
         })
       );
     }
@@ -626,9 +627,10 @@ export class NfseService {
     produtoPadrao: string;
     acumuladores: { semRetencoes: string; comRetencoes: string };
     contaFornecedorByCnpj: Map<string, string>;
+    contas: 'Padrao' | 'PorFornecedor' | 'Caixa';
     contaServicoByCodigo: Map<string, string>;
   }): string[] {
-    const { source, tipoRegistro, produtoPadrao, acumuladores, contaFornecedorByCnpj, contaServicoByCodigo } = params;
+    const { source, tipoRegistro, produtoPadrao, acumuladores, contaFornecedorByCnpj, contaServicoByCodigo, contas } = params;
     const data = source.exportData;
     const valorServico = this.roundTo2(data.valorServico ?? 0);
     const valorLiquido = this.roundTo2(data.valorLiquidoNfse ?? 0);
@@ -654,7 +656,9 @@ export class NfseService {
     const prestadorUf = this.sanitizeDominioText(data.prestadorUf || '');
     const contaFornecedor =
       params.tipoRegistro === 'Entrada'
-        ? contaFornecedorByCnpj.get(prestadorCnpj) || '506'
+        ? contas === 'Caixa'
+          ? '5'
+          : contaFornecedorByCnpj.get(prestadorCnpj) || '506'
         : '506';
     const contaDebitoEntrada =
       params.tipoRegistro === 'Entrada'
