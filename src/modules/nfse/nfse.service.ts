@@ -108,6 +108,11 @@ type NfseDominioExportSource = {
   exportData: NfseDominioExportData;
 };
 
+type NfseContaContabilPorServico = {
+  contaContabil: string;
+  produto: string | null;
+};
+
 @Injectable()
 export class NfseService {
   private readonly logger = new Logger(NfseService.name);
@@ -505,7 +510,7 @@ export class NfseService {
         : new Map<string, string>();
 
     const contaServicoByCodigo =
-      tipoRegistro === 'Entrada' ? await this.lookupContaContabilPorCodigoServico(dto.clienteId) : new Map<string, string>();
+      tipoRegistro === 'Entrada' ? await this.lookupContaContabilPorCodigoServico(dto.clienteId) : new Map<string, NfseContaContabilPorServico>();
 
     const headerCnpj = this.resolveDominioHeaderCnpj(dto, sources, tipoRegistro);
     const lines = [`|0000|${headerCnpj}|`];
@@ -628,7 +633,7 @@ export class NfseService {
     acumuladores: { semRetencoes: string; comRetencoes: string };
     contaFornecedorByCnpj: Map<string, string>;
     contas: 'Padrao' | 'PorFornecedor' | 'Caixa';
-    contaServicoByCodigo: Map<string, string>;
+    contaServicoByCodigo: Map<string, NfseContaContabilPorServico>;
   }): string[] {
     const { source, tipoRegistro, produtoPadrao, acumuladores, contaFornecedorByCnpj, contaServicoByCodigo, contas } = params;
     const data = source.exportData;
@@ -660,12 +665,13 @@ export class NfseService {
           ? '5'
           : contaFornecedorByCnpj.get(prestadorCnpj) || '506'
         : '506';
-    const contaDebitoEntrada =
+    const configuracaoServico =
       params.tipoRegistro === 'Entrada'
         ? contaServicoByCodigo.get((source.documento.codigoServicoNacional || '').trim()) ||
-          contaServicoByCodigo.get((source.documento.itemListaServico || '').trim()) ||
-          '467'
-        : '467';
+          contaServicoByCodigo.get((source.documento.itemListaServico || '').trim())
+        : undefined;
+    const contaDebitoEntrada = configuracaoServico?.contaContabil || '467';
+    const produtoEntrada = configuracaoServico?.produto || produtoPadrao;
     const classEfd = valorInss > 0 ? '100000003' : '';
     const codEfd = valorInss > 0 ? '0' : '';
     const linhas: string[] = [];
@@ -710,7 +716,7 @@ export class NfseService {
     }
 
     if (tipoRegistro === 'Entrada') {
-      linhas.push(this.createDominioRegistro1030(valorServico, dataEmissao, aliquotaIss, valorIss, prestadorUf, produtoPadrao));
+      linhas.push(this.createDominioRegistro1030(valorServico, dataEmissao, aliquotaIss, valorIss, prestadorUf, produtoEntrada));
       const totalRetencoesLancto = this.roundTo2(valorCrf + valorIrrf + valorInss + valorIssRetidoReal);
       if (totalRetencoesLancto === 0) {
         linhas.push(this.createDominioRegistro1300(dataEmissao, contaDebitoEntrada, contaFornecedor, valorServico, numeroNfse, nomeDescricao, ''));
@@ -1416,6 +1422,7 @@ export class NfseService {
     if (!contaContabil) {
       throw new BadRequestException('Informe a conta contabil a ser usada para o codigo de servico.');
     }
+    const produto = this.normalizeProdutoContaContabilConfig(dto.produto);
 
     return this.prisma.nfseContaContabilConfig.upsert({
       where: {
@@ -1428,10 +1435,12 @@ export class NfseService {
         clienteId: dto.clienteId,
         codigoServico,
         contaContabil,
+        produto,
         ativo: dto.ativo ?? true
       },
       update: {
         contaContabil,
+        produto,
         ativo: dto.ativo ?? true
       }
     });
@@ -1447,6 +1456,7 @@ export class NfseService {
       where: { id },
       data: {
         ...(dto.contaContabil !== undefined ? { contaContabil: dto.contaContabil.trim() } : {}),
+        ...(dto.produto !== undefined ? { produto: this.normalizeProdutoContaContabilConfig(dto.produto) } : {}),
         ...(dto.ativo !== undefined ? { ativo: dto.ativo } : {})
       }
     });
@@ -1480,12 +1490,28 @@ export class NfseService {
     return /^\d{6}$/.test(value.trim());
   }
 
-  private async lookupContaContabilPorCodigoServico(clienteId: string): Promise<Map<string, string>> {
+  private normalizeProdutoContaContabilConfig(produto?: string): string | null {
+    const normalized = String(produto ?? '').trim();
+    if (!normalized) {
+      return null;
+    }
+    if (!/^[A-Za-z0-9]+$/.test(normalized)) {
+      throw new BadRequestException('Informe um produto com apenas letras e numeros.');
+    }
+    return normalized;
+  }
+
+  private async lookupContaContabilPorCodigoServico(clienteId: string): Promise<Map<string, NfseContaContabilPorServico>> {
     const configs = await this.prisma.nfseContaContabilConfig.findMany({
       where: { clienteId, ativo: true }
     });
 
-    return new Map(configs.map((config) => [config.codigoServico.trim(), config.contaContabil.trim()]));
+    return new Map(
+      configs.map((config) => [
+        config.codigoServico.trim(),
+        { contaContabil: config.contaContabil.trim(), produto: config.produto?.trim() || null }
+      ])
+    );
   }
 
   async updateDocumentNumberingValidation(id: string, dto: UpdateNfseDocumentNumberingValidationDto) {

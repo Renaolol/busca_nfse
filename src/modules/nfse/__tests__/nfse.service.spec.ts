@@ -2339,6 +2339,7 @@ describe('NfseService', () => {
         clienteId: 'cliente-1',
         codigoServico: '170101',
         contaContabil: '999',
+        produto: 'ABC123',
         ativo: true,
         createdAt: new Date('2026-07-01T00:00:00.000Z'),
         updatedAt: new Date('2026-07-01T00:00:00.000Z')
@@ -2431,6 +2432,8 @@ describe('NfseService', () => {
     expect(content).toContain('|1000|39|06960810000176||802|1933||333|U||');
     // debito (registro 1300) vem da configuracao (999); credito continua o fornecedor padrao (506), pois contas=Padrao nao aciona a busca ODBC.
     expect(content).toContain('|1300|09/07/2026|999|506|180,00|| NFS-E N 333 Prestador Exportacao|||');
+    // produto configurado para o codigo de servico prevalece sobre o produto padrao no registro 1030.
+    expect(content).toContain('|1030|ABC123|1|180,00|');
   });
 
   it('usa a conta padrao 467 quando nao ha configuracao para o codigo de servico da nota', async () => {

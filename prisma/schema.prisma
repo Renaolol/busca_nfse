@@ -314,6 +314,7 @@ model NfseContaContabilConfig {
   clienteId     String   @map("cliente_id") @db.Uuid
   codigoServico String   @map("codigo_servico") @db.VarChar(50)
   contaContabil String   @map("conta_contabil") @db.VarChar(50)
+  produto       String?  @db.VarChar(50)
   ativo         Boolean  @default(true)
   createdAt     DateTime @default(now()) @map("created_at")
   updatedAt     DateTime @updatedAt @map("updated_at")

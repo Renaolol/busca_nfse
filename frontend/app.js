@@ -11092,6 +11092,10 @@ function renderNfseContaContabilConfigModal() {
                 <span>Conta contabil</span>
                 <input type="text" name="contaContabil" placeholder="Ex.: 505" value="${escapeHtml(String(state.modal.contaContabil || ''))}" ${submitting ? 'disabled' : ''} required />
               </label>
+              <label>
+                <span>Produto</span>
+                <input type="text" name="produto" placeholder="Ex.: 557" value="${escapeHtml(String(state.modal.produto || ''))}" ${submitting ? 'disabled' : ''} />
+              </label>
             </div>
             ${errorMessage ? `<div class="table-state error" style="margin-top:14px;">${escapeHtml(errorMessage)}</div>` : ''}
             <p class="card-subtitle" style="margin-top:10px;">Use o Codigo Servico Nacional da NFS-e (cai para o Item Lista Servico quando o nacional nao tiver configuracao).</p>
@@ -11108,18 +11112,20 @@ function renderNfseContaContabilConfigModal() {
                 : configs.length
                   ? `
                     <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(46vh, 420px);">
-                      <div style="display:grid; grid-template-columns:minmax(160px, 1fr) minmax(140px, .8fr) minmax(100px, .6fr) minmax(160px, 1fr); gap:0; min-width:600px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line);">
+                      <div style="display:grid; grid-template-columns:minmax(140px, 1fr) minmax(120px, .8fr) minmax(120px, .8fr) minmax(100px, .6fr) minmax(160px, 1fr); gap:0; min-width:700px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line);">
                         <div style="padding:12px 14px;">Codigo do servico</div>
                         <div style="padding:12px 14px;">Conta contabil</div>
+                        <div style="padding:12px 14px;">Produto</div>
                         <div style="padding:12px 14px;">Status</div>
                         <div style="padding:12px 14px;">Acao</div>
                       </div>
                       ${configs
                         .map(
                           (row) => `
-                            <div style="display:grid; grid-template-columns:minmax(160px, 1fr) minmax(140px, .8fr) minmax(100px, .6fr) minmax(160px, 1fr); gap:0; min-width:600px; border-bottom:1px solid var(--line); align-items:center;">
+                            <div style="display:grid; grid-template-columns:minmax(140px, 1fr) minmax(120px, .8fr) minmax(120px, .8fr) minmax(100px, .6fr) minmax(160px, 1fr); gap:0; min-width:700px; border-bottom:1px solid var(--line); align-items:center;">
                               <div style="padding:14px;"><strong>${escapeHtml(row.codigoServico || '-')}</strong></div>
                               <div style="padding:14px;">${escapeHtml(row.contaContabil || '-')}</div>
+                              <div style="padding:14px;">${escapeHtml(row.produto || '-')}</div>
                               <div style="padding:14px;">${statusBadge(row.ativo ? 'Ativa' : 'Inativa', row.ativo ? 'success' : 'neutral')}</div>
                               <div style="padding:14px; display:flex; gap:8px;">
                                 <button class="btn secondary" type="button" data-action="nfse-toggle-conta-contabil-config" data-config-id="${escapeHtml(row.id)}" data-next-ativo="${row.ativo ? 'false' : 'true'}" ${submitting ? 'disabled' : ''}>${row.ativo ? 'Desativar' : 'Ativar'}</button>
@@ -19158,6 +19164,7 @@ function openNfseContaContabilConfigModal(clientId) {
     clientName: client.razaoSocial || 'Cliente selecionado',
     codigoServico: '',
     contaContabil: '',
+    produto: '',
     submitting: false,
     loading: true,
     errorMessage: '',
@@ -19213,6 +19220,7 @@ async function submitNfseContaContabilConfigForm(form) {
   const clienteId = String(data.get('clienteId') || state.modal.clientId || '').trim();
   const codigoServico = String(data.get('codigoServico') || '').trim();
   const contaContabil = String(data.get('contaContabil') || '').trim();
+  const produto = String(data.get('produto') || '').trim();
 
   if (!clienteId || !codigoServico || !contaContabil) {
     state.modal = {
@@ -19228,6 +19236,7 @@ async function submitNfseContaContabilConfigForm(form) {
     submitting: true,
     codigoServico,
     contaContabil,
+    produto,
     errorMessage: ''
   };
   render();
@@ -19238,7 +19247,8 @@ async function submitNfseContaContabilConfigForm(form) {
       body: {
         clienteId,
         codigoServico,
-        contaContabil
+        contaContabil,
+        produto: produto || undefined
       }
     });
 
@@ -19248,6 +19258,7 @@ async function submitNfseContaContabilConfigForm(form) {
         submitting: false,
         codigoServico: '',
         contaContabil: '',
+        produto: '',
         errorMessage: ''
       };
       render();

@@ -1,5 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, IsUUID, MaxLength } from 'class-validator';
+import { IsBoolean, IsOptional, IsString, IsUUID, Matches, MaxLength } from 'class-validator';
 
 export class ListNfseContaContabilConfigQueryDto {
   @ApiPropertyOptional()
@@ -20,6 +20,9 @@ export class NfseContaContabilConfigResponseDto {
 
   @ApiProperty()
   contaContabil!: string;
+
+  @ApiPropertyOptional({ description: 'Codigo alfanumerico opcional do produto Dominio a ser usado no registro 1030 para esse codigo de servico' })
+  produto?: string | null;
 
   @ApiProperty()
   ativo!: boolean;
@@ -46,6 +49,13 @@ export class CreateNfseContaContabilConfigDto {
   @MaxLength(50)
   contaContabil!: string;
 
+  @ApiPropertyOptional({ description: 'Codigo alfanumerico opcional do produto Dominio a ser usado no registro 1030 para esse codigo de servico', pattern: '^[A-Za-z0-9]+$' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  @Matches(/^[A-Za-z0-9]+$/, { message: 'produto deve conter apenas letras e numeros.' })
+  produto?: string;
+
   @ApiPropertyOptional({ default: true })
   @IsOptional()
   @IsBoolean()
@@ -58,6 +68,13 @@ export class UpdateNfseContaContabilConfigDto {
   @IsString()
   @MaxLength(50)
   contaContabil?: string;
+
+  @ApiPropertyOptional({ description: 'Codigo alfanumerico opcional do produto Dominio para esse codigo de servico', pattern: '^[A-Za-z0-9]+$' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(50)
+  @Matches(/^[A-Za-z0-9]+$/, { message: 'produto deve conter apenas letras e numeros.' })
+  produto?: string;
 
   @ApiPropertyOptional()
   @IsOptional()
