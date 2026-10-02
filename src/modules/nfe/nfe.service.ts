@@ -1192,6 +1192,32 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return persisted;
   }
 
+  async persistNfceScDocument(params: {
+    clienteId: string;
+    estabelecimentoId: string;
+    ambiente: NfeAmbiente;
+    cnpjConsulta: string;
+    xml: string;
+  }) {
+    await this.ensureClient(params.clienteId);
+    await this.ensureEstablishment(params.estabelecimentoId, params.clienteId);
+    const classified = this.parser.classify(params.xml);
+    if (classified.contentType !== 'evento') {
+      const parsed = this.parser.parse(params.xml);
+      if (parsed.modelo !== '65') {
+        throw new BadRequestException('O servico SEF/SC retornou um XML que nao e NFC-e modelo 65');
+      }
+    }
+    return this.persistDocument({
+      clienteId: params.clienteId,
+      estabelecimentoId: params.estabelecimentoId,
+      ambiente: params.ambiente,
+      cnpjConsulta: params.cnpjConsulta,
+      document: { schema: classified.contentType === 'evento' ? 'procEventoNFe_v1.00' : 'procNFe_v4.00', xml: params.xml },
+      origem: NfeDocumentoOrigem.sef_sc_nfce
+    });
+  }
+
   async importFromDominio(dto: ImportNfeFromDominioDto) {
     await this.ensureClient(dto.clienteId);
     return this.importFromDominioInternal({

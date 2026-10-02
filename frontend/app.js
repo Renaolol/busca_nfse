@@ -251,6 +251,7 @@ const navItems = [
   { key: 'clientes', label: 'Clientes', icon: 'users', route: '/clientes' },
   { key: 'certificados', label: 'Certificados', icon: 'shield', route: '/certificados' },
   { key: 'buscas', label: 'Buscas', icon: 'search', route: '/buscas' },
+  { key: 'nfce-sc', label: 'NFC-e SC', icon: 'file', route: '/nfce-sc' },
   { key: 'armazenados', label: 'Armazenados', icon: 'file', route: '/xmls' },
   { key: 'auditoria-lacunas', label: 'Auditoria NFS-e', icon: 'alert', route: '/auditoria-lacunas' },
   { key: 'compara-sped', label: 'Compara SPED', icon: 'compare', route: '/compara-sped' },
@@ -295,6 +296,10 @@ const pageMeta = {
   'xmls-nfe': {
     title: 'XMLs NF-e',
     description: 'Consulte XMLs armazenados de NF-e no servidor interno.'
+  },
+  'nfce-sc': {
+    title: 'NFC-e Santa Catarina',
+    description: 'Configure os certificados e acompanhe a distribuicao estadual de NFC-e da SEF/SC.'
   },
   'xmls-cte': {
     title: 'XMLs CT-e',
@@ -375,6 +380,8 @@ const state = {
   nfeEventsSyncRunning: false,
   cteEventsSyncRunning: false,
   nfeSyncControls: [],
+  nfceScControls: [],
+  nfceScDocuments: [],
   nfeDocuments: [],
   cteDocuments: [],
   nfeDashboardStats: null,
@@ -854,7 +861,9 @@ async function hydrateFromApi(options = {}) {
     auditRows,
     schedulerStatus,
     compareSpedHistoryRaw,
-    monofasicoAliquotasConfig
+    monofasicoAliquotasConfig,
+    nfceScControlsByClient,
+    nfceScDocumentsByClient
   ] = await Promise.all([
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/estabelecimentos`, []),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/certificados`, []),
@@ -873,7 +882,9 @@ async function hydrateFromApi(options = {}) {
     apiRequest('/auditoria').catch(() => []),
     apiRequest('/sync/scheduler-status').catch(() => null),
     apiRequest(`/comparacoes-sped?limit=${COMPARE_SPED_HISTORY_LIMIT}`).catch(() => []),
-    apiRequest('/nfe/xml-reader30/aliquotas-monofasico').catch(() => null)
+    apiRequest('/nfe/xml-reader30/aliquotas-monofasico').catch(() => null),
+    fetchJsonByClientId(clientIds, (clientId) => `/nfce-sc/controles?clienteId=${encodeURIComponent(clientId)}`, []),
+    fetchJsonByClientId(clientIds, (clientId) => `/nfce-sc/documentos?clienteId=${encodeURIComponent(clientId)}`, [])
   ]);
 
   const nfseDocsPage = normalizePaginatedResponse(nfseDocs);
@@ -893,8 +904,11 @@ async function hydrateFromApi(options = {}) {
   const xmlFiles = buildXmlFilesFromApi(nfseDocsPage.items, clients);
   const searchRuns = buildSearchRunsFromApi(syncByClient, clients);
   const nfeDocuments = buildNfeDocumentsFromApi(nfeDocsPage.items, clients);
+  const nfceScDocumentRows = Object.values(nfceScDocumentsByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
+  const nfceScDocuments = buildNfeDocumentsFromApi(nfceScDocumentRows, clients);
   const cteDocuments = buildCteDocumentsFromApi(cteDocsPage.items, clients);
   const nfeSyncControls = buildNfeSyncControlsFromApi(nfeSyncByClient, clients, establishmentsByClient);
+  const nfceScControls = Object.values(nfceScControlsByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
   const alerts = [
     ...buildPersistentAlertsFromApi(persistedAlerts),
     ...buildAlertsFromApi(certificates, syncByClient, clients, xmlFiles, auditRows)
@@ -905,9 +919,11 @@ async function hydrateFromApi(options = {}) {
   state.searchRuns = searchRuns.length ? searchRuns : deepClone(mockSearchRuns);
   state.runningExecution = null;
   state.xmlFiles = xmlFiles;
-  state.nfeDocuments = nfeDocuments;
+  state.nfeDocuments = mergeNfeDocumentsById(nfeDocuments, nfceScDocuments);
+  state.nfceScDocuments = nfceScDocuments;
   state.cteDocuments = cteDocuments;
   state.nfeSyncControls = nfeSyncControls;
+  state.nfceScControls = nfceScControls;
   state.nfeDashboardStats = nfeDashboardStats;
   state.cteDashboardStats = cteDashboardStats;
   state.nfeSchedulerStatus = nfeSchedulerStatus;
@@ -1106,6 +1122,13 @@ function onDocumentClick(event) {
   event.preventDefault();
 
   switch (action) {
+    case 'nfce-sc-run':
+    case 'nfce-sc-pause': {
+      const controlId = actionNode.getAttribute('data-control-id') || '';
+      const clientId = actionNode.getAttribute('data-client-id') || '';
+      void executeNfceScControlAction(action, controlId, clientId);
+      return;
+    }
     case 'row-actions-menu-toggle': {
       const menuId = actionNode.getAttribute('data-menu-id') || '';
       toggleRowActionsMenu(menuId, actionNode);
@@ -2392,6 +2415,11 @@ function onDocumentSubmit(event) {
       void submitNfeDominioImportForm(target);
       return;
     }
+    case 'nfceScConfigureForm': {
+      event.preventDefault();
+      void submitNfceScConfigureForm(target);
+      return;
+    }
     case 'xmlsFilterForm': {
       event.preventDefault();
       void applyXmlFilters(target);
@@ -2541,6 +2569,10 @@ function onDocumentChange(event) {
   }
 
   const action = target.getAttribute('data-action');
+  if (action === 'nfce-sc-client-select' || action === 'nfce-sc-establishment-select') {
+    updateNfceScConfigOptions();
+    return;
+  }
   const eventsSyncControl = target.getAttribute('data-events-sync-control');
   if (eventsSyncControl === 'all') {
     if (target.checked) {
@@ -3022,6 +3054,7 @@ function render() {
     ${renderSidebarBackdrop()}
     ${renderPageLoadingOverlay()}
   `;
+  if (state.route.name === 'nfce-sc') updateNfceScConfigOptions();
 
   const modalHtml = renderModal();
   if (state.modal?.kind === 'xml-reader30-nfe-fullscreen') {
@@ -3289,6 +3322,8 @@ function renderCurrentPage() {
       return renderNfseGapAuditPage();
     case 'buscas-nfe':
       return renderNfeSyncPage();
+    case 'nfce-sc':
+      return renderNfceScPage();
     case 'xmls-nfe':
       return renderNfeDocumentsPage();
     case 'xmls-cte':
@@ -4191,6 +4226,173 @@ function renderCollapsibleCard({ sectionKey, title, subtitle = '', contentHtml, 
       ${isOpen ? `<div class="collapse-body">${contentHtml}</div>` : ''}
     </article>
   `;
+}
+
+function renderNfceScPage() {
+  const activeClients = state.clients.filter((client) => client.id);
+  const establishments = Object.entries(state.establishmentsByClient || {}).flatMap(([clienteId, rows]) =>
+    (Array.isArray(rows) ? rows : []).map((row) => ({ ...row, clienteId }))
+  );
+  const certificates = (state.certificates || []).filter((certificate) => certificate.id);
+  const establishmentLabels = establishments.reduce((labels, establishment) => {
+    const client = findClientById(establishment.clienteId);
+    labels[establishment.id] = `${establishment.razaoSocial || establishment.nome || establishment.cnpj} — ${client?.razaoSocial || 'Cliente'} (${formatCnpj(establishment.cnpj || '')})`;
+    return labels;
+  }, {});
+  const clientLabels = mapClientOptions();
+  const rowsHtml = state.nfceScControls.map((control) => `
+    <tr>
+      <td>${escapeHtml(control.estabelecimento?.razaoSocial || control.estabelecimento?.cnpj || '-')}</td>
+      <td>${escapeHtml(formatCnpj(control.cnpjConsulta || ''))}</td>
+      <td>${escapeHtml(control.certificado?.nome || 'Certificado nao selecionado')}</td>
+      <td>${escapeHtml(control.ambiente === 'producao' ? 'Producao' : 'Homologacao')}</td>
+      <td>${escapeHtml(String(control.ultimoNsuConsultado ?? '0'))}</td>
+      <td>${statusBadge(control.status === 'ativo' ? 'Configurado' : 'Pausado', control.status === 'ativo' ? 'success' : 'neutral')}</td>
+      <td><span class="row-sub">${escapeHtml(control.ultimaMensagem || 'Aguardando primeira consulta')}</span><div class="stack-actions" style="justify-content:flex-start;margin-top:6px"><button class="btn secondary" type="button" data-action="nfce-sc-run" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}">Consultar agora</button><button class="btn ghost" type="button" data-action="nfce-sc-pause" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}">Pausar</button></div></td>
+    </tr>
+  `).join('');
+  const documentRowsHtml = state.nfceScDocuments.map((doc) => `
+    <tr>
+      <td>${escapeHtml(doc.cliente)}</td>
+      <td>${escapeHtml(doc.numeroNfe)}</td>
+      <td>${escapeHtml(doc.emitenteNome)}</td>
+      <td>${escapeHtml(doc.destinatarioNome)}</td>
+      <td>${escapeHtml(formatDate(doc.dataEmissao))}</td>
+      <td>${escapeHtml(formatCurrency(doc.valor))}</td>
+      <td>${statusBadge(doc.xmlCompletoDisponivel ? 'XML completo' : 'XML ausente', doc.xmlCompletoDisponivel ? 'success' : 'warning')}</td>
+      <td><button class="btn secondary" type="button" data-action="nfe-view" data-nfe-id="${escapeHtml(doc.id)}" ${doc.xmlCompletoDisponivel ? '' : 'disabled'}>Ver XML</button></td>
+    </tr>
+  `).join('');
+
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'NFC-e Santa Catarina',
+        description: 'Configure os estabelecimentos, certificado contabilista e filtros da distribuicao oficial da SEF/SC.'
+      })}
+      <article class="card">
+        <h3 class="card-title">Configurar estabelecimento</h3>
+        <p class="card-subtitle">O certificado precisa identificar um contabilista autorizado para consultar o contribuinte. Para e-CNPJ da empresa contabil, o CPF do contador responsavel deve constar no certificado.</p>
+        <form id="nfceScConfigureForm" class="form-grid">
+          <label class="field">Cliente<select name="clienteId" data-action="nfce-sc-client-select" required>${renderOptions(activeClients.map((client) => client.id), '', clientLabels, 'Selecione o cliente')}</select></label>
+          <label class="field">Estabelecimento<select name="estabelecimentoId" data-action="nfce-sc-establishment-select" required>${renderNfceScEstablishmentOptions(establishments, establishmentLabels)}</select></label>
+          <label class="field">Certificado contabilista<select name="certificadoId" required>${renderNfceScCertificateOptions(certificates)}</select><small class="field-hint">Certificados sem cliente vinculado aparecem como credencial interna da GCONT.</small></label>
+          <label class="field">Ambiente<select name="ambiente" disabled><option value="producao" selected>Producao (SEF/SC)</option></select><input type="hidden" name="ambiente" value="producao" /></label>
+          <label class="field">Papel do contribuinte<select name="indAtor">${renderOptions([1, 2, 3, 9], 3, { 1: 'Emitente', 2: 'Destinatario', 3: 'Emitente ou destinatario', 9: 'Emitente e destinatario' })}</select></label>
+          <div class="stack-actions" style="grid-column:span 3;justify-content:flex-start;align-items:flex-end"><button class="btn primary" type="submit">Salvar configuracao</button></div>
+        </form>
+      </article>
+      <article class="card">
+        <h3 class="card-title">Controles da SEF/SC</h3>
+        <p class="card-subtitle">Cada controle guarda seu proprio NSU estadual, independente da distribuicao nacional de NF-e.</p>
+        <div class="table-wrap"><table><thead><tr><th>Estabelecimento</th><th>CNPJ</th><th>Certificado</th><th>Ambiente</th><th>Ultimo NSU SC</th><th>Status</th><th>Ultima mensagem</th></tr></thead><tbody>${renderTableRowsOrState({ key: 'nfceSc', colSpan: 7, rowsHtml, emptyMessage: 'Nenhum controle NFC-e SC configurado.' })}</tbody></table></div>
+      </article>
+      <article class="card">
+        <h3 class="card-title">NFC-e armazenadas</h3>
+        <p class="card-subtitle">Documentos modelo 65 recebidos pela distribuicao da SEF/SC. O XML completo fica no armazenamento interno do NotaSync.</p>
+        <div class="table-wrap"><table><thead><tr><th>Cliente</th><th>Numero</th><th>Emitente</th><th>Destinatario</th><th>Emissao</th><th>Valor</th><th>Arquivo</th><th></th></tr></thead><tbody>${renderTableRowsOrState({ key: 'nfceScDocs', colSpan: 8, rowsHtml: documentRowsHtml, emptyMessage: 'Nenhuma NFC-e SC armazenada.' })}</tbody></table></div>
+      </article>
+      <article class="card"><p class="card-subtitle" style="margin:0">A SEF/SC limita a disponibilidade ao mes corrente e aos dois meses anteriores. A sincronizacao respeitara a pausa minima de 12 horas depois de consumir todos os documentos disponiveis.</p></article>
+    </section>
+  `;
+}
+
+function renderNfceScEstablishmentOptions(establishments, labels) {
+  return [
+    '<option value="">Selecione o estabelecimento</option>',
+    ...establishments.map((item) => `<option value="${escapeHtml(item.id)}" data-nfce-client-id="${escapeHtml(item.clienteId)}">${escapeHtml(labels[item.id])}</option>`)
+  ].join('');
+}
+
+function renderNfceScCertificateOptions(certificates) {
+  return [
+    '<option value="">Selecione o certificado</option>',
+    ...certificates.map((certificate) => {
+      const scope = certificate.clientId ? 'Cliente vinculado' : 'Interno / GCONT';
+      const holder = certificate.cnpj ? ` — titular ${formatCnpj(certificate.cnpj)}` : '';
+      return `<option value="${escapeHtml(certificate.id)}" data-nfce-client-id="${escapeHtml(certificate.clientId || '')}" data-nfce-establishment-id="${escapeHtml(certificate.estabelecimentoId || '')}" ${certificate.ativo ? '' : 'disabled'}>${escapeHtml(`${certificate.apelido || 'Certificado'} · ${scope}${holder}`)}</option>`;
+    })
+  ].join('');
+}
+
+function updateNfceScConfigOptions() {
+  const form = document.getElementById('nfceScConfigureForm');
+  if (!form) return;
+  const clientId = String(form.elements.clienteId?.value || '');
+  const establishmentSelect = form.elements.estabelecimentoId;
+  const certificateSelect = form.elements.certificadoId;
+  for (const option of establishmentSelect.options) {
+    option.hidden = Boolean(option.value) && option.getAttribute('data-nfce-client-id') !== clientId;
+    option.disabled = option.hidden;
+  }
+  if (establishmentSelect.selectedOptions[0]?.disabled) establishmentSelect.value = '';
+  const establishmentId = String(establishmentSelect.value || '');
+  for (const option of certificateSelect.options) {
+    if (!option.value) continue;
+    const certClientId = option.getAttribute('data-nfce-client-id') || '';
+    const certEstablishmentId = option.getAttribute('data-nfce-establishment-id') || '';
+    const allowedScope = !certClientId || certClientId === clientId;
+    const allowedEstablishment = !certEstablishmentId || certEstablishmentId === establishmentId;
+    option.hidden = !allowedScope || !allowedEstablishment;
+    option.disabled = option.hidden || !state.certificates.find((certificate) => certificate.id === option.value)?.ativo;
+  }
+  if (certificateSelect.selectedOptions[0]?.disabled) certificateSelect.value = '';
+}
+
+async function submitNfceScConfigureForm(form) {
+  const values = Object.fromEntries(new FormData(form).entries());
+  const clientId = String(values.clienteId || '');
+  try {
+    const result = await apiRequest('/nfce-sc/controles', {
+      method: 'POST',
+      body: JSON.stringify({ ...values, indAtor: Number(values.indAtor) })
+    });
+    const controls = await apiRequest(`/nfce-sc/controles?clienteId=${encodeURIComponent(clientId)}`).catch(() => []);
+    const documents = await apiRequest(`/nfce-sc/documentos?clienteId=${encodeURIComponent(clientId)}`).catch(() => []);
+    state.nfceScControls = [
+      ...state.nfceScControls.filter((control) => control.clienteId !== clientId),
+      ...(Array.isArray(controls) ? controls : [])
+    ];
+    const mappedDocuments = buildNfeDocumentsFromApi(Array.isArray(documents) ? documents : [], state.clients);
+    state.nfceScDocuments = [
+      ...state.nfceScDocuments.filter((doc) => doc.clientId !== clientId),
+      ...mappedDocuments
+    ];
+    state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mappedDocuments);
+    render();
+    pushToast(result?.id ? 'Controle NFC-e SC salvo.' : 'Configuracao salva.', 'success');
+  } catch (error) {
+    pushToast(`Falha ao salvar controle NFC-e SC: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function executeNfceScControlAction(action, controlId, clienteId) {
+  if (!controlId || !clienteId) return;
+  try {
+    const endpoint = action === 'nfce-sc-run' ? 'rodar-agora' : 'pausar';
+    const result = await apiRequest(`/nfce-sc/controles/${encodeURIComponent(controlId)}/${endpoint}`, {
+      method: 'POST',
+      body: JSON.stringify({ clienteId })
+    });
+    const controls = await apiRequest(`/nfce-sc/controles?clienteId=${encodeURIComponent(clienteId)}`).catch(() => []);
+    const documents = await apiRequest(`/nfce-sc/documentos?clienteId=${encodeURIComponent(clienteId)}`).catch(() => []);
+    state.nfceScControls = [
+      ...state.nfceScControls.filter((control) => control.clienteId !== clienteId),
+      ...(Array.isArray(controls) ? controls : [])
+    ];
+    const mappedDocuments = buildNfeDocumentsFromApi(Array.isArray(documents) ? documents : [], state.clients);
+    state.nfceScDocuments = [
+      ...state.nfceScDocuments.filter((doc) => doc.clientId !== clienteId),
+      ...mappedDocuments
+    ];
+    state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mappedDocuments);
+    render();
+    pushToast(action === 'nfce-sc-run'
+      ? `Consulta SC finalizada: ${Number(result?.documentosArmazenados || 0)} documento(s) salvo(s).`
+      : 'Controle NFC-e SC pausado.', 'success');
+  } catch (error) {
+    pushToast(`Falha na operacao NFC-e SC: ${toErrorMessage(error)}`, 'error');
+  }
 }
 
 function renderNfeSyncPage() {
@@ -14177,6 +14379,7 @@ function parseRoute(hash) {
     '/xmls': 'xmls',
     '/auditoria-lacunas': 'auditoria-lacunas',
     '/buscas-nfe': 'buscas-nfe',
+    '/nfce-sc': 'nfce-sc',
     '/xmls-nfe': 'xmls-nfe',
     '/xmls-cte': 'xmls-cte',
     '/compara-sped': 'compara-sped',

@@ -522,3 +522,9 @@ Quando houver pendencias (sem certificado, sem sync ou sem notas), o painel exib
 - Manual ADN: https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/manual-contribuintes-apis-adn-sistema-nacional-nfse.pdf
 - Manual Emissor Publico API: https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/manual-contribuintes-emissor-publico-api-sistema-nacional-nfs-e-v1-2-out2025.pdf
 
+<<<<<<< Updated upstream
+=======
+## NFC-e Santa Catarina
+
+A tela `NFC-e SC` configura controles e executa consulta manual ao servico da SEF/SC. O NSU estadual tem controle separado do NSU da distribuicao nacional; os XMLs modelo 65 entram no acervo de NF-e com origem `sef_sc_nfce` e deduplicacao por `ambiente + chave_acesso`. Veja [docs/nfce-sc.md](docs/nfce-sc.md) para endpoints, certificado contabilista, configuracao e limites de consulta.
+>>>>>>> Stashed changes

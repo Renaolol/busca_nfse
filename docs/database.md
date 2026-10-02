@@ -20,6 +20,7 @@ Regras principais:
 - Deduplicacao por `UNIQUE (ambiente, chave_acesso)` em documentos.
 - Controle NSU por contexto (`cliente/cnpj/ambiente`) com `UNIQUE (cliente_id, cnpj_consulta, ambiente)` em `nfse_sync_controle`.
 - Controle NSU independente para NF-e em `nfe_sync_controle`.
+- Controle NSU proprio da distribuicao SEF/SC em `nfce_sc_sync_controle`; essa sequencia nao compartilha NSU com a distribuicao nacional.
 - Historico de certificados e vinculo de substituicao.
 - `certificados.cliente_id` e opcional para permitir controle de certificados avulsos.
 - `certificados.anotacoes` guarda observacoes internas sobre origem, renovacao e uso operacional.
