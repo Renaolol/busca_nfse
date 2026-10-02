@@ -37,11 +37,8 @@ import { PrismaModule } from './prisma/prisma.module';
     SyncModule,
     NfseModule,
     NfeModule,
-<<<<<<< Updated upstream
     SimplesNacionalModule,
-=======
     NfceScModule,
->>>>>>> Stashed changes
     AuditModule,
     JobsModule
   ],
