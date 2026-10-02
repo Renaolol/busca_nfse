@@ -4345,7 +4345,7 @@ async function submitNfceScConfigureForm(form) {
   try {
     const result = await apiRequest('/nfce-sc/controles', {
       method: 'POST',
-      body: JSON.stringify({ ...values, indAtor: Number(values.indAtor) })
+      body: { ...values, indAtor: Number(values.indAtor) }
     });
     const controls = await apiRequest(`/nfce-sc/controles?clienteId=${encodeURIComponent(clientId)}`).catch(() => []);
     const documents = await apiRequest(`/nfce-sc/documentos?clienteId=${encodeURIComponent(clientId)}`).catch(() => []);
@@ -4372,7 +4372,7 @@ async function executeNfceScControlAction(action, controlId, clienteId) {
     const endpoint = action === 'nfce-sc-run' ? 'rodar-agora' : 'pausar';
     const result = await apiRequest(`/nfce-sc/controles/${encodeURIComponent(controlId)}/${endpoint}`, {
       method: 'POST',
-      body: JSON.stringify({ clienteId })
+      body: { clienteId }
     });
     const controls = await apiRequest(`/nfce-sc/controles?clienteId=${encodeURIComponent(clienteId)}`).catch(() => []);
     const documents = await apiRequest(`/nfce-sc/documentos?clienteId=${encodeURIComponent(clienteId)}`).catch(() => []);
