@@ -14009,7 +14009,7 @@ function renderToasts() {
   `;
 }
 
-function renderPageHeader({ title, description, actions, badgeText = '' }) {
+function renderPageHeader({ title, description, actions = [], badgeText = '' }) {
   return `
     <div class="page-header">
       <div>
