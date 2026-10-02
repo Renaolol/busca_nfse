@@ -1329,6 +1329,14 @@ function onDocumentClick(event) {
       openModal({ kind: 'client-form', mode: 'edit', clientId });
       return;
     }
+    case 'client-establishment-add': {
+      const clientId = actionNode.getAttribute('data-client-id');
+      if (!clientId) {
+        return;
+      }
+      openModal({ kind: 'establishment-form', clientId });
+      return;
+    }
     case 'client-details': {
       const clientId = actionNode.getAttribute('data-client-id');
       if (!clientId) {
@@ -2372,6 +2380,11 @@ function onDocumentSubmit(event) {
     case 'clientForm': {
       event.preventDefault();
       void submitClientForm(target);
+      return;
+    }
+    case 'establishmentForm': {
+      event.preventDefault();
+      void submitEstablishmentForm(target);
       return;
     }
     case 'recoverPastNsusForm': {
@@ -3710,6 +3723,7 @@ function renderClientDetailsPage(clientId) {
   const clientXmls = state.xmlFiles.filter((xml) => xml.clientId === client.id).slice(0, 6);
   const clientAlerts = state.alerts.filter((alert) => alert.clientId === client.id).slice(0, 5);
   const establishmentSummary = getClientEstablishmentSummary(client.id);
+  const establishments = Array.isArray(state.establishmentsByClient?.[client.id]) ? state.establishmentsByClient[client.id] : [];
   const nfeBaseSummary = getClientNfeBaseSummary(client.id);
   const clientAddressParts = [client.logradouro, client.bairro, client.municipio && client.uf ? `${client.municipio} / ${client.uf}` : '', client.cep ? `CEP ${client.cep}` : ''].filter(Boolean);
   const clientAddressLabel = clientAddressParts.length ? clientAddressParts.join(' • ') : '-';
@@ -3747,6 +3761,31 @@ function renderClientDetailsPage(clientId) {
               ${detailItem('Busca NF-e', client.buscaNfeAtiva !== false ? 'Habilitada' : 'Pausada')}
               ${detailItem('Responsavel interno', client.responsavelInterno)}
               ${detailItem('Status do cliente', client.buscaStatus)}
+            </div>
+          </article>
+
+          <article class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+              <div>
+                <h3 class="card-title">Estabelecimentos</h3>
+                <p class="card-subtitle">Cadastre matriz e filiais vinculadas a este cliente.</p>
+              </div>
+              <button class="btn primary" type="button" data-action="client-establishment-add" data-client-id="${escapeHtml(client.id)}">Adicionar estabelecimento</button>
+            </div>
+            <div class="table-wrap" style="margin-top:10px;">
+              <table>
+                <thead><tr><th>Razao social</th><th>CNPJ</th><th>Municipio / UF</th><th>Status</th></tr></thead>
+                <tbody>
+                  ${establishments.length
+                    ? establishments.map((establishment) => `<tr>
+                        <td>${escapeHtml(establishment.razaoSocial || '-')}</td>
+                        <td>${escapeHtml(formatCnpj(establishment.cnpj || ''))}</td>
+                        <td>${escapeHtml(formatMunicipioUfLabel(establishment.municipioNome, establishment.uf))}</td>
+                        <td>${statusBadge(establishment.ativo ? 'Ativo' : 'Inativo', establishment.ativo ? 'success' : 'neutral')}</td>
+                      </tr>`).join('')
+                    : '<tr><td colspan="4" class="table-state">Nenhum estabelecimento cadastrado.</td></tr>'}
+                </tbody>
+              </table>
             </div>
           </article>
 
@@ -10867,6 +10906,8 @@ function renderModal() {
       `;
     case 'client-form':
       return renderClientFormModal();
+    case 'establishment-form':
+      return renderEstablishmentFormModal();
     case 'certificate-form':
       return renderCertificateFormModal();
     case 'certificate-password':
@@ -11440,6 +11481,42 @@ function renderClientFormModal() {
           <div class="modal-footer">
             <button class="btn secondary" type="button" data-action="close-modal">Cancelar</button>
             <button class="btn primary" type="submit">${state.modal.mode === 'edit' ? 'Salvar alteracoes' : 'Cadastrar cliente'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderEstablishmentFormModal() {
+  const client = findClientById(state.modal.clientId);
+  if (!client) return '';
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Adicionar estabelecimento</h3>
+          <p class="modal-subtitle">Vinculado a ${escapeHtml(client.razaoSocial)}. O CNPJ e a razao social estao preenchidos com os dados do cliente; altere-os para cadastrar uma filial.</p>
+        </div>
+        <form id="establishmentForm">
+          <input type="hidden" name="clienteId" value="${escapeHtml(client.id)}" />
+          <div class="modal-body">
+            <div class="form-grid two">
+              <label class="field">Razao social<input name="razaoSocial" required value="${escapeHtml(client.razaoSocial || '')}" /></label>
+              <label class="field">CNPJ<input name="cnpj" required inputmode="numeric" maxlength="18" value="${escapeHtml(formatCnpj(client.cnpj || ''))}" /></label>
+              <label class="field">Inscricao municipal<input name="inscricaoMunicipal" /></label>
+              <label class="field">UF<input name="uf" maxlength="2" value="${escapeHtml(client.uf || '')}" /></label>
+              <label class="field">Municipio<input name="municipioNome" value="${escapeHtml(client.municipio || '')}" /></label>
+              <label class="field">Codigo IBGE do municipio<input name="municipioCodigoIbge" inputmode="numeric" maxlength="7" /></label>
+              <label class="field">Logradouro<input name="logradouro" value="${escapeHtml(client.logradouro || '')}" /></label>
+              <label class="field">Bairro<input name="bairro" value="${escapeHtml(client.bairro || '')}" /></label>
+              <label class="field">CEP<input name="cep" inputmode="numeric" maxlength="9" value="${escapeHtml(client.cep || '')}" /></label>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button class="btn secondary" type="button" data-action="close-modal">Cancelar</button>
+            <button class="btn primary" type="submit">Cadastrar estabelecimento</button>
           </div>
         </form>
       </div>
@@ -14671,6 +14748,68 @@ async function submitClientForm(form) {
 
   closeModal();
   render();
+}
+
+async function submitEstablishmentForm(form) {
+  const formData = new FormData(form);
+  const clientId = String(formData.get('clienteId') || '').trim();
+  const client = findClientById(clientId);
+  const cnpj = normalizeDigits(String(formData.get('cnpj') || ''));
+  const razaoSocial = String(formData.get('razaoSocial') || '').trim();
+  if (!client) {
+    pushToast('Cliente nao encontrado para vincular o estabelecimento.', 'error');
+    return;
+  }
+  if (cnpj.length !== 14) {
+    pushToast('Informe um CNPJ com 14 digitos.', 'error');
+    return;
+  }
+
+  const currentEstablishments = Array.isArray(state.establishmentsByClient?.[clientId]) ? state.establishmentsByClient[clientId] : [];
+  if (currentEstablishments.some((item) => normalizeDigits(item.cnpj || '') === cnpj)) {
+    pushToast('Ja existe um estabelecimento deste cliente com esse CNPJ.', 'error');
+    return;
+  }
+
+  const optionalText = (name) => String(formData.get(name) || '').trim() || undefined;
+  const payload = {
+    cnpj,
+    razaoSocial,
+    inscricaoMunicipal: optionalText('inscricaoMunicipal'),
+    uf: optionalText('uf')?.toUpperCase(),
+    municipioNome: optionalText('municipioNome'),
+    municipioCodigoIbge: optionalText('municipioCodigoIbge'),
+    logradouro: optionalText('logradouro'),
+    bairro: optionalText('bairro'),
+    cep: normalizeDigits(String(formData.get('cep') || '')) || undefined,
+    ativo: true
+  };
+
+  try {
+    let establishment;
+    if (state.dataSource === 'api') {
+      establishment = await apiRequest(`/clientes/${encodeURIComponent(clientId)}/estabelecimentos`, {
+        method: 'POST',
+        body: payload
+      });
+    } else {
+      establishment = { ...payload, id: createBrowserId(), clienteId: clientId, createdAt: new Date().toISOString() };
+    }
+
+    state.establishmentsByClient = {
+      ...state.establishmentsByClient,
+      [clientId]: [...currentEstablishments, establishment]
+    };
+    closeModal();
+    if (state.dataSource === 'api') {
+      await refreshApiData();
+    } else {
+      render();
+    }
+    pushToast('Estabelecimento cadastrado com sucesso.', 'success');
+  } catch (error) {
+    pushToast(`Falha ao cadastrar estabelecimento: ${toErrorMessage(error)}`, 'error');
+  }
 }
 
 async function buscarCodigoEmpresaDominioAutomatico() {
