@@ -152,7 +152,6 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
   async run(clienteId: string, id: string) {
     const control = await this.prisma.nfceScSyncControle.findFirst({ where: { id, clienteId } });
     if (!control) throw new NotFoundException('Controle NFC-e SC nao encontrado');
-    if (control.status === NfeSyncStatus.pausado) throw new BadRequestException('O controle NFC-e SC esta pausado');
     if (control.status === NfeSyncStatus.processando) return this.toRunResponse(control, false);
     if (control.proximaExecucao && control.proximaExecucao > new Date()) {
       throw new BadRequestException(`Proxima consulta permitida em ${control.proximaExecucao.toISOString()}`);
@@ -164,7 +163,7 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
       where: {
         id,
         clienteId,
-        status: { notIn: [NfeSyncStatus.pausado, NfeSyncStatus.processando] },
+        status: { notIn: [NfeSyncStatus.processando] },
         OR: [{ proximaExecucao: null }, { proximaExecucao: { lte: now } }]
       },
       data: {

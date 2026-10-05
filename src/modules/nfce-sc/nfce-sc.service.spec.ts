@@ -115,4 +115,44 @@ describe('NfceScService', () => {
     });
     expect(clientStub.download).not.toHaveBeenCalled();
   });
+
+  it('retoma um controle pausado a partir do NSU salvo', async () => {
+    const control = {
+      ...createControl(new Date()),
+      status: NfeSyncStatus.pausado,
+      ultimoNsuConsultado: 230n,
+      totalDocumentosBaixados: 230,
+      proximaExecucao: null,
+      ultimaMensagem: 'Controle pausado manualmente.'
+    };
+    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const prismaStub = {
+      nfceScSyncControle: {
+        findFirst: jest.fn().mockResolvedValue(control),
+        updateMany
+      }
+    } as unknown as PrismaService;
+    const clientStub: NfceScClient = { download: jest.fn() };
+    const service = new NfceScService(prismaStub, {} as NfeService, clientStub);
+    const startBackgroundExecution = jest.spyOn(service as any, 'startBackgroundExecution').mockImplementation(() => undefined);
+
+    const result = await service.run(clienteId, controlId);
+
+    expect(result).toMatchObject({
+      accepted: true,
+      started: true,
+      status: NfeSyncStatus.processando,
+      ultimoNsu: '230',
+      totalDocumentosBaixados: 230
+    });
+    expect(updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: { notIn: [NfeSyncStatus.processando] },
+        OR: expect.arrayContaining([{ proximaExecucao: null }])
+      }),
+      data: expect.objectContaining({ status: NfeSyncStatus.processando })
+    }));
+    expect(startBackgroundExecution).toHaveBeenCalledWith(controlId, expect.any(Date));
+    expect(clientStub.download).not.toHaveBeenCalled();
+  });
 });

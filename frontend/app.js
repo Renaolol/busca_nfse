@@ -4333,6 +4333,7 @@ function renderNfceScPage() {
 
 function renderNfceScControlRow(control) {
   const isProcessing = control.status === 'processando';
+  const isPaused = control.status === 'pausado';
   const statusLabel = isProcessing ? 'Consultando' : control.status === 'ativo' ? 'Configurado' : mapNfeSyncStatusLabel(control.status);
   return `
     <tr>
@@ -4342,7 +4343,7 @@ function renderNfceScControlRow(control) {
       <td>${escapeHtml(control.ambiente === 'producao' ? 'Producao' : 'Homologacao')}</td>
       <td>${escapeHtml(String(control.ultimoNsuConsultado ?? '0'))}</td>
       <td>${statusBadge(statusLabel, toneFromNfeSyncStatus(control.status))}</td>
-      <td><span class="row-sub">${escapeHtml(control.ultimaMensagem || 'Aguardando primeira consulta')}</span><div class="stack-actions" style="justify-content:flex-start;margin-top:6px"><button class="btn secondary" type="button" data-action="nfce-sc-run" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isProcessing ? 'disabled' : ''}>${isProcessing ? 'Consultando...' : 'Consultar agora'}</button><button class="btn ghost" type="button" data-action="nfce-sc-pause" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}">Pausar</button></div></td>
+      <td><span class="row-sub">${escapeHtml(control.ultimaMensagem || 'Aguardando primeira consulta')}</span><div class="stack-actions" style="justify-content:flex-start;margin-top:6px"><button class="btn secondary" type="button" data-action="nfce-sc-run" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isProcessing ? 'disabled' : ''}>${isProcessing ? 'Consultando...' : isPaused ? 'Retomar consulta' : 'Consultar agora'}</button><button class="btn ghost" type="button" data-action="nfce-sc-pause" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isPaused ? 'disabled' : ''}>Pausar</button></div></td>
     </tr>
   `;
 }
