@@ -47,6 +47,7 @@ enum NfeAmbiente {
 enum NfeSyncStatus {
   ativo
   pausado
+  processando
   erro_certificado
   erro_autorizacao
   erro_api

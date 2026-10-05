@@ -6,9 +6,11 @@ A distribuicao catarinense e uma origem separada de NF-e modelo 65, integrada em
 
 Fluxo na tela `NFC-e SC`: selecione o cliente (por exemplo, Orestes), escolha um dos estabelecimentos daquele cliente, escolha o certificado contabilista vinculado ou a credencial interna da GCONT, defina o papel (para notas emitidas pelo Orestes, `Emitente`) e salve. Em seguida, use `Consultar agora`. A carga inicial parte do NSU zero, fica sujeita a janela de disponibilidade da SEF/SC e os arquivos aparecem na tabela `NFC-e armazenadas`.
 
+O backend continua solicitando lotes enquanto a SEF/SC retornar 50 documentos, salvando cada lote e avancando o cursor antes da proxima solicitacao. Quando chegar um lote menor ou a resposta `117`, o controle volta para `ativo` e aguarda 12 horas antes da proxima consulta. A tela mostra `Consultando` e atualiza o progresso; o processo continua se o navegador for fechado. Se o servidor reiniciar, a consulta e retomada do ultimo NSU salvo depois que o lease de execucao expirar. O botao `Pausar` interrompe a sequencia ao concluir o lote em andamento.
+
 - `GET /nfce-sc/controles?clienteId=<uuid>` lista os controles de um cliente.
 - `POST /nfce-sc/controles` cria/atualiza a configuracao do estabelecimento, certificado contabilista e papel consultado. A alteracao de certificado ou filtro preserva o cursor.
-- `POST /nfce-sc/controles/:id/rodar-agora` executa uma consulta manual.
+- `POST /nfce-sc/controles/:id/rodar-agora` inicia uma sincronizacao em segundo plano e responde `202 Accepted` com `accepted`, `started`, `status`, `ultimoNsu`, `totalDocumentosBaixados` e `mensagem`. `started=false` indica que ja havia uma sincronizacao em andamento. Consulte `GET /nfce-sc/controles?clienteId=...` para acompanhar `status=processando`, o NSU e a mensagem de progresso.
 - `POST /nfce-sc/controles/:id/pausar` pausa o controle.
 - A tela `NFC-e SC` permite configurar e acompanhar a distribuicao.
 

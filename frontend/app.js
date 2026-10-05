@@ -30,12 +30,14 @@ const API_CACHE_TTL_MS = 30000;
 const INITIAL_LOADING_MIN_MS = 500;
 const SEARCH_PAGE_SIZE = 100;
 const DASHBOARD_AUTO_REFRESH_INTERVAL_MS = 60000;
+const NFCE_SC_POLL_INTERVAL_MS = 5000;
 const AUTH_IDLE_TIMEOUT_MS = 20 * 60 * 1000;
 const AUTH_ACTIVE_REQUEST_WINDOW_MS = 30 * 1000;
 const AUTH_ACTIVITY_PING_INTERVAL_MS = 60 * 1000;
 const AUTH_STORAGE_KEY = 'gcont:auth:v1';
 const THEME_STORAGE_KEY = 'gcont:theme:v1';
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
+const activeNfceScMonitors = new Set();
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
 const COMPARE_SPED_HISTORY_LIMIT = 10;
 const SIMPLES_NACIONAL_PAGE_SIZE = 50;
@@ -4268,6 +4270,9 @@ function renderCollapsibleCard({ sectionKey, title, subtitle = '', contentHtml, 
 }
 
 function renderNfceScPage() {
+  state.nfceScControls
+    .filter((control) => control.status === 'processando')
+    .forEach((control) => void monitorNfceScControl(control.id, control.clienteId));
   const activeClients = state.clients.filter((client) => client.id);
   const establishments = Object.entries(state.establishmentsByClient || {}).flatMap(([clienteId, rows]) =>
     (Array.isArray(rows) ? rows : []).map((row) => ({ ...row, clienteId }))
@@ -4279,17 +4284,7 @@ function renderNfceScPage() {
     return labels;
   }, {});
   const clientLabels = mapClientOptions();
-  const rowsHtml = state.nfceScControls.map((control) => `
-    <tr>
-      <td>${escapeHtml(control.estabelecimento?.razaoSocial || control.estabelecimento?.cnpj || '-')}</td>
-      <td>${escapeHtml(formatCnpj(control.cnpjConsulta || ''))}</td>
-      <td>${escapeHtml(control.certificado?.nome || 'Certificado nao selecionado')}</td>
-      <td>${escapeHtml(control.ambiente === 'producao' ? 'Producao' : 'Homologacao')}</td>
-      <td>${escapeHtml(String(control.ultimoNsuConsultado ?? '0'))}</td>
-      <td>${statusBadge(control.status === 'ativo' ? 'Configurado' : 'Pausado', control.status === 'ativo' ? 'success' : 'neutral')}</td>
-      <td><span class="row-sub">${escapeHtml(control.ultimaMensagem || 'Aguardando primeira consulta')}</span><div class="stack-actions" style="justify-content:flex-start;margin-top:6px"><button class="btn secondary" type="button" data-action="nfce-sc-run" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}">Consultar agora</button><button class="btn ghost" type="button" data-action="nfce-sc-pause" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}">Pausar</button></div></td>
-    </tr>
-  `).join('');
+  const rowsHtml = state.nfceScControls.map(renderNfceScControlRow).join('');
   const documentRowsHtml = state.nfceScDocuments.map((doc) => `
     <tr>
       <td>${escapeHtml(doc.cliente)}</td>
@@ -4307,7 +4302,7 @@ function renderNfceScPage() {
     <section class="page-section">
       ${renderPageHeader({
         title: 'NFC-e Santa Catarina',
-        description: 'Configure os estabelecimentos, certificado contabilista e filtros da distribuicao oficial da SEF/SC.'
+        description: 'Configure os estabelecimentos e o certificado contabilista. Uma consulta percorre automaticamente todos os lotes disponiveis.'
       })}
       <article class="card">
         <h3 class="card-title">Configurar estabelecimento</h3>
@@ -4323,7 +4318,7 @@ function renderNfceScPage() {
       </article>
       <article class="card">
         <h3 class="card-title">Controles da SEF/SC</h3>
-        <p class="card-subtitle">Cada controle guarda seu proprio NSU estadual, independente da distribuicao nacional de NF-e.</p>
+        <p class="card-subtitle">Cada controle guarda seu proprio NSU estadual. Ao consultar, o NotaSync segue automaticamente os lotes de ate 50 documentos ate alcancar o fim da fila.</p>
         <div class="table-wrap"><table><thead><tr><th>Estabelecimento</th><th>CNPJ</th><th>Certificado</th><th>Ambiente</th><th>Ultimo NSU SC</th><th>Status</th><th>Ultima mensagem</th></tr></thead><tbody>${renderTableRowsOrState({ key: 'nfceSc', colSpan: 7, rowsHtml, emptyMessage: 'Nenhum controle NFC-e SC configurado.' })}</tbody></table></div>
       </article>
       <article class="card">
@@ -4333,6 +4328,22 @@ function renderNfceScPage() {
       </article>
       <article class="card"><p class="card-subtitle" style="margin:0">A SEF/SC limita a disponibilidade ao mes corrente e aos dois meses anteriores. A sincronizacao respeitara a pausa minima de 12 horas depois de consumir todos os documentos disponiveis.</p></article>
     </section>
+  `;
+}
+
+function renderNfceScControlRow(control) {
+  const isProcessing = control.status === 'processando';
+  const statusLabel = isProcessing ? 'Consultando' : control.status === 'ativo' ? 'Configurado' : mapNfeSyncStatusLabel(control.status);
+  return `
+    <tr>
+      <td>${escapeHtml(control.estabelecimento?.razaoSocial || control.estabelecimento?.cnpj || '-')}</td>
+      <td>${escapeHtml(formatCnpj(control.cnpjConsulta || ''))}</td>
+      <td>${escapeHtml(control.certificado?.nome || 'Certificado nao selecionado')}</td>
+      <td>${escapeHtml(control.ambiente === 'producao' ? 'Producao' : 'Homologacao')}</td>
+      <td>${escapeHtml(String(control.ultimoNsuConsultado ?? '0'))}</td>
+      <td>${statusBadge(statusLabel, toneFromNfeSyncStatus(control.status))}</td>
+      <td><span class="row-sub">${escapeHtml(control.ultimaMensagem || 'Aguardando primeira consulta')}</span><div class="stack-actions" style="justify-content:flex-start;margin-top:6px"><button class="btn secondary" type="button" data-action="nfce-sc-run" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isProcessing ? 'disabled' : ''}>${isProcessing ? 'Consultando...' : 'Consultar agora'}</button><button class="btn ghost" type="button" data-action="nfce-sc-pause" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}">Pausar</button></div></td>
+    </tr>
   `;
 }
 
@@ -4426,11 +4437,60 @@ async function executeNfceScControlAction(action, controlId, clienteId) {
     ];
     state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mappedDocuments);
     render();
-    pushToast(action === 'nfce-sc-run'
-      ? `Consulta SC finalizada: ${Number(result?.documentosArmazenados || 0)} documento(s) salvo(s).`
-      : 'Controle NFC-e SC pausado.', 'success');
+    if (action === 'nfce-sc-run' && result?.status === 'processando') {
+      pushToast(result.started
+        ? 'Consulta iniciada. Os lotes seguintes serao buscados automaticamente em segundo plano.'
+        : 'A consulta NFC-e SC ja esta em andamento.', 'success');
+      void monitorNfceScControl(controlId, clienteId);
+      return;
+    }
+    pushToast(action === 'nfce-sc-run' ? 'Consulta NFC-e SC iniciada.' : 'Controle NFC-e SC pausado.', 'success');
   } catch (error) {
     pushToast(`Falha na operacao NFC-e SC: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function monitorNfceScControl(controlId, clienteId) {
+  if (!controlId || !clienteId || activeNfceScMonitors.has(controlId)) return;
+  activeNfceScMonitors.add(controlId);
+
+  try {
+    while (true) {
+      await wait(NFCE_SC_POLL_INTERVAL_MS);
+      const controls = await apiRequest(`/nfce-sc/controles?clienteId=${encodeURIComponent(clienteId)}`, { cache: false }).catch(() => null);
+      if (!Array.isArray(controls)) continue;
+
+      state.nfceScControls = [
+        ...state.nfceScControls.filter((control) => control.clienteId !== clienteId),
+        ...controls
+      ];
+      const control = controls.find((item) => item.id === controlId);
+      if (state.route.name === 'nfce-sc') render();
+      if (control?.status === 'processando') continue;
+
+      const documents = await apiRequest(`/nfce-sc/documentos?clienteId=${encodeURIComponent(clienteId)}`, { cache: false }).catch(() => null);
+      if (Array.isArray(documents)) {
+        const mappedDocuments = buildNfeDocumentsFromApi(documents, state.clients);
+        state.nfceScDocuments = [
+          ...state.nfceScDocuments.filter((doc) => doc.clientId !== clienteId),
+          ...mappedDocuments
+        ];
+        state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mappedDocuments);
+      }
+      if (state.route.name === 'nfce-sc') render();
+
+      if (control?.status === 'pausado') return;
+      if (String(control?.status || '').startsWith('erro')) {
+        pushToast(control.ultimaMensagem || 'A consulta NFC-e SC terminou com erro.', 'error');
+      } else if (control) {
+        pushToast(control.ultimaMensagem || 'Consulta NFC-e SC concluida.', 'success');
+      }
+      return;
+    }
+  } catch (error) {
+    pushToast(`Nao foi possivel acompanhar a consulta NFC-e SC: ${toErrorMessage(error)}`, 'error');
+  } finally {
+    activeNfceScMonitors.delete(controlId);
   }
 }
 
@@ -23984,6 +24044,7 @@ function mapNfeSyncStatusLabel(status) {
   const labels = {
     ativo: 'Ativo',
     pausado: 'Pausado',
+    processando: 'Consultando',
     erro_api: 'Erro de API',
     erro_autorizacao: 'Erro de autorizacao',
     erro_certificado: 'Erro de certificado'

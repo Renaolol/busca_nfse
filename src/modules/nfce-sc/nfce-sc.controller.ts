@@ -1,8 +1,9 @@
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { ApiProperty, ApiTags } from '@nestjs/swagger';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
+import { ApiAcceptedResponse, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { IsUUID } from 'class-validator';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { ConfigureNfceScSyncDto } from './dto/configure-nfce-sc-sync.dto';
+import { NfceScRunResponseDto } from './dto/nfce-sc-run-response.dto';
 import { NfceScService } from './nfce-sc.service';
 
 class NfceScControlsQuery {
@@ -18,6 +19,10 @@ export class NfceScController {
 
   @Get('controles')
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  @ApiOperation({
+    summary: 'Lista os controles NFC-e SC',
+    description: 'O campo status inclui processando enquanto o backend percorre automaticamente os lotes da SEF/SC.'
+  })
   list(@Query() query: NfceScControlsQuery) {
     return this.service.listControls(query.clienteId);
   }
@@ -36,6 +41,9 @@ export class NfceScController {
 
   @Post('controles/:id/rodar-agora')
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({ summary: 'Inicia a sincronizacao NFC-e SC e continua automaticamente enquanto houver lotes completos' })
+  @ApiAcceptedResponse({ type: NfceScRunResponseDto })
   run(@Param('id') id: string, @Body() body: NfceScControlsQuery) {
     return this.service.run(body.clienteId, id);
   }
