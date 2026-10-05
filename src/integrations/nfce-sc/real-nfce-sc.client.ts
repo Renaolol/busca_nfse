@@ -1,5 +1,9 @@
 import { Injectable } from '@nestjs/common';
 import { Certificado } from '@prisma/client';
+import { spawnSync } from 'node:child_process';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { request as httpsRequest } from 'node:https';
 import { gunzipSync } from 'node:zlib';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -10,6 +14,10 @@ import { NfceScClient, NfceScDownloadResult, NfceScDfe } from './nfce-sc.types';
 const NS = 'http://www.satnfce.sef.sc.gov.br/ws/distribuicao-v1';
 const URL = 'https://dfe.sat.sef.sc.gov.br/nfce/ws/distribuicao/DistribuicaoNfceDownload.asmx';
 const ACTION = `${NS}/nfceDownloadContab`;
+
+type PfxCredentials = { mode: 'pfx'; pfx: Buffer; passphrase: string };
+type PemCredentials = { mode: 'pem'; cert: string; key: string };
+type MutualTlsCredentials = PfxCredentials | PemCredentials;
 
 @Injectable()
 export class RealNfceScClient implements NfceScClient {
@@ -22,7 +30,14 @@ export class RealNfceScClient implements NfceScClient {
     const passphrase = this.crypto.decrypt(certificate.senhaCriptografada).toString('utf8');
     const xml = this.buildRequest(params.cnpjConsulta, params.ultimoNsu, params.indAtor);
     const envelope = `<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><nfceDownloadContab xmlns="${NS}">${xml}</nfceDownloadContab></soap:Body></soap:Envelope>`;
-    const response = await this.request(envelope, pfx, passphrase);
+    let response: { status: number; body: string };
+    try {
+      response = await this.request(envelope, { mode: 'pfx', pfx, passphrase });
+    } catch (error) {
+      if (!this.isUnsupportedPkcs12Error(this.toErrorMessage(error))) throw error;
+      const credentials = await this.convertPfxToPemCredentials(pfx, passphrase);
+      response = await this.request(envelope, credentials);
+    }
     if (response.status < 200 || response.status >= 300) throw new Error(`SEF/SC HTTP ${response.status}: ${response.body.slice(0, 300)}`);
     const resultXml = this.extractSoapResult(response.body);
     const cStat = this.tag(resultXml, 'cStat') || '9999';
@@ -45,12 +60,14 @@ export class RealNfceScClient implements NfceScClient {
     return `<distNfceSC versao="1.00" xmlns="${NS}"><tpAmb>1</tpAmb><verAplic>NotaSync/0.1</verAplic><cUF>42</cUF>${identity}<solRel><indXML>1</indXML><indAtor>${indAtor}</indAtor><ultNuNSU>${nsu}</ultNuNSU></solRel></distNfceSC>`;
   }
 
-  private request(envelope: string, pfx: Buffer, passphrase: string): Promise<{ status: number; body: string }> {
+  private request(envelope: string, credentials: MutualTlsCredentials): Promise<{ status: number; body: string }> {
     return new Promise((resolve, reject) => {
+      const tlsOptions = credentials.mode === 'pfx'
+        ? { pfx: credentials.pfx, passphrase: credentials.passphrase }
+        : { cert: credentials.cert, key: credentials.key };
       const req = httpsRequest(URL, {
         method: 'POST',
-        pfx,
-        passphrase,
+        ...tlsOptions,
         rejectUnauthorized: process.env.NFCE_SC_REJECT_UNAUTHORIZED !== 'false',
         timeout: Number(process.env.NFCE_SC_TIMEOUT_MS || 30000),
         headers: {
@@ -68,6 +85,101 @@ export class RealNfceScClient implements NfceScClient {
       req.on('error', reject);
       req.end(envelope, 'utf8');
     });
+  }
+
+  private isUnsupportedPkcs12Error(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return normalized.includes('unsupported pkcs12 pfx data') ||
+      (normalized.includes('pkcs12') && normalized.includes('unsupported')) ||
+      normalized.includes('err_ossl_evp_unsupported') ||
+      (normalized.includes('digital envelope routines') && normalized.includes('unsupported'));
+  }
+
+  private async convertPfxToPemCredentials(pfx: Buffer, passphrase: string): Promise<PemCredentials> {
+    const tempDir = await mkdtemp(join(tmpdir(), 'nfce-sc-mtls-'));
+    const pfxPath = join(tempDir, 'certificado.pfx');
+    let lastError = '';
+
+    try {
+      await writeFile(pfxPath, pfx, { mode: 0o600 });
+
+      for (const legacy of [false, true]) {
+        const certResult = this.runOpenSslPkcs12Extract(pfxPath, passphrase, ['-clcerts', '-nokeys'], legacy);
+        if (!certResult.ok) {
+          if (certResult.commandMissing) {
+            throw new Error('OpenSSL nao encontrado no servidor para carregar este certificado PFX.');
+          }
+          lastError = certResult.stderr || lastError;
+          continue;
+        }
+
+        const keyResult = this.runOpenSslPkcs12Extract(pfxPath, passphrase, ['-nocerts', '-nodes'], legacy);
+        if (!keyResult.ok) {
+          if (keyResult.commandMissing) {
+            throw new Error('OpenSSL nao encontrado no servidor para carregar este certificado PFX.');
+          }
+          lastError = keyResult.stderr || lastError;
+          continue;
+        }
+
+        const cert = this.extractPemBlock(certResult.stdout, 'CERTIFICATE');
+        const key = this.extractPrivateKeyPem(keyResult.stdout);
+        if (cert && key) return { mode: 'pem', cert, key };
+      }
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+
+    throw new Error(`Nao foi possivel converter o PFX para PEM com OpenSSL. ${lastError.slice(0, 300) || 'Sem detalhes.'}`);
+  }
+
+  private runOpenSslPkcs12Extract(
+    pfxPath: string,
+    passphrase: string,
+    extraArgs: string[],
+    legacy: boolean
+  ): { ok: boolean; stdout: string; stderr: string; commandMissing: boolean } {
+    const args = ['pkcs12', '-in', pfxPath, '-passin', 'env:NFCE_SC_CERT_PASSWORD', ...extraArgs];
+    if (legacy) args.push('-legacy');
+
+    const result = spawnSync('openssl', args, {
+      encoding: 'utf8',
+      env: { ...process.env, NFCE_SC_CERT_PASSWORD: passphrase },
+      maxBuffer: 1024 * 1024 * 5
+    });
+    if (result.error) {
+      const commandMissing = (result.error as NodeJS.ErrnoException).code === 'ENOENT';
+      return {
+        ok: false,
+        stdout: result.stdout || '',
+        stderr: result.error.message || result.stderr || '',
+        commandMissing
+      };
+    }
+
+    return {
+      ok: result.status === 0,
+      stdout: result.stdout || '',
+      stderr: result.stderr || '',
+      commandMissing: false
+    };
+  }
+
+  private extractPemBlock(content: string, blockType: string): string | null {
+    const regex = new RegExp(`-----BEGIN ${blockType}-----[\\s\\S]+?-----END ${blockType}-----`, 'm');
+    return content.match(regex)?.[0] ?? null;
+  }
+
+  private extractPrivateKeyPem(content: string): string | null {
+    const match = content.match(/-----BEGIN PRIVATE KEY-----[\s\S]+?-----END PRIVATE KEY-----/m) ??
+      content.match(/-----BEGIN ENCRYPTED PRIVATE KEY-----[\s\S]+?-----END ENCRYPTED PRIVATE KEY-----/m) ??
+      content.match(/-----BEGIN RSA PRIVATE KEY-----[\s\S]+?-----END RSA PRIVATE KEY-----/m) ??
+      content.match(/-----BEGIN EC PRIVATE KEY-----[\s\S]+?-----END EC PRIVATE KEY-----/m);
+    return match?.[0] ?? null;
+  }
+
+  private toErrorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 
   private extractSoapResult(body: string): string {
