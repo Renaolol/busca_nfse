@@ -716,7 +716,17 @@ export class NfseService {
     }
 
     if (tipoRegistro === 'Entrada') {
-      linhas.push(this.createDominioRegistro1030(valorServico, dataEmissao, aliquotaIss, valorIss, prestadorUf, produtoEntrada));
+      linhas.push(
+        this.createDominioRegistro1030(
+          valorServico,
+          dataEmissao,
+          aliquotaIss,
+          valorIss,
+          valorIssRetidoReal,
+          prestadorUf,
+          produtoEntrada
+        )
+      );
       const totalRetencoesLancto = this.roundTo2(valorCrf + valorIrrf + valorInss + valorIssRetidoReal);
       if (totalRetencoesLancto === 0) {
         linhas.push(this.createDominioRegistro1300(dataEmissao, contaDebitoEntrada, contaFornecedor, valorServico, numeroNfse, nomeDescricao, ''));
@@ -765,7 +775,7 @@ export class NfseService {
     }
 
     const totalRetencoesLancto = this.roundTo2(valorIrrf + valorPisRetido + valorCofinsRetido + valorCsll);
-    linhas.push(this.createDominioRegistro3030(valorServico, dataEmissao, aliquotaIss, valorIss, this.resolveDominioCfopsServico(data), produtoPadrao));
+    linhas.push(this.createDominioRegistro3030(valorServico, dataEmissao, aliquotaIss, valorIss, valorIssRetidoReal, produtoPadrao));
     linhas.push(this.createDominioRegistro3300(dataEmissao, '0', '412', valorServico, numeroNfse, nomeDescricao, ''));
 
     const debitoConta5 = this.roundTo2(Math.max(valorServico - totalRetencoesLancto, 0));
@@ -997,11 +1007,27 @@ export class NfseService {
     dataEmissao: string,
     aliquota: number,
     valorIss: number,
+    valorIssRetido: number,
     estadoEmitente: string,
     produtoPadrao: string
   ): string {
     const cfop = estadoEmitente === 'SC' ? '1933' : '2933';
-    return `|1030|${produtoPadrao}|1|${this.formatDominioNumber(valorUnitario)}|||1|${dataEmissao}||00|${this.formatDominioNumber(valorUnitario)}||||||||||||||||||||||||${this.formatDominioNumber(aliquota)}|${this.formatDominioNumber(valorIss)}|${cfop}|||||||||||||||||||||||||||||||||03|||||||||||||||||||||||||||||||||||||||||||||||`;
+    return this.createDominioRecordFromFields(111, {
+      1: '1030',
+      2: produtoPadrao,
+      3: '1',
+      4: this.formatDominioNumber(valorUnitario),
+      7: '1',
+      8: dataEmissao,
+      10: '00',
+      11: this.formatDominioNumber(valorUnitario),
+      14: this.formatDominioNumber(valorIssRetido),
+      27: this.formatDominioNumber(valorUnitario),
+      31: this.formatDominioNumber(valorUnitario),
+      32: this.formatDominioNumber(aliquota),
+      33: this.formatDominioNumber(valorIss),
+      34: cfop
+    });
   }
 
   private createDominioRegistro3030(
@@ -1009,10 +1035,31 @@ export class NfseService {
     dataEmissao: string,
     aliquota: number,
     valorIss: number,
-    cfps: string,
+    valorIssRetido: number,
     produtoPadrao: string
   ): string {
-    return `|3030|${produtoPadrao}|1|${this.formatDominioNumber(valorUnitario)}|||1|${dataEmissao}||00|${this.formatDominioNumber(valorUnitario)}||||||||||||||||||||||||${this.formatDominioNumber(aliquota)}|${this.formatDominioNumber(valorIss)}|${cfps}|||||||||||||||||||||||||||||||||03|||||||||||||||||||||||||||||||||||||||||||||||`;
+    return this.createDominioRecordFromFields(40, {
+      1: '3030',
+      2: produtoPadrao,
+      3: dataEmissao,
+      4: '1',
+      5: this.formatDominioNumber(valorUnitario),
+      7: this.formatDominioNumber(valorUnitario),
+      8: '00',
+      9: this.formatDominioNumber(valorUnitario),
+      10: this.formatDominioNumber(aliquota),
+      11: this.formatDominioNumber(valorIss),
+      14: this.formatDominioNumber(valorIssRetido)
+    });
+  }
+
+  private createDominioRecordFromFields(fieldCount: number, valuesByField: Record<number, string>): string {
+    const fields = Array<string>(fieldCount).fill('');
+    for (const [fieldNumber, value] of Object.entries(valuesByField)) {
+      fields[Number(fieldNumber) - 1] = value;
+    }
+
+    return `|${fields.join('|')}|`;
   }
 
   private createDominioRegistro1300(

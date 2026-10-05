@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { ApiExtraModels, ApiOkResponse, ApiQuery, ApiTags, getSchemaPath } from '@nestjs/swagger';
+import { ApiExtraModels, ApiOkResponse, ApiOperation, ApiQuery, ApiTags, getSchemaPath } from '@nestjs/swagger';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { DownloadLoteDto } from './dto/download-lote.dto';
@@ -86,7 +86,12 @@ export class NfseController {
   }
 
   @Post('leitura-fiscal/exportar-dominio')
-  @ApiOkResponse({ type: DownloadDocumentDto })
+  @ApiOperation({
+    summary: 'Exporta o TXT fiscal de NFS-e para o LeitorXML',
+    description:
+      'Gera os registros de Entrada ou Servico no Leiaute Dominio Separador. CFOP fica nos campos 6 do registro 1000 e 34 do 1030; CFPS fica no campo 21 do registro 3000.'
+  })
+  @ApiOkResponse({ type: DownloadDocumentDto, description: 'Arquivo TXT do LeitorXML retornado em Base64.' })
   @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
   exportarLeituraFiscalDominio(@Body() dto: ExportarLeituraFiscalDominioDto) {
     return this.nfseService.exportarLeituraFiscalDominio(dto);

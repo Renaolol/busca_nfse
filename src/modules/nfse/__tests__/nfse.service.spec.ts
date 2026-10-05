@@ -2201,17 +2201,32 @@ describe('NfseService', () => {
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
+    const dataEmissao = new Date('2026-07-10T00:00:00.000Z');
+    const dataEmissaoFormatada = `${String(dataEmissao.getDate()).padStart(2, '0')}/${String(dataEmissao.getMonth() + 1).padStart(2, '0')}/${dataEmissao.getFullYear()}`;
     expect(result.fileName).toContain('DOMINIO-NFSE-ENTRADA-');
     expect(content).toContain('|0000|11111111000111|');
-    expect(content).toContain('|1000|39|06960810000176||804|1933||333|U||10/07/2026|10/07/2026|180,00');
+    expect(content).toContain(`|1000|39|06960810000176||804|1933||333|U||${dataEmissaoFormatada}|${dataEmissaoFormatada}|180,00`);
     expect(content).toContain('|1020|25||180,00|2,22|4,00');
     expect(content).toContain('|1020|16||180,00|1,67|3,00');
     expect(content).toContain('|1020|26||180,00|1,11|2,00');
     expect(content).toContain('|1020|3||180,00|5,00|9,00');
     expect(content).toContain('|1020|18||180,00|5,00|9,00');
     expect(content).toContain('|1030|557|1|180,00');
-    expect(content).toContain('|1300|10/07/2026|0|183|9,00||ISS RETIDO SOBRE NFS-E N 333 Prestador Exportacao|||');
-    expect(content).toContain('|1500|10/07/2026|180,00|2,22|4,00|3,00|9,00|2,00||1,00|1,50|1,50||333|');
+    const registroEntradaItem = content.split('\n').find((line) => line.startsWith('|1030|'));
+    const camposEntradaItem = registroEntradaItem?.split('|').slice(1, -1) ?? [];
+    expect(camposEntradaItem).toHaveLength(111);
+    expect(camposEntradaItem[13]).toBe('9,00'); // Campo 14: ISS retido.
+    expect(camposEntradaItem[30]).toBe('180,00'); // Campo 31: base de calculo do ISS.
+    expect(camposEntradaItem[31]).toBe('5,00'); // Campo 32: aliquota do ISS.
+    expect(camposEntradaItem[32]).toBe('9,00'); // Campo 33: valor do ISS.
+    expect(camposEntradaItem[33]).toBe('1933'); // Campo 34: CFOP.
+    expect(camposEntradaItem[35]).toBe(''); // Campo 36: aliquota do PIS.
+    expect(camposEntradaItem[36]).toBe(''); // Campo 37: valor do PIS.
+    expect(camposEntradaItem[37]).toBe(''); // Campo 38: aliquota da COFINS.
+    expect(camposEntradaItem[38]).toBe(''); // Campo 39: valor da COFINS.
+    expect(camposEntradaItem[69]).toBe(''); // Campo 70: CST PIS de nota devolvida.
+    expect(content).toContain(`|1300|${dataEmissaoFormatada}|0|183|9,00||ISS RETIDO SOBRE NFS-E N 333 Prestador Exportacao|||`);
+    expect(content).toContain(`|1500|${dataEmissaoFormatada}|180,00|2,22|4,00|3,00|9,00|2,00||1,00|1,50|1,50||333|`);
   });
 
   it('ignora NFS-e cancelada na exportacao da leitura fiscal para a Dominio', async () => {
@@ -2604,9 +2619,24 @@ describe('NfseService', () => {
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
-    expect(content).toContain('|3000|39|11111111000111|SC|900||333|U||');
-    expect(content).toContain('|3030|A|1|180,00');
-    expect(content).toContain('|3500|10/07/2026|180,00|');
+    const registroServicoCabecalho = content.split('\n').find((line) => line.startsWith('|3000|'));
+    const camposServicoCabecalho = registroServicoCabecalho?.split('|').slice(1, -1) ?? [];
+    expect(camposServicoCabecalho[0]).toBe('3000');
+    expect(camposServicoCabecalho[20]).toBe('9102'); // Campo 21: CFPS.
+
+    const registroServicoItem = content.split('\n').find((line) => line.startsWith('|3030|'));
+    const camposServicoItem = registroServicoItem?.split('|').slice(1, -1) ?? [];
+    expect(camposServicoItem).toHaveLength(40);
+    expect(camposServicoItem[1]).toBe('A'); // Campo 2: produto.
+    expect(camposServicoItem[2]).toMatch(/^\d{2}\/\d{2}\/\d{4}$/); // Campo 3: data da movimentacao.
+    expect(camposServicoItem[4]).toBe('180,00'); // Campo 5: valor do produto.
+    expect(camposServicoItem[7]).toBe('00'); // Campo 8: CST do ISSQN.
+    expect(camposServicoItem[8]).toBe('180,00'); // Campo 9: base de calculo do ISSQN.
+    expect(camposServicoItem[36]).toBe(''); // Campo 37: cClassTrib da CBS, nao CFPS.
+    const registroServicoParcela = content.split('\n').find((line) => line.startsWith('|3500|'));
+    const camposServicoParcela = registroServicoParcela?.split('|').slice(1, -1) ?? [];
+    expect(camposServicoParcela[1]).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
+    expect(camposServicoParcela[2]).toBe('180,00');
     expect(prisma.nfseContaContabilConfig.findMany).not.toHaveBeenCalled();
   });
 

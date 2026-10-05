@@ -36,6 +36,8 @@ As integracoes oficiais devem ser encapsuladas em adapters separados:
 ## Exportacao fiscal para Dominio
 
 - O leitor fiscal de NFS-e expõe `POST /nfse/leitura-fiscal/exportar-dominio` para gerar o TXT no layout padrao do LeitorXML.
+- Os registros seguem as posicoes do Leiaute Dominio Separador: CFOP nos campos 6 do `1000` e 34 do `1030`; CFPS no campo 21 do `3000`. Os campos de PIS/COFINS do item `1030` ficam em branco; os valores retidos permanecem nos campos proprios do registro `1500`.
+- O registro `3030` usa o leiaute de itens de NFS-e: codigo do produto no campo 2, data no 3, quantidade no 4, valor do produto no 5, ISS nos campos 8 a 14 e nenhum CFPS duplicado no registro de item.
 - O endpoint reutiliza a leitura fiscal do DANFSE e aplica a logica fiscal corrigida do projeto para ISS e retencoes federais.
 - A exportacao tambem inclui uma parcela por NFS-e: registro `1500` para Entrada e `3500` para Servico. Como o XML nacional nao informa vencimento comercial, o vencimento gerado e a data de emissao da nota; o valor e o total do servico e as retencoes seguem em seus campos proprios do registro.
 - No layout nacional, a retencao de ISS segue `tpRetISSQN`: `1` nao retido, `2` retido pelo tomador e `3` retido pelo intermediario. O campo `vISSRet` isoladamente nao substitui essa classificacao.
