@@ -153,7 +153,8 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
     const control = await this.prisma.nfceScSyncControle.findFirst({ where: { id, clienteId } });
     if (!control) throw new NotFoundException('Controle NFC-e SC nao encontrado');
     if (control.status === NfeSyncStatus.processando) return this.toRunResponse(control, false);
-    if (control.proximaExecucao && control.proximaExecucao > new Date()) {
+    const retryingInternalServerError = /^SEF\/SC 9999:/i.test(control.ultimaMensagem || '');
+    if (!retryingInternalServerError && control.proximaExecucao && control.proximaExecucao > new Date()) {
       throw new BadRequestException(`Proxima consulta permitida em ${control.proximaExecucao.toISOString()}`);
     }
 
@@ -164,7 +165,9 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
         id,
         clienteId,
         status: { notIn: [NfeSyncStatus.processando] },
-        OR: [{ proximaExecucao: null }, { proximaExecucao: { lte: now } }]
+        ...(!retryingInternalServerError
+          ? { OR: [{ proximaExecucao: null }, { proximaExecucao: { lte: now } }] }
+          : {})
       },
       data: {
         status: NfeSyncStatus.processando,
@@ -178,7 +181,8 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
       const current = await this.prisma.nfceScSyncControle.findFirst({ where: { id, clienteId } });
       if (current?.status === NfeSyncStatus.processando) return this.toRunResponse(current, false);
       if (current?.status === NfeSyncStatus.pausado) throw new BadRequestException('O controle NFC-e SC esta pausado');
-      if (current?.proximaExecucao && current.proximaExecucao > new Date()) {
+      const currentHasInternalServerError = /^SEF\/SC 9999:/i.test(current?.ultimaMensagem || '');
+      if (!currentHasInternalServerError && current?.proximaExecucao && current.proximaExecucao > new Date()) {
         throw new BadRequestException(`Proxima consulta permitida em ${current.proximaExecucao.toISOString()}`);
       }
       throw new BadRequestException('Nao foi possivel iniciar a consulta NFC-e SC; atualize o controle e tente novamente');

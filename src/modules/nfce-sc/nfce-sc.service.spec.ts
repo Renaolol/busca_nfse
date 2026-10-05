@@ -128,6 +128,35 @@ describe('NfceScService', () => {
     expect(control.proximaExecucao?.getTime()).toBeGreaterThan(Date.now() + 59 * 60 * 1000);
   });
 
+  it('permite nova tentativa manual apos cStat 9999 sem esperar o cooldown', async () => {
+    const control = {
+      ...createControl(new Date(Date.now() + 60 * 60 * 1000)),
+      status: NfeSyncStatus.erro_api,
+      ultimaMensagem: 'SEF/SC 9999: Erro no processamento. Codigo do erro: exemplo'
+    };
+    const updateMany = jest.fn().mockResolvedValue({ count: 1 });
+    const prismaStub = {
+      nfceScSyncControle: {
+        findFirst: jest.fn().mockResolvedValue(control),
+        updateMany
+      }
+    } as unknown as PrismaService;
+    const clientStub: NfceScClient = { download: jest.fn() };
+    const service = new NfceScService(prismaStub, {} as NfeService, clientStub);
+    const startBackgroundExecution = jest.spyOn(service as any, 'startBackgroundExecution').mockImplementation(() => undefined);
+
+    const result = await service.run(clienteId, controlId);
+
+    expect(result).toMatchObject({
+      accepted: true,
+      started: true,
+      status: NfeSyncStatus.processando,
+      ultimoNsu: '0'
+    });
+    expect(updateMany.mock.calls[0][0].where).not.toHaveProperty('OR');
+    expect(startBackgroundExecution).toHaveBeenCalledWith(controlId, expect.any(Date));
+  });
+
   it('responde com consulta em andamento sem iniciar uma segunda execucao', async () => {
     const control = {
       ...createControl(new Date(Date.now() + 5 * 60 * 1000)),
