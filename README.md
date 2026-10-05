@@ -401,6 +401,7 @@ Observacoes:
 - `POST /nfe/sync/download-por-chave/executar` executa o download oficial por chave usando o catalogo da Dominio sem alterar a rotina principal configurada em `NFE_SYNC_SOURCE_MODE`.
 - `POST /nfe/sync/consultar-nsu` consulta um NSU pontual via `consNSU`, com opcao de persistir o documento retornado.
 - `POST /nfe/sync/consultar-chave` consulta uma NF-e especifica via `consChNFe`, com opcao de persistir o retorno.
+- Na tela `XMLs NF-e`, `Baixar NF-e por chave` permite colar uma ou mais chaves sem consultar o catalogo da Dominio. Cada chave e consultada individualmente com o certificado do estabelecimento escolhido; o resultado diferencia XML completo, resumo e falha. A consulta nao altera o cursor NSU.
 - `POST /cte/consultar-chave` consulta um CT-e especifico via `CteConsultaV4`, persiste o resumo/XML retornado e tenta aproveitar eventos quando o autorizador devolver `procEventoCTe`.
 - `POST /cte/eventos/sincronizar` reconsulta CT-es ja armazenados por chave de acesso para tentar importar eventos vinculados no mesmo storage compartilhado. Quando o autorizador retornar `cStat 101` sem enviar o XML `procEventoCTe`, a auditoria informa `Cancelado` e atualiza a situacao do CT-e, sem fabricar um evento/XML inexistente.
 - `POST /sync/eventos/sincronizar-empresas` (admin) consulta, em lote, os eventos de NF-e e CT-e de todas as empresas ou apenas dos `clienteIds` informados. O processamento inclui somente documentos de ate 90 dias; a data de emissao e a referencia e, se ausente, usa a data de inclusao.

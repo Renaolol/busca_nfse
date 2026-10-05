@@ -61,6 +61,7 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - O fluxo atual implementa `distNSU`, `consNSU` e `consChNFe`.
 - O modulo `cte` implementa consulta manual por chave via `CteConsultaV4` e tentativa de captura de eventos retornados pelo autorizador.
 - As rotas manuais permitem testar o ambiente real e recuperar documentos pontuais sem depender do ciclo incremental.
+- Na tela `XMLs NF-e`, a acao `Baixar NF-e por chave` aceita chaves informadas diretamente e consulta cada uma por `consChNFe`, sem depender da listagem da Dominio. A resposta identifica quando a SEFAZ devolve apenas um resumo, sem XML completo. A consulta nao modifica o cursor NSU.
 - A importacao via Dominio consulta `bethadba.EFATENDIMENTO_NFE_CATALOGO` e prioriza XMLs em `bethadba.EFATENDIMENTO_NFE_XML_V2`, usando `bethadba.EFATENDIMENTO_NFE_XML` como fallback. O vinculo local e feito pelo CNPJ de `bethadba.geempre.cgce_emp` e, quando o cliente tiver `codigoEmpresaDominio`, tambem por `EFATENDIMENTO_NFE_CATALOGO.CODI_EMP`.
 - `POST /nfe/importar-dominio` aceita filtros por `chavesAcesso` e `catalogoIds`, permitindo reimportacao pontual a partir do painel operacional.
 - `POST /nfe/dominio/xml` devolve o XML bruto de um `catalogoId` da Dominio para visualizacao interna mesmo quando a persistencia falhou por chave ausente.

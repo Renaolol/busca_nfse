@@ -1675,6 +1675,10 @@ function onDocumentClick(event) {
       openNfseRecoverByKeyModal();
       return;
     }
+    case 'nfe-recover-by-key': {
+      openNfeRecoverByKeyModal();
+      return;
+    }
     case 'nfse-recover-by-key-exception': {
       const clientId = actionNode.getAttribute('data-client-id') || '';
       const cnpjConsulta = normalizeDigits(actionNode.getAttribute('data-cnpj-consulta') || '');
@@ -2463,6 +2467,11 @@ function onDocumentSubmit(event) {
     case 'nfseRecoverByKeyForm': {
       event.preventDefault();
       void submitNfseRecoverByKeyForm(target);
+      return;
+    }
+    case 'nfeRecoverByKeyForm': {
+      event.preventDefault();
+      void submitNfeRecoverByKeyForm(target);
       return;
     }
     case 'eventsSyncCompaniesForm': {
@@ -5059,6 +5068,7 @@ function renderNfeDocumentsPage() {
           <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
             <button class="btn primary" type="submit">Buscar NF-e</button>
             <button class="btn secondary" type="button" data-action="nfe-docs-clear-filters">Limpar</button>
+            <button class="btn secondary" type="button" data-action="nfe-recover-by-key" ${selectedClientId && state.dataSource === 'api' ? '' : 'disabled'}>Baixar NF-e por chave</button>
             <button class="btn secondary" type="button" data-action="events-sync-companies" ${state.dataSource === 'api' ? '' : 'disabled'}>Buscar eventos por empresa</button>
             ${
               showDefaultRunButton
@@ -10993,6 +11003,8 @@ function renderModal() {
       return renderNfseRecoverByDpsModal();
     case 'nfse-recover-by-key':
       return renderNfseRecoverByKeyModal();
+    case 'nfe-recover-by-key':
+      return renderNfeRecoverByKeyModal();
     case 'nfse-numbering-exception':
       return renderNfseNumberingExceptionModal();
     case 'nfse-conta-contabil-config':
@@ -11146,6 +11158,117 @@ function renderNfseRecoverByDpsModal() {
                         </div>
                       `
                       : '<div class="table-state">Nenhum detalhe retornado para esta recuperacao.</div>'
+                  }
+                </div>
+              `
+              : ''
+          }
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function renderNfeRecoverByKeyModal() {
+  if (state.modal?.kind !== 'nfe-recover-by-key') {
+    return '';
+  }
+
+  const submitting = Boolean(state.modal.submitting);
+  const result = state.modal.result || null;
+  const details = Array.isArray(result?.detalhes) ? result.detalhes : [];
+  const clientId = String(state.modal.clientId || '');
+  const establishments = Array.isArray(state.establishmentsByClient?.[clientId])
+    ? state.establishmentsByClient[clientId]
+    : [];
+  const establishmentOptions = establishments.map((item) => item.id).filter(Boolean);
+  const establishmentLabels = establishments.reduce((labels, item) => {
+    const name = item.nomeFantasia || item.razaoSocial || 'Estabelecimento';
+    labels[item.id] = `${formatCnpj(item.cnpj)} • ${name}`;
+    return labels;
+  }, {});
+  const errorMessage = String(state.modal.errorMessage || '').trim();
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 1100px); max-width:1100px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Baixar NF-e por chave de acesso</h3>
+          <p class="modal-subtitle">${escapeHtml(state.modal.clientName || 'Cliente selecionado')} • consulta diretamente a Distribuicao DF-e, sem buscar a chave na Dominio.</p>
+        </div>
+        <div class="modal-body">
+          <form id="nfeRecoverByKeyForm">
+            <div class="form-grid two">
+              <label>
+                <span>Cliente</span>
+                <input type="text" value="${escapeHtml(state.modal.clientName || '')}" readonly />
+              </label>
+              <label>
+                <span>Estabelecimento / certificado</span>
+                <select name="estabelecimentoId" required ${submitting ? 'disabled' : ''}>
+                  ${renderOptions(establishmentOptions, state.modal.estabelecimentoId || '', establishmentLabels, 'Selecione um estabelecimento')}
+                </select>
+              </label>
+              <label>
+                <span>Ambiente</span>
+                <select name="ambiente" ${submitting ? 'disabled' : ''}>
+                  ${renderOptions(['producao', 'homologacao'], state.modal.ambiente || 'producao', {
+                    producao: 'Producao',
+                    homologacao: 'Homologacao'
+                  })}
+                </select>
+              </label>
+              <label>
+                <span>Cliente ID</span>
+                <input type="text" value="${escapeHtml(clientId)}" readonly />
+              </label>
+            </div>
+            <label style="display:block; margin-top:12px;">
+              <span>Chaves de acesso</span>
+              <textarea name="chaves" rows="6" maxlength="20000" placeholder="Cole uma chave de 44 digitos por linha." ${submitting ? 'disabled' : ''}>${escapeHtml(state.modal.keyText || '')}</textarea>
+            </label>
+            <p class="card-subtitle" style="margin-top:10px;">Cada chave sera consultada individualmente com o certificado do estabelecimento selecionado. A consulta pode retornar o XML completo ou somente um resumo, conforme a disponibilidade na SEFAZ.</p>
+            ${errorMessage ? `<div class="table-state error" style="margin-top:14px;">${escapeHtml(errorMessage)}</div>` : ''}
+            <div class="modal-footer" style="padding:18px 0 0;">
+              <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Fechar</button>
+              <button class="btn primary" type="submit" ${submitting || !establishmentOptions.length ? 'disabled' : ''}>${submitting ? `Consultando ${details.length}/${Number(result?.requestedKeys || 0)}...` : 'Baixar XML por chave'}</button>
+            </div>
+          </form>
+          ${
+            result
+              ? `
+                <div style="margin-top:18px;">
+                  <div class="form-grid four" style="margin-bottom:18px;">
+                    ${detailItem('Chaves solicitadas', String(result.requestedKeys || 0))}
+                    ${detailItem('XMLs completos', String(result.documentsRecovered || 0))}
+                    ${detailItem('Somente resumo', String(result.summariesOnly || 0))}
+                    ${detailItem('Falhas', String(result.failures || 0))}
+                  </div>
+                  ${
+                    details.length
+                      ? `
+                        <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(52vh, 520px);">
+                          <div style="display:grid; grid-template-columns:minmax(260px, 1.3fr) minmax(150px, .7fr) minmax(360px, 1.8fr); gap:0; min-width:760px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line);">
+                            <div style="padding:12px 14px;">Chave de acesso</div>
+                            <div style="padding:12px 14px;">Resultado</div>
+                            <div style="padding:12px 14px;">Mensagem</div>
+                          </div>
+                          ${details
+                            .map((detail) => {
+                              const statusLabel = detail?.status === 'recuperada' ? 'XML completo' : detail?.status === 'resumo' ? 'Somente resumo' : 'Falha';
+                              const statusTone = detail?.status === 'recuperada' ? 'success' : detail?.status === 'resumo' ? 'warning' : 'danger';
+                              return `
+                                <div style="display:grid; grid-template-columns:minmax(260px, 1.3fr) minmax(150px, .7fr) minmax(360px, 1.8fr); gap:0; min-width:760px; border-bottom:1px solid var(--line); align-items:start;">
+                                  <div style="padding:14px; font-family:monospace; font-size:12px; word-break:break-all;">${escapeHtml(detail?.chaveAcesso || '-')}</div>
+                                  <div style="padding:14px;">${statusBadge(statusLabel, statusTone)}</div>
+                                  <div style="padding:14px; color:var(--text-secondary); white-space:normal; overflow-wrap:anywhere; word-break:break-word; line-height:1.45;">${escapeHtml(detail?.mensagem || '-')}</div>
+                                </div>
+                              `;
+                            })
+                            .join('')}
+                        </div>
+                      `
+                      : '<div class="table-state">Nenhum resultado retornado para esta consulta.</div>'
                   }
                 </div>
               `
@@ -19288,6 +19411,160 @@ function parseNfseNumberingExceptionNumbers(rawValue) {
     numbers,
     invalidTokens
   };
+}
+
+function openNfeRecoverByKeyModal() {
+  if (state.dataSource !== 'api') {
+    pushToast('O download por chave exige a API real conectada.', 'error');
+    return;
+  }
+
+  const clientId = state.filters.nfeDocs.cliente && state.filters.nfeDocs.cliente !== 'Todos' ? state.filters.nfeDocs.cliente : '';
+  const client = findClientById(clientId);
+  const establishments = Array.isArray(state.establishmentsByClient?.[clientId]) ? state.establishmentsByClient[clientId] : [];
+  if (!clientId || !client) {
+    pushToast('Selecione uma empresa antes de baixar NF-e por chave.', 'error');
+    return;
+  }
+  if (!establishments.length) {
+    pushToast('A empresa selecionada nao possui estabelecimento cadastrado para a consulta por chave.', 'error');
+    return;
+  }
+
+  const estabelecimentoDoFiltro = findEstablishmentByClientAndCnpj(clientId, state.filters.nfeDocs.cnpj);
+  const ambiente = state.filters.nfeDocs.ambiente === 'homologacao' ? 'homologacao' : 'producao';
+  openModal({
+    kind: 'nfe-recover-by-key',
+    clientId,
+    clientName: client.razaoSocial || 'Cliente selecionado',
+    estabelecimentoId: estabelecimentoDoFiltro?.id || establishments[0]?.id || '',
+    ambiente,
+    keyText: '',
+    submitting: false,
+    result: null,
+    errorMessage: ''
+  });
+}
+
+function extractNfeRecoveryKeysFromText(value) {
+  const matches = String(value || '').match(/\b\d{44}\b/g) || [];
+  return [...new Set(matches.map((item) => item.trim()).filter(Boolean))];
+}
+
+async function submitNfeRecoverByKeyForm(form) {
+  if (state.modal?.kind !== 'nfe-recover-by-key') {
+    return;
+  }
+  if (state.dataSource !== 'api') {
+    pushToast('O download por chave exige a API real conectada.', 'error');
+    return;
+  }
+
+  const data = new FormData(form);
+  const clienteId = String(state.modal.clientId || '').trim();
+  const estabelecimentoId = String(data.get('estabelecimentoId') || '').trim();
+  const ambiente = String(data.get('ambiente') || state.modal.ambiente || 'producao').trim();
+  const keyText = String(data.get('chaves') || '');
+  const chavesAcesso = extractNfeRecoveryKeysFromText(keyText);
+  if (!estabelecimentoId) {
+    pushToast('Selecione um estabelecimento com certificado para consultar a chave.', 'error');
+    return;
+  }
+  if (!chavesAcesso.length) {
+    pushToast('Cole ao menos uma chave de acesso NF-e valida com 44 digitos.', 'error');
+    return;
+  }
+
+  const result = {
+    requestedKeys: chavesAcesso.length,
+    documentsRecovered: 0,
+    summariesOnly: 0,
+    failures: 0,
+    detalhes: []
+  };
+  state.modal = {
+    ...state.modal,
+    estabelecimentoId,
+    ambiente,
+    keyText,
+    submitting: true,
+    errorMessage: '',
+    result
+  };
+  render();
+
+  for (const chaveAcesso of chavesAcesso) {
+    if (chaveAcesso.slice(20, 22) === '57') {
+      result.failures += 1;
+      result.detalhes.push({
+        chaveAcesso,
+        status: 'falha',
+        mensagem: 'A chave pertence a um CT-e. Use a consulta por chave do modulo CT-e.'
+      });
+      if (state.modal?.kind === 'nfe-recover-by-key') {
+        state.modal = { ...state.modal, result };
+        render();
+      }
+      continue;
+    }
+
+    try {
+      const response = await apiRequest('/nfe/sync/consultar-chave', {
+        method: 'POST',
+        body: {
+          clienteId,
+          estabelecimentoId,
+          chaveAcesso,
+          ambiente,
+          persistir: true
+        },
+        timeoutMs: 120000
+      });
+      const documentos = Array.isArray(response?.documentos) ? response.documentos : [];
+      const xmlCompleto = documentos.some((documento) => /procNFe|nfeProc/i.test(String(documento?.schema || '')));
+      const documentosPersistidos = Number(response?.documentosPersistidos || 0);
+      const status = response?.statusCode === 200 && xmlCompleto && documentosPersistidos > 0
+        ? 'recuperada'
+        : response?.statusCode === 200 && documentos.length > 0 && !xmlCompleto && documentosPersistidos > 0
+          ? 'resumo'
+          : 'falha';
+      const schema = documentos.map((documento) => documento?.schema).filter(Boolean).join(', ');
+      const mensagem = status === 'recuperada'
+        ? `XML completo consultado e salvo${schema ? ` (${schema})` : ''}.`
+        : status === 'resumo'
+          ? `A SEFAZ retornou somente resumo; o XML completo nao foi disponibilizado nesta consulta${schema ? ` (${schema})` : ''}.`
+          : `Nenhum XML completo foi salvo. cStat ${response?.cStat || '-'}; ${response?.xMotivo || (documentos.length ? 'Documento localizado, mas sem XML completo.' : 'Nenhum documento localizado para esta chave.')}`;
+
+      if (status === 'recuperada') {
+        result.documentsRecovered += 1;
+      } else if (status === 'resumo') {
+        result.summariesOnly += 1;
+      } else {
+        result.failures += 1;
+      }
+      result.detalhes.push({ chaveAcesso, status, mensagem });
+    } catch (error) {
+      result.failures += 1;
+      result.detalhes.push({ chaveAcesso, status: 'falha', mensagem: toErrorMessage(error) });
+    }
+
+    if (state.modal?.kind === 'nfe-recover-by-key') {
+      state.modal = { ...state.modal, result };
+      render();
+    }
+  }
+
+  if (state.modal?.kind === 'nfe-recover-by-key') {
+    state.modal = { ...state.modal, submitting: false, result };
+    render();
+  }
+
+  await refreshApiData();
+  await refreshStoredDocumentSearchesAfterDownloadByKey();
+  pushToast(
+    `Consulta por chave concluida: ${result.documentsRecovered} XML(s) completo(s), ${result.summariesOnly} resumo(s) e ${result.failures} falha(s).`,
+    result.failures || result.summariesOnly ? 'error' : 'success'
+  );
 }
 
 function openNfseRecoverByKeyModalForContext(context) {
