@@ -1,4 +1,5 @@
 import { NfeAmbiente, NfeSyncStatus } from '@prisma/client';
+import JSZip from 'jszip';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NfeService } from '../nfe/nfe.service';
 import { NfceScClient, NfceScDfe } from '../../integrations/nfce-sc/nfce-sc.types';
@@ -30,7 +31,10 @@ describe('NfceScService', () => {
       ultimaExecucao: new Date(),
       proximaExecucao: leaseUntil,
       ultimaMensagem: 'Consulta iniciada',
-      totalDocumentosBaixados: 0
+      totalDocumentosBaixados: 0,
+      diagnosticoXmlRequisicao: null,
+      diagnosticoXmlResposta: null,
+      diagnosticoXmlCriadoEm: null
     };
   }
 
@@ -109,7 +113,11 @@ describe('NfceScService', () => {
       xMotivo: 'Ocorreu um erro no processamento. Código do erro: exemplo',
       ultimoNsu: 0n,
       documentos: [],
-      httpStatus: 200
+      httpStatus: 200,
+      errorDiagnostic: {
+        requestXml: '<soap:Envelope><request/></soap:Envelope>',
+        responseXml: '<soap:Envelope><response/></soap:Envelope>'
+      }
     });
     const service = new NfceScService(
       prismaStub,
@@ -125,7 +133,44 @@ describe('NfceScService', () => {
     expect(control.status).toBe(NfeSyncStatus.erro_api);
     expect(control.ultimoNsuConsultado).toBe(0n);
     expect(control.ultimaMensagem).toContain('Código do erro: exemplo');
+    expect(control.diagnosticoXmlRequisicao).toBe('<soap:Envelope><request/></soap:Envelope>');
+    expect(control.diagnosticoXmlResposta).toBe('<soap:Envelope><response/></soap:Envelope>');
+    expect(control.diagnosticoXmlCriadoEm).toBeInstanceOf(Date);
     expect(control.proximaExecucao?.getTime()).toBeGreaterThan(Date.now() + 59 * 60 * 1000);
+  });
+
+  it('empacota os XMLs de erro para suporte sem incluí-los na listagem normal', async () => {
+    const requestXml = '<soap:Envelope><request/></soap:Envelope>';
+    const responseXml = '<soap:Envelope><response/></soap:Envelope>';
+    const createdAt = new Date('2026-10-05T15:30:00.000Z');
+    const findMany = jest.fn().mockResolvedValue([]);
+    const prismaStub = {
+      cliente: { findUnique: jest.fn().mockResolvedValue({ id: clienteId }) },
+      nfceScSyncControle: {
+        findFirst: jest.fn().mockResolvedValue({
+          cnpjConsulta: '12345678000190',
+          diagnosticoXmlRequisicao: requestXml,
+          diagnosticoXmlResposta: responseXml,
+          diagnosticoXmlCriadoEm: createdAt
+        }),
+        findMany
+      }
+    } as unknown as PrismaService;
+    const service = new NfceScService(prismaStub, {} as NfeService, { download: jest.fn() } as NfceScClient);
+
+    const payload = await service.downloadErrorDiagnostic(clienteId, controlId);
+    const zip = await JSZip.loadAsync(Buffer.from(payload.contentBase64, 'base64'));
+
+    expect(payload).toMatchObject({ contentType: 'application/zip' });
+    expect(await zip.file('requisicao.xml')?.async('string')).toBe(requestXml);
+    expect(await zip.file('resposta.xml')?.async('string')).toBe(responseXml);
+    expect(await zip.file('capturado-em.txt')?.async('string')).toBe(createdAt.toISOString());
+
+    await service.listControls(clienteId);
+    const selectedFields = findMany.mock.calls[0][0].select;
+    expect(selectedFields.diagnosticoXmlCriadoEm).toBe(true);
+    expect(selectedFields).not.toHaveProperty('diagnosticoXmlRequisicao');
+    expect(selectedFields).not.toHaveProperty('diagnosticoXmlResposta');
   });
 
   it('permite nova tentativa manual apos cStat 9999 sem esperar o cooldown', async () => {

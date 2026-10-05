@@ -8,6 +8,7 @@ import {
   OnModuleInit
 } from '@nestjs/common';
 import { NfeAmbiente, NfeSyncStatus } from '@prisma/client';
+import JSZip from 'jszip';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NfeService } from '../nfe/nfe.service';
 import { NFCE_SC_CLIENT, NfceScClient } from '../../integrations/nfce-sc/nfce-sc.types';
@@ -47,12 +48,58 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
     if (!client) throw new NotFoundException('Cliente nao encontrado');
     return this.prisma.nfceScSyncControle.findMany({
       where: { clienteId },
-      include: {
+      select: {
+        id: true,
+        clienteId: true,
+        estabelecimentoId: true,
+        cnpjConsulta: true,
+        certificadoId: true,
+        ambiente: true,
+        indAtor: true,
+        ultimoNsuConsultado: true,
+        status: true,
+        ultimaExecucao: true,
+        proximaExecucao: true,
+        ultimaMensagem: true,
+        totalDocumentosBaixados: true,
+        diagnosticoXmlCriadoEm: true,
+        createdAt: true,
+        updatedAt: true,
         estabelecimento: { select: { id: true, cnpj: true, razaoSocial: true } },
         certificado: { select: { id: true, nome: true, cnpjTitular: true, validadeFim: true, ativo: true } }
       },
       orderBy: [{ estabelecimento: { razaoSocial: 'asc' } }, { ambiente: 'asc' }]
     });
+  }
+
+  async downloadErrorDiagnostic(clienteId: string, id: string) {
+    const control = await this.prisma.nfceScSyncControle.findFirst({
+      where: { id, clienteId },
+      select: {
+        cnpjConsulta: true,
+        diagnosticoXmlRequisicao: true,
+        diagnosticoXmlResposta: true,
+        diagnosticoXmlCriadoEm: true
+      }
+    });
+    if (!control) throw new NotFoundException('Controle NFC-e SC nao encontrado');
+    if (!control.diagnosticoXmlRequisicao || !control.diagnosticoXmlResposta) {
+      throw new BadRequestException('Nao ha XML de diagnostico de erro 9999 salvo para este controle');
+    }
+
+    const zip = new JSZip();
+    zip.file('requisicao.xml', control.diagnosticoXmlRequisicao);
+    zip.file('resposta.xml', control.diagnosticoXmlResposta);
+    zip.file('capturado-em.txt', control.diagnosticoXmlCriadoEm?.toISOString() || 'Data de captura indisponivel');
+    const zipBuffer = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    const timestamp = (control.diagnosticoXmlCriadoEm || new Date()).toISOString().replace(/[:.]/g, '-');
+    const safeCnpj = control.cnpjConsulta.replace(/[^a-zA-Z0-9]/g, '');
+
+    return {
+      fileName: `nfce-sc-diagnostico-${safeCnpj}-${timestamp}.zip`,
+      contentType: 'application/zip',
+      contentBase64: zipBuffer.toString('base64')
+    };
   }
 
   async listDocuments(clienteId: string) {
@@ -303,6 +350,13 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
       const message = shouldContinue
         ? `SEF/SC ${result.cStat}: lote de ${result.documentos.length} documento(s) salvo. Continuando automaticamente; ${savedInExecution} documento(s) nesta execucao, NSU ${cursor}.`
         : `SEF/SC ${result.cStat}: ${result.xMotivo}. ${savedInExecution} documento(s) armazenado(s) nesta execucao. NSU ${cursor}.`;
+      const errorDiagnosticUpdate = result.cStat === '9999' && result.errorDiagnostic
+        ? {
+          diagnosticoXmlRequisicao: result.errorDiagnostic.requestXml,
+          diagnosticoXmlResposta: result.errorDiagnostic.responseXml,
+          diagnosticoXmlCriadoEm: now
+        }
+        : {};
       const updated = await this.prisma.nfceScSyncControle.updateMany({
         where: { id, status: NfeSyncStatus.processando, proximaExecucao: leaseUntil },
         data: {
@@ -311,7 +365,8 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
           ultimaExecucao: now,
           proximaExecucao: next,
           totalDocumentosBaixados: { increment: result.documentos.length },
-          ultimaMensagem: message
+          ultimaMensagem: message,
+          ...errorDiagnosticUpdate
         }
       });
       if (!updated.count) return;

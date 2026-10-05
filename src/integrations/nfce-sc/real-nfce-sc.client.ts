@@ -44,7 +44,14 @@ export class RealNfceScClient implements NfceScClient {
     const xMotivo = this.tag(resultXml, 'xMotivo') || 'Resposta sem descricao de status';
     const ultimoNsu = BigInt(this.tag(resultXml, 'ultNuNSURet') || params.ultimoNsu.toString());
     const documentos = cStat === '118' ? this.extractDocuments(resultXml) : [];
-    return { cStat, xMotivo, ultimoNsu, documentos, httpStatus: response.status };
+    return {
+      cStat,
+      xMotivo,
+      ultimoNsu,
+      documentos,
+      httpStatus: response.status,
+      ...(cStat === '9999' ? { errorDiagnostic: { requestXml: envelope, responseXml: response.body } } : {})
+    };
   }
 
   private async loadCertificate(id: string): Promise<Certificado> {

@@ -389,6 +389,9 @@ model NfceScSyncControle {
   proximaExecucao       DateTime?     @map("proxima_execucao")
   ultimaMensagem        String?       @map("ultima_mensagem") @db.Text
   totalDocumentosBaixados Int         @default(0) @map("total_documentos_baixados")
+  diagnosticoXmlRequisicao String?    @map("diagnostico_xml_requisicao") @db.Text
+  diagnosticoXmlResposta String?      @map("diagnostico_xml_resposta") @db.Text
+  diagnosticoXmlCriadoEm DateTime?    @map("diagnostico_xml_criado_em")
   createdAt             DateTime      @default(now()) @map("created_at")
   updatedAt             DateTime      @updatedAt @map("updated_at")
 

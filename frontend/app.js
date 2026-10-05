@@ -1131,6 +1131,12 @@ function onDocumentClick(event) {
       void executeNfceScControlAction(action, controlId, clientId);
       return;
     }
+    case 'nfce-sc-download-diagnostic': {
+      const controlId = actionNode.getAttribute('data-control-id') || '';
+      const clientId = actionNode.getAttribute('data-client-id') || '';
+      void downloadNfceScDiagnostic(controlId, clientId);
+      return;
+    }
     case 'row-actions-menu-toggle': {
       const menuId = actionNode.getAttribute('data-menu-id') || '';
       toggleRowActionsMenu(menuId, actionNode);
@@ -4352,7 +4358,7 @@ function renderNfceScControlRow(control) {
       <td>${escapeHtml(control.ambiente === 'producao' ? 'Producao' : 'Homologacao')}</td>
       <td>${escapeHtml(String(control.ultimoNsuConsultado ?? '0'))}</td>
       <td>${statusBadge(statusLabel, toneFromNfeSyncStatus(control.status))}</td>
-      <td><span class="row-sub">${escapeHtml(control.ultimaMensagem || 'Aguardando primeira consulta')}</span><div class="stack-actions" style="justify-content:flex-start;margin-top:6px"><button class="btn secondary" type="button" data-action="nfce-sc-run" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isProcessing ? 'disabled' : ''}>${isProcessing ? 'Consultando...' : isPaused ? 'Retomar consulta' : 'Consultar agora'}</button><button class="btn ghost" type="button" data-action="nfce-sc-pause" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isPaused ? 'disabled' : ''}>Pausar</button></div></td>
+      <td><span class="row-sub">${escapeHtml(control.ultimaMensagem || 'Aguardando primeira consulta')}</span><div class="stack-actions" style="justify-content:flex-start;margin-top:6px"><button class="btn secondary" type="button" data-action="nfce-sc-run" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isProcessing ? 'disabled' : ''}>${isProcessing ? 'Consultando...' : isPaused ? 'Retomar consulta' : 'Consultar agora'}</button><button class="btn ghost" type="button" data-action="nfce-sc-pause" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isPaused ? 'disabled' : ''}>Pausar</button>${control.diagnosticoXmlCriadoEm ? `<button class="btn ghost" type="button" data-action="nfce-sc-download-diagnostic" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}">Baixar XML para SEF</button>` : ''}</div></td>
     </tr>
   `;
 }
@@ -4457,6 +4463,20 @@ async function executeNfceScControlAction(action, controlId, clienteId) {
     pushToast(action === 'nfce-sc-run' ? 'Consulta NFC-e SC iniciada.' : 'Controle NFC-e SC pausado.', 'success');
   } catch (error) {
     pushToast(`Falha na operacao NFC-e SC: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function downloadNfceScDiagnostic(controlId, clienteId) {
+  if (!controlId || !clienteId) return;
+  try {
+    const payload = await apiRequest(
+      `/nfce-sc/controles/${encodeURIComponent(controlId)}/diagnostico?clienteId=${encodeURIComponent(clienteId)}`,
+      { cache: false }
+    );
+    downloadFromPayload(payload, 'nfce-sc-diagnostico-sef.zip');
+    pushToast('Download do diagnostico NFC-e SC iniciado. O ZIP contem os XMLs de requisicao e resposta.', 'success');
+  } catch (error) {
+    pushToast(`Falha ao baixar diagnostico NFC-e SC: ${toErrorMessage(error)}`, 'error');
   }
 }
 

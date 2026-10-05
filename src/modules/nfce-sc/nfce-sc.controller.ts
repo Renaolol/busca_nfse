@@ -1,8 +1,9 @@
 import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query } from '@nestjs/common';
-import { ApiAcceptedResponse, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
+import { ApiAcceptedResponse, ApiOkResponse, ApiOperation, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { IsUUID } from 'class-validator';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { ConfigureNfceScSyncDto } from './dto/configure-nfce-sc-sync.dto';
+import { NfceScDiagnosticDownloadDto } from './dto/nfce-sc-diagnostic-download.dto';
 import { NfceScRunResponseDto } from './dto/nfce-sc-run-response.dto';
 import { NfceScService } from './nfce-sc.service';
 
@@ -25,6 +26,17 @@ export class NfceScController {
   })
   list(@Query() query: NfceScControlsQuery) {
     return this.service.listControls(query.clienteId);
+  }
+
+  @Get('controles/:id/diagnostico')
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  @ApiOperation({
+    summary: 'Baixa os XMLs de diagnostico da ultima resposta NFC-e SC cStat 9999',
+    description: 'O ZIP contem os envelopes SOAP de requisicao e resposta, capturados somente em respostas cStat 9999.'
+  })
+  @ApiOkResponse({ type: NfceScDiagnosticDownloadDto })
+  downloadErrorDiagnostic(@Param('id') id: string, @Query() query: NfceScControlsQuery) {
+    return this.service.downloadErrorDiagnostic(query.clienteId, id);
   }
 
   @Get('documentos')
