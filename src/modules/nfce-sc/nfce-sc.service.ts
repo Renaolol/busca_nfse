@@ -283,7 +283,9 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
         ? NfeSyncStatus.erro_autorizacao
         : certificateFailure
           ? NfeSyncStatus.erro_certificado
-          : NfeSyncStatus.ativo;
+          : ['117', '118'].includes(result.cStat)
+            ? NfeSyncStatus.ativo
+            : NfeSyncStatus.erro_api;
       const completed = result.cStat === '117' || (result.cStat === '118' && result.documentos.length < NfceScService.BATCH_SIZE);
       const retryOneHour = result.cStat !== '117' && result.cStat !== '118';
       const now = new Date();

@@ -89,6 +89,45 @@ describe('NfceScService', () => {
     expect(control.proximaExecucao?.getTime()).toBeGreaterThan(Date.now() + 11 * 60 * 60 * 1000);
   });
 
+  it('classifica cStat 9999 como erro de API e preserva mensagem e NSU', async () => {
+    const leaseUntil = new Date(Date.now() + 5 * 60 * 1000);
+    const control = createControl(leaseUntil);
+    const prismaStub = {
+      nfceScSyncControle: {
+        findUnique: jest.fn(async () => ({ ...control })),
+        updateMany: jest.fn(async ({ where, data }: { where: Record<string, unknown>; data: Record<string, any> }) => {
+          const expectedLease = where.proximaExecucao as Date | undefined;
+          if (where.status && where.status !== control.status) return { count: 0 };
+          if (expectedLease && expectedLease.getTime() !== control.proximaExecucao?.getTime()) return { count: 0 };
+          Object.assign(control, data);
+          return { count: 1 };
+        })
+      }
+    } as unknown as PrismaService;
+    const download: NfceScClient['download'] = jest.fn().mockResolvedValue({
+      cStat: '9999',
+      xMotivo: 'Ocorreu um erro no processamento. Código do erro: exemplo',
+      ultimoNsu: 0n,
+      documentos: [],
+      httpStatus: 200
+    });
+    const service = new NfceScService(
+      prismaStub,
+      {} as NfeService,
+      { download } as NfceScClient
+    );
+    const runBatches = (service as unknown as {
+      processAllAvailableBatches: (id: string, lease: Date) => Promise<void>;
+    }).processAllAvailableBatches.bind(service);
+
+    await runBatches(controlId, leaseUntil);
+
+    expect(control.status).toBe(NfeSyncStatus.erro_api);
+    expect(control.ultimoNsuConsultado).toBe(0n);
+    expect(control.ultimaMensagem).toContain('Código do erro: exemplo');
+    expect(control.proximaExecucao?.getTime()).toBeGreaterThan(Date.now() + 59 * 60 * 1000);
+  });
+
   it('responde com consulta em andamento sem iniciar uma segunda execucao', async () => {
     const control = {
       ...createControl(new Date(Date.now() + 5 * 60 * 1000)),
