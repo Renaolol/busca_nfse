@@ -1373,6 +1373,12 @@ function onDocumentClick(event) {
       openModal({ kind: 'establishment-form', clientId });
       return;
     }
+    case 'establishment-lookup-cep': {
+      const form = actionNode.closest('#establishmentForm');
+      if (!(form instanceof HTMLFormElement)) return;
+      void lookupEstablishmentCep(form, actionNode);
+      return;
+    }
     case 'client-details': {
       const clientId = actionNode.getAttribute('data-client-id');
       if (!clientId) {
@@ -11899,7 +11905,12 @@ function renderEstablishmentFormModal() {
               <label class="field">Codigo IBGE do municipio<input name="municipioCodigoIbge" inputmode="numeric" maxlength="7" /></label>
               <label class="field">Logradouro<input name="logradouro" value="${escapeHtml(client.logradouro || '')}" /></label>
               <label class="field">Bairro<input name="bairro" value="${escapeHtml(client.bairro || '')}" /></label>
-              <label class="field">CEP<input name="cep" inputmode="numeric" maxlength="9" value="${escapeHtml(client.cep || '')}" /></label>
+              <label class="field">CEP
+                <div class="establishment-cep-control">
+                  <input name="cep" inputmode="numeric" maxlength="9" value="${escapeHtml(client.cep || '')}" />
+                  <button class="btn secondary" type="button" data-action="establishment-lookup-cep">Buscar</button>
+                </div>
+              </label>
             </div>
           </div>
           <div class="modal-footer">
@@ -15198,6 +15209,43 @@ async function submitEstablishmentForm(form) {
     pushToast('Estabelecimento cadastrado com sucesso.', 'success');
   } catch (error) {
     pushToast(`Falha ao cadastrar estabelecimento: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function lookupEstablishmentCep(form, button) {
+  if (state.dataSource !== 'api') {
+    pushToast('A busca de CEP exige conexao com a API.', 'error');
+    return;
+  }
+
+  const cep = normalizeDigits(String(form.elements.cep?.value || ''));
+  if (cep.length !== 8) {
+    pushToast('Informe um CEP com 8 digitos.', 'error');
+    return;
+  }
+
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = 'Buscando...';
+  try {
+    const address = await apiRequest(`/estabelecimentos/cep/${encodeURIComponent(cep)}`, { cache: false, timeoutMs: 15000 });
+    form.elements.cep.value = address.cep || cep;
+    form.elements.logradouro.value = address.logradouro || '';
+    form.elements.bairro.value = address.bairro || '';
+    form.elements.municipioNome.value = address.municipioNome || '';
+    form.elements.municipioCodigoIbge.value = address.municipioCodigoIbge || '';
+    form.elements.uf.value = address.uf || '';
+    pushToast(
+      address.municipioCodigoIbge
+        ? `Endereco localizado. Codigo IBGE: ${address.municipioCodigoIbge}.`
+        : 'Endereco localizado, mas a resposta nao trouxe o codigo IBGE.',
+      address.municipioCodigoIbge ? 'success' : 'info'
+    );
+  } catch (error) {
+    pushToast(`Falha ao buscar CEP: ${toErrorMessage(error)}`, 'error');
+  } finally {
+    button.disabled = false;
+    button.textContent = originalLabel || 'Buscar';
   }
 }
 

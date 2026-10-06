@@ -2470,6 +2470,21 @@ label.field {
   font-weight: 700;
 }
 
+.establishment-cep-control {
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.establishment-cep-control input {
+  min-width: 0;
+  flex: 1;
+}
+
+.establishment-cep-control .btn {
+  flex: 0 0 auto;
+}
+
 input,
 select,
 textarea {
