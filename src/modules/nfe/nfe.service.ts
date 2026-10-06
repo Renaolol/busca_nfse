@@ -896,6 +896,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         id: true,
         clienteId: true,
         chaveAcesso: true,
+        modelo: true,
         xmlCompletoPath: true,
         xmlResumoPath: true,
         xmlCompletoDisponivel: true,
@@ -924,7 +925,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         } else {
           try {
             xmlBuffer = await this.storage.getObject(xmlPath);
-            zip.file(`xml/NFE-${this.toSafeFileName(doc.chaveAcesso)}.xml`, xmlBuffer);
+            const prefix = doc.modelo === '65' ? 'NFCE' : 'NFE';
+            zip.file(`xml/${prefix}-${this.toSafeFileName(doc.chaveAcesso)}.xml`, xmlBuffer);
             totalArquivosIncluidos += 1;
           } catch (error) {
             erros.push({ id: doc.id, erro: `Falha ao ler XML: ${this.toErrorMessage(error)}` });

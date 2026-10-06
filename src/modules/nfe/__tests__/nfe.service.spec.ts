@@ -665,6 +665,31 @@ describe('NfeService', () => {
     expect(zip.file('xml/NFE-35260612345678000199550010000001231000008888.xml')).toBeTruthy();
   });
 
+  it('nomeia XML de modelo 65 como NFC-e no ZIP de lote', async () => {
+    prisma.nfeDocumento.findMany.mockResolvedValue([
+      {
+        id: 'doc-nfce-lote',
+        clienteId: 'cliente-1',
+        chaveAcesso: '35260612345678000199650010000001231000006666',
+        modelo: '65',
+        xmlCompletoPath: 'nfce-sc/producao/123/2026/06/xml/a.xml',
+        xmlResumoPath: null,
+        xmlCompletoDisponivel: true,
+        resumoDisponivel: false
+      }
+    ]);
+    storage.getObject.mockResolvedValue(Buffer.from('<nfeProc>nfce</nfeProc>', 'utf8'));
+
+    const result = await service.downloadLote({
+      ids: ['doc-nfce-lote'],
+      tipoArquivo: 'xml',
+      clienteId: 'cliente-1'
+    });
+
+    const zip = await JSZip.loadAsync(Buffer.from(result.contentBase64, 'base64'));
+    expect(zip.file('xml/NFCE-35260612345678000199650010000001231000006666.xml')).toBeTruthy();
+  });
+
   it('importa XMLs da Dominio vinculando estabelecimento por CNPJ', async () => {
     (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([
       {

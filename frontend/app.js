@@ -299,6 +299,10 @@ const pageMeta = {
     title: 'XMLs NF-e',
     description: 'Consulte XMLs armazenados de NF-e no servidor interno.'
   },
+  'xmls-nfce': {
+    title: 'XMLs NFC-e',
+    description: 'Consulte e baixe em lote NFC-e de Santa Catarina armazenadas no servidor interno.'
+  },
   'nfce-sc': {
     title: 'NFC-e Santa Catarina',
     description: 'Configure os certificados e acompanhe a distribuicao estadual de NFC-e da SEF/SC.'
@@ -353,6 +357,7 @@ const state = {
   selectedAlertIds: new Set(),
   selectedXmlIds: new Set(),
   selectedNfeIds: new Set(),
+  selectedNfceScDocumentIds: new Set(),
   selectedXmlReaderIds: new Set(),
   savedXmlReaderIds: new Set(),
   clients: [],
@@ -384,6 +389,15 @@ const state = {
   nfeSyncControls: [],
   nfceScControls: [],
   nfceScDocuments: [],
+  nfceScStoredDocuments: [],
+  nfceScStoredSearch: {
+    hasSearched: false,
+    results: [],
+    lastQuery: null,
+    lastSearchedAt: null,
+    total: 0,
+    truncated: false
+  },
   nfeDocuments: [],
   cteDocuments: [],
   nfeDashboardStats: null,
@@ -634,6 +648,15 @@ const state = {
       xmlCompleto: 'Todos',
       ambiente: 'producao'
     },
+    nfceScDocs: {
+      cliente: 'Todos',
+      tipo: 'Todos',
+      cnpj: '',
+      numero: '',
+      chave: '',
+      emissaoInicio: '',
+      emissaoFim: ''
+    },
     cteDocs: {
       cliente: 'Todos',
       tipo: 'Todos',
@@ -669,6 +692,7 @@ const state = {
     nfseFiscalReader: 'loading',
     nfseGapAudit: 'loading',
     nfeDocs: 'loading',
+    nfceScDocs: 'data',
     cteDocs: 'loading',
     xmlReader30: 'loading',
     difalReader: 'data',
@@ -684,6 +708,10 @@ const state = {
       direction: 'desc'
     },
     nfeDocs: {
+      key: 'dataEmissao',
+      direction: 'desc'
+    },
+    nfceScDocs: {
       key: 'dataEmissao',
       direction: 'desc'
     },
@@ -1814,7 +1842,7 @@ function onDocumentClick(event) {
     }
     case 'stored-docs-switch': {
       const docType = actionNode.getAttribute('data-doc-type');
-      navigate(docType === 'nfe' ? '/xmls-nfe' : docType === 'cte' ? '/xmls-cte' : '/xmls');
+      navigate(docType === 'nfce' ? '/xmls-nfce' : docType === 'nfe' ? '/xmls-nfe' : docType === 'cte' ? '/xmls-cte' : '/xmls');
       return;
     }
     case 'search-type-switch': {
@@ -1837,6 +1865,37 @@ function onDocumentClick(event) {
     case 'nfe-docs-clear-filters': {
       resetNfeDocsSearch();
       render();
+      return;
+    }
+    case 'nfce-sc-docs-clear-filters': {
+      resetNfceScStoredSearch();
+      render();
+      return;
+    }
+    case 'nfce-sc-docs-export-list': {
+      exportNfceScStoredListToCsv();
+      return;
+    }
+    case 'nfce-sc-doc-select': {
+      const documentId = actionNode.getAttribute('data-nfce-sc-doc-id');
+      if (!documentId) return;
+      if (actionNode.checked) state.selectedNfceScDocumentIds.add(documentId);
+      else state.selectedNfceScDocumentIds.delete(documentId);
+      renderPreservingScroll();
+      return;
+    }
+    case 'nfce-sc-docs-toggle-all': {
+      const checked = actionNode.checked;
+      getFilteredNfceScStoredDocuments().forEach((doc) => {
+        if (!doc.apiNfeId) return;
+        if (checked) state.selectedNfceScDocumentIds.add(doc.id);
+        else state.selectedNfceScDocumentIds.delete(doc.id);
+      });
+      renderPreservingScroll();
+      return;
+    }
+    case 'nfce-sc-docs-batch-download': {
+      void downloadSelectedNfceScStoredBatch();
       return;
     }
     case 'nfe-docs-run-now-client': {
@@ -2498,6 +2557,11 @@ function onDocumentSubmit(event) {
     case 'nfeDocsFilterForm': {
       event.preventDefault();
       void applyNfeDocsFilters(target);
+      return;
+    }
+    case 'nfceScStoredFilterForm': {
+      event.preventDefault();
+      void applyNfceScStoredDocumentsFilters(target);
       return;
     }
     case 'cteDocsFilterForm': {
@@ -3356,6 +3420,8 @@ function renderCurrentPage() {
       return renderNfceScPage();
     case 'xmls-nfe':
       return renderNfeDocumentsPage();
+    case 'xmls-nfce':
+      return renderNfceScStoredDocumentsPage();
     case 'xmls-cte':
       return renderCteDocumentsPage();
     case 'compara-sped':
@@ -5123,6 +5189,122 @@ function renderNfeSearchEmptyState() {
   `;
 }
 
+function renderNfceScStoredDocumentsPage() {
+  const docs = getFilteredNfceScStoredDocuments();
+  const hasSearched = state.nfceScStoredSearch.hasSearched;
+  const canShowTable = hasSearched || state.tableState.nfceScDocs === 'loading' || state.tableState.nfceScDocs === 'error';
+  const selectedClientId = state.filters.nfceScDocs.cliente !== 'Todos' ? state.filters.nfceScDocs.cliente : '';
+
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'XMLs NFC-e',
+        description: 'Consulte as NFC-e de Santa Catarina armazenadas no servidor interno.',
+        actions: [actionButton('Exportar listagem', 'nfce-sc-docs-export-list', 'secondary', !hasSearched)]
+      })}
+
+      ${renderStoredDocumentsTypeSwitcher('nfce')}
+
+      <article class="card filter-card">
+        <h3 class="card-title">Consulta de NFC-e</h3>
+        <p class="card-subtitle">Selecione uma empresa e refine a busca por emissão, participante ou número da nota.</p>
+        <form id="nfceScStoredFilterForm" class="form-grid">
+          <label class="field">
+            Empresa
+            <select name="cliente" required>${renderOptions(state.clients.map((client) => client.id), selectedClientId, mapClientOptions(), 'Selecione uma empresa')}</select>
+          </label>
+          <label class="field">
+            Emissão início
+            <input name="emissaoInicio" type="date" value="${escapeHtml(state.filters.nfceScDocs.emissaoInicio)}" />
+          </label>
+          <label class="field">
+            Emissão fim
+            <input name="emissaoFim" type="date" value="${escapeHtml(state.filters.nfceScDocs.emissaoFim)}" />
+          </label>
+          <label class="field">
+            Tipo
+            <select name="tipo">${renderOptions(['Todos', 'emitidas', 'recebidas'], state.filters.nfceScDocs.tipo, { Todos: 'Todos', emitidas: 'Emitida', recebidas: 'Recebida' })}</select>
+          </label>
+          <label class="field">
+            CNPJ
+            <input name="cnpj" value="${escapeHtml(state.filters.nfceScDocs.cnpj)}" />
+          </label>
+          <label class="field">
+            Número da NFC-e
+            <input name="numero" value="${escapeHtml(state.filters.nfceScDocs.numero)}" />
+          </label>
+          <label class="field">
+            Chave de acesso
+            <input name="chave" value="${escapeHtml(state.filters.nfceScDocs.chave)}" maxlength="44" />
+          </label>
+          <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
+            <button class="btn primary" type="submit">Buscar NFC-e</button>
+            <button class="btn secondary" type="button" data-action="nfce-sc-docs-clear-filters">Limpar</button>
+          </div>
+        </form>
+      </article>
+
+      ${canShowTable ? renderNfceScStoredDocumentsTable(docs) : `
+        <article class="card">
+          <div class="table-state">Selecione uma empresa e o periodo desejado, depois clique em <strong>Buscar NFC-e</strong>.</div>
+        </article>
+      `}
+    </section>
+  `;
+}
+
+function renderNfceScStoredDocumentsTable(docs) {
+  const selectableDocs = docs.filter((doc) => Boolean(doc.apiNfeId));
+  const selectedVisibleCount = selectableDocs.filter((doc) => state.selectedNfceScDocumentIds.has(doc.id)).length;
+  const allVisibleSelected = selectableDocs.length > 0 && selectedVisibleCount === selectableDocs.length;
+  const batchDisabled = selectedVisibleCount > 0 ? '' : 'disabled';
+  const total = Number(state.nfceScStoredSearch.total || docs.length || 0);
+  const truncationMessage = state.nfceScStoredSearch.truncated
+    ? ' A listagem atingiu o limite de 10.000 registros; refine os filtros para incluir os demais.'
+    : '';
+  const rowsHtml = docs.map((doc) => {
+    const menuId = `nfce-sc:${doc.id}`;
+    const items = [
+      { label: 'Ver XML', action: 'nfe-view', attrs: { 'nfe-id': doc.id } },
+      { label: 'Baixar XML', action: 'nfe-download', attrs: { 'nfe-id': doc.id } }
+    ];
+    return `<tr data-row-actions-menu-id="${escapeHtml(menuId)}">
+      <td><input type="checkbox" data-action="nfce-sc-doc-select" data-nfce-sc-doc-id="${escapeHtml(doc.id)}" ${state.selectedNfceScDocumentIds.has(doc.id) ? 'checked' : ''} ${doc.apiNfeId ? '' : 'disabled'} aria-label="Selecionar NFC-e ${escapeHtml(doc.numeroNfe || '-')}" /></td>
+      <td>${escapeHtml(doc.numeroNfe || '-')}</td>
+      <td>${escapeHtml(doc.cliente || '-')}</td>
+      <td><span class="row-title">${escapeHtml(doc.contraparteNome || '-')}</span><span class="row-sub">${escapeHtml(formatCnpj(doc.contraparteCnpj || ''))}</span></td>
+      <td>${escapeHtml(formatDateTime(doc.dataEmissao))}</td>
+      <td>${escapeHtml(formatOptionalCurrency(doc.valor))}</td>
+      <td>${renderNfeStorageBadges(doc)}</td>
+      <td>${renderNfeStatusBadges(doc)}</td>
+      <td>${renderRowActionsMenu(menuId, items)}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <article class="card">
+      <div class="xml-batch-bar">
+        <div>
+          <h3 class="card-title">NFC-e encontradas</h3>
+    <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(total))} documento(s). ${escapeHtml(String(selectedVisibleCount))} selecionado(s).${escapeHtml(truncationMessage)}</p>
+        </div>
+        <div class="table-actions">
+          <button class="btn primary" type="button" data-action="nfce-sc-docs-batch-download" ${batchDisabled}>Baixar XMLs selecionados</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th><input type="checkbox" data-action="nfce-sc-docs-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableDocs.length ? '' : 'disabled'} aria-label="Selecionar todas as NFC-e da listagem" /></th>
+            <th>Número</th><th>Empresa</th><th>Emitente / destinatário</th><th>Data de emissão</th><th>Valor</th><th>Arquivo</th><th>Status</th><th>Ações</th>
+          </tr></thead>
+          <tbody>${renderTableRowsOrState({ key: 'nfceScDocs', colSpan: 9, rowsHtml, emptyMessage: 'Nenhuma NFC-e encontrada para os filtros informados.' })}</tbody>
+        </table>
+      </div>
+    </article>
+  `;
+}
+
 function renderNfeSearchSummary() {
   const query = state.nfeSearch.lastQuery;
   if (!query) {
@@ -5505,6 +5687,7 @@ function renderCteSortHeader(key, label) {
 function renderStoredDocumentsTypeSwitcher(activeType) {
   const isNfse = activeType === 'nfse';
   const isNfe = activeType === 'nfe';
+  const isNfce = activeType === 'nfce';
   const isCte = activeType === 'cte';
 
   return `
@@ -5517,6 +5700,7 @@ function renderStoredDocumentsTypeSwitcher(activeType) {
         <div class="table-actions">
           <button class="btn ${isNfse ? 'primary' : 'secondary'}" type="button" data-action="stored-docs-switch" data-doc-type="nfse">NFS-e</button>
           <button class="btn ${isNfe ? 'primary' : 'secondary'}" type="button" data-action="stored-docs-switch" data-doc-type="nfe">NF-e</button>
+          <button class="btn ${isNfce ? 'primary' : 'secondary'}" type="button" data-action="stored-docs-switch" data-doc-type="nfce">NFC-e</button>
           <button class="btn ${isCte ? 'primary' : 'secondary'}" type="button" data-action="stored-docs-switch" data-doc-type="cte">CT-e</button>
         </div>
       </div>
@@ -14662,6 +14846,7 @@ function parseRoute(hash) {
     '/buscas-nfe': 'buscas-nfe',
     '/nfce-sc': 'nfce-sc',
     '/xmls-nfe': 'xmls-nfe',
+    '/xmls-nfce': 'xmls-nfce',
     '/xmls-cte': 'xmls-cte',
     '/compara-sped': 'compara-sped',
     '/leitor-xml': 'leitor-xml',
@@ -14701,7 +14886,7 @@ function resolveNavKeyByRoute(routeName) {
   if (routeName === 'buscas-nfe' || routeName === 'buscas') {
     return 'buscas';
   }
-  if (routeName === 'xmls' || routeName === 'xmls-nfe' || routeName === 'xmls-cte') {
+  if (routeName === 'xmls' || routeName === 'xmls-nfe' || routeName === 'xmls-nfce' || routeName === 'xmls-cte') {
     return 'armazenados';
   }
   return routeName;
@@ -16479,6 +16664,75 @@ async function applyNfeDocsFilters(form) {
   await executeNfeDocsSearch();
 }
 
+async function applyNfceScStoredDocumentsFilters(form) {
+  const data = new FormData(form);
+  state.filters.nfceScDocs = {
+    cliente: String(data.get('cliente') || ''),
+    tipo: String(data.get('tipo') || 'Todos'),
+    cnpj: String(data.get('cnpj') || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase(),
+    numero: String(data.get('numero') || '').trim(),
+    chave: String(data.get('chave') || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase(),
+    emissaoInicio: String(data.get('emissaoInicio') || ''),
+    emissaoFim: String(data.get('emissaoFim') || '')
+  };
+  state.selectedNfceScDocumentIds = new Set();
+  await executeNfceScStoredDocumentsSearch();
+}
+
+async function executeNfceScStoredDocumentsSearch() {
+  const filters = state.filters.nfceScDocs;
+  if (!filters.cliente || filters.cliente === 'Todos') {
+    resetNfceScStoredSearch();
+    pushToast('Selecione uma empresa para buscar NFC-e armazenadas.', 'error');
+    render();
+    return;
+  }
+  if (filters.emissaoInicio && filters.emissaoFim && Date.parse(filters.emissaoInicio) > Date.parse(filters.emissaoFim)) {
+    resetNfceScStoredSearch();
+    pushToast('A data inicial não pode ser maior que a data final.', 'error');
+    render();
+    return;
+  }
+
+  state.nfceScStoredSearch.hasSearched = true;
+  state.nfceScStoredSearch.results = [];
+  state.nfceScStoredSearch.lastQuery = { ...filters };
+  state.tableState.nfceScDocs = 'loading';
+  render();
+
+  try {
+    const query = new URLSearchParams({ clienteId: filters.cliente, all: 'true' });
+    if (filters.tipo !== 'Todos') query.set('tipoRelacao', filters.tipo);
+    if (filters.emissaoInicio) query.set('dataInicio', filters.emissaoInicio);
+    if (filters.emissaoFim) query.set('dataFim', filters.emissaoFim);
+    if (filters.cnpj) query.set('cnpj', filters.cnpj);
+    if (filters.numero) query.set('numeroNfce', filters.numero);
+    if (filters.chave) query.set('chaveAcesso', filters.chave);
+
+    const response = await apiRequest(`/nfce-sc/armazenadas?${query.toString()}`, { cache: false, timeoutMs: 60000 });
+    const payload = normalizePaginatedResponse(response);
+    const mapped = buildNfeDocumentsFromApi(payload.items, state.clients);
+    state.nfceScStoredDocuments = mapped;
+    state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mapped);
+    state.nfceScStoredSearch.results = mapped;
+    state.nfceScStoredSearch.total = Number(payload.total || mapped.length);
+    state.nfceScStoredSearch.truncated = Boolean(response?.truncated);
+    state.nfceScStoredSearch.lastSearchedAt = new Date().toISOString();
+    state.tableState.nfceScDocs = 'data';
+    if (state.nfceScStoredSearch.truncated) {
+      pushToast('A busca atingiu 10.000 NFC-e. Refine os filtros para localizar documentos adicionais.', 'info');
+    }
+  } catch (error) {
+    state.nfceScStoredSearch.results = [];
+    state.nfceScStoredSearch.total = 0;
+    state.nfceScStoredSearch.truncated = false;
+    state.tableState.nfceScDocs = 'error';
+    pushToast(`Falha ao buscar NFC-e armazenadas: ${toErrorMessage(error)}`, 'error');
+  }
+
+  render();
+}
+
 async function applyCteDocsFilters(form) {
   const data = new FormData(form);
   const rawTipoEvento = String(data.get('tipoEvento') || '').trim();
@@ -17497,6 +17751,11 @@ function getFilteredNfeDocuments() {
   return sortNfeDocuments(getFilteredNfeDocumentsFromSource(state.nfeSearch.results));
 }
 
+function getFilteredNfceScStoredDocuments() {
+  if (!state.nfceScStoredSearch.hasSearched) return [];
+  return [...state.nfceScStoredSearch.results].sort((left, right) => Date.parse(right.dataEmissao || 0) - Date.parse(left.dataEmissao || 0));
+}
+
 function getFilteredCteDocuments() {
   if (!state.cteSearch.hasSearched) {
     return [];
@@ -17856,6 +18115,29 @@ function resetNfeDocsSearch() {
   state.nfeSearch.total = 0;
   state.nfeSearch.totalPages = 0;
   state.tableState.nfeDocs = 'data';
+}
+
+function resetNfceScStoredSearch() {
+  state.selectedNfceScDocumentIds = new Set();
+  state.filters.nfceScDocs = {
+    cliente: 'Todos',
+    tipo: 'Todos',
+    cnpj: '',
+    numero: '',
+    chave: '',
+    emissaoInicio: '',
+    emissaoFim: ''
+  };
+  state.nfceScStoredDocuments = [];
+  state.nfceScStoredSearch = {
+    hasSearched: false,
+    results: [],
+    lastQuery: null,
+    lastSearchedAt: null,
+    total: 0,
+    truncated: false
+  };
+  state.tableState.nfceScDocs = 'data';
 }
 
 function resetCteDocsSearch() {
@@ -25129,6 +25411,35 @@ async function downloadSelectedNfeBatch(tipoArquivo = 'ambos') {
   }
 }
 
+async function downloadSelectedNfceScStoredBatch() {
+  const selectedDocs = getFilteredNfceScStoredDocuments().filter(
+    (doc) => state.selectedNfceScDocumentIds.has(doc.id) && doc.apiNfeId
+  );
+  if (!selectedDocs.length) {
+    pushToast('Selecione ao menos uma NFC-e da listagem atual.', 'error');
+    return;
+  }
+
+  const clienteId = state.filters.nfceScDocs.cliente;
+  const ids = [...new Set(selectedDocs.map((doc) => doc.apiNfeId))];
+  try {
+    const payload = await apiRequest('/nfce-sc/armazenadas/download-lote', {
+      method: 'POST',
+      body: { ids, clienteId },
+      timeoutMs: 2 * 60 * 1000
+    });
+    downloadFromPayload(payload, 'nfce-sc-lote-xmls.zip');
+    const included = Number(payload?.totalArquivosIncluidos || 0);
+    const errorsCount = Array.isArray(payload?.erros) ? payload.erros.length : 0;
+    pushToast(
+      `Download em lote iniciado: ${included} XML(s) no ZIP${errorsCount ? `, ${errorsCount} aviso(s)` : ''}.`,
+      errorsCount ? 'info' : 'success'
+    );
+  } catch (error) {
+    pushToast(`Falha ao baixar lote de NFC-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
 async function syncEventsForListedXmls() {
   if (state.xmlEventsSyncRunning) {
     pushToast('A sincronizacao de eventos da listagem ja esta em andamento.', 'info');
@@ -26131,6 +26442,40 @@ function exportXmlListToCsv() {
 
   triggerBrowserDownload(fileName, blob);
   pushToast(`${xmls.length} XML(s) exportado(s) para CSV.`, 'success');
+}
+
+function exportNfceScStoredListToCsv() {
+  if (!state.nfceScStoredSearch.hasSearched) {
+    pushToast('Busque as NFC-e antes de exportar a listagem.', 'error');
+    return;
+  }
+  const docs = getFilteredNfceScStoredDocuments();
+  if (!docs.length) {
+    pushToast('Não há NFC-e na listagem atual para exportar.', 'error');
+    return;
+  }
+
+  const header = ['Chave de acesso', 'Número NFC-e', 'Cliente', 'Tipo', 'Data de emissão', 'Valor total', 'Status', 'Emitente', 'CNPJ emitente', 'Destinatário', 'CNPJ destinatário'];
+  const rows = docs.map((doc) => [
+    doc.chaveAcesso,
+    doc.numeroNfe,
+    doc.cliente,
+    doc.tipo,
+    formatDateTime(doc.dataEmissao),
+    formatCurrency(doc.valor),
+    doc.statusFiscal,
+    doc.emitenteNome,
+    formatCnpj(doc.emitenteCnpj),
+    doc.destinatarioNome,
+    formatCnpj(doc.destinatarioCnpj)
+  ]);
+  const csv = [header, ...rows].map((row) => row.map(escapeCsvCell).join(';')).join('\r\n');
+  const client = findClientById(state.nfceScStoredSearch.lastQuery?.cliente);
+  const start = state.nfceScStoredSearch.lastQuery?.emissaoInicio || 'inicio';
+  const end = state.nfceScStoredSearch.lastQuery?.emissaoFim || 'fim';
+  const fileName = `nfce-sc-${toSafeFileName(client?.razaoSocial || 'cliente')}-${start}-${end}.csv`;
+  triggerBrowserDownload(fileName, new Blob([`\ufeff${csv}`], { type: 'text/csv;charset=utf-8' }));
+  pushToast(`${docs.length} NFC-e exportada(s) para CSV.`, 'success');
 }
 
 function exportNfeListToCsv() {

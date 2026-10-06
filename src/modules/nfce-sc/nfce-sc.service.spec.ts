@@ -38,6 +38,68 @@ describe('NfceScService', () => {
     };
   }
 
+  it('lista NFC-e armazenadas no escopo do cliente e aplica filtros de pesquisa', async () => {
+    const storedDocument = { id: '55555555-5555-4555-8555-555555555555', modelo: '65', origem: 'sef_sc_nfce' };
+    const findMany = jest.fn().mockResolvedValue([storedDocument]);
+    const count = jest.fn().mockResolvedValue(1);
+    const prismaStub = {
+      cliente: { findUnique: jest.fn().mockResolvedValue({ id: clienteId }) },
+      nfeDocumento: { findMany, count }
+    } as unknown as PrismaService;
+    const service = new NfceScService(prismaStub, {} as NfeService, { download: jest.fn() } as NfceScClient);
+
+    const result = await service.listStoredDocuments({
+      clienteId,
+      all: true,
+      tipoRelacao: 'emitidas',
+      dataInicio: '2026-09-01',
+      dataFim: '2026-09-30',
+      cnpj: '12.345.678/0001-90',
+      numeroNfce: '123',
+      chaveAcesso: '4126'
+    });
+
+    expect(result).toMatchObject({ items: [storedDocument], total: 1, page: 1, truncated: false });
+    expect(findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ clienteId, modelo: '65', origem: 'sef_sc_nfce' }),
+      take: 10000
+    }));
+    const where = findMany.mock.calls[0][0].where;
+    expect(where.AND).toEqual(expect.arrayContaining([
+      { tipoRelacao: 'emitida' },
+      { numeroNfe: { contains: '123' } },
+      { chaveAcesso: { contains: '4126' } }
+    ]));
+    expect(findMany.mock.calls[0][0].select).not.toHaveProperty('xmlCompletoPath');
+  });
+
+  it('baixa em ZIP somente NFC-e armazenadas no cliente informado', async () => {
+    const nfceId = '55555555-5555-4555-8555-555555555555';
+    const findMany = jest.fn().mockResolvedValue([{ id: nfceId }]);
+    const downloadLote = jest.fn().mockResolvedValue({
+      fileName: 'nfe-lote.zip',
+      contentType: 'application/zip',
+      contentBase64: 'c2FtcGxl',
+      totalSolicitados: 1,
+      totalDocumentosEncontrados: 1,
+      totalArquivosIncluidos: 1,
+      idsNaoEncontrados: [],
+      erros: []
+    });
+    const prismaStub = { nfeDocumento: { findMany } } as unknown as PrismaService;
+    const service = new NfceScService(prismaStub, { downloadLote } as unknown as NfeService, { download: jest.fn() } as NfceScClient);
+
+    const result = await service.downloadStoredDocumentsBatch(clienteId, [nfceId, nfceId]);
+
+    expect(findMany).toHaveBeenCalledWith({
+      where: { id: { in: [nfceId] }, clienteId, modelo: '65', origem: 'sef_sc_nfce' },
+      select: { id: true }
+    });
+    expect(downloadLote).toHaveBeenCalledWith({ ids: [nfceId], clienteId, tipoArquivo: 'xml' });
+    expect(result).toMatchObject({ contentType: 'application/zip', contentBase64: 'c2FtcGxl' });
+    expect(result.fileName).toMatch(/^nfce-sc-lote-.*\.zip$/);
+  });
+
   it('continua automaticamente pelos lotes de 50 e encerra ao receber o lote final', async () => {
     const leaseUntil = new Date(Date.now() + 5 * 60 * 1000);
     const control = createControl(leaseUntil);

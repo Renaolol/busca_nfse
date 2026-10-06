@@ -3,8 +3,11 @@ import { ApiAcceptedResponse, ApiOkResponse, ApiOperation, ApiProperty, ApiTags 
 import { IsUUID } from 'class-validator';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { ConfigureNfceScSyncDto } from './dto/configure-nfce-sc-sync.dto';
+import { DownloadNfceScStoredDocumentsDto } from './dto/download-nfce-sc-stored-documents.dto';
+import { DownloadLoteResponseDto } from '../nfe/dto/download-lote-response.dto';
 import { NfceScDiagnosticDownloadDto } from './dto/nfce-sc-diagnostic-download.dto';
 import { NfceScRunResponseDto } from './dto/nfce-sc-run-response.dto';
+import { QueryNfceScStoredDocumentsDto } from './dto/query-nfce-sc-stored-documents.dto';
 import { NfceScService } from './nfce-sc.service';
 
 class NfceScControlsQuery {
@@ -43,6 +46,37 @@ export class NfceScController {
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   listDocuments(@Query() query: NfceScControlsQuery) {
     return this.service.listDocuments(query.clienteId);
+  }
+
+  @Get('armazenadas')
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  @ApiOperation({
+    summary: 'Lista NFC-e SC armazenadas com filtros e paginacao',
+    description: 'Retorna somente documentos modelo 65 recebidos pela distribuicao SEF/SC, dentro do escopo do cliente informado.'
+  })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: {
+        items: { type: 'array', items: { type: 'object', additionalProperties: true } },
+        total: { type: 'integer' },
+        page: { type: 'integer' },
+        pageSize: { type: 'integer' },
+        totalPages: { type: 'integer' },
+        truncated: { type: 'boolean' }
+      }
+    }
+  })
+  listStoredDocuments(@Query() query: QueryNfceScStoredDocumentsDto) {
+    return this.service.listStoredDocuments(query);
+  }
+
+  @Post('armazenadas/download-lote')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  @ApiOperation({ summary: 'Baixa em ZIP XMLs de NFC-e SC armazenadas' })
+  @ApiOkResponse({ type: DownloadLoteResponseDto, description: 'Arquivo ZIP com os XMLs das NFC-e selecionadas.' })
+  downloadStoredDocumentsBatch(@Body() dto: DownloadNfceScStoredDocumentsDto) {
+    return this.service.downloadStoredDocumentsBatch(dto.clienteId, dto.ids);
   }
 
   @Post('controles')

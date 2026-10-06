@@ -7,12 +7,14 @@ import {
   OnModuleDestroy,
   OnModuleInit
 } from '@nestjs/common';
-import { NfeAmbiente, NfeSyncStatus } from '@prisma/client';
+import { NfeAmbiente, NfeSyncStatus, Prisma } from '@prisma/client';
 import JSZip from 'jszip';
+import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NfeService } from '../nfe/nfe.service';
 import { NFCE_SC_CLIENT, NfceScClient } from '../../integrations/nfce-sc/nfce-sc.types';
 import { ConfigureNfceScSyncDto } from './dto/configure-nfce-sc-sync.dto';
+import { QueryNfceScStoredDocumentsDto } from './dto/query-nfce-sc-stored-documents.dto';
 
 @Injectable()
 export class NfceScService implements OnModuleInit, OnModuleDestroy {
@@ -117,6 +119,113 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
         xmlCompletoPath: true, origem: true, createdAt: true
       }
     });
+  }
+
+  async listStoredDocuments(query: QueryNfceScStoredDocumentsDto) {
+    const client = await this.prisma.cliente.findUnique({ where: { id: query.clienteId }, select: { id: true } });
+    if (!client) throw new NotFoundException('Cliente nao encontrado');
+    if (query.dataInicio && query.dataFim && Date.parse(query.dataInicio) > Date.parse(query.dataFim)) {
+      throw new BadRequestException('A data inicial nao pode ser maior que a data final');
+    }
+
+    const conditions: Prisma.NfeDocumentoWhereInput[] = [];
+    if (query.tipoRelacao === 'emitidas') conditions.push({ tipoRelacao: 'emitida' });
+    if (query.tipoRelacao === 'recebidas') conditions.push({ tipoRelacao: 'recebida' });
+
+    const cnpj = String(query.cnpj || '').replace(/[^a-zA-Z0-9]/g, '').toUpperCase();
+    if (cnpj) {
+      conditions.push({ OR: [{ cnpjEmitente: { contains: cnpj } }, { cnpjDestinatario: { contains: cnpj } }] });
+    }
+    if (query.numeroNfce?.trim()) {
+      conditions.push({ numeroNfe: { contains: query.numeroNfce.trim() } });
+    }
+    if (query.chaveAcesso?.trim()) {
+      conditions.push({ chaveAcesso: { contains: query.chaveAcesso.trim() } });
+    }
+    if (query.dataInicio || query.dataFim) {
+      conditions.push({
+        dataEmissao: {
+          gte: query.dataInicio ? new Date(`${query.dataInicio}T00:00:00.000Z`) : undefined,
+          lte: query.dataFim ? new Date(`${query.dataFim}T23:59:59.999Z`) : undefined
+        }
+      });
+    }
+
+    const where: Prisma.NfeDocumentoWhereInput = {
+      clienteId: query.clienteId,
+      modelo: '65',
+      origem: 'sef_sc_nfce',
+      AND: conditions
+    };
+    const all = query.all === true;
+    const page = all ? 1 : query.page ?? 1;
+    const pageSize = all ? MAX_UNPAGINATED_RESULTS : query.pageSize ?? 100;
+    const [total, items] = await Promise.all([
+      this.prisma.nfeDocumento.count({ where }),
+      this.prisma.nfeDocumento.findMany({
+        where,
+        orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
+        skip: all ? 0 : (page - 1) * pageSize,
+        take: pageSize,
+        select: {
+          id: true,
+          clienteId: true,
+          estabelecimentoId: true,
+          ambiente: true,
+          chaveAcesso: true,
+          numeroNfe: true,
+          serie: true,
+          modelo: true,
+          dataEmissao: true,
+          dataAutorizacao: true,
+          status: true,
+          tipoRelacao: true,
+          schemaDoc: true,
+          resumoDisponivel: true,
+          xmlCompletoDisponivel: true,
+          cnpjEmitente: true,
+          razaoSocialEmitente: true,
+          cnpjDestinatario: true,
+          razaoSocialDestinatario: true,
+          valorTotal: true,
+          createdAt: true,
+          updatedAt: true
+        }
+      })
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      pageSize: all ? items.length : pageSize,
+      totalPages: all ? Math.max(1, Math.ceil(total / MAX_UNPAGINATED_RESULTS)) : Math.max(1, Math.ceil(total / pageSize)),
+      truncated: all && total > MAX_UNPAGINATED_RESULTS
+    };
+  }
+
+  async downloadStoredDocumentsBatch(clienteId: string, ids: string[]) {
+    const uniqueIds = [...new Set(ids)];
+    const documents = await this.prisma.nfeDocumento.findMany({
+      where: {
+        id: { in: uniqueIds },
+        clienteId,
+        modelo: '65',
+        origem: 'sef_sc_nfce'
+      },
+      select: { id: true }
+    });
+    if (!documents.length) throw new NotFoundException('Nenhuma NFC-e armazenada encontrada para os IDs informados');
+
+    const payload = await this.nfeService.downloadLote({
+      ids: documents.map(({ id }) => id),
+      clienteId,
+      tipoArquivo: 'xml'
+    });
+    return {
+      ...payload,
+      fileName: `nfce-sc-lote-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`
+    };
   }
 
   async configure(dto: ConfigureNfceScSyncDto) {
