@@ -19,7 +19,7 @@ O servico aceita certificado e-CPF do contabilista ou e-CNPJ da empresa contabil
 
 ## Protocolo e limites
 
-O cliente real usa o WSDL `https://dfe.sat.sef.sc.gov.br/nfce/ws/distribuicao/DistribuicaoNfceDownload.asmx?WSDL`, SOAP 1.1, TLS mutuo, operacao `nfceDownloadContab`, lote GZIP em Base64 e respostas limitadas a 50 itens. O servico esta publicado apenas para producao. A aplicacao aguarda 12 horas quando o sincronismo termina ou a SEF retorna `117`, e uma hora para `110`/`657`.
+O cliente real usa o WSDL `https://dfe.sat.sef.sc.gov.br/nfce/ws/distribuicao/DistribuicaoNfceDownload.asmx?WSDL`, SOAP 1.1, TLS mutuo, operacao `nfceDownloadContab`, lote GZIP em Base64 e respostas limitadas a 50 itens. A raiz do payload XML é `distNFCeSC` (NFC em maiusculas), conforme o exemplo do boletim tecnico. O servico esta publicado apenas para producao. A aplicacao aguarda 12 horas quando o sincronismo termina ou a SEF retorna `117`, e uma hora para `110`/`657`.
 
 Use `NFCE_SC_CLIENT_MODE=mock` para desenvolvimento sem chamadas externas e `NFCE_SC_CLIENT_MODE=real` para ativar chamadas reais. Nunca configure real antes de confirmar que a SEF liberou o certificado para o contribuinte e que a conta esta autorizada no ambiente de testes/operacao.
 

@@ -116,6 +116,8 @@ describe('RealNfceScClient', () => {
 
     expect(result.cStat).toBe('9999');
     expect(result.errorDiagnostic).toEqual({ requestXml: sentEnvelope, responseXml });
+    expect(sentEnvelope).toContain('<distNFCeSC versao="1.00"');
+    expect(sentEnvelope).toContain('</distNFCeSC>');
     expect(sentEnvelope).toContain('<ultNuNSU>0</ultNuNSU>');
     expect(sentEnvelope).toContain('<CNPJ>12345678000199</CNPJ>');
   });

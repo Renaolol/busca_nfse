@@ -64,7 +64,7 @@ export class RealNfceScClient implements NfceScClient {
   private buildRequest(cnpj: string, nsu: bigint, indAtor: number): string {
     const cleanCnpj = String(cnpj || '').replace(/[^\dA-Za-z]/g, '');
     const identity = cleanCnpj.length <= 11 ? `<CPF>${cleanCnpj}</CPF>` : `<CNPJ>${cleanCnpj}</CNPJ>`;
-    return `<distNfceSC versao="1.00" xmlns="${NS}"><tpAmb>1</tpAmb><verAplic>NotaSync/0.1</verAplic><cUF>42</cUF>${identity}<solRel><indXML>1</indXML><indAtor>${indAtor}</indAtor><ultNuNSU>${nsu}</ultNuNSU></solRel></distNfceSC>`;
+    return `<distNFCeSC versao="1.00" xmlns="${NS}"><tpAmb>1</tpAmb><verAplic>NotaSync/0.1</verAplic><cUF>42</cUF>${identity}<solRel><indXML>1</indXML><indAtor>${indAtor}</indAtor><ultNuNSU>${nsu}</ultNuNSU></solRel></distNFCeSC>`;
   }
 
   private request(envelope: string, credentials: MutualTlsCredentials): Promise<{ status: number; body: string }> {
