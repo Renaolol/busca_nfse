@@ -5314,12 +5314,39 @@ function renderNfceScStoredDocumentsPage() {
         </form>
       </article>
 
-      ${canShowTable ? renderNfceScStoredDocumentsTable(docs) : `
-        <article class="card">
-          <div class="table-state">Selecione uma empresa e o periodo desejado, depois clique em <strong>Buscar NFC-e</strong>.</div>
-        </article>
-      `}
+      ${canShowTable
+        ? `${renderNfceScStoredSearchSummary()}${renderNfceScStoredDocumentsTable(docs)}`
+        : `<article class="card"><div class="table-state">Selecione uma empresa e o periodo desejado, depois clique em <strong>Buscar NFC-e</strong>.</div></article>`
+      }
     </section>
+  `;
+}
+
+function renderNfceScStoredSearchSummary() {
+  const query = state.nfceScStoredSearch.lastQuery;
+  if (!query) return '';
+
+  const client = findClientById(query.cliente);
+  const filteredDocs = getFilteredNfceScStoredDocuments();
+  const totalResults = Number(state.nfceScStoredSearch.total || filteredDocs.length || 0);
+  const totalValue = sumListedDocumentValues(filteredDocs);
+  const periodText =
+    query.emissaoInicio || query.emissaoFim
+      ? `${formatDate(query.emissaoInicio || '')} ate ${formatDate(query.emissaoFim || '')}`
+      : 'Sem filtro de emissao';
+  const tipoText = query.tipo && query.tipo !== 'Todos' ? (query.tipo === 'emitidas' ? 'Emitida' : 'Recebida') : 'Todos';
+
+  return `
+    <article class="card" style="box-shadow:none; border-style:dashed;">
+      <div class="progress-meta">
+        <span>Empresa: <strong>${escapeHtml(client?.razaoSocial || 'Cliente selecionado')}</strong></span>
+        <span>Periodo: <strong>${escapeHtml(periodText)}</strong></span>
+        <span>Tipo: <strong>${escapeHtml(tipoText)}</strong></span>
+        <span>Resultado: <strong>${escapeHtml(String(totalResults))} NFC-e</strong></span>
+        <span>Valor somado: <strong>${escapeHtml(formatCurrency(totalValue))}</strong></span>
+        <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.nfceScStoredSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
+      </div>
+    </article>
   `;
 }
 
@@ -5354,34 +5381,11 @@ function renderNfceScStoredDocumentsTable(docs) {
   }).join('');
 
   return `
-    ${docs.length > 0 ? `
-    <div class="stats-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
-      <article class="card" style="padding:16px 20px;">
-        <p class="card-subtitle" style="margin:0 0 4px">Total de NFC-e</p>
-        <p style="font-size:1.75rem;font-weight:700;margin:0;line-height:1">${escapeHtml(String(total))}</p>
-        <p class="card-subtitle" style="margin:4px 0 0;font-size:0.75rem">Mostrando ${escapeHtml(String(docs.length))} na listagem</p>
-      </article>
-      <article class="card" style="padding:16px 20px;">
-        <p class="card-subtitle" style="margin:0 0 4px">Valor total</p>
-        <p style="font-size:1.75rem;font-weight:700;margin:0;line-height:1">${escapeHtml(formatCurrency(totalValue))}</p>
-        <p class="card-subtitle" style="margin:4px 0 0;font-size:0.75rem">Soma dos documentos listados</p>
-      </article>
-      <article class="card" style="padding:16px 20px;">
-        <p class="card-subtitle" style="margin:0 0 4px">XMLs completos</p>
-        <p style="font-size:1.75rem;font-weight:700;margin:0;line-height:1">${escapeHtml(String(xmlsCompletos))}</p>
-        <p class="card-subtitle" style="margin:4px 0 0;font-size:0.75rem">de ${escapeHtml(String(docs.length))} exibidos</p>
-      </article>
-      <article class="card" style="padding:16px 20px;">
-        <p class="card-subtitle" style="margin:0 0 4px">Selecionados</p>
-        <p style="font-size:1.75rem;font-weight:700;margin:0;line-height:1">${escapeHtml(String(selectedVisibleCount))}</p>
-        <p class="card-subtitle" style="margin:4px 0 0;font-size:0.75rem">prontos para download</p>
-      </article>
-    </div>` : ''}
     <article class="card">
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">NFC-e encontradas</h3>
-          <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(total))} documento(s). ${escapeHtml(String(selectedVisibleCount))} selecionado(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}.${escapeHtml(truncationMessage)}</p>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(total))} documento(s). ${escapeHtml(String(selectedVisibleCount))} selecionado(s).${escapeHtml(truncationMessage)}</p>
         </div>
         <div class="table-actions">
           <button class="btn primary" type="button" data-action="nfce-sc-docs-batch-download" ${batchDisabled}>Baixar XMLs selecionados</button>
