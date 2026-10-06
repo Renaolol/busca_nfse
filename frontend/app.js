@@ -253,7 +253,6 @@ const navItems = [
   { key: 'clientes', label: 'Clientes', icon: 'users', route: '/clientes' },
   { key: 'certificados', label: 'Certificados', icon: 'shield', route: '/certificados' },
   { key: 'buscas', label: 'Buscas', icon: 'search', route: '/buscas' },
-  { key: 'nfce-sc', label: 'NFC-e SC', icon: 'file', route: '/nfce-sc' },
   { key: 'armazenados', label: 'Armazenados', icon: 'file', route: '/xmls' },
   { key: 'auditoria-lacunas', label: 'Auditoria NFS-e', icon: 'alert', route: '/auditoria-lacunas' },
   { key: 'compara-sped', label: 'Compara SPED', icon: 'compare', route: '/compara-sped' },
@@ -306,6 +305,10 @@ const pageMeta = {
   'nfce-sc': {
     title: 'NFC-e Santa Catarina',
     description: 'Configure os certificados e acompanhe a distribuicao estadual de NFC-e da SEF/SC.'
+  },
+  'buscas-nfce': {
+    title: 'Buscas NFC-e',
+    description: 'Configure estabelecimentos e acompanhe a distribuicao estadual de NFC-e da SEF/SC.'
   },
   'xmls-cte': {
     title: 'XMLs CT-e',
@@ -1853,7 +1856,7 @@ function onDocumentClick(event) {
     }
     case 'search-type-switch': {
       const searchType = actionNode.getAttribute('data-search-type');
-      navigate(searchType === 'nfe' ? '/buscas-nfe' : '/buscas');
+      navigate(searchType === 'nfe' ? '/buscas-nfe' : searchType === 'nfce' ? '/buscas-nfce' : '/buscas');
       return;
     }
     case 'nfe-sync-pause-control': {
@@ -3154,7 +3157,7 @@ function render() {
     ${renderSidebarBackdrop()}
     ${renderPageLoadingOverlay()}
   `;
-  if (state.route.name === 'nfce-sc') updateNfceScConfigOptions();
+  if (state.route.name === 'buscas-nfce') updateNfceScConfigOptions();
 
   const modalHtml = renderModal();
   if (state.modal?.kind === 'xml-reader30-nfe-fullscreen') {
@@ -3422,7 +3425,7 @@ function renderCurrentPage() {
       return renderNfseGapAuditPage();
     case 'buscas-nfe':
       return renderNfeSyncPage();
-    case 'nfce-sc':
+    case 'buscas-nfce':
       return renderNfceScPage();
     case 'xmls-nfe':
       return renderNfeDocumentsPage();
@@ -4356,6 +4359,20 @@ function renderCollapsibleCard({ sectionKey, title, subtitle = '', contentHtml, 
   `;
 }
 
+function getNfceScStats() {
+  const controls = state.nfceScControls || [];
+  return controls.reduce(
+    (acc, control) => {
+      if (control.status === 'processando') acc.consultando += 1;
+      else if (control.status === 'ativo') acc.ativos += 1;
+      else if (control.status === 'pausado') acc.pausados += 1;
+      else if (String(control.status || '').startsWith('erro')) acc.erros += 1;
+      return acc;
+    },
+    { ativos: 0, consultando: 0, pausados: 0, erros: 0 }
+  );
+}
+
 function renderNfceScPage() {
   state.nfceScControls
     .filter((control) => control.status === 'processando')
@@ -4384,15 +4401,44 @@ function renderNfceScPage() {
       <td><button class="btn secondary" type="button" data-action="nfe-view" data-nfe-id="${escapeHtml(doc.id)}" ${doc.xmlCompletoDisponivel ? '' : 'disabled'}>Ver XML</button></td>
     </tr>
   `).join('');
+  const stats = getNfceScStats();
+  const totalDocumentos = state.nfceScDocuments.length;
+  const totalControles = state.nfceScControls.length;
 
   return `
     <section class="page-section">
       ${renderPageHeader({
-        title: 'NFC-e Santa Catarina',
-        description: 'Configure os estabelecimentos e o certificado contabilista. Uma consulta percorre automaticamente todos os lotes disponiveis.'
+        title: 'Buscas NFC-e',
+        description: 'Configure estabelecimentos e certificado contabilista. A consulta percorre automaticamente todos os lotes disponiveis na SEF/SC.'
       })}
+
+      ${renderSearchTypeSwitcher('nfce')}
+
+      <div class="stats-grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;">
+        <article class="card" style="padding:16px 20px;">
+          <p class="card-subtitle" style="margin:0 0 4px">Controles</p>
+          <p style="font-size:1.75rem;font-weight:700;margin:0;line-height:1">${totalControles}</p>
+          <p class="card-subtitle" style="margin:4px 0 0;font-size:0.75rem">${stats.ativos} configurado${stats.ativos !== 1 ? 's' : ''} · ${stats.consultando} consultando</p>
+        </article>
+        <article class="card" style="padding:16px 20px;">
+          <p class="card-subtitle" style="margin:0 0 4px">NFC-e armazenadas</p>
+          <p style="font-size:1.75rem;font-weight:700;margin:0;line-height:1">${totalDocumentos}</p>
+          <p class="card-subtitle" style="margin:4px 0 0;font-size:0.75rem">Documentos modelo 65 na base local</p>
+        </article>
+        <article class="card" style="padding:16px 20px;">
+          <p class="card-subtitle" style="margin:0 0 4px">Pausados</p>
+          <p style="font-size:1.75rem;font-weight:700;margin:0;line-height:1">${stats.pausados}</p>
+          <p class="card-subtitle" style="margin:4px 0 0;font-size:0.75rem">${stats.erros > 0 ? `${stats.erros} com erro` : 'Nenhum erro ativo'}</p>
+        </article>
+        <article class="card" style="padding:16px 20px;">
+          <p class="card-subtitle" style="margin:0 0 4px">Ambiente</p>
+          <p style="font-size:1.75rem;font-weight:700;margin:0;line-height:1">SC</p>
+          <p class="card-subtitle" style="margin:4px 0 0;font-size:0.75rem">SEF/SC · Producao</p>
+        </article>
+      </div>
+
       <article class="card">
-        <h3 class="card-title">Configurar estabelecimento</h3>
+        <h3 class="card-title">Adicionar estabelecimento</h3>
         <p class="card-subtitle">O certificado precisa identificar um contabilista autorizado para consultar o contribuinte. Para e-CNPJ da empresa contabil, o CPF do contador responsavel deve constar no certificado.</p>
         <form id="nfceScConfigureForm" class="form-grid">
           <label class="field">Cliente<select name="clienteId" data-action="nfce-sc-client-select" required>${renderOptions(activeClients.map((client) => client.id), '', clientLabels, 'Selecione o cliente')}</select></label>
@@ -4403,17 +4449,28 @@ function renderNfceScPage() {
           <div class="stack-actions" style="grid-column:span 3;justify-content:flex-start;align-items:flex-end"><button class="btn primary" type="submit">Salvar configuracao</button></div>
         </form>
       </article>
+
       <article class="card">
-        <h3 class="card-title">Controles da SEF/SC</h3>
-        <p class="card-subtitle">Cada controle guarda seu proprio NSU estadual. Ao consultar, o NotaSync segue automaticamente os lotes de ate 50 documentos ate alcancar o fim da fila.</p>
-        <div class="table-wrap"><table><thead><tr><th>Estabelecimento</th><th>CNPJ</th><th>Certificado</th><th>Ambiente</th><th>Ultimo NSU SC</th><th>Status</th><th>Ultima mensagem</th></tr></thead><tbody>${renderTableRowsOrState({ key: 'nfceSc', colSpan: 7, rowsHtml, emptyMessage: 'Nenhum controle NFC-e SC configurado.' })}</tbody></table></div>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+          <div>
+            <h3 class="card-title" style="margin-bottom:4px">Controles da SEF/SC</h3>
+            <p class="card-subtitle" style="margin:0">Cada controle guarda seu proprio NSU estadual. Ao consultar, o NotaSync segue automaticamente os lotes de ate 50 documentos ate alcancar o fim da fila.</p>
+          </div>
+          ${totalControles > 0 ? `<div class="table-actions"><button class="btn secondary" type="button" data-action="nfe-run-now" style="display:none"></button></div>` : ''}
+        </div>
+        <div class="table-wrap"><table><thead><tr><th>Estabelecimento</th><th>CNPJ</th><th>Certificado</th><th>Ultimo NSU SC</th><th>Status</th><th>Ultima atividade</th></tr></thead><tbody>${renderTableRowsOrState({ key: 'nfceSc', colSpan: 6, rowsHtml, emptyMessage: 'Nenhum controle NFC-e SC configurado. Adicione um estabelecimento acima para comecar.' })}</tbody></table></div>
       </article>
+
       <article class="card">
-        <h3 class="card-title">NFC-e armazenadas</h3>
-        <p class="card-subtitle">Documentos modelo 65 recebidos pela distribuicao da SEF/SC. O XML completo fica no armazenamento interno do NotaSync.</p>
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
+          <div>
+            <h3 class="card-title" style="margin-bottom:4px">NFC-e armazenadas</h3>
+            <p class="card-subtitle" style="margin:0">Documentos modelo 65 recebidos pela distribuicao da SEF/SC. O XML completo fica no armazenamento interno do NotaSync.</p>
+          </div>
+        </div>
         <div class="table-wrap"><table><thead><tr><th>Cliente</th><th>Numero</th><th>Emitente</th><th>Destinatario</th><th>Emissao</th><th>Valor</th><th>Arquivo</th><th></th></tr></thead><tbody>${renderTableRowsOrState({ key: 'nfceScDocs', colSpan: 8, rowsHtml: documentRowsHtml, emptyMessage: 'Nenhuma NFC-e SC armazenada.' })}</tbody></table></div>
+        <p class="card-subtitle" style="margin-top:12px;margin-bottom:0;font-size:0.8rem">A SEF/SC limita a disponibilidade ao mes corrente e aos dois meses anteriores. Apos consumir todos os documentos disponiveis, a sincronizacao aguarda 12 horas antes de nova consulta.</p>
       </article>
-      <article class="card"><p class="card-subtitle" style="margin:0">A SEF/SC limita a disponibilidade ao mes corrente e aos dois meses anteriores. A sincronizacao respeitara a pausa minima de 12 horas depois de consumir todos os documentos disponiveis.</p></article>
     </section>
   `;
 }
@@ -4422,15 +4479,22 @@ function renderNfceScControlRow(control) {
   const isProcessing = control.status === 'processando';
   const isPaused = control.status === 'pausado';
   const statusLabel = isProcessing ? 'Consultando' : control.status === 'ativo' ? 'Configurado' : mapNfeSyncStatusLabel(control.status);
+  const runLabel = isProcessing ? 'Consultando...' : isPaused ? 'Retomar' : 'Consultar agora';
   return `
     <tr>
       <td>${escapeHtml(control.estabelecimento?.razaoSocial || control.estabelecimento?.cnpj || '-')}</td>
       <td>${escapeHtml(formatCnpj(control.cnpjConsulta || ''))}</td>
-      <td>${escapeHtml(control.certificado?.nome || 'Certificado nao selecionado')}</td>
-      <td>${escapeHtml(control.ambiente === 'producao' ? 'Producao' : 'Homologacao')}</td>
+      <td>${escapeHtml(control.certificado?.nome || 'Nao selecionado')}</td>
       <td>${escapeHtml(String(control.ultimoNsuConsultado ?? '0'))}</td>
       <td>${statusBadge(statusLabel, toneFromNfeSyncStatus(control.status))}</td>
-      <td><span class="row-sub">${escapeHtml(control.ultimaMensagem || 'Aguardando primeira consulta')}</span><div class="stack-actions" style="justify-content:flex-start;margin-top:6px"><button class="btn secondary" type="button" data-action="nfce-sc-run" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isProcessing ? 'disabled' : ''}>${isProcessing ? 'Consultando...' : isPaused ? 'Retomar consulta' : 'Consultar agora'}</button><button class="btn ghost" type="button" data-action="nfce-sc-pause" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isPaused ? 'disabled' : ''}>Pausar</button>${control.diagnosticoXmlCriadoEm ? `<button class="btn ghost" type="button" data-action="nfce-sc-download-diagnostic" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}">Baixar XML para SEF</button>` : ''}</div></td>
+      <td>
+        <span class="row-sub">${escapeHtml(control.ultimaMensagem || 'Aguardando primeira consulta')}</span>
+        <div class="stack-actions" style="justify-content:flex-start;margin-top:6px">
+          <button class="btn secondary" type="button" data-action="nfce-sc-run" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isProcessing ? 'disabled' : ''}>${runLabel}</button>
+          <button class="btn ghost" type="button" data-action="nfce-sc-pause" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isPaused ? 'disabled' : ''}>Pausar</button>
+          ${control.diagnosticoXmlCriadoEm ? `<button class="btn ghost" type="button" data-action="nfce-sc-download-diagnostic" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}">Baixar XML SEF</button>` : ''}
+        </div>
+      </td>
     </tr>
   `;
 }
@@ -4567,7 +4631,7 @@ async function monitorNfceScControl(controlId, clienteId) {
         ...controls
       ];
       const control = controls.find((item) => item.id === controlId);
-      if (state.route.name === 'nfce-sc') render();
+      if (state.route.name === 'buscas-nfce') render();
       if (control?.status === 'processando') continue;
 
       const documents = await apiRequest(`/nfce-sc/documentos?clienteId=${encodeURIComponent(clienteId)}`, { cache: false }).catch(() => null);
@@ -4579,7 +4643,7 @@ async function monitorNfceScControl(controlId, clienteId) {
         ];
         state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mappedDocuments);
       }
-      if (state.route.name === 'nfce-sc') render();
+      if (state.route.name === 'buscas-nfce') render();
 
       if (control?.status === 'pausado') return;
       if (String(control?.status || '').startsWith('erro')) {
@@ -5717,6 +5781,7 @@ function renderStoredDocumentsTypeSwitcher(activeType) {
 function renderSearchTypeSwitcher(activeType) {
   const isNfse = activeType === 'nfse';
   const isNfe = activeType === 'nfe';
+  const isNfce = activeType === 'nfce';
 
   return `
     <article class="card" style="padding-bottom:18px;">
@@ -5728,6 +5793,7 @@ function renderSearchTypeSwitcher(activeType) {
         <div class="table-actions">
           <button class="btn ${isNfse ? 'primary' : 'secondary'}" type="button" data-action="search-type-switch" data-search-type="nfse">NFS-e</button>
           <button class="btn ${isNfe ? 'primary' : 'secondary'}" type="button" data-action="search-type-switch" data-search-type="nfe">NF-e</button>
+          <button class="btn ${isNfce ? 'primary' : 'secondary'}" type="button" data-action="search-type-switch" data-search-type="nfce">NFC-e</button>
         </div>
       </div>
     </article>
@@ -14855,7 +14921,8 @@ function parseRoute(hash) {
     '/xmls': 'xmls',
     '/auditoria-lacunas': 'auditoria-lacunas',
     '/buscas-nfe': 'buscas-nfe',
-    '/nfce-sc': 'nfce-sc',
+    '/buscas-nfce': 'buscas-nfce',
+    '/nfce-sc': 'buscas-nfce',
     '/xmls-nfe': 'xmls-nfe',
     '/xmls-nfce': 'xmls-nfce',
     '/xmls-cte': 'xmls-cte',
@@ -14894,7 +14961,7 @@ function resolveNavKeyByRoute(routeName) {
   if (routeName === 'client-details') {
     return 'clientes';
   }
-  if (routeName === 'buscas-nfe' || routeName === 'buscas') {
+  if (routeName === 'buscas-nfe' || routeName === 'buscas' || routeName === 'buscas-nfce') {
     return 'buscas';
   }
   if (routeName === 'xmls' || routeName === 'xmls-nfe' || routeName === 'xmls-nfce' || routeName === 'xmls-cte') {
