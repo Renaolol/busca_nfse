@@ -522,7 +522,14 @@ const state = {
     chartRenderPoints: [],
     chartViewBox: null
   },
-  cst060Reader: { hasSearched: false, lastQuery: null, result: null },
+  cst060Reader: {
+    hasSearched: false,
+    lastQuery: null,
+    result: null,
+    selectedItemIndexes: [],
+    manualRate: '',
+    manualOverrides: {}
+  },
   alerts: [],
   serverResolvedAlerts: {},
   resolvedAlerts: loadResolvedAlertsStore(),
@@ -1137,6 +1144,10 @@ function onDocumentClick(event) {
     return;
   }
 
+  if (action === 'cst060-products-select') {
+    return;
+  }
+
   if (action === 'xml-reader30-column-resize') {
     return;
   }
@@ -1259,6 +1270,14 @@ function onDocumentClick(event) {
     }
     case 'cst060-export-excel': {
       exportCst060ToExcel();
+      return;
+    }
+    case 'cst060-apply-manual-rate': {
+      applyCst060ManualRate();
+      return;
+    }
+    case 'cst060-reset-manual-rate': {
+      resetCst060ManualRate();
       return;
     }
     case 'nfse-fiscal-sort': {
@@ -2673,6 +2692,11 @@ function onDocumentChange(event) {
   }
 
   const action = target.getAttribute('data-action');
+  if (action === 'cst060-products-select') {
+    state.cst060Reader.selectedItemIndexes = Array.from(target.selectedOptions, (option) => option.value);
+    return;
+  }
+
   if (action === 'nfce-sc-client-select' || action === 'nfce-sc-establishment-select') {
     updateNfceScConfigOptions();
     return;
@@ -6960,15 +6984,115 @@ function renderCst060Section() {
 
 function renderCst060Results(result) {
   if (!result) return '<p class="row-sub">Consultando NF-e e XMLs...</p>';
-  const cards = [['NF-e analisadas', result.notasAnalisadas], ['NF-e com CST 060', result.notasComCst060], ['Diferenca', formatCurrency(result.totalDiferenca)], ['ICMS ST XML', formatCurrency(result.totalIcmsStXml)], ['ICMS recalculado', formatCurrency(result.totalIcmsCalculado)]];
-  return `<div class="stats-grid">${cards.map(([label, value]) => statCard('file', label, String(value), '', 'neutral')).join('')}</div><div class="table-wrap"><table class="xml-reader30-table" style="min-width:1360px;"><thead><tr><th>Data</th><th>NF-e</th><th>Item</th><th>Emitente</th><th>Produto</th><th>NCM</th><th>CFOP</th><th>CST</th><th>V. Produto</th><th>Desconto</th><th>Base</th><th>Aliq.</th><th>ICMS ST XML</th><th>ICMS calculado</th><th>Diferenca</th><th>Status</th></tr></thead><tbody>${result.items.map((row) => `<tr><td>${escapeHtml(formatDate(row.dataEmissao))}</td><td>${escapeHtml(row.numeroNfe || '-')}</td><td>${escapeHtml(String(row.itemNumero || '-'))}</td><td>${escapeHtml(row.razaoSocialEmitente || '-')}</td><td>${escapeHtml(row.descricaoProduto || '-')}</td><td>${escapeHtml(row.ncm || '-')}</td><td>${escapeHtml(row.cfop || '-')}</td><td>060</td><td>${escapeHtml(formatCurrency(row.valorProduto))}</td><td>${escapeHtml(formatCurrency(row.desconto))}</td><td>${escapeHtml(formatCurrency(row.baseCalculada))}</td><td>${escapeHtml(String(row.aliquotaInterna))}%${row.origemAliquota === 'regra-pneu' ? ' <span class="row-sub">(pneu)</span>' : ''}</td><td>${escapeHtml(formatCurrency(row.icmsStXml))}</td><td>${escapeHtml(formatCurrency(row.icmsCalculado))}</td><td>${escapeHtml(formatCurrency(row.diferenca))}</td><td>${statusBadge(row.status, row.status === 'OK' ? 'success' : 'warning')}</td></tr>`).join('') || '<tr><td colspan="16" class="table-state">Nenhum item CST 060 encontrado.</td></tr>'}</tbody></table></div>`;
+  const displayedResult = getCst060DisplayedResult(result);
+  const cards = [['NF-e analisadas', displayedResult.notasAnalisadas], ['NF-e com CST 060', displayedResult.notasComCst060], ['Diferenca', formatCurrency(displayedResult.totalDiferenca)], ['ICMS ST XML', formatCurrency(displayedResult.totalIcmsStXml)], ['ICMS recalculado', formatCurrency(displayedResult.totalIcmsCalculado)]];
+  const adjustment = result.items.length ? renderCst060ManualRateEditor(result.items) : '';
+  return `${adjustment}<div class="stats-grid">${cards.map(([label, value]) => statCard('file', label, String(value), '', 'neutral')).join('')}</div><div class="table-wrap"><table class="xml-reader30-table" style="min-width:1360px;"><thead><tr><th>Data</th><th>NF-e</th><th>Item</th><th>Emitente</th><th>Produto</th><th>NCM</th><th>CFOP</th><th>CST</th><th>V. Produto</th><th>Desconto</th><th>Base</th><th>Aliq.</th><th>ICMS ST XML</th><th>ICMS calculado</th><th>Diferenca</th><th>Status</th></tr></thead><tbody>${displayedResult.items.map((row) => `<tr><td>${escapeHtml(formatDate(row.dataEmissao))}</td><td>${escapeHtml(row.numeroNfe || '-')}</td><td>${escapeHtml(String(row.itemNumero || '-'))}</td><td>${escapeHtml(row.razaoSocialEmitente || '-')}</td><td>${escapeHtml(row.descricaoProduto || '-')}</td><td>${escapeHtml(row.ncm || '-')}</td><td>${escapeHtml(row.cfop || '-')}</td><td>060</td><td>${escapeHtml(formatCurrency(row.valorProduto))}</td><td>${escapeHtml(formatCurrency(row.desconto))}</td><td>${escapeHtml(formatCurrency(row.baseCalculada))}</td><td>${escapeHtml(String(row.aliquotaInterna))}%${row.origemAliquota === 'regra-pneu' ? ' <span class="row-sub">(pneu)</span>' : row.origemAliquota === 'manual' ? ' <span class="row-sub">(manual)</span>' : ''}</td><td>${escapeHtml(formatCurrency(row.icmsStXml))}</td><td>${escapeHtml(formatCurrency(row.icmsCalculado))}</td><td>${escapeHtml(formatCurrency(row.diferenca))}</td><td>${statusBadge(row.status, row.status === 'OK' ? 'success' : 'warning')}</td></tr>`).join('') || '<tr><td colspan="16" class="table-state">Nenhum item CST 060 encontrado.</td></tr>'}</tbody></table></div>`;
+}
+
+function renderCst060ManualRateEditor(rows) {
+  const reader = state.cst060Reader;
+  const selectedIndexes = new Set(reader.selectedItemIndexes || []);
+  const options = rows.map((row, index) => {
+    const key = getCst060ItemKey(row);
+    const rate = Object.prototype.hasOwnProperty.call(reader.manualOverrides || {}, key) ? reader.manualOverrides[key] : row.aliquotaInterna;
+    const product = row.descricaoProduto || row.codigoProduto || 'Produto sem descricao';
+    const label = `NF-e ${row.numeroNfe || '-'} | Item ${row.itemNumero || '-'} | ${product} | NCM ${row.ncm || '-'} | ${rate}%`;
+    return `<option value="${index}" ${selectedIndexes.has(String(index)) ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+  }).join('');
+  return `<section class="cst060-rate-adjustment"><div><h4>Ajuste manual de aliquota</h4><p>Selecione um ou mais itens. A alteracao vale para esta consulta e tambem atualiza os totais e a exportacao.</p></div><div class="cst060-rate-adjustment-fields"><label class="field cst060-products-field">Produtos da consulta<select id="cst060ProductsSelect" data-action="cst060-products-select" multiple size="${Math.min(Math.max(rows.length, 3), 6)}">${options}</select><small>Para varios itens, use Ctrl (ou Command no Mac) ao selecionar. Os itens ficam identificados pela NF-e e numero.</small></label><label class="field cst060-rate-field">Nova aliquota interna (%)<input id="cst060ManualRate" type="number" min="0.01" max="100" step="0.01" value="${escapeHtml(reader.manualRate || '')}" placeholder="Ex.: 18" /></label><div class="cst060-rate-actions"><button class="btn primary" type="button" data-action="cst060-apply-manual-rate">Aplicar aliquota</button><button class="btn secondary" type="button" data-action="cst060-reset-manual-rate">Restaurar aliquota automatica</button></div></div></section>`;
+}
+
+function getCst060ItemKey(row) {
+  return `${row.chaveAcesso}:${row.itemNumero}`;
+}
+
+function getCst060DisplayedResult(result) {
+  const manualOverrides = state.cst060Reader.manualOverrides || {};
+  const items = result.items.map((row) => {
+    const manualRate = manualOverrides[getCst060ItemKey(row)];
+    if (!Number.isFinite(manualRate)) return row;
+
+    const icmsCalculado = Number(row.icmsStXml) === 0
+      ? 0
+      : Math.round((Number(row.baseCalculada) * (manualRate / 100) + Number.EPSILON) * 100) / 100;
+    const diferenca = Math.round((Number(row.icmsStXml) - icmsCalculado + Number.EPSILON) * 100) / 100;
+    return {
+      ...row,
+      aliquotaInterna: manualRate,
+      origemAliquota: 'manual',
+      icmsCalculado,
+      diferenca,
+      diferencaAbsoluta: Math.abs(diferenca),
+      status: Math.abs(diferenca) <= 0.01 ? 'OK' : 'Divergente'
+    };
+  });
+  const sum = (key) => Math.round((items.reduce((total, row) => total + (Number(row[key]) || 0), 0) + Number.EPSILON) * 100) / 100;
+  return {
+    ...result,
+    items,
+    totalIcmsCalculado: sum('icmsCalculado'),
+    totalDiferenca: sum('diferenca')
+  };
+}
+
+function applyCst060ManualRate() {
+  const reader = state.cst060Reader;
+  const select = document.querySelector('#cst060ProductsSelect');
+  const selectedIndexes = select
+    ? Array.from(select.selectedOptions, (option) => option.value)
+    : (reader.selectedItemIndexes || []);
+  const input = document.querySelector('#cst060ManualRate');
+  const rateInput = String(input?.value || reader.manualRate || '').trim().replace(',', '.');
+  const rate = Number(rateInput);
+  const items = reader.result?.items || [];
+  if (!selectedIndexes.length) {
+    pushToast('Selecione ao menos um produto da lista.', 'error');
+    return;
+  }
+  if (!Number.isFinite(rate) || rate < 0.01 || rate > 100) {
+    pushToast('Informe uma aliquota entre 0,01% e 100%.', 'error');
+    return;
+  }
+
+  const manualOverrides = { ...(reader.manualOverrides || {}) };
+  const selectedRows = selectedIndexes.map((index) => items[Number(index)]).filter(Boolean);
+  selectedRows.forEach((row) => { manualOverrides[getCst060ItemKey(row)] = rate; });
+  reader.selectedItemIndexes = selectedIndexes;
+  reader.manualRate = rateInput;
+  reader.manualOverrides = manualOverrides;
+  pushToast(`Aliquota de ${rate}% aplicada a ${selectedRows.length} item(ns).`, 'success');
+  renderPreservingScroll();
+}
+
+function resetCst060ManualRate() {
+  const reader = state.cst060Reader;
+  const selectedIndexes = reader.selectedItemIndexes || [];
+  const items = reader.result?.items || [];
+  const selectedRows = selectedIndexes.map((index) => items[Number(index)]).filter(Boolean);
+  const manualOverrides = { ...(reader.manualOverrides || {}) };
+  let restoredCount = 0;
+  selectedRows.forEach((row) => {
+    const key = getCst060ItemKey(row);
+    if (Object.prototype.hasOwnProperty.call(manualOverrides, key)) {
+      delete manualOverrides[key];
+      restoredCount += 1;
+    }
+  });
+  if (!restoredCount) {
+    pushToast('Selecione um produto com aliquota manual para restaurar.', 'error');
+    return;
+  }
+  reader.manualOverrides = manualOverrides;
+  pushToast(`Aliquota automatica restaurada em ${restoredCount} item(ns).`, 'success');
+  renderPreservingScroll();
 }
 
 async function submitCst060ReaderForm(form) {
   const data = new FormData(form);
   const query = { clienteId: String(data.get('clienteId') || ''), dataInicial: String(data.get('dataInicial') || ''), dataFinal: String(data.get('dataFinal') || ''), aliquotaInterna: String(data.get('aliquotaInterna') || '').replace(',', '.') };
   if (!query.clienteId || !query.dataInicial || !query.dataFinal || !query.aliquotaInterna) { pushToast('Informe empresa, periodo e aliquota interna.', 'error'); return; }
-  state.cst060Reader = { hasSearched: true, lastQuery: query, result: null };
+  state.cst060Reader = { hasSearched: true, lastQuery: query, result: null, selectedItemIndexes: [], manualRate: '', manualOverrides: {} };
   render();
   try {
     state.cst060Reader.result = await apiRequest(`/nfe/cst-060-analysis?clienteId=${encodeURIComponent(query.clienteId)}&dataInicial=${encodeURIComponent(query.dataInicial)}&dataFinal=${encodeURIComponent(query.dataFinal)}&aliquotaInterna=${encodeURIComponent(query.aliquotaInterna)}`, { timeoutMs: 60000 });
@@ -6977,14 +7101,15 @@ async function submitCst060ReaderForm(form) {
 }
 
 function exportCst060ToExcel() {
-  const result = state.cst060Reader?.result;
+  const sourceResult = state.cst060Reader?.result;
+  const result = sourceResult ? getCst060DisplayedResult(sourceResult) : null;
   const rows = Array.isArray(result?.items) ? result.items : [];
   if (!rows.length) {
     pushToast('Consulte itens CST 060 antes de exportar.', 'error');
     return;
   }
   const headers = ['Data', 'NF-e', 'Item', 'Emitente', 'Produto', 'NCM', 'CFOP', 'CST', 'Valor produto', 'Desconto', 'Base calculada', 'Aliquota aplicada', 'Regra aliquota', 'ICMS ST XML', 'ICMS calculado', 'Diferenca', 'Status'];
-  const body = rows.map((row) => [formatDate(row.dataEmissao), row.numeroNfe || '', row.itemNumero, row.razaoSocialEmitente || '', row.descricaoProduto || '', row.ncm || '', row.cfop || '', '060', row.valorProduto, row.desconto, row.baseCalculada, `${row.aliquotaInterna}%`, row.origemAliquota === 'regra-pneu' ? 'Pneu (4%)' : 'Informada', row.icmsStXml, row.icmsCalculado, row.diferenca, row.status]);
+  const body = rows.map((row) => [formatDate(row.dataEmissao), row.numeroNfe || '', row.itemNumero, row.razaoSocialEmitente || '', row.descricaoProduto || '', row.ncm || '', row.cfop || '', '060', row.valorProduto, row.desconto, row.baseCalculada, `${row.aliquotaInterna}%`, row.origemAliquota === 'regra-pneu' ? 'Pneu (4%)' : row.origemAliquota === 'manual' ? 'Manual' : 'Informada', row.icmsStXml, row.icmsCalculado, row.diferenca, row.status]);
   const table = `<table><thead><tr>${headers.map((header) => `<th>${escapeHtml(header)}</th>`).join('')}</tr></thead><tbody>${body.map((row) => `<tr>${row.map((value) => `<td>${escapeHtml(String(value ?? ''))}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
   const blob = new Blob([`\ufeff<html><head><meta charset="utf-8"></head><body>${table}</body></html>`], { type: 'application/vnd.ms-excel;charset=utf-8' });
   const query = state.cst060Reader.lastQuery || {};
