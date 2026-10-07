@@ -464,6 +464,7 @@ export class NfseService {
     const tipoRegistro = dto.tipoRegistro === 'Servico' ? 'Servico' : 'Entrada';
     const contas = dto.contas === 'PorFornecedor' || dto.contas === 'Caixa' ? dto.contas : 'Padrao';
     const produtoPadrao = String(dto.produtoPadrao ?? '').trim();
+    const incluirEstoque = dto.incluirEstoque !== false;
 
     if (contas === 'PorFornecedor' && tipoRegistro !== 'Entrada') {
       throw new BadRequestException('O modo Por Fornecedor so pode ser usado na exportacao de Entrada.');
@@ -521,6 +522,7 @@ export class NfseService {
           source,
           tipoRegistro,
           produtoPadrao,
+          incluirEstoque,
           acumuladores,
           contaFornecedorByCnpj,
           contaServicoByCodigo,
@@ -630,12 +632,13 @@ export class NfseService {
     source: NfseDominioExportSource;
     tipoRegistro: 'Entrada' | 'Servico';
     produtoPadrao: string;
+    incluirEstoque: boolean;
     acumuladores: { semRetencoes: string; comRetencoes: string };
     contaFornecedorByCnpj: Map<string, string>;
     contas: 'Padrao' | 'PorFornecedor' | 'Caixa';
     contaServicoByCodigo: Map<string, NfseContaContabilPorServico>;
   }): string[] {
-    const { source, tipoRegistro, produtoPadrao, acumuladores, contaFornecedorByCnpj, contaServicoByCodigo, contas } = params;
+    const { source, tipoRegistro, produtoPadrao, incluirEstoque, acumuladores, contaFornecedorByCnpj, contaServicoByCodigo, contas } = params;
     const data = source.exportData;
     const valorServico = this.roundTo2(data.valorServico ?? 0);
     const valorLiquido = this.roundTo2(data.valorLiquidoNfse ?? 0);
@@ -716,17 +719,19 @@ export class NfseService {
     }
 
     if (tipoRegistro === 'Entrada') {
-      linhas.push(
-        this.createDominioRegistro1030(
-          valorServico,
-          dataEmissao,
-          aliquotaIss,
-          valorIss,
-          valorIssRetidoReal,
-          prestadorUf,
-          produtoEntrada
-        )
-      );
+      if (incluirEstoque) {
+        linhas.push(
+          this.createDominioRegistro1030(
+            valorServico,
+            dataEmissao,
+            aliquotaIss,
+            valorIss,
+            valorIssRetidoReal,
+            prestadorUf,
+            produtoEntrada
+          )
+        );
+      }
       const totalRetencoesLancto = this.roundTo2(valorCrf + valorIrrf + valorInss + valorIssRetidoReal);
       if (totalRetencoesLancto === 0) {
         linhas.push(this.createDominioRegistro1300(dataEmissao, contaDebitoEntrada, contaFornecedor, valorServico, numeroNfse, nomeDescricao, ''));
@@ -775,7 +780,9 @@ export class NfseService {
     }
 
     const totalRetencoesLancto = this.roundTo2(valorIrrf + valorPisRetido + valorCofinsRetido + valorCsll);
-    linhas.push(this.createDominioRegistro3030(valorServico, dataEmissao, aliquotaIss, valorIss, valorIssRetidoReal, produtoPadrao));
+    if (incluirEstoque) {
+      linhas.push(this.createDominioRegistro3030(valorServico, dataEmissao, aliquotaIss, valorIss, valorIssRetidoReal, produtoPadrao));
+    }
     linhas.push(this.createDominioRegistro3300(dataEmissao, '0', '412', valorServico, numeroNfse, nomeDescricao, ''));
 
     const debitoConta5 = this.roundTo2(Math.max(valorServico - totalRetencoesLancto, 0));

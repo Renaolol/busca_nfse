@@ -459,6 +459,7 @@ const state = {
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
       produtoPadrao: '',
+      incluirEstoque: true,
       acumuladorEntradaSemRetencoes: '802',
       acumuladorEntradaComRetencoes: '804',
       acumuladorServicoSemRetencoes: '900',
@@ -13719,6 +13720,7 @@ function renderNfseFiscalReaderCard() {
   const minWidth = Math.max(1480, visibleColumns.length * 138);
   const tipoRegistro = String(exportConfig.tipoRegistro || 'Entrada') === 'Servico' ? 'Servico' : 'Entrada';
   const contas = ['Padrao', 'PorFornecedor', 'Caixa'].includes(String(exportConfig.contas)) ? String(exportConfig.contas) : 'Padrao';
+  const incluirEstoque = exportConfig.incluirEstoque !== false;
   const clienteIdAtual = state.filters.xmls.cliente && state.filters.xmls.cliente !== 'Todos' ? state.filters.xmls.cliente : '';
   const clienteAtual = clienteIdAtual ? findClientById(clienteIdAtual) : null;
   const codigoEmpresaCadastrado =
@@ -13796,6 +13798,17 @@ function renderNfseFiscalReaderCard() {
           placeholder="Opcional"
         />
         <span style="color:var(--text-secondary); font-size:12px;">Opcional. Aceita codigos numericos ou alfanumericos, como A ou A12.</span>
+      </label>
+      <label class="field nfse-dominio-stock-switch-field">
+        Estoque
+        <span class="nfse-dominio-stock-switch-row">
+          <input name="incluirEstoque" type="checkbox" role="switch" ${incluirEstoque ? 'checked' : ''} aria-label="Exportar com estoque" />
+          <span class="nfse-dominio-stock-switch-status">
+            <span class="nfse-dominio-stock-switch-on">Com estoque</span>
+            <span class="nfse-dominio-stock-switch-off">Sem estoque</span>
+          </span>
+        </span>
+        <span style="color:var(--text-secondary); font-size:12px;">Desative para omitir os registros de produtos 1030/3030 do arquivo.</span>
       </label>
       <label class="field">
         Acumulador Entrada sem retencoes
@@ -18426,6 +18439,7 @@ async function submitNfseFiscalDominioExportForm(form) {
   const contasValue = String(data.get('contas') || '').trim();
   const contas = tipoRegistro === 'Entrada' && ['PorFornecedor', 'Caixa'].includes(contasValue) ? contasValue : 'Padrao';
   const produtoPadrao = String(data.get('produtoPadrao') || '').trim();
+  const incluirEstoque = Boolean(form.querySelector('[name="incluirEstoque"]')?.checked);
   const acumuladorEntradaSemRetencoes = String(data.get('acumuladorEntradaSemRetencoes') || '').trim();
   const acumuladorEntradaComRetencoes = String(data.get('acumuladorEntradaComRetencoes') || '').trim();
   const acumuladorServicoSemRetencoes = String(data.get('acumuladorServicoSemRetencoes') || '').trim();
@@ -18455,6 +18469,7 @@ async function submitNfseFiscalDominioExportForm(form) {
     tipoRegistro,
     contas,
     produtoPadrao,
+    incluirEstoque,
     acumuladorEntradaSemRetencoes,
     acumuladorEntradaComRetencoes,
     acumuladorServicoSemRetencoes,
@@ -18476,6 +18491,7 @@ async function submitNfseFiscalDominioExportForm(form) {
         tipoRegistro,
         contas,
         produtoPadrao,
+        incluirEstoque,
         acumuladorEntradaSemRetencoes: acumuladorEntradaSemRetencoes || undefined,
         acumuladorEntradaComRetencoes: acumuladorEntradaComRetencoes || undefined,
         acumuladorServicoSemRetencoes: acumuladorServicoSemRetencoes || undefined,
@@ -18498,6 +18514,7 @@ async function submitNfseFiscalDominioExportForm(form) {
       tipoRegistro,
       contas,
       produtoPadrao,
+      incluirEstoque,
       acumuladorEntradaSemRetencoes,
       acumuladorEntradaComRetencoes,
       acumuladorServicoSemRetencoes,

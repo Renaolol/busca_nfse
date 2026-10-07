@@ -2451,7 +2451,7 @@ describe('NfseService', () => {
     expect(content).toContain('|1030|ABC123|1|180,00|');
   });
 
-  it('usa a conta padrao 467 quando nao ha configuracao para o codigo de servico da nota', async () => {
+  it('usa a conta padrao 467 e mantem os lancamentos ao exportar sem estoque', async () => {
     prisma.nfseContaContabilConfig.findMany.mockResolvedValueOnce([]);
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
       {
@@ -2531,10 +2531,12 @@ describe('NfseService', () => {
       tipoRegistro: 'Entrada',
       contas: 'Padrao',
       produtoPadrao: '557',
+      incluirEstoque: false,
     });
 
     const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
     expect(content).toContain('|1300|09/07/2026|467|506|180,00|| NFS-E N 333 Prestador Exportacao|||');
+    expect(content).not.toContain('|1030|');
   });
 
   it('nao consulta contas por codigo de servico ao exportar Servico (aplicavel apenas a Entrada)', async () => {
@@ -2638,6 +2640,25 @@ describe('NfseService', () => {
     expect(camposServicoParcela[1]).toMatch(/^\d{2}\/\d{2}\/\d{4}$/);
     expect(camposServicoParcela[2]).toBe('180,00');
     expect(prisma.nfseContaContabilConfig.findMany).not.toHaveBeenCalled();
+
+    const documentos = await (prisma.nfseDocumento.findMany as jest.Mock).mock.results[0]?.value;
+    const xml = await (storage.getObject as jest.Mock).mock.results[0]?.value;
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce(documentos);
+    storage.getObject.mockResolvedValueOnce(xml);
+
+    const resultadoSemEstoque = await service.exportarLeituraFiscalDominio({
+      clienteId: 'cliente-1',
+      all: true,
+      codigoEmpresa: 10105,
+      tipoRegistro: 'Servico',
+      contas: 'Padrao',
+      produtoPadrao: 'A',
+      incluirEstoque: false
+    });
+    const conteudoSemEstoque = Buffer.from(resultadoSemEstoque.contentBase64, 'base64').toString('utf8');
+    expect(conteudoSemEstoque).toContain('|3000|');
+    expect(conteudoSemEstoque).toContain('|3500|');
+    expect(conteudoSemEstoque).not.toContain('|3030|');
   });
 
   it('rejeita exportacao por fornecedor sem configuracao ODBC da Dominio', async () => {
