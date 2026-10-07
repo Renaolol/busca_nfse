@@ -6,6 +6,8 @@ A distribuicao catarinense e uma origem separada de NF-e modelo 65, integrada em
 
 Fluxo na tela `NFC-e SC`: selecione o cliente (por exemplo, Orestes), escolha um dos estabelecimentos daquele cliente, escolha o certificado contabilista vinculado ou a credencial interna da GCONT, defina o papel (para notas emitidas pelo Orestes, `Emitente`) e salve. Em seguida, use `Consultar agora`. A carga inicial parte do NSU zero, fica sujeita a janela de disponibilidade da SEF/SC e os arquivos aparecem na tabela `NFC-e armazenadas`.
 
+O cadastro de uma nova empresa/cliente para uso nessa configuracao esta disponivel para usuarios `admin` e `comum`. Usuarios com perfil `cliente` continuam limitados ao proprio cliente e podem configurar os estabelecimentos dentro desse escopo.
+
 O backend continua solicitando lotes enquanto a SEF/SC retornar 50 documentos, salvando cada lote e avancando o cursor antes da proxima solicitacao. Quando chegar um lote menor ou a resposta `117`, o controle volta para `ativo` e aguarda 12 horas antes da proxima consulta. A tela mostra `Consultando` e atualiza o progresso; o processo continua se o navegador for fechado. Se o servidor reiniciar, a consulta e retomada do ultimo NSU salvo depois que o lease de execucao expirar. O botao `Pausar` interrompe a sequencia ao concluir o lote em andamento. Um controle pausado pode ser retomado pelo botao `Retomar consulta`, a partir do NSU salvo.
 
 - `GET /nfce-sc/controles?clienteId=<uuid>` lista os controles de um cliente.

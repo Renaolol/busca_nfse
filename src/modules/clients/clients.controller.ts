@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Patch, Post, Query } from '@nestjs/common';
-import { ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { CreateClientDto } from './dto/create-client.dto';
@@ -12,7 +12,11 @@ export class ClientsController {
   constructor(private readonly clientsService: ClientsService) {}
 
   @Post()
-  @Roles('admin')
+  @Roles('admin', 'comum')
+  @ApiOperation({
+    summary: 'Cadastra um cliente e seu estabelecimento principal',
+    description: 'Disponivel para usuarios administradores e usuarios comuns.'
+  })
   create(@Body() dto: CreateClientDto) {
     return this.clientsService.create(dto);
   }
