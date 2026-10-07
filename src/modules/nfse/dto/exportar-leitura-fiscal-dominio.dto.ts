@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, Min } from 'class-validator';
+import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, Min } from 'class-validator';
 import { QueryNfseDto } from './query-nfse.dto';
 
 export class ExportarLeituraFiscalDominioDto extends QueryNfseDto {
@@ -22,6 +22,14 @@ export class ExportarLeituraFiscalDominioDto extends QueryNfseDto {
   @IsOptional()
   @IsIn(['Padrao', 'PorFornecedor', 'Caixa'])
   contas?: 'Padrao' | 'PorFornecedor' | 'Caixa';
+
+  @ApiPropertyOptional({
+    description: 'Inclui os registros de produtos/estoque 1030 (Entrada) ou 3030 (Servico) no arquivo',
+    default: true
+  })
+  @IsOptional()
+  @IsBoolean()
+  incluirEstoque?: boolean;
 
   @ApiPropertyOptional({
     description: 'Codigo alfanumerico opcional do produto para os registros 1030/3030',
