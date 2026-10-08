@@ -85,6 +85,7 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - O painel da ultima importacao em `Buscas NF-e` pode abrir o XML bruto do catalogo e reimportar um item isolado ou todos os `catalogoIds` retornados na execucao manual.
 - O script `npm run nfe:separar-cte -- --apply` varre `nfe_documentos`, classifica os XMLs salvos e marca CT-es ja persistidos em `schemaDoc`, permitindo que o modulo de NF-e os exclua das listagens e do dashboard sem migration adicional.
 - O modulo `cte` reaproveita `nfe_documentos` como armazenamento, mas expoe consulta separada para documentos de transporte, incluindo `GET /cte`, `GET /cte/:id`, `GET /cte/:id/xml`, `GET /cte/dashboard-stats`, `POST /cte/consultar-chave` e `POST /cte/eventos/sincronizar`.
+- `GET /nfe` aceita o filtro opcional `modelo` (por exemplo, `55` para NF-e e `65` para NFC-e); o painel `XMLs NF-e` usa `modelo=55` para manter NFC-e fora dessa listagem.
 - `GET /nfe` e `GET /cte` agora aceitam `page` e `pageSize` (padrao `100`, maximo `200`) e retornam `{ items, total, page, pageSize, totalPages }`, permitindo paginacao real no painel de armazenados.
 - Quando `CTE_CONSULTA_CLIENT_MODE=real`, o cliente SOAP de CT-e aplica fallback automatico de namespace, SOAPAction, versao SOAP e formato de `cteDadosMsg` para reduzir rejeicoes tecnicas de consulta por chave. Se ainda retornar `cStat 243`, a resposta deve ser tratada como falha da requisicao ao autorizador, nao como XML de CT-e valido.
 

@@ -3321,6 +3321,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       andConditions.push({ schemaDoc: query.schemaDoc });
     }
 
+    if (query.modelo) {
+      andConditions.push({ modelo: query.modelo });
+    }
+
     if (query.numeroNfe) {
       andConditions.push({
         numeroNfe: {

@@ -186,19 +186,20 @@ describe('NfeService', () => {
     expect(row.status).toBe('OK');
   });
 
-  it('pagina a listagem de NF-e armazenadas', async () => {
+  it('filtra a listagem de NF-e pelo modelo fiscal e pagina os resultados', async () => {
     prisma.nfeDocumento.count.mockResolvedValueOnce(275);
     prisma.nfeDocumento.findMany.mockResolvedValueOnce([]);
 
     const result = await service.findAll({
       clienteId: 'cliente-1',
+      modelo: '55',
       page: 2,
       pageSize: 100
     });
 
     expect(prisma.nfeDocumento.count).toHaveBeenCalledWith({
       where: expect.objectContaining({
-        AND: expect.arrayContaining([{ clienteId: 'cliente-1' }])
+        AND: expect.arrayContaining([{ clienteId: 'cliente-1' }, { modelo: '55' }])
       })
     });
     expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
