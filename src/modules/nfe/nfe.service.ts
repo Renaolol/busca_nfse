@@ -885,22 +885,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   async downloadLote(dto: DownloadLoteDto) {
     const uniqueIds = [...new Set(dto.ids)];
     const tipoArquivo = dto.tipoArquivo ?? 'ambos';
-    const docs = await this.prisma.nfeDocumento.findMany({
+    const docs = await this.findManyDocumentosWithEventos({
       where: {
         id: {
           in: uniqueIds
         },
         ...(dto.clienteId ? { clienteId: dto.clienteId } : {})
-      },
-      select: {
-        id: true,
-        clienteId: true,
-        chaveAcesso: true,
-        modelo: true,
-        xmlCompletoPath: true,
-        xmlResumoPath: true,
-        xmlCompletoDisponivel: true,
-        resumoDisponivel: true
       }
     });
 
@@ -930,6 +920,28 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             totalArquivosIncluidos += 1;
           } catch (error) {
             erros.push({ id: doc.id, erro: `Falha ao ler XML: ${this.toErrorMessage(error)}` });
+          }
+        }
+
+        if (doc.modelo === '65') {
+          for (const evento of doc.eventos) {
+            if (!evento.xmlPath) {
+              continue;
+            }
+
+            try {
+              const eventoXmlBuffer = await this.storage.getObject(evento.xmlPath);
+              const originalFileName = (evento.xmlPath.split('/').filter(Boolean).pop() ?? 'evento').replace(/\.xml$/i, '');
+              const eventDirectory = `xml/eventos/${this.toSafeFileName(doc.chaveAcesso)}`;
+              const eventFileName = `${this.toSafeFileName(evento.id)}-${this.toSafeFileName(originalFileName)}.xml`;
+              zip.file(`${eventDirectory}/${eventFileName}`, eventoXmlBuffer);
+              totalArquivosIncluidos += 1;
+            } catch (error) {
+              erros.push({
+                id: doc.id,
+                erro: `Falha ao ler XML do evento ${evento.tipoEvento || evento.id}: ${this.toErrorMessage(error)}`
+              });
+            }
           }
         }
       }

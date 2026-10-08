@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
-import { ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
@@ -90,6 +90,7 @@ export class NfeController {
   }
 
   @Post('download-lote')
+  @ApiOperation({ summary: 'Baixa XMLs e DANFEs de NF-e em lote; NFC-e inclui os XMLs de eventos vinculados' })
   @ApiOkResponse({ type: DownloadLoteResponseDto })
   @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
   downloadLote(@Body() dto: DownloadLoteDto) {

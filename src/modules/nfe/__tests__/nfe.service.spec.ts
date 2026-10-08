@@ -665,7 +665,7 @@ describe('NfeService', () => {
     expect(zip.file('xml/NFE-35260612345678000199550010000001231000008888.xml')).toBeTruthy();
   });
 
-  it('nomeia XML de modelo 65 como NFC-e no ZIP de lote', async () => {
+  it('exporta XML da NFC-e junto com os eventos vinculados no ZIP de lote', async () => {
     prisma.nfeDocumento.findMany.mockResolvedValue([
       {
         id: 'doc-nfce-lote',
@@ -675,10 +675,19 @@ describe('NfeService', () => {
         xmlCompletoPath: 'nfce-sc/producao/123/2026/06/xml/a.xml',
         xmlResumoPath: null,
         xmlCompletoDisponivel: true,
-        resumoDisponivel: false
+        resumoDisponivel: false,
+        eventos: [
+          {
+            id: 'evento-cancelamento-1',
+            tipoEvento: '110111',
+            xmlPath: 'nfce-sc/producao/123/2026/06/eventos/cancelamento.xml'
+          }
+        ]
       }
     ]);
-    storage.getObject.mockResolvedValue(Buffer.from('<nfeProc>nfce</nfeProc>', 'utf8'));
+    storage.getObject
+      .mockResolvedValueOnce(Buffer.from('<nfeProc>nfce</nfeProc>', 'utf8'))
+      .mockResolvedValueOnce(Buffer.from('<procEventoNFe>cancelamento</procEventoNFe>', 'utf8'));
 
     const result = await service.downloadLote({
       ids: ['doc-nfce-lote'],
@@ -688,6 +697,11 @@ describe('NfeService', () => {
 
     const zip = await JSZip.loadAsync(Buffer.from(result.contentBase64, 'base64'));
     expect(zip.file('xml/NFCE-35260612345678000199650010000001231000006666.xml')).toBeTruthy();
+    const eventPath = 'xml/eventos/35260612345678000199650010000001231000006666/evento-cancelamento-1-cancelamento.xml';
+    const eventEntry = zip.file(eventPath);
+    expect(eventEntry).toBeTruthy();
+    expect(await eventEntry!.async('string')).toBe('<procEventoNFe>cancelamento</procEventoNFe>');
+    expect(result.totalArquivosIncluidos).toBe(2);
   });
 
   it('importa XMLs da Dominio vinculando estabelecimento por CNPJ', async () => {
