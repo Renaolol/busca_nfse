@@ -697,7 +697,7 @@ describe('NfeService', () => {
 
     const zip = await JSZip.loadAsync(Buffer.from(result.contentBase64, 'base64'));
     expect(zip.file('xml/NFCE-35260612345678000199650010000001231000006666.xml')).toBeTruthy();
-    const eventPath = 'xml/eventos/35260612345678000199650010000001231000006666/evento-cancelamento-1-cancelamento.xml';
+    const eventPath = 'xml/NFCE-EVENTO-35260612345678000199650010000001231000006666-evento-cancelamento-1-cancelamento.xml';
     const eventEntry = zip.file(eventPath);
     expect(eventEntry).toBeTruthy();
     expect(await eventEntry!.async('string')).toBe('<procEventoNFe>cancelamento</procEventoNFe>');

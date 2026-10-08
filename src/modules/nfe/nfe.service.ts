@@ -932,9 +932,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             try {
               const eventoXmlBuffer = await this.storage.getObject(evento.xmlPath);
               const originalFileName = (evento.xmlPath.split('/').filter(Boolean).pop() ?? 'evento').replace(/\.xml$/i, '');
-              const eventDirectory = `xml/eventos/${this.toSafeFileName(doc.chaveAcesso)}`;
-              const eventFileName = `${this.toSafeFileName(evento.id)}-${this.toSafeFileName(originalFileName)}.xml`;
-              zip.file(`${eventDirectory}/${eventFileName}`, eventoXmlBuffer);
+              const eventFileName = `NFCE-EVENTO-${this.toSafeFileName(doc.chaveAcesso)}-${this.toSafeFileName(evento.id)}-${this.toSafeFileName(originalFileName)}.xml`;
+              zip.file(`xml/${eventFileName}`, eventoXmlBuffer);
               totalArquivosIncluidos += 1;
             } catch (error) {
               erros.push({

@@ -74,7 +74,7 @@ export class NfceScController {
   @Post('armazenadas/download-lote')
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   @ApiOperation({ summary: 'Baixa em ZIP XMLs de NFC-e SC armazenadas e seus eventos vinculados' })
-  @ApiOkResponse({ type: DownloadLoteResponseDto, description: 'Arquivo ZIP com os XMLs das NFC-e selecionadas e dos eventos vinculados que tiverem XML armazenado.' })
+  @ApiOkResponse({ type: DownloadLoteResponseDto, description: 'Arquivo ZIP com os XMLs das NFC-e selecionadas e dos eventos vinculados que tiverem XML armazenado, todos na mesma pasta.' })
   downloadStoredDocumentsBatch(@Body() dto: DownloadNfceScStoredDocumentsDto) {
     return this.service.downloadStoredDocumentsBatch(dto.clienteId, dto.ids);
   }

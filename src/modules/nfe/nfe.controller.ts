@@ -90,7 +90,7 @@ export class NfeController {
   }
 
   @Post('download-lote')
-  @ApiOperation({ summary: 'Baixa XMLs e DANFEs de NF-e em lote; NFC-e inclui os XMLs de eventos vinculados' })
+  @ApiOperation({ summary: 'Baixa XMLs e DANFEs de NF-e em lote; eventos de NFC-e ficam na mesma pasta dos XMLs' })
   @ApiOkResponse({ type: DownloadLoteResponseDto })
   @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
   downloadLote(@Body() dto: DownloadLoteDto) {
