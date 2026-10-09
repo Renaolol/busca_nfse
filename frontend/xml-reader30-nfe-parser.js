@@ -125,6 +125,26 @@ function extractNfeLineItems(xmlString) {
     .filter((item) => item.description !== '-' || item.code !== '-');
 }
 
+function extractNfeTotalIpiValue(xmlString) {
+  const xml = parseXmlDocumentSafe(xmlString);
+  if (!xml) {
+    return 0;
+  }
+
+  const totalNode = findXmlElementsByLocalName(xml, 'ICMSTot')[0] || null;
+  const totalText = getXmlText(totalNode, 'vIPI');
+  if (totalText) {
+    const totalValue = Number(totalText.replace(',', '.'));
+    return Number.isFinite(totalValue) ? totalValue : 0;
+  }
+
+  return findXmlElementsByLocalName(xml, 'det').reduce((sum, detNode) => {
+    const ipiNode = findXmlElementsByLocalName(detNode, 'IPI')[0] || null;
+    const itemValue = Number(getXmlText(ipiNode, 'vIPI').replace(',', '.'));
+    return sum + (Number.isFinite(itemValue) ? itemValue : 0);
+  }, 0);
+}
+
 function extractNfeLineItemTaxValues(detNode, prodNode) {
   const impostoNode = findXmlElementsByLocalName(detNode, 'imposto')[0] || detNode;
   const icmsNode = findXmlElementsByLocalName(impostoNode, 'ICMS')[0] || null;
@@ -197,6 +217,7 @@ export {
   getXmlText,
   getFirstXmlText,
   extractNfeLineItems,
+  extractNfeTotalIpiValue,
   extractNfeLineItemTaxValues,
   extractCteServiceSummary
 };

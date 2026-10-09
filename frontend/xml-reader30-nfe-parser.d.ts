@@ -42,5 +42,6 @@ export function findXmlElementsByLocalName(parent: ParentNode | null | undefined
 export function getXmlText(parent: ParentNode | null | undefined, localName: string): string;
 export function getFirstXmlText(parents: ArrayLike<ParentNode | null | undefined> | ParentNode[] | null | undefined, localNames: string[]): string;
 export function extractNfeLineItems(xmlString: string): XmlReader30NfeLineItem[];
+export function extractNfeTotalIpiValue(xmlString: string): number;
 export function extractNfeLineItemTaxValues(detNode: ParentNode, prodNode: ParentNode): Omit<XmlReader30NfeLineItem, 'index' | 'code' | 'description' | 'quantity' | 'unit' | 'unitValue' | 'unitValueRaw' | 'totalValue' | 'totalValueRaw'>;
 export function extractCteServiceSummary(xmlString: string): XmlReader30CteServiceSummary;
