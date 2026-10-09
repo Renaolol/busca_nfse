@@ -299,7 +299,7 @@ Eventos sao vinculados pela chave da NFS-e referenciada (`chNFSe`) e salvos em `
 - `POST /nfse/reprocessar-danfses`: reprocessa DANFSEs salvas para atualizar PDFs legados ou ausentes para o modelo atual.
 - `GET /nfe/:id/xml`: retorna XML da NF-e com `fileName`, `contentType` e `contentBase64`.
 - `GET /nfe/:id/danfe`: retorna DANFE em PDF com `fileName`, `contentType` e `contentBase64`.
-- `POST /nfe/download-lote`: gera um arquivo ZIP em Base64 para baixar XML/DANFE em lote, com `tipoArquivo=ambos|xml|danfe`.
+- `POST /nfe/download-lote`: gera um arquivo ZIP em Base64 para baixar XML/DANFE em lote, com `tipoArquivo=ambos|xml|danfe`. Ao exportar XMLs de NFC-e modelo 65, inclui na mesma pasta `xml/` os XMLs dos eventos vinculados que estiverem armazenados.
 - `POST /nfse/eventos/sincronizar`: consulta manualmente os eventos das NFS-e ja armazenadas, usando a chave de acesso da nota e o certificado do estabelecimento, sem alterar NSU. O import aceita tanto XMLs de evento retornados pelo ADN quanto eventos estruturados em JSON. Quando o ADN responder sem documentos para a chave consultada (por exemplo `E2240` / `NENHUM_DOCUMENTO_LOCALIZADO`), a auditoria trata o caso como `sem_eventos`; o status `nao_localizado_endpoint_eventos` fica reservado para `HTTP 404` anomalo do endpoint.
 - `GET /nfse`, `GET /nfse/separadas` e `GET /nfse/:id` retornam tambem `eventos` vinculados a cada nota.
 - Os endpoints `GET /nfse/:id`, `GET /nfse/:id/xml` e `GET /nfse/:id/danfse` exigem `?clienteId=...` para garantir escopo de acesso por cliente.
@@ -446,7 +446,7 @@ Observacoes:
 - Para revisar e corrigir o ambiente (`producao`/`homologacao`) das NF-e ja salvas com base no `tpAmb` do XML, rode `npm run nfe:reclassificar-ambiente` para gerar um relatorio em `.tmp/nfe-environment-reclassification` e `npm run nfe:reclassificar-ambiente -- --apply` para aplicar as atualizacoes sem tocar documentos com conflito de `ambiente + chave_acesso`. Use `--clienteId=UUID` para limitar a uma empresa.
 - Para revisar documentos de transporte que ja foram gravados em `nfe_documentos`, rode `npm run nfe:separar-cte` para gerar um relatorio em `.tmp/nfe-cte-separation` e `npm run nfe:separar-cte -- --apply` para marcar os CT-es detectados em `schemaDoc`, permitindo que o modulo de NF-e deixe de exibi-los nas listagens e indicadores.
 - O frontend agora expõe um menu dedicado `XMLs CT-e`, paralelo a `XMLs NFS-e` e `XMLs NF-e`, com filtros, visualizacao do XML e download por cliente.
-- `GET /nfe` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, periodo, status e `somenteXmlCompleto`.
+- `GET /nfe` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, modelo fiscal (por exemplo, `55` para NF-e e `65` para NFC-e), periodo, status e `somenteXmlCompleto`. A tela `XMLs NF-e` consulta somente o modelo `55`.
 - `GET /cte` aceita filtros por `cnpjEmitente`, `cnpjDestinatario`, `cnpjConsulta`, `tipoRelacao`, numero, chave, ambiente, periodo, status e `somenteXmlCompleto`.
 - `GET /nfse`, `GET /nfe` e `GET /cte` aceitam `page` e `pageSize` (padrao `100`, maximo `200`) e retornam `{ items, total, page, pageSize, totalPages }`.
 - `GET /nfse` e `GET /cte` tambem aceitam `all=true` para retornar todos os registros que casam com o filtro de uma vez so, ignorando `page`/`pageSize` com limite de seguranca de 10000 itens por chamada.

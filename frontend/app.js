@@ -17605,6 +17605,7 @@ async function executeNfeDocsSearch() {
 
   try {
     const query = buildNfeSearchQuery(state.filters.nfeDocs, 1, SEARCH_PAGE_SIZE, true);
+    query.set('modelo', '55');
     const payload = normalizePaginatedResponse(await apiRequest(`/nfe?${query.toString()}`));
     const mapped = buildNfeDocumentsFromApi(payload.items, state.clients);
     state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mapped);
@@ -18062,6 +18063,7 @@ function getFilteredNfeDocumentsFromSource(source) {
   const docsSource = Array.isArray(source) ? source : [];
 
   return docsSource.filter((doc) => {
+    const matchesModelo = String(doc.modelo || '') === '55';
     const matchesClient = filters.cliente === 'Todos' || !filters.cliente || doc.clientId === filters.cliente;
     const matchesTipo = filters.tipo === 'Todos' || doc.tipo === filters.tipo;
     const matchesCnpj =
@@ -18089,6 +18091,7 @@ function getFilteredNfeDocumentsFromSource(source) {
     const matchesEmissaoFim = !filters.emissaoFim || emissaoDate <= Date.parse(`${filters.emissaoFim}T23:59:59`);
 
     return (
+      matchesModelo &&
       matchesClient &&
       matchesTipo &&
       matchesCnpj &&

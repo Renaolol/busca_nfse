@@ -52,6 +52,12 @@ export class QueryNfeDto extends PaginationQueryDto {
   @IsString()
   schemaDoc?: string;
 
+  @ApiPropertyOptional({ description: 'Modelo fiscal do documento (por exemplo, 55 para NF-e e 65 para NFC-e)' })
+  @IsOptional()
+  @IsString()
+  @Length(2, 2)
+  modelo?: string;
+
   @ApiPropertyOptional()
   @IsOptional()
   @Type(() => Number)
