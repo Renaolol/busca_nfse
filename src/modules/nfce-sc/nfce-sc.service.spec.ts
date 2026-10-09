@@ -176,6 +176,12 @@ describe('NfceScService', () => {
       { numeroNfe: { contains: '123' } },
       { chaveAcesso: { contains: '4126' } }
     ]));
+    expect(where.AND).toContainEqual({
+      dataEmissao: {
+        gte: new Date('2026-09-01T00:00:00.000-03:00'),
+        lte: new Date('2026-09-30T23:59:59.999-03:00')
+      }
+    });
     expect(findMany.mock.calls[0][0].select).not.toHaveProperty('xmlCompletoPath');
   });
 

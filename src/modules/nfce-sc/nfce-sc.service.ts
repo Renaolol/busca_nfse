@@ -154,8 +154,8 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
     if (query.dataInicio || query.dataFim) {
       conditions.push({
         dataEmissao: {
-          gte: query.dataInicio ? new Date(`${query.dataInicio}T00:00:00.000Z`) : undefined,
-          lte: query.dataFim ? new Date(`${query.dataFim}T23:59:59.999Z`) : undefined
+          gte: query.dataInicio ? new Date(`${query.dataInicio}T00:00:00.000-03:00`) : undefined,
+          lte: query.dataFim ? new Date(`${query.dataFim}T23:59:59.999-03:00`) : undefined
         }
       });
     }
