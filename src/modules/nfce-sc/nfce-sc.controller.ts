@@ -7,6 +7,8 @@ import { DownloadNfceScStoredDocumentsDto } from './dto/download-nfce-sc-stored-
 import { DownloadLoteResponseDto } from '../nfe/dto/download-lote-response.dto';
 import { NfceScDiagnosticDownloadDto } from './dto/nfce-sc-diagnostic-download.dto';
 import { NfceScRunResponseDto } from './dto/nfce-sc-run-response.dto';
+import { NfceScNsuRecoveryResponseDto } from './dto/nfce-sc-nsu-recovery-response.dto';
+import { ReprocessNfceScNsusDto } from './dto/reprocess-nfce-sc-nsus.dto';
 import { QueryNfceScStoredDocumentsDto } from './dto/query-nfce-sc-stored-documents.dto';
 import { NfceScService } from './nfce-sc.service';
 
@@ -92,6 +94,18 @@ export class NfceScController {
   @ApiAcceptedResponse({ type: NfceScRunResponseDto })
   run(@Param('id') id: string, @Body() body: NfceScControlsQuery) {
     return this.service.run(body.clienteId, id);
+  }
+
+  @Post('controles/:id/reprocessar-nsus')
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  @HttpCode(HttpStatus.ACCEPTED)
+  @ApiOperation({
+    summary: 'Reprocessa um intervalo de NSUs NFC-e SC sem alterar o cursor principal',
+    description: 'Consulta os lotes SEF/SC em segundo plano, persiste documentos de forma idempotente e mantém o progresso no controle.'
+  })
+  @ApiAcceptedResponse({ type: NfceScNsuRecoveryResponseDto })
+  reprocessNsus(@Param('id') id: string, @Body() dto: ReprocessNfceScNsusDto) {
+    return this.service.reprocessNsus(dto.clienteId, id, dto);
   }
 
   @Post('controles/:id/pausar')

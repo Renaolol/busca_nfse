@@ -1,4 +1,4 @@
-import { NfeAmbiente, NfeSyncStatus } from '@prisma/client';
+import { NfeAmbiente, NfeSyncStatus, NfceScRecoveryStatus } from '@prisma/client';
 import JSZip from 'jszip';
 import { PrismaService } from '../../prisma/prisma.service';
 import { NfeService } from '../nfe/nfe.service';
@@ -34,9 +34,115 @@ describe('NfceScService', () => {
       totalDocumentosBaixados: 0,
       diagnosticoXmlRequisicao: null,
       diagnosticoXmlResposta: null,
-      diagnosticoXmlCriadoEm: null
+      diagnosticoXmlCriadoEm: null,
+      reprocessamentoNsuInicial: null,
+      reprocessamentoNsuFinal: null,
+      reprocessamentoNsuAtual: null,
+      reprocessamentoStatus: null,
+      reprocessamentoTotalDocumentos: 0,
+      reprocessamentoMensagem: null,
+      reprocessamentoLease: null
     };
   }
+
+  it('inicia um reprocessamento sem alterar o cursor principal', async () => {
+    const control = {
+      ...createControl(new Date(0)),
+      status: NfeSyncStatus.ativo,
+      ultimoNsuConsultado: 500n,
+      proximaExecucao: null
+    };
+    const updateMany = jest.fn(async ({ data }: { data: Record<string, any> }) => {
+      Object.assign(control, data);
+      return { count: 1 };
+    });
+    const prismaStub = {
+      nfceScSyncControle: {
+        findFirst: jest.fn().mockResolvedValue(control),
+        findUnique: jest.fn().mockImplementation(async () => control),
+        updateMany
+      }
+    } as unknown as PrismaService;
+    const service = new NfceScService(prismaStub, {} as NfeService, { download: jest.fn() } as NfceScClient);
+    jest.spyOn(service as any, 'startBackgroundRecovery').mockImplementation(() => undefined);
+
+    const result = await service.reprocessNsus(clienteId, controlId, {
+      clienteId,
+      nsuInicial: '100',
+      nsuFinal: '150'
+    });
+
+    expect(result).toMatchObject({
+      accepted: true,
+      started: true,
+      status: NfceScRecoveryStatus.processando,
+      nsuInicial: '100',
+      nsuFinal: '150',
+      nsuAtual: '99',
+      totalDocumentos: 0
+    });
+    expect(updateMany.mock.calls[0][0].data).toMatchObject({
+      reprocessamentoNsuInicial: 100n,
+      reprocessamentoNsuFinal: 150n,
+      reprocessamentoNsuAtual: 99n,
+      reprocessamentoStatus: NfceScRecoveryStatus.processando
+    });
+    expect(control.ultimoNsuConsultado).toBe(500n);
+  });
+
+  it('persiste NSUs encontrados no intervalo sem avancar o cursor normal', async () => {
+    const leaseUntil = new Date(Date.now() + 5 * 60 * 1000);
+    const control = {
+      ...createControl(leaseUntil),
+      status: NfeSyncStatus.ativo,
+      ultimoNsuConsultado: 100n,
+      reprocessamentoNsuInicial: 10n,
+      reprocessamentoNsuFinal: 11n,
+      reprocessamentoNsuAtual: 9n,
+      reprocessamentoStatus: NfceScRecoveryStatus.processando,
+      reprocessamentoTotalDocumentos: 0,
+      reprocessamentoLease: leaseUntil
+    };
+    const updateMany = jest.fn(async ({ data }: { data: Record<string, any> }) => {
+      const { reprocessamentoTotalDocumentos, ...updates } = data;
+      Object.assign(control, updates);
+      if (reprocessamentoTotalDocumentos?.increment) {
+        control.reprocessamentoTotalDocumentos += reprocessamentoTotalDocumentos.increment;
+      }
+      return { count: 1 };
+    });
+    const prismaStub = {
+      nfceScSyncControle: {
+        findUnique: jest.fn().mockImplementation(async () => control),
+        updateMany
+      }
+    } as unknown as PrismaService;
+    const download: NfceScClient['download'] = jest.fn().mockResolvedValue({
+      cStat: '118',
+      xMotivo: 'Lote localizado',
+      ultimoNsu: 11n,
+      documentos: createDocuments(10, 2),
+      httpStatus: 200
+    });
+    const persistNfceScDocument = jest.fn().mockResolvedValue(undefined);
+    const service = new NfceScService(
+      prismaStub,
+      { persistNfceScDocument } as unknown as NfeService,
+      { download } as NfceScClient
+    );
+    const processRecovery = (service as unknown as {
+      processNsuRecovery: (id: string, lease: Date) => Promise<void>;
+    }).processNsuRecovery.bind(service);
+
+    await processRecovery(controlId, leaseUntil);
+
+    expect(download).toHaveBeenCalledWith(expect.objectContaining({ ultimoNsu: 9n }));
+    expect(persistNfceScDocument).toHaveBeenCalledTimes(2);
+    expect(control.reprocessamentoStatus).toBe(NfceScRecoveryStatus.concluido);
+    expect(control.reprocessamentoNsuAtual).toBe(11n);
+    expect(control.reprocessamentoTotalDocumentos).toBe(2);
+    expect(control.ultimoNsuConsultado).toBe(100n);
+  });
 
   it('lista NFC-e armazenadas no escopo do cliente e aplica filtros de pesquisa', async () => {
     const storedDocument = { id: '55555555-5555-4555-8555-555555555555', modelo: '65', origem: 'sef_sc_nfce' };

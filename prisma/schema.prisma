@@ -59,6 +59,13 @@ enum NfeDocumentoOrigem {
   sef_sc_nfce
 }
 
+enum NfceScRecoveryStatus {
+  processando
+  concluido
+  pausado
+  erro
+}
+
 enum NfeTipoRelacao {
   emitida
   recebida
@@ -392,6 +399,13 @@ model NfceScSyncControle {
   diagnosticoXmlRequisicao String?    @map("diagnostico_xml_requisicao") @db.Text
   diagnosticoXmlResposta String?      @map("diagnostico_xml_resposta") @db.Text
   diagnosticoXmlCriadoEm DateTime?    @map("diagnostico_xml_criado_em")
+  reprocessamentoNsuInicial BigInt?    @map("reprocessamento_nsu_inicial")
+  reprocessamentoNsuFinal BigInt?      @map("reprocessamento_nsu_final")
+  reprocessamentoNsuAtual BigInt?      @map("reprocessamento_nsu_atual")
+  reprocessamentoStatus NfceScRecoveryStatus? @map("reprocessamento_status")
+  reprocessamentoTotalDocumentos Int    @default(0) @map("reprocessamento_total_documentos")
+  reprocessamentoMensagem String?       @map("reprocessamento_mensagem") @db.Text
+  reprocessamentoLease DateTime?        @map("reprocessamento_lease")
   createdAt             DateTime      @default(now()) @map("created_at")
   updatedAt             DateTime      @updatedAt @map("updated_at")
 

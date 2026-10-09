@@ -2456,6 +2456,12 @@ function onDocumentSubmit(event) {
     return;
   }
 
+  if (target.matches('[data-nfce-sc-reprocess-form]')) {
+    event.preventDefault();
+    void submitNfceScRecoveryForm(target);
+    return;
+  }
+
   switch (target.id) {
     case 'authLoginForm': {
       event.preventDefault();
@@ -4378,10 +4384,10 @@ function getNfceScStats() {
   const controls = state.nfceScControls || [];
   return controls.reduce(
     (acc, control) => {
-      if (control.status === 'processando') acc.consultando += 1;
+      if (control.status === 'processando' || control.reprocessamentoStatus === 'processando') acc.consultando += 1;
+      else if (String(control.status || '').startsWith('erro') || control.reprocessamentoStatus === 'erro') acc.erros += 1;
       else if (control.status === 'ativo') acc.ativos += 1;
       else if (control.status === 'pausado') acc.pausados += 1;
-      else if (String(control.status || '').startsWith('erro')) acc.erros += 1;
       return acc;
     },
     { ativos: 0, consultando: 0, pausados: 0, erros: 0 }
@@ -4390,7 +4396,7 @@ function getNfceScStats() {
 
 function renderNfceScPage() {
   state.nfceScControls
-    .filter((control) => control.status === 'processando')
+    .filter((control) => control.status === 'processando' || control.reprocessamentoStatus === 'processando')
     .forEach((control) => void monitorNfceScControl(control.id, control.clienteId));
   const activeClients = state.clients.filter((client) => client.id);
   const establishments = Object.entries(state.establishmentsByClient || {}).flatMap(([clienteId, rows]) =>
@@ -4492,23 +4498,47 @@ function renderNfceScPage() {
 
 function renderNfceScControlRow(control) {
   const isProcessing = control.status === 'processando';
+  const isRecoveryProcessing = control.reprocessamentoStatus === 'processando';
+  const isAnyProcessing = isProcessing || isRecoveryProcessing;
   const isPaused = control.status === 'pausado';
-  const statusLabel = isProcessing ? 'Consultando' : control.status === 'ativo' ? 'Configurado' : mapNfeSyncStatusLabel(control.status);
+  const latestNsu = String(control.ultimoNsuConsultado ?? '0');
+  const recoveryStart = String(control.reprocessamentoNsuInicial ?? '0');
+  const recoveryEnd = String(control.reprocessamentoNsuFinal ?? latestNsu);
+  const hasNsus = /^\d+$/.test(latestNsu) && BigInt(latestNsu) > 0n;
+  const statusLabel = isRecoveryProcessing
+    ? 'Reprocessando NSUs'
+    : isProcessing
+      ? 'Consultando'
+      : control.status === 'ativo'
+        ? 'Configurado'
+        : mapNfeSyncStatusLabel(control.status);
   const runLabel = isProcessing ? 'Consultando...' : isPaused ? 'Retomar' : 'Consultar agora';
+  const recoveryTone = control.reprocessamentoStatus === 'erro' ? 'danger' : control.reprocessamentoStatus === 'concluido' ? 'success' : 'info';
   return `
     <tr>
       <td>${escapeHtml(control.estabelecimento?.razaoSocial || control.estabelecimento?.cnpj || '-')}</td>
       <td>${escapeHtml(formatCnpj(control.cnpjConsulta || ''))}</td>
       <td>${escapeHtml(control.certificado?.nome || 'Nao selecionado')}</td>
-      <td>${escapeHtml(String(control.ultimoNsuConsultado ?? '0'))}</td>
-      <td>${statusBadge(statusLabel, toneFromNfeSyncStatus(control.status))}</td>
+      <td>${escapeHtml(latestNsu)}</td>
+      <td>${statusBadge(statusLabel, isRecoveryProcessing ? 'info' : toneFromNfeSyncStatus(control.status))}</td>
       <td>
         <span class="row-sub">${escapeHtml(control.ultimaMensagem || 'Aguardando primeira consulta')}</span>
+        ${control.reprocessamentoStatus ? `<span class="row-sub nfce-sc-recovery-status">${statusBadge(`Reprocessamento ${control.reprocessamentoStatus}`, recoveryTone)} ${escapeHtml(control.reprocessamentoMensagem || '')}</span>` : ''}
         <div class="stack-actions" style="justify-content:flex-start;margin-top:6px">
-          <button class="btn secondary" type="button" data-action="nfce-sc-run" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isProcessing ? 'disabled' : ''}>${runLabel}</button>
-          <button class="btn ghost" type="button" data-action="nfce-sc-pause" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isPaused ? 'disabled' : ''}>Pausar</button>
+          <button class="btn secondary" type="button" data-action="nfce-sc-run" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isAnyProcessing ? 'disabled' : ''}>${runLabel}</button>
+          <button class="btn ghost" type="button" data-action="nfce-sc-pause" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isAnyProcessing ? '' : 'disabled'}>Pausar</button>
           ${control.diagnosticoXmlCriadoEm ? `<button class="btn ghost" type="button" data-action="nfce-sc-download-diagnostic" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}">Baixar XML SEF</button>` : ''}
         </div>
+        <details class="nfce-sc-reprocess" ${isRecoveryProcessing ? 'open' : ''}>
+          <summary>${isRecoveryProcessing ? 'Acompanhar reprocessamento' : 'Reprocessar intervalo de NSUs'}</summary>
+          <form class="nfce-sc-reprocess-form" data-nfce-sc-reprocess-form data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}">
+            <label class="field">NSU inicial (inclusive)<input name="nsuInicial" type="text" inputmode="numeric" pattern="[0-9]{1,18}" maxlength="18" value="${escapeHtml(recoveryStart)}" required ${isRecoveryProcessing || !hasNsus ? 'disabled' : ''} /></label>
+            <label class="field">NSU final (inclusive)<input name="nsuFinal" type="text" inputmode="numeric" pattern="[0-9]{1,18}" maxlength="18" value="${escapeHtml(recoveryEnd)}" required ${isRecoveryProcessing || !hasNsus ? 'disabled' : ''} /></label>
+            <input type="hidden" name="clienteId" value="${escapeHtml(control.clienteId)}" />
+            <button class="btn secondary" type="submit" ${isRecoveryProcessing || !hasNsus ? 'disabled' : ''}>${isRecoveryProcessing ? 'Reprocessando...' : 'Reprocessar NSUs'}</button>
+          </form>
+          <p class="card-subtitle">O intervalo e inclusivo, e o NSU final nao pode passar de ${escapeHtml(latestNsu)}. Use 0 como NSU inicial para buscar desde o mais antigo que a SEF/SC ainda disponibiliza. O cursor normal nao sera alterado.</p>
+        </details>
       </td>
     </tr>
   `;
@@ -4617,6 +4647,39 @@ async function executeNfceScControlAction(action, controlId, clienteId) {
   }
 }
 
+async function submitNfceScRecoveryForm(form) {
+  const controlId = form.getAttribute('data-control-id') || '';
+  const values = Object.fromEntries(new FormData(form).entries());
+  const clienteId = String(values.clienteId || '');
+  if (!controlId || !clienteId) return;
+
+  try {
+    const result = await apiRequest(`/nfce-sc/controles/${encodeURIComponent(controlId)}/reprocessar-nsus`, {
+      method: 'POST',
+      body: { clienteId, nsuInicial: String(values.nsuInicial || ''), nsuFinal: String(values.nsuFinal || '') }
+    });
+    const controls = await apiRequest(`/nfce-sc/controles?clienteId=${encodeURIComponent(clienteId)}`, { cache: false }).catch(() => []);
+    const documents = await apiRequest(`/nfce-sc/documentos?clienteId=${encodeURIComponent(clienteId)}`, { cache: false }).catch(() => []);
+    state.nfceScControls = [
+      ...state.nfceScControls.filter((control) => control.clienteId !== clienteId),
+      ...(Array.isArray(controls) ? controls : [])
+    ];
+    if (Array.isArray(documents)) {
+      const mappedDocuments = buildNfeDocumentsFromApi(documents, state.clients);
+      state.nfceScDocuments = [
+        ...state.nfceScDocuments.filter((doc) => doc.clientId !== clienteId),
+        ...mappedDocuments
+      ];
+      state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mappedDocuments);
+    }
+    render();
+    pushToast(result?.started ? 'Reprocessamento de NSUs iniciado.' : 'Reprocessamento de NSUs ja estava em andamento.', 'success');
+    void monitorNfceScControl(controlId, clienteId);
+  } catch (error) {
+    pushToast(`Falha ao reprocessar NSUs da NFC-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
 async function downloadNfceScDiagnostic(controlId, clienteId) {
   if (!controlId || !clienteId) return;
   try {
@@ -4647,7 +4710,8 @@ async function monitorNfceScControl(controlId, clienteId) {
       ];
       const control = controls.find((item) => item.id === controlId);
       if (state.route.name === 'buscas-nfce') render();
-      if (control?.status === 'processando') continue;
+      const isRecoveryProcessing = control?.reprocessamentoStatus === 'processando';
+      if (control?.status === 'processando' || isRecoveryProcessing) continue;
 
       const documents = await apiRequest(`/nfce-sc/documentos?clienteId=${encodeURIComponent(clienteId)}`, { cache: false }).catch(() => null);
       if (Array.isArray(documents)) {
@@ -4660,6 +4724,18 @@ async function monitorNfceScControl(controlId, clienteId) {
       }
       if (state.route.name === 'buscas-nfce') render();
 
+      if (control?.reprocessamentoStatus === 'pausado') {
+        pushToast(control.reprocessamentoMensagem || 'Reprocessamento de NSUs pausado.', 'info');
+        return;
+      }
+      if (control?.reprocessamentoStatus === 'erro') {
+        pushToast(control.reprocessamentoMensagem || 'O reprocessamento de NSUs terminou com erro.', 'error');
+        return;
+      }
+      if (control?.reprocessamentoStatus === 'concluido') {
+        pushToast(control.reprocessamentoMensagem || 'Reprocessamento de NSUs concluido.', 'success');
+        return;
+      }
       if (control?.status === 'pausado') return;
       if (String(control?.status || '').startsWith('erro')) {
         pushToast(control.ultimaMensagem || 'A consulta NFC-e SC terminou com erro.', 'error');

@@ -2720,6 +2720,44 @@ input[type='checkbox'] {
   flex-wrap: wrap;
 }
 
+.nfce-sc-reprocess {
+  margin-top: 10px;
+  border-top: 1px solid var(--line-strong);
+  padding-top: 8px;
+}
+
+.nfce-sc-reprocess summary {
+  color: var(--accent-dark);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.nfce-sc-reprocess-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(90px, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.nfce-sc-reprocess-form .btn,
+.nfce-sc-reprocess > .card-subtitle {
+  grid-column: 1 / -1;
+}
+
+.nfce-sc-reprocess-form input {
+  height: 34px;
+}
+
+.nfce-sc-reprocess > .card-subtitle {
+  margin: 8px 0 0;
+  font-size: 0.72rem;
+}
+
+.nfce-sc-recovery-status {
+  margin-top: 6px;
+}
+
 .table-state {
   padding: 32px 12px;
   text-align: center;

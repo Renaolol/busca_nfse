@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Inject,
   Injectable,
   Logger,
@@ -7,7 +8,7 @@ import {
   OnModuleDestroy,
   OnModuleInit
 } from '@nestjs/common';
-import { NfeAmbiente, NfeSyncStatus, Prisma } from '@prisma/client';
+import { NfeAmbiente, NfeSyncStatus, NfceScRecoveryStatus, Prisma } from '@prisma/client';
 import JSZip from 'jszip';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
 import { PrismaService } from '../../prisma/prisma.service';
@@ -15,6 +16,7 @@ import { NfeService } from '../nfe/nfe.service';
 import { NFCE_SC_CLIENT, NfceScClient } from '../../integrations/nfce-sc/nfce-sc.types';
 import { ConfigureNfceScSyncDto } from './dto/configure-nfce-sc-sync.dto';
 import { QueryNfceScStoredDocumentsDto } from './dto/query-nfce-sc-stored-documents.dto';
+import { ReprocessNfceScNsusDto } from './dto/reprocess-nfce-sc-nsus.dto';
 
 @Injectable()
 export class NfceScService implements OnModuleInit, OnModuleDestroy {
@@ -65,6 +67,13 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
         ultimaMensagem: true,
         totalDocumentosBaixados: true,
         diagnosticoXmlCriadoEm: true,
+        reprocessamentoNsuInicial: true,
+        reprocessamentoNsuFinal: true,
+        reprocessamentoNsuAtual: true,
+        reprocessamentoStatus: true,
+        reprocessamentoTotalDocumentos: true,
+        reprocessamentoMensagem: true,
+        reprocessamentoLease: true,
         createdAt: true,
         updatedAt: true,
         estabelecimento: { select: { id: true, cnpj: true, razaoSocial: true } },
@@ -258,10 +267,13 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
           ambiente: dto.ambiente
         }
       },
-      select: { status: true }
+      select: { status: true, reprocessamentoStatus: true }
     });
     if (currentControl?.status === NfeSyncStatus.processando) {
       throw new BadRequestException('Pause a consulta NFC-e SC antes de alterar a configuracao');
+    }
+    if (currentControl?.reprocessamentoStatus === NfceScRecoveryStatus.processando) {
+      throw new BadRequestException('Pause o reprocessamento de NSUs antes de alterar a configuracao');
     }
     return this.prisma.nfceScSyncControle.upsert({
       where: {
@@ -302,12 +314,23 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
       }
     });
     if (!result.count) throw new NotFoundException('Controle NFC-e SC nao encontrado');
+    await this.prisma.nfceScSyncControle.updateMany({
+      where: { id, clienteId, reprocessamentoStatus: NfceScRecoveryStatus.processando },
+      data: {
+        reprocessamentoStatus: NfceScRecoveryStatus.pausado,
+        reprocessamentoLease: null,
+        reprocessamentoMensagem: 'Reprocessamento pausado manualmente; retome o mesmo intervalo para continuar.'
+      }
+    });
     return { paused: true };
   }
 
   async run(clienteId: string, id: string) {
     const control = await this.prisma.nfceScSyncControle.findFirst({ where: { id, clienteId } });
     if (!control) throw new NotFoundException('Controle NFC-e SC nao encontrado');
+    if (control.reprocessamentoStatus === NfceScRecoveryStatus.processando) {
+      throw new ConflictException('O reprocessamento de NSUs deste controle ainda esta em andamento');
+    }
     if (control.status === NfeSyncStatus.processando) return this.toRunResponse(control, false);
     const retryingInternalServerError = /^SEF\/SC 9999:/i.test(control.ultimaMensagem || '');
     if (!retryingInternalServerError && control.proximaExecucao && control.proximaExecucao > new Date()) {
@@ -321,6 +344,12 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
         id,
         clienteId,
         status: { notIn: [NfeSyncStatus.processando] },
+        AND: [{
+          OR: [
+            { reprocessamentoStatus: null },
+            { reprocessamentoStatus: { not: NfceScRecoveryStatus.processando } }
+          ]
+        }],
         ...(!retryingInternalServerError
           ? { OR: [{ proximaExecucao: null }, { proximaExecucao: { lte: now } }] }
           : {})
@@ -351,6 +380,308 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
     };
     this.startBackgroundExecution(id, leaseUntil);
     return this.toRunResponse(startedControl, true);
+  }
+
+  async reprocessNsus(clienteId: string, id: string, dto: ReprocessNfceScNsusDto) {
+    const control = await this.prisma.nfceScSyncControle.findFirst({ where: { id, clienteId } });
+    if (!control) throw new NotFoundException('Controle NFC-e SC nao encontrado');
+
+    const nsuInicial = BigInt(dto.nsuInicial);
+    const nsuFinal = BigInt(dto.nsuFinal);
+    if (nsuInicial < 0n || nsuFinal < 1n || nsuFinal < nsuInicial) {
+      throw new BadRequestException('Informe um intervalo de NSUs valido, com o NSU final igual ou maior que o inicial');
+    }
+    if (nsuFinal > control.ultimoNsuConsultado) {
+      throw new BadRequestException(`O NSU final nao pode ultrapassar o ultimo NSU consultado (${control.ultimoNsuConsultado})`);
+    }
+    if (control.status === NfeSyncStatus.processando) {
+      throw new ConflictException('Pause a consulta NFC-e SC antes de reprocessar NSUs');
+    }
+    if (control.reprocessamentoStatus === NfceScRecoveryStatus.processando) {
+      if (control.reprocessamentoNsuInicial === nsuInicial && control.reprocessamentoNsuFinal === nsuFinal) {
+        return this.toRecoveryResponse(control, false);
+      }
+      throw new ConflictException('Ja existe um reprocessamento de NSUs em andamento para este controle');
+    }
+
+    const now = new Date();
+    if (control.proximaExecucao && control.proximaExecucao > now) {
+      throw new BadRequestException(`Proxima consulta permitida em ${control.proximaExecucao.toISOString()}`);
+    }
+
+    const isResume =
+      control.reprocessamentoNsuInicial === nsuInicial &&
+      control.reprocessamentoNsuFinal === nsuFinal &&
+      (control.reprocessamentoStatus === NfceScRecoveryStatus.pausado ||
+        control.reprocessamentoStatus === NfceScRecoveryStatus.erro) &&
+      control.reprocessamentoNsuAtual !== null;
+    const initialCursor = nsuInicial > 0n ? nsuInicial - 1n : 0n;
+    const currentCursor = isResume ? control.reprocessamentoNsuAtual! : initialCursor;
+    const leaseUntil = this.newLease();
+    const started = await this.prisma.nfceScSyncControle.updateMany({
+      where: {
+        id,
+        clienteId,
+        status: { not: NfeSyncStatus.processando },
+        AND: [
+          {
+            OR: [
+              { reprocessamentoStatus: null },
+              { reprocessamentoStatus: { not: NfceScRecoveryStatus.processando } }
+            ]
+          },
+          { OR: [{ proximaExecucao: null }, { proximaExecucao: { lte: now } }] }
+        ]
+      },
+      data: {
+        reprocessamentoNsuInicial: nsuInicial,
+        reprocessamentoNsuFinal: nsuFinal,
+        reprocessamentoNsuAtual: currentCursor,
+        reprocessamentoStatus: NfceScRecoveryStatus.processando,
+        reprocessamentoTotalDocumentos: isResume ? control.reprocessamentoTotalDocumentos : 0,
+        reprocessamentoMensagem: isResume
+          ? `Reprocessamento retomado a partir do NSU ${currentCursor}.`
+          : `Reprocessamento do intervalo NSU ${nsuInicial}-${nsuFinal} iniciado.`,
+        reprocessamentoLease: leaseUntil,
+        proximaExecucao: leaseUntil
+      }
+    });
+
+    if (!started.count) {
+      const current = await this.prisma.nfceScSyncControle.findFirst({ where: { id, clienteId } });
+      if (current?.reprocessamentoStatus === NfceScRecoveryStatus.processando) {
+        return this.toRecoveryResponse(current, false);
+      }
+      if (current?.status === NfeSyncStatus.processando) {
+        throw new ConflictException('Pause a consulta NFC-e SC antes de reprocessar NSUs');
+      }
+      throw new ConflictException('Nao foi possivel iniciar o reprocessamento; atualize o controle e tente novamente');
+    }
+
+    this.startBackgroundRecovery(id, leaseUntil);
+    const startedControl = await this.prisma.nfceScSyncControle.findUnique({ where: { id } });
+    if (!startedControl) throw new NotFoundException('Controle NFC-e SC nao encontrado');
+    return this.toRecoveryResponse(startedControl, true);
+  }
+
+  private toRecoveryResponse(control: {
+    reprocessamentoNsuInicial: bigint | null;
+    reprocessamentoNsuFinal: bigint | null;
+    reprocessamentoNsuAtual: bigint | null;
+    reprocessamentoTotalDocumentos: number;
+    reprocessamentoMensagem: string | null;
+  }, started: boolean) {
+    return {
+      accepted: true,
+      started,
+      status: NfceScRecoveryStatus.processando,
+      nsuInicial: String(control.reprocessamentoNsuInicial ?? 0n),
+      nsuFinal: String(control.reprocessamentoNsuFinal ?? 0n),
+      nsuAtual: String(control.reprocessamentoNsuAtual ?? 0n),
+      totalDocumentos: control.reprocessamentoTotalDocumentos,
+      mensagem: control.reprocessamentoMensagem || 'Reprocessamento NFC-e SC em andamento.'
+    };
+  }
+
+  private startBackgroundRecovery(id: string, leaseUntil: Date): void {
+    if (this.runningControls.has(id)) return;
+    this.runningControls.add(id);
+    void this.processNsuRecovery(id, leaseUntil)
+      .catch(async (error: unknown) => {
+        try {
+          const current = await this.prisma.nfceScSyncControle.findUnique({ where: { id } });
+          if (current?.reprocessamentoStatus === NfceScRecoveryStatus.processando && current.reprocessamentoLease) {
+            await this.stopNsuRecoveryAfterError(id, current.reprocessamentoLease, error);
+          }
+        } catch (recoveryError) {
+          this.logger.error(`Falha inesperada no reprocessamento NFC-e SC ${id}: ${this.toErrorMessage(recoveryError)}`);
+        }
+      })
+      .finally(() => this.runningControls.delete(id));
+  }
+
+  private async processNsuRecovery(id: string, initialLease: Date): Promise<void> {
+    let leaseUntil = initialLease;
+    while (true) {
+      const control = await this.prisma.nfceScSyncControle.findUnique({ where: { id } });
+      if (
+        !control ||
+        control.reprocessamentoStatus !== NfceScRecoveryStatus.processando ||
+        !this.sameDate(control.reprocessamentoLease, leaseUntil)
+      ) {
+        return;
+      }
+
+      const nsuFinal = control.reprocessamentoNsuFinal;
+      const requestCursor = control.reprocessamentoNsuAtual;
+      if (nsuFinal === null || requestCursor === null) {
+        await this.stopNsuRecoveryAfterError(id, leaseUntil, new Error('Intervalo de NSUs ausente no reprocessamento.'));
+        return;
+      }
+      if (requestCursor >= nsuFinal) {
+        await this.finishNsuRecovery({
+          id,
+          leaseUntil,
+          cursor: nsuFinal,
+          totalDocuments: 0,
+          message: `Reprocessamento concluido no intervalo NSU ${control.reprocessamentoNsuInicial}-${nsuFinal}. O cursor principal permaneceu em ${control.ultimoNsuConsultado}.`
+        });
+        return;
+      }
+
+      const renewedLease = this.newLease();
+      const renewed = await this.prisma.nfceScSyncControle.updateMany({
+        where: {
+          id,
+          status: { not: NfeSyncStatus.processando },
+          reprocessamentoStatus: NfceScRecoveryStatus.processando,
+          reprocessamentoLease: leaseUntil
+        },
+        data: { reprocessamentoLease: renewedLease, proximaExecucao: renewedLease }
+      });
+      if (!renewed.count) return;
+      leaseUntil = renewedLease;
+
+      let result;
+      try {
+        result = await this.client.download({
+          clienteId: control.clienteId,
+          cnpjConsulta: control.cnpjConsulta,
+          certificadoId: control.certificadoId || '',
+          ambiente: control.ambiente,
+          ultimoNsu: requestCursor,
+          indAtor: control.indAtor
+        });
+      } catch (error) {
+        await this.stopNsuRecoveryAfterError(id, leaseUntil, error);
+        return;
+      }
+
+      if (result.cStat === '117') {
+        await this.finishNsuRecovery({
+          id,
+          leaseUntil,
+          cursor: requestCursor,
+          totalDocuments: 0,
+          message: `Reprocessamento concluido. A SEF/SC nao retornou documentos no intervalo NSU ${control.reprocessamentoNsuInicial}-${nsuFinal}.`
+        });
+        return;
+      }
+      if (result.cStat !== '118') {
+        await this.stopNsuRecoveryAfterError(id, leaseUntil, new Error(`SEF/SC ${result.cStat}: ${result.xMotivo}`));
+        return;
+      }
+
+      const documents = result.documentos
+        .filter((document) => document.nsu > requestCursor)
+        .sort((left, right) => left.nsu < right.nsu ? -1 : left.nsu > right.nsu ? 1 : 0);
+      if (!documents.length || documents[0].nsu > nsuFinal) {
+        await this.finishNsuRecovery({
+          id,
+          leaseUntil,
+          cursor: requestCursor,
+          totalDocuments: 0,
+          message: `Reprocessamento concluido sem documentos no intervalo NSU ${control.reprocessamentoNsuInicial}-${nsuFinal}. A SEF/SC disponibiliza somente os tres meses de referencia mais recentes.`
+        });
+        return;
+      }
+
+      let cursor = requestCursor;
+      let totalDocuments = 0;
+      for (const document of documents) {
+        if (document.nsu > nsuFinal) break;
+        await this.nfeService.persistNfceScDocument({
+          clienteId: control.clienteId,
+          estabelecimentoId: control.estabelecimentoId,
+          ambiente: control.ambiente,
+          cnpjConsulta: control.cnpjConsulta,
+          xml: document.xml
+        });
+        if (document.nsu > cursor) cursor = document.nsu;
+        totalDocuments += 1;
+      }
+
+      if (documents.length === NfceScService.BATCH_SIZE && cursor <= requestCursor) {
+        await this.stopNsuRecoveryAfterError(
+          id,
+          leaseUntil,
+          new Error('A SEF/SC retornou um lote completo sem avancar o NSU; reprocessamento interrompido para evitar repeticao.')
+        );
+        return;
+      }
+
+      const outOfRange = documents.some((document) => document.nsu > nsuFinal);
+      const completed = outOfRange || cursor >= nsuFinal || documents.length < NfceScService.BATCH_SIZE;
+      const nextLease = completed ? null : this.newLease();
+      const now = new Date();
+      const message = completed
+        ? `Reprocessamento concluido no intervalo NSU ${control.reprocessamentoNsuInicial}-${nsuFinal}. ${control.reprocessamentoTotalDocumentos + totalDocuments} documento(s) revisado(s); o cursor principal permaneceu em ${control.ultimoNsuConsultado}.`
+        : `Reprocessamento em andamento: ${control.reprocessamentoTotalDocumentos + totalDocuments} documento(s) revisado(s), cursor do intervalo ${cursor} de ${nsuFinal}.`;
+      const updated = await this.prisma.nfceScSyncControle.updateMany({
+        where: {
+          id,
+          status: { not: NfeSyncStatus.processando },
+          reprocessamentoStatus: NfceScRecoveryStatus.processando,
+          reprocessamentoLease: leaseUntil
+        },
+        data: {
+          reprocessamentoNsuAtual: outOfRange ? nsuFinal : cursor,
+          reprocessamentoTotalDocumentos: { increment: totalDocuments },
+          reprocessamentoStatus: completed ? NfceScRecoveryStatus.concluido : NfceScRecoveryStatus.processando,
+          reprocessamentoMensagem: message,
+          reprocessamentoLease: nextLease,
+          proximaExecucao: completed ? new Date(now.getTime() + 12 * 60 * 60 * 1000) : nextLease
+        }
+      });
+      if (!updated.count || completed) return;
+      leaseUntil = nextLease!;
+    }
+  }
+
+  private async finishNsuRecovery(params: {
+    id: string;
+    leaseUntil: Date;
+    cursor: bigint;
+    totalDocuments: number;
+    message: string;
+  }): Promise<void> {
+    const now = new Date();
+    await this.prisma.nfceScSyncControle.updateMany({
+      where: {
+        id: params.id,
+        status: { not: NfeSyncStatus.processando },
+        reprocessamentoStatus: NfceScRecoveryStatus.processando,
+        reprocessamentoLease: params.leaseUntil
+      },
+      data: {
+        reprocessamentoNsuAtual: params.cursor,
+        reprocessamentoTotalDocumentos: { increment: params.totalDocuments },
+        reprocessamentoStatus: NfceScRecoveryStatus.concluido,
+        reprocessamentoMensagem: params.message,
+        reprocessamentoLease: null,
+        proximaExecucao: new Date(now.getTime() + 12 * 60 * 60 * 1000)
+      }
+    });
+  }
+
+  private async stopNsuRecoveryAfterError(id: string, leaseUntil: Date, error: unknown): Promise<void> {
+    const message = this.toErrorMessage(error);
+    const next = new Date(Date.now() + 60 * 60 * 1000);
+    await this.prisma.nfceScSyncControle.updateMany({
+      where: {
+        id,
+        status: { not: NfeSyncStatus.processando },
+        reprocessamentoStatus: NfceScRecoveryStatus.processando,
+        reprocessamentoLease: leaseUntil
+      },
+      data: {
+        reprocessamentoStatus: NfceScRecoveryStatus.erro,
+        reprocessamentoMensagem: `Falha no reprocessamento de NSUs: ${message}`,
+        reprocessamentoLease: null,
+        proximaExecucao: next
+      }
+    });
+    this.logger.warn(`Reprocessamento NFC-e SC ${id} interrompido: ${message}`);
   }
 
   private toRunResponse(control: {
@@ -502,6 +833,33 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
   private async resumeExpiredExecutions(): Promise<void> {
     try {
       const now = new Date();
+      const expiredRecoveries = await this.prisma.nfceScSyncControle.findMany({
+        where: {
+          status: { not: NfeSyncStatus.processando },
+          reprocessamentoStatus: NfceScRecoveryStatus.processando,
+          reprocessamentoLease: { lte: now }
+        },
+        select: { id: true, reprocessamentoLease: true }
+      });
+      for (const { id, reprocessamentoLease } of expiredRecoveries) {
+        if (this.runningControls.has(id) || !reprocessamentoLease) continue;
+        const leaseUntil = this.newLease();
+        const claimed = await this.prisma.nfceScSyncControle.updateMany({
+          where: {
+            id,
+            status: { not: NfeSyncStatus.processando },
+            reprocessamentoStatus: NfceScRecoveryStatus.processando,
+            reprocessamentoLease: { lte: now }
+          },
+          data: {
+            reprocessamentoLease: leaseUntil,
+            proximaExecucao: leaseUntil,
+            reprocessamentoMensagem: 'Retomando automaticamente o reprocessamento de NSUs a partir do ultimo cursor salvo.'
+          }
+        });
+        if (claimed.count) this.startBackgroundRecovery(id, leaseUntil);
+      }
+
       const expired = await this.prisma.nfceScSyncControle.findMany({
         where: { status: NfeSyncStatus.processando, proximaExecucao: { lte: now } },
         select: { id: true }
