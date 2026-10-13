@@ -1,6 +1,5 @@
 ﻿import { Injectable } from '@nestjs/common';
 import * as QRCode from 'qrcode';
-import { resolveNfseValorServico } from '../../common/utils/nfse-valor-servico.util';
 import { replaceMunicipioCodigoComNome, resolveMunicipioIbge } from '../../common/utils/municipio-ibge.util';
 
 export interface DanfseRenderInput {
@@ -1374,7 +1373,7 @@ export class NfseDanfseService {
         ['DeclaracaoPrestacaoServico', 'InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorServicos']
       ]) ??
       this.extract(xml, ['valorServico', 'ValorServicos', 'vServ']);
-    const valorServico = resolveNfseValorServico(valorServicoRaw, descricaoServico);
+    const valorServico = valorServicoRaw;
 
     const valorDeducoes = this.extract(xml, ['valorDeducoes', 'vDeducao']);
     const valorDescontoIncondicionado = this.extractFromPaths(xml, [

@@ -1,6 +1,5 @@
 ﻿import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
-import { resolveNfseValorServico } from '../../common/utils/nfse-valor-servico.util';
 import { resolveMunicipioIbge, resolveMunicipioNome } from '../../common/utils/municipio-ibge.util';
 
 export interface ParsedNfse {
@@ -133,7 +132,7 @@ export class NfseXmlParserService {
       municipioPrestacaoNome:
         this.extract(xml, ['municipioPrestacaoNome', 'xLocPrestacao', 'xLocIncid']) ??
         this.extractNestedAny(xml, ['locPrest'], ['xLocPrestacao']),
-      valorServico: resolveNfseValorServico(valorServico, descricaoServico),
+      valorServico,
       valorDeducoes: this.extract(xml, ['valorDeducoes', 'vDeducao', 'vDescCondIncond']),
       valorDescontoIncondicionado: this.extractFromPaths(xml, [
         ['infDPS', 'valores', 'vDescCondIncond', 'vDescIncond'],

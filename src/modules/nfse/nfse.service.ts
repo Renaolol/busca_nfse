@@ -36,6 +36,7 @@ import { ReprocessarDanfsesDto } from './dto/reprocessar-danfses.dto';
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
 import { SincronizarNfseEventosDto } from './dto/sincronizar-eventos.dto';
 import { UpdateNfseDocumentNumberingValidationDto } from './dto/update-document-numbering-validation.dto';
+import { UpdateNfseValorServicoDto } from './dto/update-nfse-valor-servico.dto';
 import { NfseXmlParserService, ParsedNfse, ParsedNfseEvento } from './nfse-xml-parser.service';
 
 type NfseSubstituicaoLink = {
@@ -1586,6 +1587,38 @@ export class NfseService {
       data: {
         ignorarNumeracaoValidacao: dto.ignorar,
         ignorarNumeracaoObservacao: dto.ignorar ? dto.observacao?.trim() || 'Documento desconsiderado na validacao de numeracao.' : null
+      }
+    });
+  }
+
+  async updateManualServiceValue(id: string, dto: UpdateNfseValorServicoDto) {
+    const found = await this.prisma.nfseDocumento.findUnique({
+      where: { id },
+      include: this.nfseDocumentoInclude()
+    });
+    if (!found) {
+      throw new NotFoundException('NFS-e nao encontrada');
+    }
+    this.assertNfseClientScope(found, dto.clienteId);
+
+    const statusCode = String(found.status ?? '').trim().match(/^\d{3}/)?.[0];
+    const hasCancellationEvent = (found.eventos ?? []).some((evento) => {
+      const tipo = String(evento.tipoEvento ?? '').toLowerCase();
+      const descricao = String(evento.descricao ?? '').toLowerCase();
+      return tipo.includes('110111') || tipo.includes('cancelamento') || descricao.includes('cancelamento') || descricao.includes('cancelada');
+    });
+    if (statusCode !== '102' || found.dataCancelamento || hasCancellationEvent) {
+      throw new BadRequestException('O ajuste manual de valor esta disponivel somente para NFS-e autorizada com cStat 102.');
+    }
+
+    return this.prisma.nfseDocumento.update({
+      where: { id },
+      data: { valorServicoManual: new Prisma.Decimal(dto.valorServico.toFixed(2)) },
+      select: {
+        id: true,
+        valorServico: true,
+        valorServicoManual: true,
+        updatedAt: true
       }
     });
   }

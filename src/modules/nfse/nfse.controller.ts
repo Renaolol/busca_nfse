@@ -30,6 +30,7 @@ import { ReprocessarDanfsesDto, ReprocessarDanfsesResponseDto } from './dto/repr
 import { ReprocessarXmlsDto } from './dto/reprocessar-xmls.dto';
 import { SincronizarNfseEventosDto, SincronizarNfseEventosResponseDto } from './dto/sincronizar-eventos.dto';
 import { UpdateNfseDocumentNumberingValidationDto } from './dto/update-document-numbering-validation.dto';
+import { UpdateNfseValorServicoDto } from './dto/update-nfse-valor-servico.dto';
 import { NfseService } from './nfse.service';
 
 @ApiTags('nfse')
@@ -159,6 +160,27 @@ export class NfseController {
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   updateDocumentNumberingValidation(@Param('id') id: string, @Body() dto: UpdateNfseDocumentNumberingValidationDto) {
     return this.nfseService.updateDocumentNumberingValidation(id, dto);
+  }
+
+  @Patch(':id/valor-servico')
+  @ApiOperation({
+    summary: 'Altera manualmente o valor de servico de uma NFS-e autorizada com cStat 102',
+    description: 'Preserva o valor oficial do XML e grava o valor informado como ajuste manual persistente.'
+  })
+  @ApiOkResponse({
+    schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string', format: 'uuid' },
+        valorServico: { type: 'string', nullable: true },
+        valorServicoManual: { type: 'string', nullable: true },
+        updatedAt: { type: 'string', format: 'date-time' }
+      }
+    }
+  })
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  updateManualServiceValue(@Param('id') id: string, @Body() dto: UpdateNfseValorServicoDto) {
+    return this.nfseService.updateManualServiceValue(id, dto);
   }
 
   @Get('separadas')

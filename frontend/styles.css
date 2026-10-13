@@ -2820,6 +2820,11 @@ input[type='checkbox'] {
   box-shadow: inset 3px 0 0 var(--danger);
 }
 
+.xml-row-authorized-102 {
+  background: #fffbf0;
+  box-shadow: inset 3px 0 0 var(--warning);
+}
+
 .cert-row-vencido,
 tbody tr.cert-row-vencido:hover {
   background: #fff5f5;
@@ -4193,6 +4198,10 @@ tbody tr.cert-row-a-vencer:hover {
 [data-theme='Escuro'] .cert-row-vencido,
 [data-theme='Escuro'] tbody tr.cert-row-vencido:hover {
   background: rgba(226, 99, 95, 0.12);
+}
+
+[data-theme='Escuro'] .xml-row-authorized-102 {
+  background: rgba(240, 180, 41, 0.12);
 }
 
 [data-theme='Escuro'] .cert-row-a-vencer,

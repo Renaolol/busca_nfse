@@ -2143,6 +2143,13 @@ function onDocumentClick(event) {
       void openXmlDetails(xmlId);
       return;
     }
+    case 'xml-edit-value': {
+      const xmlId = actionNode.getAttribute('data-xml-id');
+      if (xmlId) {
+        openXmlManualValueModal(xmlId);
+      }
+      return;
+    }
     case 'xml-toggle-numbering-validation': {
       const xmlId = actionNode.getAttribute('data-xml-id');
       if (!xmlId) {
@@ -2531,6 +2538,11 @@ function onDocumentSubmit(event) {
     case 'xmlsFilterForm': {
       event.preventDefault();
       void applyXmlFilters(target);
+      return;
+    }
+    case 'xmlManualValueForm': {
+      event.preventDefault();
+      void submitXmlManualValueForm(target);
       return;
     }
     case 'difalReaderForm': {
@@ -3963,10 +3975,13 @@ function renderClientDetailsPage(clientId) {
                           const clientXmlMenuId = `client-xml:${xml.id}`;
                           const clientXmlMenuItems = [
                             { label: 'Visualizar', action: 'xml-details', attrs: { 'xml-id': xml.id } },
+                            ...(xml.statusFiscal === 'Autorizada - 102'
+                              ? [{ label: 'Alterar valor pela descricao', action: 'xml-edit-value', attrs: { 'xml-id': xml.id } }]
+                              : []),
                             { label: 'Baixar XML', action: 'xml-download', attrs: { 'xml-id': xml.id } },
                             { label: 'Baixar DANFSE', action: 'xml-download-danfse', attrs: { 'xml-id': xml.id } }
                           ];
-                          return `<tr class="${xml.cancelada && !xml.substitui ? 'xml-row-cancelled' : ''}" data-row-actions-menu-id="${escapeHtml(clientXmlMenuId)}">
+                          return `<tr class="${xml.cancelada && !xml.substitui ? 'xml-row-cancelled' : xml.statusFiscal === 'Autorizada - 102' ? 'xml-row-authorized-102' : ''}" data-row-actions-menu-id="${escapeHtml(clientXmlMenuId)}">
                             <td>${renderNfseNumber(xml)}</td>
                             <td>${escapeHtml(formatDate(xml.dataEmissao))}</td>
                             <td>${escapeHtml(`${xml.prestador} / ${xml.tomador}`)}</td>
@@ -6383,6 +6398,9 @@ function renderXmlsTableCard(xmls) {
                       ]
                     : [
                         { label: 'Visualizar detalhes', action: 'xml-details', attrs: { 'xml-id': xml.id } },
+                        ...(xml.statusFiscal === 'Autorizada - 102'
+                          ? [{ label: 'Alterar valor pela descricao', action: 'xml-edit-value', attrs: { 'xml-id': xml.id } }]
+                          : []),
                         {
                           label: xml.ignorarNumeracaoValidacao ? 'Voltar numeracao' : 'Desconsiderar numeracao',
                           action: 'xml-toggle-numbering-validation',
@@ -6393,7 +6411,7 @@ function renderXmlsTableCard(xmls) {
                         { label: 'Baixar XML', action: 'xml-download', attrs: { 'xml-id': xml.id } },
                         { label: 'Baixar DANFSE', action: 'xml-download-danfse', attrs: { 'xml-id': xml.id } }
                       ];
-                  return `<tr class="${xml.cancelada && !xml.substitui ? 'xml-row-cancelled' : ''}" data-row-actions-menu-id="${escapeHtml(xmlMenuId)}">
+                  return `<tr class="${xml.cancelada && !xml.substitui ? 'xml-row-cancelled' : xml.statusFiscal === 'Autorizada - 102' ? 'xml-row-authorized-102' : ''}" data-row-actions-menu-id="${escapeHtml(xmlMenuId)}">
                     <td><input type="checkbox" data-action="xml-select" data-xml-id="${escapeHtml(xml.id)}" ${state.selectedXmlIds.has(xml.id) ? 'checked' : ''} ${xml.apiNfseId ? '' : 'disabled'} aria-label="Selecionar NFS-e ${escapeHtml(xml.numeroNfse || '-')}" /></td>
                     <td>${renderNfseNumber(xml)}</td>
                     <td>${escapeHtml(xml.cliente)}</td>
@@ -11487,6 +11505,8 @@ function renderModal() {
           </div>
         </div>
       `;
+    case 'xml-edit-value':
+      return renderXmlManualValueModal();
     case 'recover-past-nsus':
       return renderRecoverPastNsusModal();
     case 'import-clients':
@@ -11563,6 +11583,48 @@ function renderModal() {
     default:
       return '';
   }
+}
+
+function renderXmlManualValueModal() {
+  const xml = findXmlById(state.modal?.xmlId);
+  if (!xml) {
+    return '';
+  }
+
+  const currentValue = Number(xml.valor ?? 0);
+  const inputValue = (Number.isFinite(currentValue) ? currentValue : 0).toFixed(2).replace('.', ',');
+  const submitting = Boolean(state.modal.submitting);
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Alterar valor da NFS-e ${escapeHtml(xml.numeroNfse || '')}</h3>
+          <p class="modal-subtitle">Confira a descricao da nota e informe o valor correto. O valor oficial do XML sera preservado.</p>
+        </div>
+        <form id="xmlManualValueForm">
+          <div class="modal-body">
+            <div class="form-grid two">
+              ${detailItem('Situacao fiscal', xml.statusFiscal || '-')}
+              ${detailItem('Valor atual', formatCurrency(xml.valor))}
+            </div>
+            <div style="margin-top:14px; padding:12px; border:1px solid var(--line); border-radius:10px; max-height:180px; overflow:auto; white-space:pre-wrap;">
+              <strong style="display:block; margin-bottom:6px;">Descricao da nota</strong>
+              ${escapeHtml(xml.descricaoServico || 'Descricao nao disponivel.')}
+            </div>
+            <label class="field" style="margin-top:14px;">
+              Valor correto (R$)
+              <input name="valorServico" type="text" inputmode="decimal" autocomplete="off" value="${escapeHtml(inputValue)}" placeholder="0,00" required ${submitting ? 'disabled' : ''} />
+            </label>
+            <p class="card-subtitle" style="margin:8px 0 0;">Exemplo: 1.234,56. O ajuste permanece salvo ate uma nova alteracao.</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Cancelar</button>
+            <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Salvando...' : 'Salvar valor'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
 }
 
 function renderRecoverPastNsusModal() {
@@ -22985,7 +23047,8 @@ function buildXmlFilesFromApi(nfseDocs, clients, contextClienteId) {
         ambiente: doc.ambiente || 'producao',
         dataEmissao: doc.dataEmissao || doc.createdAt || doc.updatedAt,
         dataDownload: doc.updatedAt || doc.createdAt || doc.dataEmissao,
-        valor: toNumber(doc.valorServico),
+        valor: toNumber(doc.valorServicoManual ?? doc.valorServico),
+        valorServicoManual: toNumber(doc.valorServicoManual),
         tipo,
         statusArmazenamento: doc.xmlPath ? 'Armazenado' : 'Erro',
         statusFiscal,
@@ -23048,7 +23111,7 @@ function resolveFiscalStatus(status, dataCancelamento, cancelamentoEvento) {
 function resolveNfseFiscalStatus(status, dataCancelamento, cancelamentoEvento) {
   const normalized = normalizeSearchText(status);
   if (!dataCancelamento && !cancelamentoEvento && normalized === '102') {
-    return 'Autorizada por decisao administrativa/judicial';
+    return 'Autorizada - 102';
   }
 
   return resolveFiscalStatus(status, dataCancelamento, cancelamentoEvento);
@@ -25078,6 +25141,9 @@ function toneFromFiscalStatus(status) {
   if (normalized.includes('cancel') || normalized.includes('inutiliz')) {
     return 'danger';
   }
+  if (normalized.includes('102') && normalized.includes('autoriz')) {
+    return 'warning';
+  }
   if (normalized.includes('autoriz')) {
     return 'success';
   }
@@ -25608,6 +25674,77 @@ async function openXmlDetails(xmlId, options = {}) {
     alertId: String(options.alertId || '').trim(),
     returnTo: options.returnToModal ? cloneModalState(options.returnToModal) : null
   });
+}
+
+function openXmlManualValueModal(xmlId) {
+  const xml = findXmlById(xmlId);
+  if (!xml || !xml.apiNfseId || !xml.clientId || xml.statusFiscal !== 'Autorizada - 102') {
+    pushToast('O ajuste manual esta disponivel somente para NFS-e Autorizada - 102.', 'error');
+    return;
+  }
+
+  openModal({ kind: 'xml-edit-value', xmlId: xml.id });
+}
+
+async function submitXmlManualValueForm(form) {
+  const xml = findXmlById(state.modal?.xmlId);
+  if (!xml || !xml.apiNfseId || !xml.clientId) {
+    pushToast('Nao foi possivel localizar a NFS-e para alterar o valor.', 'error');
+    return;
+  }
+
+  const formData = new FormData(form);
+  const valorServico = parseBrazilianCurrencyInput(formData.get('valorServico'));
+  if (!Number.isFinite(valorServico) || valorServico < 0) {
+    pushToast('Informe um valor valido, sem sinal negativo e com ate duas casas decimais.', 'error');
+    return;
+  }
+
+  state.modal.submitting = true;
+  render();
+  try {
+    await apiRequest(`/nfse/${encodeURIComponent(xml.apiNfseId)}/valor-servico`, {
+      method: 'PATCH',
+      body: { clienteId: xml.clientId, valorServico }
+    });
+
+    const applyOverride = (rows) =>
+      rows.map((row) =>
+        row.apiNfseId === xml.apiNfseId ? { ...row, valor: valorServico, valorServicoManual: valorServico } : row
+      );
+    state.xmlFiles = applyOverride(state.xmlFiles);
+    state.xmlSearch.results = applyOverride(state.xmlSearch.results);
+    state.modal = null;
+    render();
+    pushToast(`Valor da NFS-e ${xml.numeroNfse || xml.chaveAcesso} atualizado.`, 'success');
+  } catch (error) {
+    if (state.modal?.kind === 'xml-edit-value') {
+      state.modal.submitting = false;
+      render();
+    }
+    pushToast(`Falha ao atualizar o valor da NFS-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+function parseBrazilianCurrencyInput(value) {
+  let normalized = String(value ?? '').trim().replace(/[^\d,.-]/g, '');
+  if (!normalized) {
+    return Number.NaN;
+  }
+
+  if (normalized.includes(',')) {
+    if ((normalized.match(/,/g) || []).length !== 1) {
+      return Number.NaN;
+    }
+    normalized = normalized.replace(/\./g, '').replace(',', '.');
+  } else if (/^-?\d{1,3}(\.\d{3})+$/.test(normalized)) {
+    normalized = normalized.replace(/\./g, '');
+  }
+
+  if (!/^-?\d+(\.\d{1,2})?$/.test(normalized)) {
+    return Number.NaN;
+  }
+  return Number(normalized);
 }
 
 async function updateXmlNumberingValidation(xmlId, ignore) {

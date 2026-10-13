@@ -35,8 +35,8 @@ As integracoes oficiais devem ser encapsuladas em adapters separados:
 
 ## Exportacao fiscal para Dominio
 
-- Em NFS-e da Caixa cujo valor oficial do servico seja zero, o NotaSync usa como `valorServico` o valor positivo descrito no trecho `Total de Credito Auxilio Alimentacao: R$ ...`. O XML original e a descricao permanecem preservados; a regra nao substitui valores oficiais diferentes de zero.
-- Na exibicao de NFS-e, `cStat=102` nao significa numeracao inutilizada: identifica emissao por decisao administrativa ou judicial e aparece como autorizada. A classificacao `102 - Inutilizada` continua aplicavel aos outros documentos fiscais.
+- Na exibicao de NFS-e, `cStat=102` nao significa numeracao inutilizada: aparece como `Autorizada - 102`. A classificacao `102 - Inutilizada` continua aplicavel aos outros documentos fiscais.
+- NFS-e com `cStat=102` podem receber um ajuste manual pelo endpoint `PATCH /nfse/{id}/valor-servico`, com `clienteId` e `valorServico`. O ajuste fica em `valorServicoManual`, preserva o valor oficial `valorServico` do XML e prevalece na exibicao do NotaSync ate uma nova alteracao.
 
 - O leitor fiscal de NFS-e expõe `POST /nfse/leitura-fiscal/exportar-dominio` para gerar o TXT no layout padrao do LeitorXML.
 - Os registros seguem as posicoes do Leiaute Dominio Separador: CFOP nos campos 6 do `1000` e 34 do `1030`; CFPS no campo 21 do `3000`. Os campos de PIS/COFINS do item `1030` ficam em branco; os valores retidos permanecem nos campos proprios do registro `1500`.
