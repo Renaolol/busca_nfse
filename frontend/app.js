@@ -55,13 +55,13 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'select',
   'numeroNf',
   'statusNf',
-  'nfCancelada',
   'dataEmissao',
   'produto',
   'ncm',
   'quantidade',
   'valorUnitario',
   'valorTotal',
+  'valorIpi',
   'valorTotalNfXml',
   'icmsStRet',
   'cstCsosn',
@@ -78,7 +78,6 @@ const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
 ];
 const XML_READER30_NFE_SIMPLE_NATIONAL_HIDDEN_COLUMNS = [
   'ncm',
-  'nfCancelada',
   'icmsStRet',
   'baseCalculoIcms',
   'aliquotaIcms',
@@ -7592,18 +7591,18 @@ function renderXmlReader30NfeResultsTable(results) {
         </div>
       </div>
       <div class="table-wrap">
-        <table class="xml-reader30-table" style="min-width: 1380px;">
+        <table class="xml-reader30-table" style="min-width: 1500px;">
           <thead>
             <tr>
               <th class="xml-reader30-check">Conferido</th>
               ${renderXmlReader30SortHeader('numeroNf', 'Numero NF')}
               <th>Status NF-e</th>
-              <th>NF Cancelada?</th>
               ${renderXmlReader30SortHeader('dataEmissao', 'Data Emissao')}
               <th>Produto</th>
               <th>Quantidade</th>
               <th>Valor Unitario</th>
               <th>Valor Total</th>
+              <th>Valor IPI R$</th>
               <th>Valor Total NF XML R$</th>
               <th>ICMS ST RET R$</th>
               <th>CST/CSOSN</th>
@@ -7623,7 +7622,7 @@ function renderXmlReader30NfeResultsTable(results) {
           <tbody>
             ${renderTableRowsOrState({
               key: 'xmlReader30',
-              colSpan: 22,
+              colSpan: 23,
               rowsHtml: displayedRows.length
                 ? displayedRows
                     .map((row) => {
@@ -7643,7 +7642,6 @@ function renderXmlReader30NfeResultsTable(results) {
                             <span class="row-title">${escapeHtml(String(numberLabel))}</span>
                           </td>
                           <td>${statusBadge(row.statusNf || row.statusLabel || '-', statusTone)}</td>
-                          <td>${escapeHtml(row.nfCancelada || (row.raw?.cancelada ? 'Sim' : 'Nao'))}</td>
                           <td>${escapeHtml(row.dataEmissaoLabel || formatDate(row.dataEmissao || row.raw?.dataEmissao || ''))}</td>
                           <td class="xml-reader30-doc">
                             ${renderXmlReader30ProductLabel(row.produto || '-')}
@@ -7651,6 +7649,7 @@ function renderXmlReader30NfeResultsTable(results) {
                           <td>${escapeHtml(row.quantidade || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorUnitario || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorTotal || '-')}</td>
+                          <td class="xml-reader30-money">${escapeHtml(formatXmlReader30CurrencyValue(row.valorIpiRaw ?? row.valorIpi))}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.valorTotalNfXml || '-')}</td>
                           <td class="xml-reader30-money">${escapeHtml(row.icmsStRet || '-')}</td>
                           <td>${escapeHtml(row.cstCsosn || '-')}</td>
@@ -7950,13 +7949,6 @@ function getXmlReader30NfeColumnDefinitions() {
       render: (row, statusTone) => statusBadge(row.statusNf || row.statusLabel || '-', statusTone)
     },
     {
-      key: 'nfCancelada',
-      label: 'NF Cancelada?',
-      className: 'xml-reader30-flag',
-      html: false,
-      render: (row) => (row.raw?.cancelada ? 'Sim' : 'Nao')
-    },
-    {
       key: 'dataEmissao',
       label: 'Data Emissao',
       className: 'xml-reader30-date',
@@ -7997,6 +7989,13 @@ function getXmlReader30NfeColumnDefinitions() {
       className: 'xml-reader30-money',
       html: false,
       render: (row) => row.valorTotal || '-'
+    },
+    {
+      key: 'valorIpi',
+      label: 'Valor IPI R$',
+      className: 'xml-reader30-money',
+      html: false,
+      render: (row) => formatXmlReader30CurrencyValue(row.valorIpiRaw ?? row.valorIpi)
     },
     {
       key: 'valorTotalNfXml',
@@ -8222,8 +8221,6 @@ function getXmlReader30NfeColumnMinWidth(columnKey) {
       return 110;
     case 'statusNf':
       return 118;
-    case 'nfCancelada':
-      return 108;
     case 'dataEmissao':
       return 125;
     case 'produto':
@@ -8233,6 +8230,8 @@ function getXmlReader30NfeColumnMinWidth(columnKey) {
     case 'valorUnitario':
       return 118;
     case 'valorTotal':
+      return 118;
+    case 'valorIpi':
       return 118;
     case 'valorTotalNfXml':
       return 148;
@@ -8596,8 +8595,6 @@ function getXmlReader30SortValue(row, key) {
       return Number(String(row.valorLabel || row.valorTotal || row.valorTotalNfXml || row.raw?.valor || 0).replace(/[^\d.-]/g, '')) || 0;
     case 'statusNf':
       return row.statusNf || row.statusLabel || '';
-    case 'nfCancelada':
-      return row.raw?.cancelada ? 1 : 0;
     case 'produto':
       return row.produto || '';
     case 'quantidade':
@@ -8606,6 +8603,8 @@ function getXmlReader30SortValue(row, key) {
       return toSortableBrNumber(row.valorUnitario);
     case 'valorTotal':
       return toSortableBrNumber(row.valorTotal);
+    case 'valorIpi':
+      return toSortableBrNumber(row.valorIpiRaw ?? row.valorIpi);
     case 'valorTotalNfXml':
       return toSortableBrNumber(row.valorTotalNfXml);
     case 'icmsStRet':
@@ -8806,6 +8805,8 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
         quantidade: '0.00',
         valorUnitario: '-',
         valorTotal: '-',
+        valorIpi: '0',
+        valorIpiRaw: '0',
         valorTotalNfXml: baseValorTotal,
         icmsStRet: '0',
         icmsStRetRaw: '0',
@@ -8845,6 +8846,8 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
     quantidade: formatXmlReader30QuantityValue(item.quantity),
     valorUnitario: item.unitValueRaw || item.unitValue || '-',
     valorTotal: item.totalValueRaw || item.totalValue || '-',
+    valorIpi: item.valorIpiRaw || '0',
+    valorIpiRaw: item.valorIpiRaw || '0',
     valorTotalNfXml: baseValorTotal,
     icmsStRet: item.icmsStRet || '0',
     icmsStRetRaw: item.icmsStRetRaw || '0',
@@ -10042,6 +10045,7 @@ function mapXmlReader30Item(documentType, doc) {
         ...nfeItems.map((item) => item.quantity),
         ...nfeItems.map((item) => item.unitValueRaw || item.unitValue || ''),
         ...nfeItems.map((item) => item.totalValueRaw || item.totalValue || ''),
+        ...nfeItems.map((item) => item.valorIpiRaw || ''),
         ...nfeItems.map((item) => item.cstCsosn || ''),
         ...nfeItems.map((item) => item.cfop || ''),
         ...nfeItems.map((item) => item.baseCalculoIcmsRaw || item.baseCalculoIcms || ''),
@@ -27021,12 +27025,12 @@ function buildXmlReader30ProductsSpreadsheetXml(rows, metadata = {}) {
   const headers = [
     'Documento',
     'Status NF-e',
-    'NF Cancelada?',
     'Data Emissao',
     'Produto',
     'Quantidade',
     'Valor Unitario',
     'Valor Total',
+    'Valor IPI R$',
     'Valor Total NF XML R$',
     'CST/CSOSN',
     'CFOP',
@@ -27044,12 +27048,12 @@ function buildXmlReader30ProductsSpreadsheetXml(rows, metadata = {}) {
   const sheetRows = (Array.isArray(rows) ? rows : []).map((row) => [
     row.numeroNf || row.numeroLabel || '-',
     row.statusNf || row.statusLabel || '-',
-    row.nfCancelada || (row.raw?.cancelada ? 'Sim' : 'Nao'),
     row.dataEmissaoLabel || formatDate(row.dataEmissao || row.raw?.dataEmissao || ''),
     row.produto || '-',
     row.quantidade || '-',
     row.valorUnitario || '-',
     row.valorTotal || '-',
+    row.valorIpi || '-',
     row.valorTotalNfXml || '-',
     row.cstCsosn || '-',
     row.cfop || '-',

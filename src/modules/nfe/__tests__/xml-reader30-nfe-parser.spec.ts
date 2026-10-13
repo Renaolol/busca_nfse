@@ -109,4 +109,24 @@ describe('xml-reader30-nfe-parser', () => {
     expect(item.qBCMonoRetRaw).toBe('0');
     expect(item.qBCMonoRet).toBe('0');
   });
+
+  it('le o valor de IPI individualmente por produto', () => {
+    const items = extractNfeLineItems(`
+      <NFe>
+        <infNFe>
+          <det nItem="1">
+            <prod><cProd>1</cProd><xProd>Produto com IPI</xProd></prod>
+            <imposto><IPI><IPITrib><vIPI>1.23</vIPI></IPITrib></IPI></imposto>
+          </det>
+          <det nItem="2">
+            <prod><cProd>2</cProd><xProd>Produto sem IPI</xProd></prod>
+            <imposto><IPINT><CST>53</CST></IPINT></imposto>
+          </det>
+        </infNFe>
+      </NFe>
+    `);
+
+    expect(items.map((item) => item.valorIpiRaw)).toEqual(['1.23', '0']);
+    expect(items[0].valorIpi).toContain('1,23');
+  });
 });

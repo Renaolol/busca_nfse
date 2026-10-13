@@ -147,6 +147,8 @@ function extractNfeTotalIpiValue(xmlString) {
 
 function extractNfeLineItemTaxValues(detNode, prodNode) {
   const impostoNode = findXmlElementsByLocalName(detNode, 'imposto')[0] || detNode;
+  const ipiNode = findXmlElementsByLocalName(impostoNode, 'IPI')[0] || null;
+  const valorIpi = getXmlText(ipiNode, 'vIPI') || '0';
   const icmsNode = findXmlElementsByLocalName(impostoNode, 'ICMS')[0] || null;
   const icmsGroupNode = icmsNode
     ? Array.from(icmsNode.children || []).find((node) => node && node.nodeType === 1) || null
@@ -163,6 +165,8 @@ function extractNfeLineItemTaxValues(detNode, prodNode) {
   const valorIcms = getFirstXmlText(icmsSourceNodes, ['vICMS', 'vICMSST', 'vICMSDif', 'vICMSDeson', 'vICMSEfet']) || '0';
 
   return {
+    valorIpi: formatXmlReader30CurrencyValue(valorIpi),
+    valorIpiRaw: valorIpi,
     cstCsosn,
     cfop: getFirstXmlText([prodNode, icmsTaxNode, icmsNode, impostoNode, detNode], ['CFOP']) || '0',
     icmsStRet: formatXmlReader30CurrencyValue(icmsStRet),

@@ -13,6 +13,8 @@ export type XmlReader30NfeLineItem = {
   unitValueRaw: string;
   totalValue: string;
   totalValueRaw: string;
+  valorIpi: string;
+  valorIpiRaw: string;
   cstCsosn: string;
   cfop: string;
   icmsStRet: string;
