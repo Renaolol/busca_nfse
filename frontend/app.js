@@ -22949,7 +22949,7 @@ function buildXmlFilesFromApi(nfseDocs, clients, contextClienteId) {
       const eventos = Array.isArray(doc.eventos) ? doc.eventos : [];
       const cancelamentoEvento = eventos.find(isCancelamentoEventoApi) || null;
       const dataCancelamento = doc.dataCancelamento || cancelamentoEvento?.dataEvento || null;
-      const statusFiscal = resolveFiscalStatus(doc.status, dataCancelamento, cancelamentoEvento);
+      const statusFiscal = resolveNfseFiscalStatus(doc.status, dataCancelamento, cancelamentoEvento);
       const cancelada = normalizeSearchText(statusFiscal).includes('cancel');
       const codigoServicoPrestado = composeCodigoServicoPrestado(doc);
 
@@ -23043,6 +23043,15 @@ function resolveFiscalStatus(status, dataCancelamento, cancelamentoEvento) {
     return 'Autorizada';
   }
   return mapFiscalStatusCode(status);
+}
+
+function resolveNfseFiscalStatus(status, dataCancelamento, cancelamentoEvento) {
+  const normalized = normalizeSearchText(status);
+  if (!dataCancelamento && !cancelamentoEvento && normalized === '102') {
+    return 'Autorizada por decisao administrativa/judicial';
+  }
+
+  return resolveFiscalStatus(status, dataCancelamento, cancelamentoEvento);
 }
 
 function mapFiscalStatusCode(status) {

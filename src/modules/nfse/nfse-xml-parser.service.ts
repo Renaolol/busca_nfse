@@ -1,5 +1,6 @@
 ﻿import { Injectable } from '@nestjs/common';
 import { createHash } from 'node:crypto';
+import { resolveNfseValorServico } from '../../common/utils/nfse-valor-servico.util';
 import { resolveMunicipioIbge, resolveMunicipioNome } from '../../common/utils/municipio-ibge.util';
 
 export interface ParsedNfse {
@@ -80,6 +81,11 @@ export class NfseXmlParserService {
       throw new Error('Nao foi possivel localizar chave de acesso no XML');
     }
 
+    const descricaoServico = this.extract(xml, ['descricaoServico', 'Discriminacao', 'xDescServ']);
+    const valorServico =
+      this.extract(xml, ['valorServico', 'ValorServicos', 'vServ']) ??
+      this.extractNestedAny(xml, ['vServPrest'], ['vServ']);
+
     return {
       chaveAcesso,
       tpAmb: this.extract(xml, ['tpAmb']),
@@ -127,9 +133,7 @@ export class NfseXmlParserService {
       municipioPrestacaoNome:
         this.extract(xml, ['municipioPrestacaoNome', 'xLocPrestacao', 'xLocIncid']) ??
         this.extractNestedAny(xml, ['locPrest'], ['xLocPrestacao']),
-      valorServico:
-        this.extract(xml, ['valorServico', 'ValorServicos', 'vServ']) ??
-        this.extractNestedAny(xml, ['vServPrest'], ['vServ']),
+      valorServico: resolveNfseValorServico(valorServico, descricaoServico),
       valorDeducoes: this.extract(xml, ['valorDeducoes', 'vDeducao', 'vDescCondIncond']),
       valorDescontoIncondicionado: this.extractFromPaths(xml, [
         ['infDPS', 'valores', 'vDescCondIncond', 'vDescIncond'],
@@ -159,7 +163,7 @@ export class NfseXmlParserService {
       aliquotaIss: this.extract(xml, ['aliquotaIss', 'aliquotaISS', 'pAliqAplic', 'pAliq', 'pAliquota']),
       codigoServicoNacional: this.extractBestServiceCode(xml, ['codigoServicoNacional', 'cTribNac']),
       itemListaServico: this.extractBestServiceCode(xml, ['cTribMun', 'itemListaServico', 'ItemListaServico', 'cItemListaServ']),
-      descricaoServico: this.extract(xml, ['descricaoServico', 'Discriminacao', 'xDescServ']),
+      descricaoServico,
       chaveSubstituida: this.normalizeChaveAcesso(this.extractNestedAny(xml, ['subst'], ['chSubstda'])),
       motivoSubstituicao: this.extractNestedAny(xml, ['subst'], ['xMotivo'])
     };
