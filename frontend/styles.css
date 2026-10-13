@@ -1399,7 +1399,23 @@ textarea:focus-visible,
   overflow-x: scroll;
   overflow-y: hidden;
   scrollbar-gutter: stable;
-  margin: 0 0 6px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) var(--surface);
+  background: var(--surface);
+  margin: 0;
+}
+
+.xml-reader30-top-scroll::-webkit-scrollbar {
+  height: 8px;
+}
+
+.xml-reader30-top-scroll::-webkit-scrollbar-track {
+  background: var(--surface);
+}
+
+.xml-reader30-top-scroll::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
 }
 
 .xml-reader30-top-scroll-spacer {
@@ -1997,6 +2013,7 @@ tbody tr:hover {
 .xml-reader30-column-menu-wrap {
   position: relative;
   flex: 0 0 auto;
+  z-index: 10;
 }
 
 .xml-reader30-column-header-tools {
@@ -2009,18 +2026,31 @@ tbody tr:hover {
 .xml-reader30-column-menu {
   border: 0;
   background: transparent;
-  color: #778199;
+  color: var(--text-secondary);
   cursor: pointer;
-  flex: 0 0 auto;
-  font-size: 0.95rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  font-size: 1.1rem;
   line-height: 1;
-  padding: 0 2px;
-  border-radius: 6px;
+  padding: 0;
+  border-radius: 7px;
+  position: relative;
+  z-index: 11;
 }
 
 .xml-reader30-column-menu:hover {
-  background: rgba(97, 124, 255, 0.08);
+  background: var(--surface-hover);
   color: var(--accent);
+}
+
+.xml-reader30-column-menu:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .xml-reader30-column-resizer {
@@ -2057,7 +2087,7 @@ tbody tr:hover {
 
 .xml-reader30-column-menu-panel {
   position: fixed;
-  z-index: 999;
+  z-index: 10000;
   min-width: 150px;
   padding: 6px;
   border: 1px solid var(--line-strong);
@@ -2072,7 +2102,7 @@ tbody tr:hover {
   border: 0;
   background: transparent;
   border-radius: 8px;
-  padding: 8px 10px;
+  padding: 10px 12px;
   text-align: left;
   font-size: 0.78rem;
   color: #243041;

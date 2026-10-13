@@ -2935,6 +2935,11 @@ function onDocumentDragStart(event) {
     return;
   }
 
+  if (event.target.closest?.('.xml-reader30-column-header button')) {
+    event.preventDefault();
+    return;
+  }
+
   const xmlReader30Header = event.target.closest?.('[data-action="xml-reader30-column-drag"]');
   if (xmlReader30Header) {
     const columnKey = xmlReader30Header.getAttribute('data-column-key');
@@ -7809,9 +7814,11 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
                               type="button"
                               data-action="xml-reader30-column-menu-toggle"
                               data-column-key="${escapeHtml(column.key)}"
+                              aria-haspopup="menu"
                               aria-expanded="${state.xmlReader30.columnMenuOpenKey === column.key ? 'true' : 'false'}"
                               aria-label="Abrir menu da coluna ${escapeHtml(column.label)}"
                               title="Abrir menu"
+                              draggable="false"
                             >&#8942;</button>
                             ${
                               state.xmlReader30.columnMenuOpenKey === column.key
