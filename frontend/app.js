@@ -3981,7 +3981,7 @@ function renderClientDetailsPage(clientId) {
                             { label: 'Baixar XML', action: 'xml-download', attrs: { 'xml-id': xml.id } },
                             { label: 'Baixar DANFSE', action: 'xml-download-danfse', attrs: { 'xml-id': xml.id } }
                           ];
-                          return `<tr class="${xml.cancelada && !xml.substitui ? 'xml-row-cancelled' : xml.statusFiscal === 'Autorizada - 102' ? 'xml-row-authorized-102' : ''}" data-row-actions-menu-id="${escapeHtml(clientXmlMenuId)}">
+                          return `<tr class="${xml.cancelada && !xml.substitui ? 'xml-row-cancelled' : ''}" data-row-actions-menu-id="${escapeHtml(clientXmlMenuId)}">
                             <td>${renderNfseNumber(xml)}</td>
                             <td>${escapeHtml(formatDate(xml.dataEmissao))}</td>
                             <td>${escapeHtml(`${xml.prestador} / ${xml.tomador}`)}</td>
@@ -6411,7 +6411,7 @@ function renderXmlsTableCard(xmls) {
                         { label: 'Baixar XML', action: 'xml-download', attrs: { 'xml-id': xml.id } },
                         { label: 'Baixar DANFSE', action: 'xml-download-danfse', attrs: { 'xml-id': xml.id } }
                       ];
-                  return `<tr class="${xml.cancelada && !xml.substitui ? 'xml-row-cancelled' : xml.statusFiscal === 'Autorizada - 102' ? 'xml-row-authorized-102' : ''}" data-row-actions-menu-id="${escapeHtml(xmlMenuId)}">
+                  return `<tr class="${xml.cancelada && !xml.substitui ? 'xml-row-cancelled' : ''}" data-row-actions-menu-id="${escapeHtml(xmlMenuId)}">
                     <td><input type="checkbox" data-action="xml-select" data-xml-id="${escapeHtml(xml.id)}" ${state.selectedXmlIds.has(xml.id) ? 'checked' : ''} ${xml.apiNfseId ? '' : 'disabled'} aria-label="Selecionar NFS-e ${escapeHtml(xml.numeroNfse || '-')}" /></td>
                     <td>${renderNfseNumber(xml)}</td>
                     <td>${escapeHtml(xml.cliente)}</td>
@@ -15142,7 +15142,7 @@ function renderXmlStatusBadges(xml) {
   } else if (xml.cancelada) {
     badges.push(statusBadge('Cancelada', 'danger', 'nfse-cancel-chip'));
   } else if (xml.statusFiscal && xml.statusFiscal !== '-') {
-    badges.push(statusBadge(xml.statusFiscal, toneFromFiscalStatus(xml.statusFiscal)));
+    badges.push(statusBadge(xml.statusFiscal, toneFromXmlFiscalStatus(xml)));
   }
 
   if (xml.substituidaPor) {
@@ -15159,6 +15159,13 @@ function renderXmlLinkChip(label, tone, linkedXmlId) {
   }
 
   return `<button type="button" class="chip chip-link ${normalizedTone}" data-action="xml-details" data-xml-id="${escapeHtml(linkedXmlId)}" title="Abrir detalhes desta NFS-e">${escapeHtml(label)}</button>`;
+}
+
+function toneFromXmlFiscalStatus(xml) {
+  if (xml?.statusFiscal === 'Autorizada - 102') {
+    return Number(xml.valor) > 0 ? 'success' : 'warning';
+  }
+  return toneFromFiscalStatus(xml?.statusFiscal);
 }
 
 function renderNfeStorageBadges(doc) {
