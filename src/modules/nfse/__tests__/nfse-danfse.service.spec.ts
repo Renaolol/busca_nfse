@@ -498,6 +498,37 @@ describe('NfseDanfseService', () => {
     expect(content).toContain('Nao Retido');
   });
 
+  it('ignora retencoes agregadas inconsistentes em credito de auxilio alimentacao da Caixa autorizado com cStat 102', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <cStat>102</cStat>
+  <infNFSe>
+    <valores>
+      <vServ>0.00</vServ>
+      <vLiq>0.00</vLiq>
+      <vTotalRet>43.32</vTotalRet>
+      <vISSRet>0.00</vISSRet>
+      <trib><tribMun><tpRetISSQN>2</tpRetISSQN></tribMun></trib>
+    </valores>
+    <DPS><infDPS><serv><cServ>
+      <xDescServ>Total de Credito Auxilio Alimentacao: R$ 570,00</xDescServ>
+    </cServ></serv></infDPS></DPS>
+  </infNFSe>
+</NFSe>`;
+
+    const leitura = service.extractLeituraFiscal(xml, '102');
+    const retencoes = service.extractRetentionAlertData(xml, '102');
+    const statusDiferente = service.extractLeituraFiscal(xml, '101');
+
+    expect(leitura.valorServico).toBe('0.00');
+    expect(leitura.valorTotalRetencoes).toBe('0.00');
+    expect(leitura.retencaoIss).toBe('Nao Retido');
+    expect(leitura.retencaoFederal).toBe('Normal');
+    expect(leitura.retencoes).toEqual([]);
+    expect(retencoes).toEqual({ hasRetention: false, entries: [] });
+    expect(statusDiferente.valorTotalRetencoes).toBe('43.32');
+  });
+
   it('sinaliza erro de leitura quando ha retencoes com valor de servico zerado', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">

@@ -317,7 +317,11 @@ export class NfseService {
       try {
         const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
         const parsed = this.parser.parse(xml);
-        const leitura = this.danfse.extractLeituraFiscal(xml);
+        const leituraOficial = this.danfse.extractLeituraFiscal(xml, doc.status);
+        const leitura =
+          doc.valorServicoManual != null
+            ? { ...leituraOficial, valorServico: doc.valorServicoManual.toFixed(2) }
+            : leituraOficial;
         const municipioTomador =
           parsed.municipioTomador ??
           this.extractMunicipioTomadorFromXml(xml) ??
@@ -490,10 +494,11 @@ export class NfseService {
 
       try {
         const xml = (await this.storage.getObject(doc.xmlPath)).toString('utf8');
-        sources.push({
-          documento: doc,
-          exportData: this.danfse.extractDominioExportData(xml)
-        });
+        const exportData = this.danfse.extractDominioExportData(xml, doc.status);
+        if (doc.valorServicoManual != null) {
+          exportData.valorServico = doc.valorServicoManual.toNumber();
+        }
+        sources.push({ documento: doc, exportData });
       } catch (error) {
         this.logger.warn(`Falha ao preparar NFS-e ${doc.id} para exportacao Dominio: ${this.toErrorMessage(error)}`);
       }
@@ -2506,6 +2511,11 @@ export class NfseService {
         municipioPrestacaoNome: doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome,
         cnpjPrestador: doc.cnpjPrestador ?? parsed.cnpjPrestador
       });
+      const leituraFiscalOficial = this.danfse.extractLeituraFiscal(xml, doc.status);
+      const leituraFiscal =
+        doc.valorServicoManual != null
+          ? { ...leituraFiscalOficial, valorServico: doc.valorServicoManual.toFixed(2) }
+          : leituraFiscalOficial;
 
       return {
         ...doc,
@@ -2517,7 +2527,7 @@ export class NfseService {
         municipioTomador,
         municipioPrestacaoNome: municipioPrestacaoNome ?? doc.municipioPrestacaoNome ?? parsed.municipioPrestacaoNome ?? null,
         retencaoIss: parsed.retencaoIss ?? null,
-        leituraFiscal: this.danfse.extractLeituraFiscal(xml)
+        leituraFiscal
       };
     } catch (error) {
       this.logger.warn(`Falha ao enriquecer detalhes da NFS-e ${doc.id}: ${this.toErrorMessage(error)}`);

@@ -225,8 +225,8 @@ export class NfseDanfseService {
     return this.generatePdf({ ...merged, chaveAcesso: this.normalizeChaveAcesso(fallback.chaveAcesso) });
   }
 
-  extractRetentionAlertData(xml: string): NfseRetentionAlertData {
-    const extracted = this.extractFromXml(xml);
+  extractRetentionAlertData(xml: string, statusOverride?: string | null): NfseRetentionAlertData {
+    const extracted = this.normalizeCaixaAuxilioAlimentacaoRetencoes(this.extractFromXml(xml), statusOverride);
     const layoutNfse = extracted.layoutNfse ?? this.detectLeituraFiscalLayout(xml);
     const totalRetencoesFederais = this.computeFederalRetentionTotal(layoutNfse, {
       valorServico: extracted.valorServico,
@@ -267,10 +267,10 @@ export class NfseDanfseService {
     };
   }
 
-  extractLeituraFiscal(xml: string): NfseLeituraFiscal {
-    const extracted = this.extractFromXml(xml);
+  extractLeituraFiscal(xml: string, statusOverride?: string | null): NfseLeituraFiscal {
+    const extracted = this.normalizeCaixaAuxilioAlimentacaoRetencoes(this.extractFromXml(xml), statusOverride);
     const layoutNfse = extracted.layoutNfse ?? this.detectLeituraFiscalLayout(xml);
-    const retencoes = this.extractRetentionAlertData(xml).entries;
+    const retencoes = this.extractRetentionAlertData(xml, statusOverride).entries;
     const valorServico = this.toNumber(extracted.valorServico) ?? 0;
     const valorDescontoIncondicionado = this.toNumber(extracted.valorDescontoIncondicionado);
     const valorDescontoCondicionado = this.toNumber(extracted.valorDescontoCondicionado);
@@ -398,10 +398,10 @@ export class NfseDanfseService {
     };
   }
 
-  extractDominioExportData(xml: string): NfseDominioExportData {
-    const extracted = this.extractFromXml(xml);
+  extractDominioExportData(xml: string, statusOverride?: string | null): NfseDominioExportData {
+    const extracted = this.normalizeCaixaAuxilioAlimentacaoRetencoes(this.extractFromXml(xml), statusOverride);
     const layoutNfse = extracted.layoutNfse ?? this.detectLeituraFiscalLayout(xml);
-    const leitura = this.extractLeituraFiscal(xml);
+    const leitura = this.extractLeituraFiscal(xml, statusOverride);
     const prestador = this.splitMunicipioUf(extracted.municipioPrestador);
     const tomador = this.splitMunicipioUf(extracted.municipioTomador);
     const destinatario = this.splitMunicipioUf(extracted.municipioDestinatario);
@@ -1288,6 +1288,37 @@ export class NfseDanfseService {
     lines.push(`Gerado em: ${this.formatDateBr(generatedAt)}`);
 
     return lines;
+  }
+
+  private normalizeCaixaAuxilioAlimentacaoRetencoes(
+    extracted: Omit<DanfseRenderInput, 'chaveAcesso'>,
+    statusOverride?: string | null
+  ): Omit<DanfseRenderInput, 'chaveAcesso'> {
+    const status = String(statusOverride ?? extracted.status ?? '').trim().toLowerCase();
+    const status102 = status === '102' || (status.includes('autoriz') && /\b102\b/.test(status));
+    const descricao = String(extracted.descricaoServico ?? '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+    const valorServicoZero = this.toNumber(extracted.valorServico) === 0;
+
+    if (!status102 || !valorServicoZero || !descricao.includes('total de credito auxilio alimentacao')) {
+      return extracted;
+    }
+
+    return {
+      ...extracted,
+      valorTotalRetencoes: '0.00',
+      valorIssRetido: '0.00',
+      retencaoIss: '1',
+      valorIrrf: undefined,
+      valorContribuicaoPrevidenciaria: undefined,
+      valorContribuicoesSociais: undefined,
+      valorPis: undefined,
+      valorCofins: undefined,
+      descricaoContribuicoesSociais: '0'
+    };
   }
 
   private extractFromXml(xml: string): Omit<DanfseRenderInput, 'chaveAcesso'> {

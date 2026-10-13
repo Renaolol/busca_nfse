@@ -36,7 +36,9 @@ As integracoes oficiais devem ser encapsuladas em adapters separados:
 ## Exportacao fiscal para Dominio
 
 - Na exibicao de NFS-e, `cStat=102` nao significa numeracao inutilizada: aparece como `Autorizada - 102`. A classificacao `102 - Inutilizada` continua aplicavel aos outros documentos fiscais.
-- NFS-e com `cStat=102` podem receber um ajuste manual pelo endpoint `PATCH /nfse/{id}/valor-servico`, com `clienteId` e `valorServico`. O ajuste fica em `valorServicoManual`, preserva o valor oficial `valorServico` do XML e prevalece na exibicao do NotaSync ate uma nova alteracao.
+- NFS-e com `cStat=102` podem receber um ajuste manual pelo endpoint `PATCH /nfse/{id}/valor-servico`, com `clienteId` e `valorServico`. O ajuste fica em `valorServicoManual`, preserva o valor oficial `valorServico` do XML e prevalece na exibicao, nos totais fiscais e na exportacao Dominio ate uma nova alteracao.
+- Depois de salvar o ajuste manual nas notas armazenadas, a busca fiscal do mesmo cliente e atualizada automaticamente; o leitor e seus totais passam a usar o valor salvo.
+- Para NFS-e `cStat=102` da Caixa com valor oficial zerado e descricao contendo `Total de Credito Auxilio Alimentacao`, o leitor fiscal desconsidera os totais agregados de retencao inconsistentes com os campos individuais sem retencao. Essas notas nao devem aparecer como retidas nos alertas nem na exportacao fiscal.
 
 - O leitor fiscal de NFS-e expõe `POST /nfse/leitura-fiscal/exportar-dominio` para gerar o TXT no layout padrao do LeitorXML.
 - Os registros seguem as posicoes do Leiaute Dominio Separador: CFOP nos campos 6 do `1000` e 34 do `1030`; CFPS no campo 21 do `3000`. Os campos de PIS/COFINS do item `1030` ficam em branco; os valores retidos permanecem nos campos proprios do registro `1500`.

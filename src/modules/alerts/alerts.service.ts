@@ -271,7 +271,7 @@ export class AlertsService {
 
     try {
       const xml = (await this.storage.getObject(xmlPath)).toString('utf8');
-      const retentionData = this.nfseDanfse.extractRetentionAlertData(xml);
+      const retentionData = this.nfseDanfse.extractRetentionAlertData(xml, row.status);
       if (!retentionData.hasRetention) {
         return null;
       }

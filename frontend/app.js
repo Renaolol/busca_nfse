@@ -25710,6 +25710,10 @@ async function submitXmlManualValueForm(form) {
   state.modal.submitting = true;
   render();
   try {
+    const refreshCurrentFiscalSearch =
+      state.dataSource === 'api' &&
+      state.filters.xmls.cliente === xml.clientId &&
+      (state.xmlSearch.hasSearched || state.nfseFiscalReader.lastQuery?.cliente === xml.clientId);
     await apiRequest(`/nfse/${encodeURIComponent(xml.apiNfseId)}/valor-servico`, {
       method: 'PATCH',
       body: { clienteId: xml.clientId, valorServico }
@@ -25723,6 +25727,9 @@ async function submitXmlManualValueForm(form) {
     state.xmlSearch.results = applyOverride(state.xmlSearch.results);
     state.modal = null;
     render();
+    if (refreshCurrentFiscalSearch) {
+      await executeXmlSearch();
+    }
     pushToast(`Valor da NFS-e ${xml.numeroNfse || xml.chaveAcesso} atualizado.`, 'success');
   } catch (error) {
     if (state.modal?.kind === 'xml-edit-value') {
