@@ -1296,7 +1296,9 @@ export class NfseDanfseService {
   ): Omit<DanfseRenderInput, 'chaveAcesso'> {
     const status = String(statusOverride ?? extracted.status ?? '').trim().toLowerCase();
     const status102 = status === '102' || (status.includes('autoriz') && /\b102\b/.test(status));
-    const descricao = String(extracted.descricaoServico ?? '')
+    const descricao = [extracted.descricaoServico, extracted.infoComplementares]
+      .filter((value): value is string => Boolean(value))
+      .join(' ')
       .normalize('NFD')
       .replace(/[\u0300-\u036f]/g, '')
       .toLowerCase()

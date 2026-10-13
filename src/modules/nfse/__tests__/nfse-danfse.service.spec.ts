@@ -519,6 +519,10 @@ describe('NfseDanfseService', () => {
     const leitura = service.extractLeituraFiscal(xml, '102');
     const retencoes = service.extractRetentionAlertData(xml, '102');
     const statusDiferente = service.extractLeituraFiscal(xml, '101');
+    const descricaoComplementar = xml.replace(
+      '<xDescServ>Total de Credito Auxilio Alimentacao: R$ 570,00</xDescServ>',
+      '<xDescServ>Credito de alimentacao</xDescServ><infoComp><xInfComp>Total de Credito Auxilio Alimentacao: R$ 570,00</xInfComp></infoComp>'
+    );
 
     expect(leitura.valorServico).toBe('0.00');
     expect(leitura.valorTotalRetencoes).toBe('0.00');
@@ -527,6 +531,7 @@ describe('NfseDanfseService', () => {
     expect(leitura.retencoes).toEqual([]);
     expect(retencoes).toEqual({ hasRetention: false, entries: [] });
     expect(statusDiferente.valorTotalRetencoes).toBe('43.32');
+    expect(service.extractRetentionAlertData(descricaoComplementar, '102')).toEqual({ hasRetention: false, entries: [] });
   });
 
   it('sinaliza erro de leitura quando ha retencoes com valor de servico zerado', () => {
