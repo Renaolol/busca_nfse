@@ -8216,51 +8216,53 @@ function finishXmlReader30CellSelection() {
 function getXmlReader30NfeColumnMinWidth(columnKey) {
   switch (columnKey) {
     case 'select':
-      return 92;
+      return 120;
     case 'numeroNf':
-      return 110;
+      return 145;
     case 'statusNf':
-      return 118;
+      return 150;
     case 'dataEmissao':
-      return 125;
+      return 160;
     case 'produto':
-      return 320;
+      return 360;
+    case 'ncm':
+      return 125;
     case 'quantidade':
-      return 84;
+      return 145;
     case 'valorUnitario':
-      return 118;
+      return 160;
     case 'valorTotal':
-      return 118;
+      return 140;
     case 'valorIpi':
-      return 118;
+      return 145;
     case 'valorTotalNfXml':
-      return 148;
+      return 205;
     case 'icmsStRet':
-      return 118;
+      return 170;
     case 'cstCsosn':
-      return 92;
+      return 145;
     case 'cfop':
-      return 84;
+      return 115;
     case 'baseCalculoIcms':
-      return 116;
+      return 210;
     case 'aliquotaIcms':
-      return 108;
+      return 190;
     case 'valorIcms':
-      return 108;
+      return 145;
     case 'qBCMonoRet':
-      return 110;
+      return 160;
     case 'adRemICMSRet':
-      return 118;
+      return 185;
     case 'vICMSMonoRet':
-      return 118;
+      return 180;
     case 'aliqVigente':
-      return 100;
+      return 160;
     case 'valorCorreto':
-      return 132;
+      return 180;
     case 'evento':
       return 220;
     default:
-      return 110;
+      return 130;
   }
 }
 
@@ -24106,6 +24108,13 @@ function normalizeXmlReader30NfeColumnOrder(columnOrder) {
       normalized.push(key);
     }
   });
+
+  const ipiIndex = normalized.indexOf('valorIpi');
+  const totalIndex = normalized.indexOf('valorTotal');
+  if (ipiIndex === normalized.length - 1 && totalIndex >= 0) {
+    normalized.splice(ipiIndex, 1);
+    normalized.splice(normalized.indexOf('valorTotal') + 1, 0, 'valorIpi');
+  }
 
   return normalized;
 }

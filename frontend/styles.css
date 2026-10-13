@@ -1943,10 +1943,11 @@ tbody tr:hover {
 .xml-reader30-column-header-inner {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 4px;
+  justify-content: flex-start;
+  gap: 8px;
   width: 100%;
   min-width: 0;
+  flex-wrap: nowrap;
 }
 
 .xml-reader30-column-header-select {
@@ -1968,10 +1969,21 @@ tbody tr:hover {
 }
 
 .xml-reader30-column-title {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  min-width: 0;
-  flex: 1 1 auto;
+  min-width: max-content;
+  flex: 0 0 auto;
+}
+
+.xml-reader30-column-header .xml-reader30-sort-header {
+  width: auto;
+  justify-content: flex-start;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.xml-reader30-column-header .sort-indicator {
+  flex: 0 0 auto;
 }
 
 .xml-reader30-column-title-select {
