@@ -50,7 +50,7 @@ const SIMPLES_NACIONAL_COMPRESS_MIN_BYTES = 20 * 1024 * 1024;
 const XML_READER30_NFE_COLUMN_ORDER_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-order:v1';
 const XML_READER30_NFE_COLUMN_WIDTHS_STORAGE_KEY = 'gcont:xml-reader30-nfe-column-widths:v1';
 const XML_READER30_NFE_REGIME_STORAGE_KEY = 'gcont:xml-reader30-nfe-regime:v1';
-const XML_READER30_SCROLL_SELECTORS = ['.xml-reader30-top-scroll', '.xml-reader30-pan-scroll'];
+const XML_READER30_SCROLL_SELECTORS = ['.xml-reader30-pan-scroll'];
 const XML_READER30_NFE_DEFAULT_COLUMN_ORDER = [
   'select',
   'numeroNf',
@@ -122,7 +122,6 @@ const AUTH_LOGO_DEFAULT_SRC = '/app/assets/notasync-logo-horizontal.png';
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
 let dashboardAutoRefreshTimer = null;
 let dashboardAutoRefreshRunning = false;
-let xmlReader30ScrollSyncing = false;
 let lastRenderedRouteKey = null;
 let authRefreshPromise = null;
 let authInactivityTimer = null;
@@ -1026,7 +1025,6 @@ function wireGlobalEvents() {
     },
     true
   );
-  document.addEventListener('scroll', onDocumentScroll, true);
   document.addEventListener('mousedown', onDocumentMouseDown);
   document.addEventListener('mousemove', onDocumentMouseMove);
   document.addEventListener('mouseover', onDocumentMouseOver);
@@ -7793,11 +7791,8 @@ function renderXmlReader30NfeResultsTableReorderable(results, options = {}) {
         </div>
       </div>
       <div class="${viewportClassName}" style="max-height:${compactMaxHeight};">
-        <div class="xml-reader30-top-scroll" aria-hidden="true">
-          <div class="xml-reader30-top-scroll-spacer" style="min-width:${tableWidth}px;"></div>
-        </div>
         <div class="${tableWrapClassName}">
-          <table class="xml-reader30-table xml-reader30-reorderable-table xml-reader30-nfe-reorderable-table" style="min-width: ${tableWidth}px;">
+          <table class="xml-reader30-table xml-reader30-reorderable-table xml-reader30-nfe-reorderable-table" style="width: ${tableWidth}px; min-width: ${tableWidth}px;">
           <colgroup>
             ${visibleColumns
               .map((column) => {
@@ -8241,6 +8236,15 @@ function finishXmlReader30CellSelection() {
 function getXmlReader30NfeColumnMinWidth(columnKey) {
   switch (columnKey) {
     case 'select':
+      return 64;
+    default:
+      return 56;
+  }
+}
+
+function getXmlReader30NfeColumnDefaultWidth(columnKey) {
+  switch (columnKey) {
+    case 'select':
       return 120;
     case 'numeroNf':
       return 145;
@@ -8310,7 +8314,7 @@ function getXmlReader30NfeColumnWidth(columnKey) {
     return normalizeXmlReader30NfeColumnWidth(columnKey, configuredWidth);
   }
 
-  return getXmlReader30NfeColumnMinWidth(columnKey);
+  return getXmlReader30NfeColumnDefaultWidth(columnKey);
 }
 
 function getXmlReader30VisibleNfeColumnsTotalWidth() {
@@ -8326,6 +8330,7 @@ function applyXmlReader30NfeColumnWidthsToDom() {
       return;
     }
 
+    table.style.width = `${totalWidth}px`;
     table.style.minWidth = `${totalWidth}px`;
 
     visibleColumns.forEach((column) => {
@@ -8342,13 +8347,6 @@ function applyXmlReader30NfeColumnWidthsToDom() {
     });
   });
 
-  document.querySelectorAll('.xml-reader30-top-scroll-spacer').forEach((node) => {
-    if (!(node instanceof HTMLElement)) {
-      return;
-    }
-
-    node.style.minWidth = `${totalWidth}px`;
-  });
 }
 
 function startXmlReader30NfeColumnResize(columnKey, startX) {
@@ -8393,42 +8391,6 @@ function finishXmlReader30NfeColumnResize() {
   saveXmlReader30NfeColumnWidthsStore(state.xmlReader30.nfeColumnWidths);
   state.xmlReader30.columnResize = null;
   document.body.classList.remove('xml-reader30-resizing');
-}
-
-function onDocumentScroll(event) {
-  const target = event.target;
-  if (!(target instanceof HTMLElement)) {
-    return;
-  }
-
-  if (!target.classList.contains('xml-reader30-top-scroll') && !target.classList.contains('xml-reader30-pan-scroll')) {
-    return;
-  }
-
-  if (xmlReader30ScrollSyncing) {
-    return;
-  }
-
-  const card = target.closest('.card');
-  if (!(card instanceof HTMLElement)) {
-    return;
-  }
-
-  const topScroll = card.querySelector('.xml-reader30-top-scroll');
-  const panScroll = card.querySelector('.xml-reader30-pan-scroll');
-  const left = target.scrollLeft;
-
-  xmlReader30ScrollSyncing = true;
-  try {
-    if (topScroll instanceof HTMLElement && topScroll !== target) {
-      topScroll.scrollLeft = left;
-    }
-    if (panScroll instanceof HTMLElement && panScroll !== target) {
-      panScroll.scrollLeft = left;
-    }
-  } finally {
-    xmlReader30ScrollSyncing = false;
-  }
 }
 
 function formatXmlReader30UnitValue(value) {

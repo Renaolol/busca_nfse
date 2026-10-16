@@ -1392,36 +1392,6 @@ textarea:focus-visible,
   flex: 1;
 }
 
-.xml-reader30-top-scroll {
-  display: block;
-  width: 100%;
-  max-width: 100%;
-  overflow-x: scroll;
-  overflow-y: hidden;
-  scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line-strong) var(--surface);
-  background: var(--surface);
-  margin: 0;
-}
-
-.xml-reader30-top-scroll::-webkit-scrollbar {
-  height: 8px;
-}
-
-.xml-reader30-top-scroll::-webkit-scrollbar-track {
-  background: var(--surface);
-}
-
-.xml-reader30-top-scroll::-webkit-scrollbar-thumb {
-  background: var(--line-strong);
-  border-radius: 999px;
-}
-
-.xml-reader30-top-scroll-spacer {
-  height: 1px;
-}
-
 .xml-reader30-pan-scroll-compact,
 .xml-reader30-pan-scroll-fullscreen {
   flex: 1 1 auto;
@@ -2023,6 +1993,29 @@ tbody tr:hover {
   flex: 0 0 auto;
 }
 
+.xml-reader30-nfe-reorderable-table .xml-reader30-column-header-inner {
+  gap: 4px;
+}
+
+.xml-reader30-nfe-reorderable-table .xml-reader30-column-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.xml-reader30-nfe-reorderable-table .xml-reader30-column-header .xml-reader30-sort-header {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.xml-reader30-nfe-reorderable-table .xml-reader30-sort-header > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .xml-reader30-column-menu {
   border: 0;
   background: transparent;
@@ -2069,12 +2062,12 @@ tbody tr:hover {
 .xml-reader30-column-resizer::before {
   content: '';
   position: absolute;
-  top: 4px;
-  bottom: 4px;
+  top: 0;
+  bottom: 0;
   left: 50%;
   width: 2px;
   transform: translateX(-50%);
-  border-radius: 999px;
+  border-radius: 0;
   background: rgba(119, 129, 153, 0.45);
   transition: background-color 0.15s ease, width 0.15s ease;
 }
@@ -2212,8 +2205,23 @@ body.xml-reader30-cell-selecting * {
 }
 
 .xml-reader30-nfe-reorderable-table {
-  table-layout: auto;
+  table-layout: fixed;
   width: max-content;
+  border-collapse: collapse;
+}
+
+.xml-reader30-nfe-reorderable-table th,
+.xml-reader30-nfe-reorderable-table td {
+  border-right: 1px solid var(--line);
+}
+
+.xml-reader30-nfe-reorderable-table th:last-child,
+.xml-reader30-nfe-reorderable-table td:last-child {
+  border-right: 0;
+}
+
+.xml-reader30-nfe-reorderable-table .xml-reader30-cell-selected-right {
+  border-right: 2px solid var(--info);
 }
 
 .xml-reader30-nfe-reorderable-table .xml-reader30-product {
