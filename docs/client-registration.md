@@ -1,6 +1,6 @@
 # Cadastro de clientes
 
-O cadastro de clientes aceita pessoa fisica e pessoa juridica. No formulario, o seletor abaixo do campo de identificacao alterna entre CPF e CNPJ e ajusta a quantidade de digitos aceita.
+O cadastro de clientes aceita pessoa fisica e pessoa juridica. No formulario, a caixa de selecao alinhada ao campo de identificacao alterna entre CPF e CNPJ e ajusta a quantidade de digitos aceita.
 
 - CPF: 11 digitos numericos.
 - CNPJ: 14 digitos numericos.

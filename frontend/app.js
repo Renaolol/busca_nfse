@@ -2678,13 +2678,11 @@ function onDocumentChange(event) {
     return;
   }
 
-  if (target instanceof HTMLInputElement && target.getAttribute('data-action') === 'client-document-type-toggle') {
+  if (target.getAttribute('data-action') === 'client-document-type-select') {
     const field = target.closest('[data-client-document-field]');
     const documentInput = field?.querySelector('[name="cnpj"]');
-    const isCpf = target.checked;
+    const isCpf = target.value === 'CPF';
     const documentType = isCpf ? 'CPF' : 'CNPJ';
-    const documentLabel = field?.querySelector('[data-client-document-label]');
-    const toggleTypeLabel = field?.querySelector('[data-client-document-type-label]');
 
     if (documentInput) {
       documentInput.value = '';
@@ -2692,8 +2690,6 @@ function onDocumentChange(event) {
       documentInput.placeholder = isCpf ? '00000000000' : '00000000000000';
       documentInput.setAttribute('aria-label', `${documentType} do cliente`);
     }
-    if (documentLabel) documentLabel.textContent = documentType;
-    if (toggleTypeLabel) toggleTypeLabel.textContent = documentType;
     const domainSearchButton = field?.closest('#clientForm')?.querySelector('[data-action="client-buscar-codigo-empresa-dominio"]');
     if (domainSearchButton) {
       const hasClientId = Boolean(field.closest('#clientForm')?.querySelector('[name="clientId"]')?.value);
@@ -12196,31 +12192,26 @@ function renderClientFormModal() {
                 <input name="nomeFantasia" value="${escapeHtml(client?.nomeFantasia || '')}" />
               </label>
               <div class="field client-document-field" data-client-document-field>
-                <span data-client-document-label>${clientDocumentType}</span>
-                <input
-                  id="clientDocumentInput"
-                  name="cnpj"
-                  required
-                  inputmode="numeric"
-                  maxlength="${isCpf ? 11 : 14}"
-                  placeholder="${isCpf ? '00000000000' : '00000000000000'}"
-                  aria-label="${clientDocumentType} do cliente"
-                  value="${escapeHtml(client?.cnpj || '')}"
-                />
-                <div class="client-document-toggle-row">
-                  <span>Tipo de cadastro: <strong data-client-document-type-label>${clientDocumentType}</strong></span>
-                  <label class="client-document-switch" title="Alternar entre CPF e CNPJ">
-                    <input
-                      name="tipoDocumento"
-                      type="checkbox"
-                      value="CPF"
-                      role="switch"
-                      aria-label="Alternar entre CPF e CNPJ"
-                      data-action="client-document-type-toggle"
-                      ${isCpf ? 'checked' : ''}
-                    />
-                    <span aria-hidden="true"></span>
-                  </label>
+                <span>Documento</span>
+                <div class="client-document-control">
+                  <input
+                    id="clientDocumentInput"
+                    name="cnpj"
+                    required
+                    inputmode="numeric"
+                    maxlength="${isCpf ? 11 : 14}"
+                    placeholder="${isCpf ? '00000000000' : '00000000000000'}"
+                    aria-label="${clientDocumentType} do cliente"
+                    value="${escapeHtml(client?.cnpj || '')}"
+                  />
+                  <select
+                    name="tipoDocumento"
+                    aria-label="Tipo de documento do cliente"
+                    data-action="client-document-type-select"
+                  >
+                    <option value="CNPJ" ${isCpf ? '' : 'selected'}>CNPJ</option>
+                    <option value="CPF" ${isCpf ? 'selected' : ''}>CPF</option>
+                  </select>
                 </div>
               </div>
               <label class="field">
@@ -12814,7 +12805,7 @@ function onDocumentInput(event) {
   }
 
   if (target.name === 'cnpj' && target.closest('#clientForm')) {
-    const isCpf = Boolean(target.closest('[data-client-document-field]')?.querySelector('[data-action="client-document-type-toggle"]')?.checked);
+    const isCpf = target.closest('[data-client-document-field]')?.querySelector('[data-action="client-document-type-select"]')?.value === 'CPF';
     target.value = normalizeDigits(target.value).slice(0, isCpf ? 11 : 14);
     return;
   }
