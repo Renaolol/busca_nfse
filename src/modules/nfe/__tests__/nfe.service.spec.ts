@@ -173,6 +173,50 @@ describe('NfeService', () => {
     expect(row.icmsCalculado).toBe(286.56);
   });
 
+  it('limita a base CST 060 ao valor da mercadoria e usa a aliquota do XML', () => {
+    const row = (service as any).toCst060AnalysisItem(
+      { id: 'nfe-1', chaveAcesso: '1'.repeat(44), dataEmissao: new Date('2026-07-29'), cnpjEmitente: null },
+      {
+        itemNumero: 1,
+        descricaoProduto: 'PRODUTO CST 060',
+        quantidade: 1,
+        valorUnitario: 1000,
+        valorProduto: 1000,
+        desconto: 0,
+        vBCSTRet: 1200,
+        pST: 12.5,
+        vICMSSTRet: 150
+      },
+      17
+    );
+
+    expect(row.baseCalculada).toBe(1000);
+    expect(row.aliquotaInterna).toBe(12.5);
+    expect(row.icmsCalculado).toBe(125);
+  });
+
+  it('preserva a base CST 060 do XML quando ela for menor que o valor da mercadoria', () => {
+    const row = (service as any).toCst060AnalysisItem(
+      { id: 'nfe-1', chaveAcesso: '1'.repeat(44), dataEmissao: new Date('2026-07-29'), cnpjEmitente: null },
+      {
+        itemNumero: 1,
+        descricaoProduto: 'PRODUTO CST 060',
+        quantidade: 1,
+        valorUnitario: 1000,
+        valorProduto: 1000,
+        desconto: 50,
+        vBCSTRet: 700,
+        pST: 12.5,
+        vICMSSTRet: 105
+      },
+      17
+    );
+
+    expect(row.baseCalculada).toBe(700);
+    expect(row.aliquotaInterna).toBe(12.5);
+    expect(row.icmsCalculado).toBe(87.5);
+  });
+
   it('zera o ICMS recalculado quando o ICMS ST retido no XML esta zerado', () => {
     const row = (service as any).toCst060AnalysisItem(
       { id: 'nfe-1', chaveAcesso: '1'.repeat(44), dataEmissao: new Date('2026-07-29'), cnpjEmitente: null },

@@ -60,6 +60,11 @@ export class NfeController {
   }
 
   @Get('cst-060-analysis')
+  @ApiOperation({
+    summary: 'Analisa itens CST 060 de NF-e recebidas',
+    description:
+      'Para cada item, usa a base vBCSTRet do XML limitada ao valor total do produto (vProd): bases maiores são limitadas a vProd e bases menores são preservadas. Usa pST do XML como alíquota quando informado; sem pST, mantém a alíquota interna solicitada e a regra automática de 4% para pneus.'
+  })
   @ApiOkResponse({ type: Cst060AnalysisResponseDto })
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   cst060Analysis(@Query() query: QueryCst060AnalysisDto) {

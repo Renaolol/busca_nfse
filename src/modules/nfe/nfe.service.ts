@@ -684,8 +684,16 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   private toCst060AnalysisItem(document: any, item: ParsedCst060Item, aliquotaInterna: number) {
     const isPneu = this.isCst060Pneu(item);
-    const aliquotaAplicada = isPneu ? 4 : aliquotaInterna;
-    const baseCalculada = this.roundMoney(item.valorProduto - item.desconto);
+    const aliquotaXml = item.pST;
+    const temAliquotaXml = aliquotaXml != null && Number.isFinite(aliquotaXml);
+    const aliquotaAplicada = temAliquotaXml && aliquotaXml != null ? aliquotaXml : isPneu ? 4 : aliquotaInterna;
+    const baseMercadoriaLiquida = Math.max(0, item.valorProduto - item.desconto);
+    const baseXml = item.vBCSTRet;
+    const baseCalculada = this.roundMoney(
+      baseXml == null
+        ? baseMercadoriaLiquida
+        : Math.min(Math.max(0, baseXml), Math.max(0, item.valorProduto))
+    );
     // Sem ICMS ST retido no XML, nao ha credito a aproveitar no CST 060.
     const icmsCalculado = item.vICMSSTRet === 0
       ? 0
@@ -710,7 +718,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       desconto: item.desconto,
       baseCalculada,
       aliquotaInterna: aliquotaAplicada,
-      origemAliquota: isPneu ? 'regra-pneu' as const : 'informada' as const,
+      origemAliquota: !temAliquotaXml && isPneu ? 'regra-pneu' as const : 'informada' as const,
       icmsStXml: item.vICMSSTRet,
       icmsCalculado,
       diferenca,
