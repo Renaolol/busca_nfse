@@ -8047,14 +8047,14 @@ function getXmlReader30NfeColumnDefinitions() {
     },
     {
       key: 'baseCalculoIcms',
-      label: 'Base de Cálculo ICMS',
+      label: 'BC ICMS',
       className: 'xml-reader30-icms-number',
       html: false,
       render: (row) => row.baseCalculoIcms || '-'
     },
     {
       key: 'aliquotaIcms',
-      label: 'Alíquota ICMS (%)',
+      label: 'Alq ICMS',
       className: 'xml-reader30-icms-number',
       html: false,
       render: (row) => row.aliquotaIcms || '-'
