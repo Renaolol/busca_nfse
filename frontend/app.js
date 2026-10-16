@@ -2678,6 +2678,38 @@ function onDocumentChange(event) {
     return;
   }
 
+  if (target instanceof HTMLInputElement && target.getAttribute('data-action') === 'client-document-type-toggle') {
+    const field = target.closest('[data-client-document-field]');
+    const documentInput = field?.querySelector('[name="cnpj"]');
+    const isCpf = target.checked;
+    const documentType = isCpf ? 'CPF' : 'CNPJ';
+    const documentLabel = field?.querySelector('[data-client-document-label]');
+    const toggleTypeLabel = field?.querySelector('[data-client-document-type-label]');
+
+    if (documentInput) {
+      documentInput.value = '';
+      documentInput.maxLength = isCpf ? 11 : 14;
+      documentInput.placeholder = isCpf ? '00000000000' : '00000000000000';
+      documentInput.setAttribute('aria-label', `${documentType} do cliente`);
+    }
+    if (documentLabel) documentLabel.textContent = documentType;
+    if (toggleTypeLabel) toggleTypeLabel.textContent = documentType;
+    const domainSearchButton = field?.closest('#clientForm')?.querySelector('[data-action="client-buscar-codigo-empresa-dominio"]');
+    if (domainSearchButton) {
+      const hasClientId = Boolean(field.closest('#clientForm')?.querySelector('[name="clientId"]')?.value);
+      const isSearching = domainSearchButton.textContent.includes('Buscando...');
+      domainSearchButton.disabled = isCpf || !hasClientId || isSearching;
+      if (isCpf) {
+        domainSearchButton.title = 'A busca pelo codigo Dominio usa CNPJ.';
+      } else if (!hasClientId) {
+        domainSearchButton.title = 'Salve o cliente primeiro para buscar pelo CNPJ.';
+      } else {
+        domainSearchButton.removeAttribute('title');
+      }
+    }
+    return;
+  }
+
   if (target instanceof HTMLInputElement && target.name === 'arquivo' && target.closest('#certificatesModalForm')) {
     const fileName = target.files?.[0]?.name || 'Nenhum arquivo escolhido';
     const fileNameElement = target.closest('.certificate-file-control')?.querySelector('.certificate-file-name');
@@ -3581,7 +3613,7 @@ function renderDashboardPage() {
               <thead>
                 <tr>
                   <th>Cliente</th>
-                  <th>CNPJ</th>
+                  <th>CPF/CNPJ</th>
                   <th>Municipio</th>
                   <th>Ultima busca</th>
                   <th>NFS-e</th>
@@ -3596,7 +3628,7 @@ function renderDashboardPage() {
                     .map((client) => {
                       return `<tr data-action="client-details" data-client-id="${client.id}" style="cursor:pointer;">
                         <td>${escapeHtml(client.razaoSocial)}</td>
-                        <td>${escapeHtml(formatCnpj(client.cnpj))}</td>
+                        <td>${escapeHtml(formatCpfCnpj(client.cnpj))}</td>
                         <td>${escapeHtml(client.municipio)}</td>
                         <td>${escapeHtml(formatDateTime(client.ultimaBusca))}</td>
                         <td>${escapeHtml(String(client.xmlsEncontrados))}</td>
@@ -3709,7 +3741,7 @@ function renderClientsPage() {
         <h3 class="card-title">Filtros</h3>
         <form id="clientsFilterForm" class="form-grid">
           <label class="field" style="grid-column: span 2;">
-            Buscar por razao social, CNPJ ou municipio
+            Buscar por razao social, CPF/CNPJ ou municipio
             <input id="clientsFilterQuery" name="query" value="${escapeHtml(state.filters.clients.query)}" placeholder="Digite para buscar" />
           </label>
           <label class="field">
@@ -3797,7 +3829,7 @@ function renderClientsPage() {
                         <td><input type="checkbox" data-action="client-select" data-client-id="${client.id}" ${state.selectedClientIds.has(client.id) ? 'checked' : ''} aria-label="Selecionar ${escapeHtml(client.razaoSocial)}" /></td>
                         <td>
                           <span class="row-title">${escapeHtml(client.razaoSocial)}</span>
-                          <span class="row-sub">${escapeHtml(formatCnpj(client.cnpj))}</span>
+                          <span class="row-sub">${escapeHtml(formatCpfCnpj(client.cnpj))}</span>
                         </td>
                         <td>${escapeHtml(client.municipio)} / ${escapeHtml(client.uf)}</td>
                         <td>
@@ -3861,7 +3893,7 @@ function renderClientDetailsPage(clientId) {
         <div>
           <button class="btn ghost" type="button" data-action="navigate" data-route="/clientes">${icon('arrow-left')} Voltar</button>
           <h2 class="page-title" style="margin-top:8px;">${escapeHtml(client.razaoSocial)}</h2>
-          <p class="page-description">${escapeHtml(formatCnpj(client.cnpj))}</p>
+          <p class="page-description">${escapeHtml(formatCpfCnpj(client.cnpj))}</p>
         </div>
         <div class="page-actions">
           ${statusBadge(client.buscaAtiva ? 'Busca habilitada' : 'Busca pausada', client.buscaAtiva ? 'success' : 'neutral')}
@@ -3878,7 +3910,7 @@ function renderClientDetailsPage(clientId) {
             <div class="form-grid two" style="margin-top:12px; gap:10px;">
               ${detailItem('Razao social', client.razaoSocial)}
               ${detailItem('Nome fantasia', client.nomeFantasia || '-')}
-              ${detailItem('CNPJ', formatCnpj(client.cnpj))}
+              ${detailItem('CPF/CNPJ', formatCpfCnpj(client.cnpj))}
               ${detailItem('Inscricao municipal', client.inscricaoMunicipal || '-')}
               ${detailItem('Endereco', clientAddressLabel)}
               ${detailItem('Municipio', formatMunicipioUfLabel(client.municipio, client.uf))}
@@ -3901,12 +3933,12 @@ function renderClientDetailsPage(clientId) {
             </div>
             <div class="table-wrap" style="margin-top:10px;">
               <table>
-                <thead><tr><th>Razao social</th><th>CNPJ</th><th>Municipio / UF</th><th>Status</th></tr></thead>
+                <thead><tr><th>Razao social</th><th>CPF/CNPJ</th><th>Municipio / UF</th><th>Status</th></tr></thead>
                 <tbody>
                   ${establishments.length
                     ? establishments.map((establishment) => `<tr>
                         <td>${escapeHtml(establishment.razaoSocial || '-')}</td>
-                        <td>${escapeHtml(formatCnpj(establishment.cnpj || ''))}</td>
+                        <td>${escapeHtml(formatCpfCnpj(establishment.cnpj || ''))}</td>
                         <td>${escapeHtml(formatMunicipioUfLabel(establishment.municipioNome, establishment.uf))}</td>
                         <td>${statusBadge(establishment.ativo ? 'Ativo' : 'Inativo', establishment.ativo ? 'success' : 'neutral')}</td>
                       </tr>`).join('')
@@ -4103,11 +4135,11 @@ function renderCertificatesPage() {
         <h3 class="card-title">Filtro</h3>
         <form id="certificatesFilterForm" class="form-grid">
           <label class="field" style="grid-column: span 2;">
-            Buscar por nome ou CNPJ
+            Buscar por nome ou CPF/CNPJ
             <input
               name="query"
               value="${escapeHtml(state.filters.certificates.query)}"
-              placeholder="Digite o nome do cliente, apelido do certificado ou CNPJ"
+              placeholder="Digite o nome do cliente, apelido do certificado ou CPF/CNPJ"
             />
           </label>
           <div class="stack-actions" style="grid-column: span 2; justify-content:flex-start; align-items:flex-end;">
@@ -4123,7 +4155,7 @@ function renderCertificatesPage() {
             <thead>
               <tr>
                 <th>Cliente</th>
-                <th>CNPJ</th>
+                <th>CPF/CNPJ</th>
                 <th>Tipo</th>
                 <th>Apelido</th>
                 <th>Validade</th>
@@ -4156,7 +4188,7 @@ function renderCertificatesPage() {
                     ];
                     return `<tr${rowClass} data-row-actions-menu-id="${escapeHtml(certMenuId)}">
                       <td>${escapeHtml(cert.cliente)}</td>
-                      <td>${escapeHtml(formatCnpj(cert.cnpj))}</td>
+                      <td>${escapeHtml(formatCpfCnpj(cert.cnpj))}</td>
                       <td>${escapeHtml(cert.tipo)}</td>
                       <td>${escapeHtml(cert.apelido)}</td>
                       <td>${escapeHtml(formatDate(cert.validade))}</td>
@@ -11606,7 +11638,7 @@ function renderRecoverPastNsusModal() {
                   <option value="">Todos os clientes</option>
                   ${state.clients
                     .map((client) => {
-                      return `<option value="${escapeHtml(client.id)}">${escapeHtml(client.razaoSocial)} - ${escapeHtml(formatCnpj(client.cnpj))}</option>`;
+                      return `<option value="${escapeHtml(client.id)}">${escapeHtml(client.razaoSocial)} - ${escapeHtml(formatCpfCnpj(client.cnpj))}</option>`;
                     })
                     .join('')}
                 </select>
@@ -12130,6 +12162,9 @@ function renderNfseContaContabilConfigModal() {
 
 function renderClientFormModal() {
   const client = state.modal.mode === 'edit' ? findClientById(state.modal.clientId) : null;
+  const clientDocumentNumber = normalizeDigits(client?.cnpj || '');
+  const isCpf = clientDocumentNumber.length === 11;
+  const clientDocumentType = isCpf ? 'CPF' : 'CNPJ';
   const municipioValue = getEditableValue(client?.municipio);
   const ufValue = getEditableValue(client?.uf);
   const logradouroValue = getEditableValue(client?.logradouro);
@@ -12160,10 +12195,34 @@ function renderClientFormModal() {
                 Nome fantasia
                 <input name="nomeFantasia" value="${escapeHtml(client?.nomeFantasia || '')}" />
               </label>
-              <label class="field">
-                CNPJ
-                <input name="cnpj" required value="${escapeHtml(client?.cnpj || '')}" />
-              </label>
+              <div class="field client-document-field" data-client-document-field>
+                <span data-client-document-label>${clientDocumentType}</span>
+                <input
+                  id="clientDocumentInput"
+                  name="cnpj"
+                  required
+                  inputmode="numeric"
+                  maxlength="${isCpf ? 11 : 14}"
+                  placeholder="${isCpf ? '00000000000' : '00000000000000'}"
+                  aria-label="${clientDocumentType} do cliente"
+                  value="${escapeHtml(client?.cnpj || '')}"
+                />
+                <div class="client-document-toggle-row">
+                  <span>Tipo de cadastro: <strong data-client-document-type-label>${clientDocumentType}</strong></span>
+                  <label class="client-document-switch" title="Alternar entre CPF e CNPJ">
+                    <input
+                      name="tipoDocumento"
+                      type="checkbox"
+                      value="CPF"
+                      role="switch"
+                      aria-label="Alternar entre CPF e CNPJ"
+                      data-action="client-document-type-toggle"
+                      ${isCpf ? 'checked' : ''}
+                    />
+                    <span aria-hidden="true"></span>
+                  </label>
+                </div>
+              </div>
               <label class="field">
                 Inscricao municipal
                 <input name="inscricaoMunicipal" value="${escapeHtml(client?.inscricaoMunicipal || '')}" />
@@ -12196,7 +12255,7 @@ function renderClientFormModal() {
                     class="btn secondary"
                     type="button"
                     data-action="client-buscar-codigo-empresa-dominio"
-                    ${client?.id ? '' : 'disabled title="Salve o cliente primeiro para buscar pelo CNPJ."'}
+                    ${client?.id && !isCpf ? '' : `disabled title="${isCpf ? 'A busca pelo codigo Dominio usa CNPJ.' : 'Salve o cliente primeiro para buscar pelo CNPJ.'}"`}
                     ${buscandoCodigoEmpresa ? 'disabled' : ''}
                   >
                     ${buscandoCodigoEmpresa ? 'Buscando...' : 'Buscar por CNPJ'}
@@ -12230,20 +12289,22 @@ function renderClientFormModal() {
 function renderEstablishmentFormModal() {
   const client = findClientById(state.modal.clientId);
   if (!client) return '';
+  const clientIdentifier = normalizeDigits(client.cnpj || '');
+  const clientHasCnpj = clientIdentifier.length === 14;
 
   return `
     <div class="overlay" data-action="overlay-close">
       <div class="modal" role="dialog" aria-modal="true">
         <div class="modal-header">
           <h3 class="modal-title">Adicionar estabelecimento</h3>
-          <p class="modal-subtitle">Vinculado a ${escapeHtml(client.razaoSocial)}. O CNPJ e a razao social estao preenchidos com os dados do cliente; altere-os para cadastrar uma filial.</p>
+          <p class="modal-subtitle">${clientHasCnpj ? `Vinculado a ${escapeHtml(client.razaoSocial)}. O CNPJ e a razao social estao preenchidos com os dados do cliente; altere-os para cadastrar uma filial.` : `Vinculado a ${escapeHtml(client.razaoSocial)} com CPF. Informe o CNPJ da filial.`}</p>
         </div>
         <form id="establishmentForm">
           <input type="hidden" name="clienteId" value="${escapeHtml(client.id)}" />
           <div class="modal-body">
             <div class="form-grid two">
               <label class="field">Razao social<input name="razaoSocial" required value="${escapeHtml(client.razaoSocial || '')}" /></label>
-              <label class="field">CNPJ<input name="cnpj" required inputmode="numeric" maxlength="18" value="${escapeHtml(formatCnpj(client.cnpj || ''))}" /></label>
+              <label class="field">CNPJ<input name="cnpj" required inputmode="numeric" maxlength="18" value="${escapeHtml(clientHasCnpj ? formatCnpj(clientIdentifier) : '')}" /></label>
               <label class="field">Inscricao municipal<input name="inscricaoMunicipal" /></label>
               <label class="field">UF<input name="uf" maxlength="2" value="${escapeHtml(client.uf || '')}" /></label>
               <label class="field">Municipio<input name="municipioNome" value="${escapeHtml(client.municipio || '')}" /></label>
@@ -12686,7 +12747,7 @@ function renderEventsSyncCompaniesModal() {
               <span>Processar todas as empresas</span>
             </label>
             <div class="events-sync-companies-toolbar">
-              <input type="search" data-events-sync-control="filter" placeholder="Filtrar por nome ou CNPJ" ${submitting ? 'disabled' : ''} />
+              <input type="search" data-events-sync-control="filter" placeholder="Filtrar por nome ou CPF/CNPJ" ${submitting ? 'disabled' : ''} />
               <div class="events-sync-companies-actions">
                 <button class="btn secondary" type="button" data-action="events-sync-companies-select-visible" ${submitting ? 'disabled' : ''}>Selecionar visiveis</button>
                 <button class="btn secondary" type="button" data-action="events-sync-companies-clear-selection" ${submitting ? 'disabled' : ''}>Limpar</button>
@@ -12698,8 +12759,8 @@ function renderEventsSyncCompaniesModal() {
                 .map(
                   (client) => {
                     const clientName = String(client.razaoSocial || client.cnpj || client.id);
-                    const cnpj = formatCnpj(client.cnpj || '');
-                    const searchText = `${clientName} ${client.cnpj || ''}`
+                    const clientDocument = formatCpfCnpj(client.cnpj || '');
+                    const searchText = `${clientName} ${client.cnpj || ''} ${clientDocument}`
                       .normalize('NFD')
                       .replace(/[\u0300-\u036f]/g, '')
                       .toLowerCase();
@@ -12707,7 +12768,7 @@ function renderEventsSyncCompaniesModal() {
                     <label class="events-sync-company-row" data-events-sync-company="${escapeHtml(searchText)}">
                       <input type="checkbox" name="clienteIds" data-events-sync-control="client" value="${escapeHtml(client.id)}" ${submitting ? 'disabled' : ''} />
                       <span class="events-sync-company-name">${escapeHtml(clientName)}</span>
-                      <small>${escapeHtml(cnpj)}</small>
+                      <small>${escapeHtml(clientDocument)}</small>
                     </label>`
                   }
                 )
@@ -12748,9 +12809,17 @@ function renderEventsSyncCompaniesModal() {
 
 function onDocumentInput(event) {
   const target = event.target;
-  if (!(target instanceof HTMLInputElement) || target.getAttribute('data-events-sync-control') !== 'filter') {
+  if (!(target instanceof HTMLInputElement)) {
     return;
   }
+
+  if (target.name === 'cnpj' && target.closest('#clientForm')) {
+    const isCpf = Boolean(target.closest('[data-client-document-field]')?.querySelector('[data-action="client-document-type-toggle"]')?.checked);
+    target.value = normalizeDigits(target.value).slice(0, isCpf ? 11 : 14);
+    return;
+  }
+
+  if (target.getAttribute('data-events-sync-control') !== 'filter') return;
 
   const term = String(target.value || '')
     .normalize('NFD')
@@ -15243,7 +15312,7 @@ function resolvePageMetaForRoute(route = state.route) {
     if (client) {
       return {
         title: client.razaoSocial,
-        description: `Detalhes operacionais do cliente ${formatCnpj(client.cnpj)}.`
+        description: `Detalhes operacionais do cliente ${formatCpfCnpj(client.cnpj)}.`
       };
     }
   }
@@ -15289,11 +15358,15 @@ function applyClientsFilters(form) {
 
 function getFilteredClients() {
   const { query, statusBusca, certificado, municipio } = state.filters.clients;
+  const normalizedQuery = normalizeSearchText(query);
+  const queryDigits = normalizeDigits(query);
 
   return state.clients.filter((client) => {
+    const clientDocument = normalizeDigits(client.cnpj || '');
     const matchesQuery =
       !query ||
-      `${client.razaoSocial} ${client.cnpj} ${client.municipio}`.toLowerCase().includes(query.toLowerCase());
+      normalizeSearchText(`${client.razaoSocial} ${formatCpfCnpj(client.cnpj)} ${client.municipio}`).includes(normalizedQuery) ||
+      (queryDigits.length > 0 && clientDocument.includes(queryDigits));
 
     const matchesStatus = statusBusca === 'Todos' || client.buscaStatus === statusBusca;
     const matchesCertificate = certificado === 'Todos' || client.certificadoStatus === certificado;
@@ -15428,9 +15501,11 @@ async function submitClientForm(form) {
     buscaNfeAtiva: formData.get('buscaNfeAtiva') === 'on',
     codigoEmpresaDominio: String(formData.get('codigoEmpresaDominio') || '').trim()
   };
+  const documentType = formData.get('tipoDocumento') === 'CPF' ? 'CPF' : 'CNPJ';
+  const expectedDocumentLength = documentType === 'CPF' ? 11 : 14;
 
-  if (payload.cnpj.length !== 14) {
-    pushToast('Informe um CNPJ com 14 digitos.', 'error');
+  if (payload.cnpj.length !== expectedDocumentLength) {
+    pushToast(`Informe um ${documentType} com ${expectedDocumentLength} digitos.`, 'error');
     return;
   }
 
@@ -20924,7 +20999,7 @@ function buildDominioImportOverlayRows(clients, periodLabel) {
   return (Array.isArray(clients) ? clients : []).map((client) => ({
     clientId: client.id,
     clientLabel: client.razaoSocial || 'Cliente',
-    clientDetail: formatCnpj(client.cnpj || ''),
+    clientDetail: formatCpfCnpj(client.cnpj || ''),
     periodLabel,
     status: 'na_fila',
     stepLabel: 'Aguardando inicio',
@@ -21009,7 +21084,7 @@ function buildDownloadByKeyPreviewRows(rawRows, showClientColumn = false) {
       chaveAcesso: String(row?.chaveAcesso || ''),
       modelo: String(row?.modelo || ''),
       clientLabel: client?.razaoSocial || 'Cliente nao localizado',
-      clientDetail: showClientColumn ? formatCnpj(client?.cnpj || row?.cnpjConsulta || '') : '',
+      clientDetail: showClientColumn ? formatCpfCnpj(client?.cnpj || row?.cnpjConsulta || '') : '',
       keyDetail: isControl
         ? `CNPJ ${formatCnpj(row?.cnpjConsulta || '') || '-'}`
         : `Catalogo ${String(row?.catalogoId || '-')} • ${mapNfeAmbienteLabel(row?.ambiente)}`,
@@ -24945,7 +25020,7 @@ function canSyncCteEvents(doc) {
 
 function mapClientOptions() {
   return state.clients.reduce((acc, client) => {
-    acc[client.id] = `${client.razaoSocial} (${formatCnpj(client.cnpj)})`;
+    acc[client.id] = `${client.razaoSocial} (${formatCpfCnpj(client.cnpj)})`;
     return acc;
   }, {});
 }
@@ -25364,6 +25439,14 @@ function formatCnpj(value) {
   }
 
   return digits.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, '$1.$2.$3/$4-$5');
+}
+
+function formatCpfCnpj(value) {
+  const digits = normalizeDigits(String(value || ''));
+  if (digits.length === 11) {
+    return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, '$1.$2.$3-$4');
+  }
+  return formatCnpj(value);
 }
 
 function normalizeDigits(value) {

@@ -15,7 +15,7 @@ export class ClientsController {
   @Roles('admin', 'comum')
   @ApiOperation({
     summary: 'Cadastra um cliente e seu estabelecimento principal',
-    description: 'Disponivel para usuarios administradores e usuarios comuns.'
+    description: 'Aceita CPF com 11 digitos ou CNPJ com 14 digitos no campo cnpj. Disponivel para usuarios administradores e usuarios comuns.'
   })
   create(@Body() dto: CreateClientDto) {
     return this.clientsService.create(dto);

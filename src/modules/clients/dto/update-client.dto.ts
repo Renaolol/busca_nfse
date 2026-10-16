@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, Length, Min } from 'class-validator';
+import { IsBoolean, IsEmail, IsInt, IsOptional, IsString, Matches, Min } from 'class-validator';
 
 export class UpdateClientDto {
   @ApiPropertyOptional()
@@ -8,10 +8,10 @@ export class UpdateClientDto {
   @IsString()
   razaoSocial?: string;
 
-  @ApiPropertyOptional({ description: 'CNPJ com 14 digitos numericos' })
+  @ApiPropertyOptional({ description: 'CPF com 11 ou CNPJ com 14 digitos numericos' })
   @IsOptional()
   @IsString()
-  @Length(14, 14)
+  @Matches(/^(?:\d{11}|\d{14})$/)
   cnpj?: string;
 
   @ApiPropertyOptional({ description: 'Inscricao municipal do estabelecimento principal' })

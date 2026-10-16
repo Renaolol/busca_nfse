@@ -103,6 +103,31 @@ describe('ClientsService', () => {
     expect(result.estabelecimentoPrincipal).toEqual(createdEstablishment);
   });
 
+  it('cria cliente pessoa fisica e armazena o CPF no campo de identificacao existente', async () => {
+    prisma.cliente.create.mockResolvedValue({
+      id: 'cliente-cpf',
+      razaoSocial: 'Cliente Pessoa Fisica',
+      cnpj: '12345678901'
+    });
+    prisma.clienteEstabelecimento.create.mockResolvedValue({
+      id: 'estabelecimento-cpf',
+      clienteId: 'cliente-cpf',
+      cnpj: '12345678901'
+    });
+
+    await service.create({
+      razaoSocial: 'Cliente Pessoa Fisica',
+      cnpj: '123.456.789-01'
+    });
+
+    expect(prisma.cliente.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ cnpj: '12345678901' })
+    });
+    expect(prisma.clienteEstabelecimento.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ cnpj: '12345678901' })
+    });
+  });
+
   it('atualiza cliente e estabelecimento principal com dados fiscais e responsavel interno', async () => {
     prisma.cliente.findUnique.mockResolvedValue({
       id: 'cliente-1',
