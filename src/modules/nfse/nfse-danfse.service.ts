@@ -769,8 +769,8 @@ export class NfseDanfseService {
           this.getFederalSocialContributionsLabel(input.layoutNfse),
           this.describeFederalSocialContributions(input.descricaoContribuicoesSociais, input.layoutNfse)
         ),
-        field(this.getPisFederalLabel(input.layoutNfse), money(input.valorPis)),
-        field(this.getCofinsFederalLabel(input.layoutNfse), money(input.valorCofins))
+        field(this.getPisFederalLabel(input), money(input.valorPis)),
+        field(this.getCofinsFederalLabel(input), money(input.valorCofins))
       ]
     });
 
@@ -800,7 +800,7 @@ export class NfseDanfseService {
         field('Desconto Incondicionado', money(input.valorDescontoIncondicionado)),
         field('ISSQN Retido', money(input.valorIssRetido)),
         field('Total das Retencoes Federais', money(this.totalRetencoesFederais(input))),
-        field(this.getPisCofinsResumoLabel(input.layoutNfse), money(this.sumValues(input.valorPis, input.valorCofins))),
+        field(this.getPisCofinsResumoLabel(input), money(this.sumValues(input.valorPis, input.valorCofins))),
         field('Total das Retencoes (ISSQN / Federais)', money(input.valorTotalRetencoes), 2),
         field('Valor Liquido da NFS-e', money(input.valorLiquidoNfse), 2),
         ...(this.hasIbsCbsData(input)
@@ -1238,8 +1238,8 @@ export class NfseDanfseService {
       this.safeValue(this.describeFederalSocialContributions(input.descricaoContribuicoesSociais, input.layoutNfse)),
       120
     );
-    pushField(this.getPisFederalLabel(input.layoutNfse), this.safeValue(this.formatMoney(input.valorPis)));
-    pushField(this.getCofinsFederalLabel(input.layoutNfse), this.safeValue(this.formatMoney(input.valorCofins)));
+    pushField(this.getPisFederalLabel(input), this.safeValue(this.formatMoney(input.valorPis)));
+    pushField(this.getCofinsFederalLabel(input), this.safeValue(this.formatMoney(input.valorCofins)));
 
     if (hasIbsCbs) {
       pushSection('TRIBUTACAO IBS/CBS');
@@ -1268,7 +1268,7 @@ export class NfseDanfseService {
     pushField('ISSQN Retido', this.safeValue(this.formatMoney(input.valorIssRetido)));
     pushField('Total das Retencoes Federais', this.safeValue(this.formatMoney(this.totalRetencoesFederais(input))));
     pushField(
-      this.getPisCofinsResumoLabel(input.layoutNfse),
+      this.getPisCofinsResumoLabel(input),
       this.safeValue(this.formatMoney(this.sumValues(input.valorPis, input.valorCofins)))
     );
     pushField('Total das Retencoes (ISSQN / Federais)', this.safeValue(this.formatMoney(input.valorTotalRetencoes)));
@@ -1733,7 +1733,11 @@ export class NfseDanfseService {
       valorContribuicoesSociais,
       valorPis,
       valorCofins,
-      descricaoContribuicoesSociais: this.extractFromPaths(xml, [['infDPS', 'valores', 'trib', 'tribFed', 'piscofins', 'tpRetPisCofins']]),
+      descricaoContribuicoesSociais: this.extractFromPaths(xml, [
+        ['infDPS', 'valores', 'trib', 'tribFed', 'piscofins', 'tpRetPisCofins'],
+        ['infNFSe', 'valores', 'trib', 'tribFed', 'piscofins', 'tpRetPisCofins'],
+        ['valores', 'trib', 'tribFed', 'piscofins', 'tpRetPisCofins']
+      ]),
       cstClassTribIbsCbs: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'cClassTrib'], ['infDPS', 'IBSCBS', 'CST']]),
       indicadorOperacaoIbsCbs: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'cIndOp']]),
       municipioIncidenciaIbsCbs: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'xLocIncid']]),
@@ -2906,16 +2910,34 @@ export class NfseDanfseService {
     return descriptions[normalized] ?? normalized;
   }
 
-  private getPisFederalLabel(layout?: DanfseRenderInput['layoutNfse']): string {
-    return layout === 'padrao_nacional' ? 'PIS - Debito Apuracao Propria' : 'PIS Retido';
+  private hasPisCofinsRetention(input: DanfseRenderInput): boolean {
+    if (input.layoutNfse === 'padrao_nacional') {
+      return false;
+    }
+
+    const pisCofins = this.toNumber(this.sumValues(input.valorPis, input.valorCofins)) ?? 0;
+    if (pisCofins <= 0) {
+      return false;
+    }
+
+    const federalRetention = this.toNumber(this.totalRetencoesFederais(input));
+    if (federalRetention === undefined) {
+      return true;
+    }
+
+    return federalRetention > 0.005;
   }
 
-  private getCofinsFederalLabel(layout?: DanfseRenderInput['layoutNfse']): string {
-    return layout === 'padrao_nacional' ? 'COFINS - Debito Apuracao Propria' : 'COFINS Retido';
+  private getPisFederalLabel(input: DanfseRenderInput): string {
+    return this.hasPisCofinsRetention(input) ? 'PIS Retido' : 'PIS - Debito Apuracao Propria';
   }
 
-  private getPisCofinsResumoLabel(layout?: DanfseRenderInput['layoutNfse']): string {
-    return layout === 'padrao_nacional' ? 'PIS/COFINS - Debito Apur. Propria' : 'PIS/COFINS Retidos';
+  private getCofinsFederalLabel(input: DanfseRenderInput): string {
+    return this.hasPisCofinsRetention(input) ? 'COFINS Retido' : 'COFINS - Debito Apuracao Propria';
+  }
+
+  private getPisCofinsResumoLabel(input: DanfseRenderInput): string {
+    return this.hasPisCofinsRetention(input) ? 'PIS/COFINS Retidos' : 'PIS/COFINS - Debito Apur. Propria';
   }
 
   private pushRetentionAmountEntry(

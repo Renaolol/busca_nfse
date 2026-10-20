@@ -285,6 +285,46 @@ describe('NfseDanfseService', () => {
     expect(content).toContain('R$ 34,31');
   });
 
+  it('nao rotula PIS/COFINS como retidos em XML ABRASF quando o liquido prova que nao houve retencoes', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<CompNfse xmlns="http://www.abrasf.org.br/nfse.xsd">
+  <Nfse versao="1.00">
+    <InfNfse>
+      <Numero>514972</Numero>
+      <ValoresNfse><ValorLiquidoNfse>107.53</ValorLiquidoNfse></ValoresNfse>
+      <DeclaracaoPrestacaoServico>
+        <InfDeclaracaoPrestacaoServico>
+          <Servico>
+            <Valores>
+              <ValorServicos>107.53</ValorServicos>
+              <ValorIss>2.15</ValorIss>
+              <ValorPis>0.70</ValorPis>
+              <ValorCofins>3.23</ValorCofins>
+            </Valores>
+            <IssRetido>2</IssRetido>
+            <Discriminacao>Cadastro 17 01</Discriminacao>
+          </Servico>
+        </InfDeclaracaoPrestacaoServico>
+      </DeclaracaoPrestacaoServico>
+    </InfNfse>
+  </Nfse>
+</CompNfse>`;
+
+    const pdf = service.generateFromXml(xml, {
+      chaveAcesso: '35488071206326025000247000000051497226094000639225'
+    });
+    const content = pdf.toString('latin1');
+
+    expect(content).toContain('PIS - Debito Apuracao Propria');
+    expect(content).toContain('COFINS - Debito Apuracao Propria');
+    expect(content).toContain('PIS/COFINS - Debito Apur. Propria');
+    expect(content).not.toContain('PIS Retido');
+    expect(content).not.toContain('COFINS Retido');
+    expect(content).not.toContain('PIS/COFINS Retidos');
+    expect(content).toContain('Total das Retencoes Federais');
+    expect(content).toContain('R$ 0,00');
+  });
+
   it('respeita tpRetISSQN=1 do layout nacional mesmo com vISSRet informado', () => {
     const xml = `<?xml version="1.0" encoding="utf-8"?>
 <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
@@ -446,6 +486,39 @@ describe('NfseDanfseService', () => {
     expect(content).toContain('PIS/COFINS retidos');
     expect(content).toContain('PIS - Debito Apuracao Propria');
     expect(content).toContain('COFINS - Debito Apuracao Propria');
+  });
+
+  it('le tpRetPisCofins da NFS-e autorizada fora do grupo DPS', () => {
+    const xml = `<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <infNFSe Id="NFS35488071206326025000247000000051497226094000639225">
+    <nNFSe>514972</nNFSe>
+    <valores>
+      <vServ>107.53</vServ>
+      <vLiq>107.53</vLiq>
+      <vTotalRet>0.00</vTotalRet>
+      <trib>
+        <tribFed>
+          <piscofins>
+            <vPis>0.70</vPis>
+            <vCofins>3.23</vCofins>
+            <tpRetPisCofins>0</tpRetPisCofins>
+          </piscofins>
+        </tribFed>
+      </trib>
+    </valores>
+  </infNFSe>
+</NFSe>`;
+
+    const pdf = service.generateFromXml(xml, {
+      chaveAcesso: '35488071206326025000247000000051497226094000639225'
+    });
+    const content = pdf.toString('latin1');
+
+    expect(content).toContain('PIS - Debito Apuracao Propria');
+    expect(content).toContain('COFINS - Debito Apuracao Propria');
+    expect(content).toContain('PIS/COFINS/CSLL nao retidos');
+    expect(content).not.toContain('PIS/COFINS retidos');
   });
 
   it('interpreta tpRetISSQN=1 do layout nacional como nao retido quando nao houver valor de ISS retido', () => {
