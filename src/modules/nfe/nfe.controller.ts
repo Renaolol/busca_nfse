@@ -187,6 +187,16 @@ export class NfeController {
     return this.nfeService.runNowGlobal();
   }
 
+  @Post('sync/rodar-sefaz-cpf')
+  @Roles('admin')
+  @ApiOperation({
+    summary: 'Executa busca de NF-e somente pela SEFAZ para controles cadastrados com CPF',
+    description: 'Ignora a origem configurada para CNPJs e consulta exclusivamente os controles CPF pela distribuicao DF-e da SEFAZ.'
+  })
+  runNowCpfViaSefazGlobal() {
+    return this.nfeService.runNowCpfViaSefazGlobal();
+  }
+
   @Post('sync/download-por-chave/preview')
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   previewDownloadByKey(@Body() dto: RunNfeSyncDto) {

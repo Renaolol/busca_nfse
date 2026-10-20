@@ -1660,6 +1660,10 @@ function onDocumentClick(event) {
       void runNfeSearchNow();
       return;
     }
+    case 'nfe-run-sefaz-cpf': {
+      void runNfeCpfSefazSearch();
+      return;
+    }
     case 'nfe-download-by-key-global': {
       void runNfeDownloadByKey();
       return;
@@ -4798,6 +4802,13 @@ async function monitorNfceScControl(controlId, clienteId) {
 
 function renderNfeSyncPage() {
   const nfeEligibleClients = getNfeEligibleClients();
+  const eligibleClientIds = new Set(nfeEligibleClients.map((client) => client.id));
+  const eligibleCpfControlCount = state.nfeSyncControls.filter(
+    (control) =>
+      eligibleClientIds.has(control.clientId) &&
+      normalizeDigits(control.cnpjConsulta || '').length === 11 &&
+      ['ativo', 'erro_api'].includes(control.status)
+  ).length;
   const controls = getFilteredNfeSyncControls();
   const clientRows = getNfeSyncClientRows(controls, nfeEligibleClients);
   const syncStats = getNfeSyncStats();
@@ -4915,6 +4926,17 @@ function renderNfeSyncPage() {
         <button class="btn secondary" type="button" data-action="nfe-sync-clear-filters">Limpar</button>
       </div>
     </form>
+  `;
+  const sefazCpfSearchContent = `
+    <div class="form-grid two">
+      <label class="field">
+        Controles de produtores cadastrados por CPF
+        <input type="text" value="${eligibleCpfControlCount} produtor(es) elegivel(is) para consulta" readonly />
+      </label>
+      <div class="stack-actions" style="justify-content:flex-start; align-items:flex-end;">
+        <button class="btn primary" type="button" data-action="nfe-run-sefaz-cpf" ${eligibleCpfControlCount ? '' : 'disabled'}>Buscar somente pela SEFAZ</button>
+      </div>
+    </div>
   `;
   const simplifiedContent = `
     <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
@@ -5054,6 +5076,14 @@ function renderNfeSyncPage() {
       })}
 
       ${renderSearchTypeSwitcher('nfe')}
+
+      ${renderCollapsibleCard({
+        sectionKey: 'sefazCpf',
+        title: 'Busca SEFAZ para empresas cadastradas por CPF',
+        subtitle: 'Executa a busca manual somente nos controles CPF pela distribuicao DF-e da SEFAZ, sem processar controles CNPJ pela Dominio.',
+        contentHtml: sefazCpfSearchContent,
+        defaultOpen: true
+      })}
 
       <section class="stats-grid">
         ${statCard('search', 'Controles ativos', String(syncStats.ativos), queueLabel, 'success')}
@@ -16447,6 +16477,23 @@ async function runNfeSearchNow() {
     await refreshApiData();
   } catch (error) {
     pushToast(`Falha ao executar busca de NF-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function runNfeCpfSefazSearch() {
+  try {
+    pushToast('Busca de NF-e somente pela SEFAZ iniciada para os produtores cadastrados por CPF. Aguarde a conclusao.', 'info');
+    const result = await apiRequest('/nfe/sync/rodar-sefaz-cpf', {
+      method: 'POST'
+    });
+    state.nfeLastRunReport = buildNfeRunReport(result);
+    pushToast(
+      buildNfeRunToastMessage('Busca SEFAZ por CPF executada', result),
+      Number(result?.failures || 0) > 0 ? 'error' : 'success'
+    );
+    await refreshApiData();
+  } catch (error) {
+    pushToast(`Falha ao executar busca SEFAZ por CPF: ${toErrorMessage(error)}`, 'error');
   }
 }
 

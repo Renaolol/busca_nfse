@@ -1656,6 +1656,124 @@ describe('NfeService', () => {
     expect(result.processed).toBe(2);
   });
 
+  it('executa a acao manual somente para CPFs na SEFAZ mesmo com Dominio configurada', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-cnpj',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 12n,
+        ultimoNsuDistribuido: 12n,
+        maxNsu: 12n,
+        status: NfeSyncStatus.ativo
+      },
+      {
+        id: 'ctrl-cpf',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-cpf',
+        cnpjConsulta: '01861020970',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 0n,
+        ultimoNsuDistribuido: 0n,
+        maxNsu: 20n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    prisma.clienteEstabelecimento.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => ({
+      id: where.id,
+      clienteId: 'cliente-1',
+      cnpj: where.id === 'estab-cpf' ? '01861020970' : '12345678000199',
+      municipioCodigoIbge: '4204202'
+    }));
+    prisma.certificado.findMany.mockResolvedValue([
+      {
+        id: 'cert-1',
+        nome: 'Certificado da Empresa',
+        estabelecimentoId: 'estab-1',
+        arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin'
+      },
+      {
+        id: 'cert-cpf',
+        nome: 'Certificado do Produtor',
+        estabelecimentoId: 'estab-cpf',
+        arquivoCriptografadoPath: 'certificados/cliente-1/cert-cpf.bin'
+      }
+    ]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '137',
+      xMotivo: 'Sem novos documentos',
+      ultNsu: 0n,
+      maxNsu: 20n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.runNowCpfViaSefazGlobal();
+
+    expect(prisma.nfeSyncControle.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          status: { in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api] }
+        })
+      })
+    );
+    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledTimes(1);
+    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledWith(
+      expect.objectContaining({ cnpjConsulta: '01861020970', certificateId: 'cert-cpf' })
+    );
+    expect(dominioXmlSource.listDocuments).not.toHaveBeenCalled();
+    expect(dominioXmlSource.listCatalog).not.toHaveBeenCalled();
+    expect(result.processed).toBe(1);
+  });
+
+  it('exibe falhas retornadas pela SEFAZ na busca manual de CPF', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-cpf',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '01861020970',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 0n,
+        ultimoNsuDistribuido: 0n,
+        maxNsu: 20n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 401,
+      cStat: '999',
+      xMotivo: 'Certificado nao autorizado',
+      ultNsu: 0n,
+      maxNsu: 20n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.runNowCpfViaSefazGlobal();
+
+    expect(result.failures).toBe(1);
+    expect(result.failureDetails).toEqual([
+      expect.objectContaining({
+        kind: 'controle',
+        status: 'falha',
+        cnpjConsulta: '01861020970',
+        mensagem: 'Certificado nao autorizado'
+      })
+    ]);
+    expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'ctrl-cpf' },
+        data: expect.objectContaining({ status: NfeSyncStatus.erro_api })
+      })
+    );
+  });
+
   it('aplica o periodo do mes corrente apenas na busca noturna via Dominio', async () => {
     process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
     jest.useFakeTimers().setSystemTime(new Date('2026-08-07T00:00:00.000Z'));

@@ -1486,6 +1486,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return this.runNowByConfiguredSources({ limitControles: 50 });
   }
 
+  async runNowCpfViaSefazGlobal(): Promise<NfeSyncRunResult> {
+    return this.runNowInternal({ onlyCpf: true });
+  }
+
   private async runNowByConfiguredSources(params: {
     clienteId?: string;
     ambiente?: NfeAmbiente;
@@ -2883,11 +2887,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       orderBy: { updatedAt: 'asc' },
       ...(params.onlyCpf ? {} : { take: params.limitControles ?? 10 })
     });
-    const controls = (params.onlyCpf ? loadedControls.filter((control) => this.isCpf(control.cnpjConsulta)) : loadedControls).slice(
-      0,
-      params.limitControles ?? 10
-    );
+    const cpfControls = params.onlyCpf ? loadedControls.filter((control) => this.isCpf(control.cnpjConsulta)) : loadedControls;
+    const controls = params.onlyCpf && params.limitControles === undefined
+      ? cpfControls
+      : cpfControls.slice(0, params.limitControles ?? 10);
     let documentsSaved = 0;
+    let failures = 0;
+    const executionDetails: NfeSyncRunFailureDetail[] = [];
+    const failureDetails: NfeSyncRunFailureDetail[] = [];
 
     for (const control of controls) {
       const establishment = await this.getEstablishmentOrThrow(control.estabelecimentoId, control.clienteId);
@@ -2906,12 +2913,25 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       });
 
       if (result.statusCode !== 200) {
+        const message = result.xMotivo ?? `Falha na distribuicao NF-e. HTTP ${result.statusCode}.`;
+        const failureDetail: NfeSyncRunFailureDetail = {
+          kind: 'controle',
+          status: 'falha',
+          clientId: control.clienteId,
+          estabelecimentoId: control.estabelecimentoId,
+          ambiente: control.ambiente,
+          cnpjConsulta: control.cnpjConsulta,
+          mensagem: message
+        };
+        failures += 1;
+        executionDetails.push(failureDetail);
+        failureDetails.push(failureDetail);
         await this.prisma.nfeSyncControle.update({
           where: { id: control.id },
           data: {
             status: NfeSyncStatus.erro_api,
             ultimaExecucao: new Date(),
-            ultimaMensagem: result.xMotivo ?? `Falha na distribuicao NF-e. HTTP ${result.statusCode}.`
+            ultimaMensagem: message
           }
         });
         continue;
@@ -2952,9 +2972,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return {
       processed: controls.length,
       documentsSaved,
-      failures: 0,
-      executionDetails: [],
-      failureDetails: []
+      failures,
+      executionDetails,
+      failureDetails
     };
   }
 
