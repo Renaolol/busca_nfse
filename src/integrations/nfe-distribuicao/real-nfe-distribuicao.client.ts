@@ -265,7 +265,11 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
         };
   }): string {
     const tpAmb = params.ambiente === NfeAmbiente.producao ? '1' : '2';
-    const cnpj = this.onlyDigits(params.cnpjConsulta);
+    const documentoConsulta = this.onlyDigits(params.cnpjConsulta);
+    if (documentoConsulta.length !== 11 && documentoConsulta.length !== 14) {
+      throw new Error('O identificador da consulta NF-e deve ser um CPF com 11 digitos ou um CNPJ com 14 digitos');
+    }
+    const tagDocumento = documentoConsulta.length === 11 ? 'CPF' : 'CNPJ';
     const cUfAutor = this.resolveCUfAutor(params.cUfAutor);
     const consultaXml =
       params.consulta.kind === 'distNSU'
@@ -278,7 +282,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
       `<distDFeInt xmlns="${RealNfeDistribuicaoClient.XML_NAMESPACE}" versao="${RealNfeDistribuicaoClient.LAYOUT_VERSION}">`,
       `<tpAmb>${tpAmb}</tpAmb>`,
       `<cUFAutor>${cUfAutor}</cUFAutor>`,
-      `<CNPJ>${cnpj}</CNPJ>`,
+      `<${tagDocumento}>${documentoConsulta}</${tagDocumento}>`,
       consultaXml,
       `</distDFeInt>`
     ].join('');

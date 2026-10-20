@@ -59,6 +59,9 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - homologacao: `https://hom1.nfe.fazenda.gov.br/NFeDistribuicaoDFe/NFeDistribuicaoDFe.asmx`
 - As URLs acima seguem a relacao oficial de servicos web do portal da NF-e e podem ser sobrescritas por env var.
 - O fluxo atual implementa `distNSU`, `consNSU` e `consChNFe`.
+- Consultas por estabelecimento aceitam CPF (11 digitos) ou CNPJ (14 digitos). O adapter oficial envia CPF como `<CPF>` no pedido DF-e e CNPJ como `<CNPJ>`.
+- Quando `NFE_SYNC_SOURCE_MODE=dominio` ou `dominio_chave`, os estabelecimentos cadastrados por CPF continuam pela distribuicao oficial da SEFAZ; estabelecimentos cadastrados por CNPJ seguem a origem Dominio configurada.
+- `GET /nfe` aceita CPF ou CNPJ em `cnpjConsulta` para filtrar documentos emitidos ou recebidos pelo produtor.
 - O modulo `cte` implementa consulta manual por chave via `CteConsultaV4` e tentativa de captura de eventos retornados pelo autorizador.
 - As rotas manuais permitem testar o ambiente real e recuperar documentos pontuais sem depender do ciclo incremental.
 - Na tela `XMLs NF-e`, a acao `Baixar NF-e por chave` aceita chaves informadas diretamente e consulta cada uma por `consChNFe`, sem depender da listagem da Dominio. A resposta identifica quando a SEFAZ devolve apenas um resumo, sem XML completo. A consulta nao modifica o cursor NSU.
@@ -66,14 +69,14 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - `POST /nfe/importar-dominio` aceita filtros por `chavesAcesso` e `catalogoIds`, permitindo reimportacao pontual a partir do painel operacional.
 - `POST /nfe/dominio/xml` devolve o XML bruto de um `catalogoId` da Dominio para visualizacao interna mesmo quando a persistencia falhou por chave ausente.
 - O adapter real da Dominio fica desacoplado em `src/integrations/dominio-nfe` e usa `pyodbc` via script Python para evitar acoplamento de driver nativo ao build Node.
-- Quando `NFE_SYNC_SOURCE_MODE=dominio`, as rotas operacionais `POST /nfe/sync/ativar`, `POST /nfe/sync/ativar-todos`, `POST /nfe/sync/rodar-agora` e `POST /nfe/sync/rodar-agora-geral` deixam de consultar NSU e passam a importar incrementalmente da base Dominio.
+- Quando `NFE_SYNC_SOURCE_MODE=dominio`, as rotas operacionais usam a base Dominio para controles com CNPJ. Controles com CPF continuam inicializando e consultando NSU na SEFAZ.
 - Mesmo em `NFE_SYNC_SOURCE_MODE=dominio`, o operador pode usar o fluxo manual `POST /nfe/sync/download-por-chave/preview` + `POST /nfe/sync/download-por-chave/executar` para baixar notas faltantes por chave sem trocar o modo principal.
 - Nesse fluxo manual, o backend pagina todo o catalogo da Dominio desde `2026-01-02`, ignora o cursor incremental salvo e preserva `ultimo_nsu_consultado`/`max_nsu` ao concluir a execucao.
 - O mesmo fluxo manual aceita `dataEmissaoInicio` opcional no body para retroagir a busca, por exemplo `2026-01-01` quando o catalogo da empresa tiver notas no primeiro dia do ano.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio_chave`, essas mesmas rotas passam a ler a `EFATENDIMENTO_NFE_CATALOGO` incrementalmente e consultar cada NF-e por `consChNFe`, usando o certificado ja cadastrado do estabelecimento correspondente.
 - Nesse modo, o catalogo da Dominio e filtrado para considerar apenas notas com emissao a partir de `2026-01-02`, isto e, com data maior que `2026-01-01`.
 - Nesse modo, `nfe_sync_controle.ultimo_nsu_consultado` passa a guardar o ultimo `EFATENDIMENTO_NFE_CATALOGO.ID` importado com sucesso para cada `cliente/cnpj/ambiente`.
-- Nesse modo, a leitura por chave da Dominio ocorre apenas nas execucoes manuais/esporadicas; o ciclo automatico e a busca noturna nao a disparam.
+- Nesse modo, a leitura por chave da Dominio ocorre apenas nas execucoes manuais/esporadicas para controles com CNPJ; controles com CPF continuam consultando NSU pela SEFAZ no ciclo automatico.
 - Nesse modo, o painel manual usa `POST /nfe/sync/download-por-chave/preview` e `POST /nfe/sync/download-por-chave/preview-global` para abrir um overlay de auditoria com as chaves pendentes antes do download oficial.
 - O uso por chave ficou documentado como trilha auxiliar/esporadica. Em 17/07/2026, os prazos oficiais consultados indicam 180 dias para consulta completa de NF-e e CT-e; no ecossistema NF-e, a manifestacao conclusiva do destinatario passou para 90 dias a partir de 01/06/2026. Portanto, chaves antigas frequentemente retornam falhas definitivas como `cStat 632` e nao devem ser tratadas como backlog ordinario.
 - XMLs da Dominio com assinatura ABRASF/NFS-e sao redirecionados para `NfseService.importXml`, preservando a deduplicacao do armazenamento de servicos por `ambiente + chave_acesso`.

@@ -102,6 +102,25 @@ describe('RealNfeDistribuicaoClient', () => {
     expect(envelope).toContain(request);
   });
 
+  it('consulta produtor rural por CPF usando o elemento CPF do DF-e', () => {
+    const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
+      buildRequestXml(params: {
+        cnpjConsulta: string;
+        ambiente: 'producao' | 'homologacao';
+        consulta: { kind: 'distNSU'; ultNsu: bigint };
+      }): string;
+    };
+
+    const request = client.buildRequestXml({
+      cnpjConsulta: '018.610.209-70',
+      ambiente: 'producao',
+      consulta: { kind: 'distNSU', ultNsu: 0n }
+    });
+
+    expect(request).toContain('<CPF>01861020970</CPF>');
+    expect(request).not.toContain('<CNPJ>');
+  });
+
   it('monta envelope SOAP 1.1 para fallback em endpoints .asmx', () => {
     const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
       buildSoapEnvelope(xml: string, soapVersion: '1.1' | '1.2', profile?: Record<string, unknown>): string;

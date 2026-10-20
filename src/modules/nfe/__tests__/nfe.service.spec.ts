@@ -1393,6 +1393,35 @@ describe('NfeService', () => {
     expect(result.falhas).toBe(0);
   });
 
+  it('ativa produtor rural por CPF via distribuicao mesmo com a origem Dominio configurada', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    prisma.clienteEstabelecimento.findMany.mockResolvedValue([
+      {
+        id: 'estab-1',
+        clienteId: 'cliente-1',
+        cnpj: '01861020970',
+        municipioCodigoIbge: '4204202'
+      }
+    ]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '137',
+      xMotivo: 'Sem novos documentos',
+      ultNsu: 0n,
+      maxNsu: 20n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.ativarSyncNoNsuAtual({ clienteId: 'cliente-1' });
+
+    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledWith(
+      expect.objectContaining({ cnpjConsulta: '01861020970', ultNsu: 0n })
+    );
+    expect(dominioXmlSource.listDocuments).not.toHaveBeenCalled();
+    expect(result.controlesInicializados).toBe(1);
+  });
+
   it('roda distribuicao e persiste NF-e sincronizada', async () => {
     prisma.nfeSyncControle.findMany.mockResolvedValue([
       {
@@ -1558,6 +1587,73 @@ describe('NfeService', () => {
       ],
       failureDetails: []
     });
+  });
+
+  it('roda CNPJ via Dominio e CPF via SEFAZ quando a origem configurada e Dominio', async () => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-cnpj',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 12n,
+        ultimoNsuDistribuido: 12n,
+        maxNsu: 12n,
+        status: NfeSyncStatus.ativo
+      },
+      {
+        id: 'ctrl-cpf',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-cpf',
+        cnpjConsulta: '01861020970',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 0n,
+        ultimoNsuDistribuido: 0n,
+        maxNsu: 20n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    prisma.clienteEstabelecimento.findUnique.mockImplementation(async ({ where }: { where: { id: string } }) => ({
+      id: where.id,
+      clienteId: 'cliente-1',
+      cnpj: where.id === 'estab-cpf' ? '01861020970' : '12345678000199',
+      municipioCodigoIbge: '4204202'
+    }));
+    prisma.certificado.findMany.mockResolvedValue([
+      {
+        id: 'cert-1',
+        nome: 'Certificado da Empresa',
+        estabelecimentoId: 'estab-1',
+        arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin'
+      },
+      {
+        id: 'cert-cpf',
+        nome: 'Certificado do Produtor',
+        estabelecimentoId: 'estab-cpf',
+        arquivoCriptografadoPath: 'certificados/cliente-1/cert-cpf.bin'
+      }
+    ]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '137',
+      xMotivo: 'Sem novos documentos',
+      ultNsu: 0n,
+      maxNsu: 20n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.runNow({ clienteId: 'cliente-1' });
+
+    expect(dominioXmlSource.listDocuments).toHaveBeenCalledWith(
+      expect.objectContaining({ cnpjs: ['12345678000199'] })
+    );
+    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledWith(
+      expect.objectContaining({ cnpjConsulta: '01861020970' })
+    );
+    expect(result.processed).toBe(2);
   });
 
   it('aplica o periodo do mes corrente apenas na busca noturna via Dominio', async () => {
@@ -2391,15 +2487,41 @@ describe('NfeService', () => {
     });
   });
 
-  it('nao executa dominio_chave nos ciclos automaticos e noturnos', async () => {
+  it('mantem consulta automatica de CPF na SEFAZ no modo dominio_chave', async () => {
     process.env.NFE_SYNC_SOURCE_MODE = 'dominio_chave';
     const runNowGlobalSpy = jest.spyOn(service, 'runNowGlobal');
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-cpf',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '01861020970',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 0n,
+        ultimoNsuDistribuido: 0n,
+        maxNsu: 1n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '137',
+      xMotivo: 'Sem novos documentos',
+      ultNsu: 0n,
+      maxNsu: 1n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
 
     await (service as unknown as { runAutomaticSyncCycle(): Promise<void> }).runAutomaticSyncCycle();
     await (service as unknown as { runNightlySweepCycle(): Promise<void> }).runNightlySweepCycle();
 
     expect(runNowGlobalSpy).not.toHaveBeenCalled();
-    expect(prisma.nfeSyncControle.findMany).not.toHaveBeenCalled();
+    expect(prisma.nfeSyncControle.findMany).toHaveBeenCalledTimes(1);
+    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledWith(
+      expect.objectContaining({ cnpjConsulta: '01861020970' })
+    );
+    expect(dominioXmlSource.listCatalog).not.toHaveBeenCalled();
   });
 
   it('continua importacao de NF-e quando a tabela nfe_eventos nao existe', async () => {

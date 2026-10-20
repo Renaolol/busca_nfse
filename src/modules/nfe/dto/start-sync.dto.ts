@@ -1,6 +1,6 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { NfeAmbiente } from '@prisma/client';
-import { IsEnum, IsOptional, IsString, IsUUID, Length, Matches } from 'class-validator';
+import { IsEnum, IsOptional, IsString, IsUUID, Matches } from 'class-validator';
 
 export class StartNfeSyncDto {
   @ApiProperty()
@@ -23,9 +23,14 @@ export class StartNfeSyncDto {
   @Matches(/^\d+$/)
   nsuInicial?: string;
 
-  @ApiPropertyOptional({ description: 'CNPJ de consulta explicito. Quando omitido usa o CNPJ do estabelecimento.' })
+  @ApiPropertyOptional({
+    description: 'CPF (11 digitos) ou CNPJ (14 digitos) explicito. Quando omitido usa o identificador do estabelecimento.',
+    minLength: 11,
+    maxLength: 14,
+    pattern: '^(?:\\d{11}|\\d{14})$'
+  })
   @IsOptional()
   @IsString()
-  @Length(14, 14)
+  @Matches(/^(?:\d{11}|\d{14})$/)
   cnpjConsulta?: string;
 }

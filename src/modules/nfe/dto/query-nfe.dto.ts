@@ -1,6 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsBoolean, IsDateString, IsIn, IsNumber, IsOptional, IsString, IsUUID, Length, Min } from 'class-validator';
+import { IsBoolean, IsDateString, IsIn, IsNumber, IsOptional, IsString, IsUUID, Length, Matches, Min } from 'class-validator';
 import { NfeAmbiente } from '@prisma/client';
 import { IsEnum } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
@@ -21,10 +21,15 @@ export class QueryNfeDto extends PaginationQueryDto {
   @IsString()
   cnpjDestinatario?: string;
 
-  @ApiPropertyOptional({ description: 'CNPJ base para consultar emitidas/recebidas (14 digitos)' })
+  @ApiPropertyOptional({
+    description: 'CPF (11 digitos) ou CNPJ (14 digitos) para consultar emitidas/recebidas',
+    minLength: 11,
+    maxLength: 14,
+    pattern: '^(?:\\d{11}|\\d{14})$'
+  })
   @IsOptional()
   @IsString()
-  @Length(14, 14)
+  @Matches(/^(?:\d{11}|\d{14})$/)
   cnpjConsulta?: string;
 
   @ApiPropertyOptional({ enum: ['ambas', 'emitidas', 'recebidas'], default: 'ambas' })

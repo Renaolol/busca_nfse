@@ -95,6 +95,21 @@ type NfeSyncRunResult = {
   failureDetails: NfeSyncRunFailureDetail[];
 };
 
+type NfeSyncActivationResult = {
+  clienteId: string;
+  ambiente: NfeAmbiente;
+  controlesCriadosOuReativados: number;
+  controlesInicializados: number;
+  controlesReativados: number;
+  falhas: number;
+  detalhes: Array<{
+    estabelecimentoId: string;
+    cnpjConsulta: string;
+    status: 'inicializado' | 'reativado' | 'falha';
+    mensagem: string;
+  }>;
+};
+
 type DominioImportCategory =
   | 'nfe_documento'
   | 'nfe_evento'
@@ -372,25 +387,38 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   async ativarSyncNoNsuAtual(
     dto: EnableNfeSyncDto
-  ): Promise<{
-    clienteId: string;
-    ambiente: NfeAmbiente;
-    controlesCriadosOuReativados: number;
-    controlesInicializados: number;
-    controlesReativados: number;
-    falhas: number;
-    detalhes: Array<{ estabelecimentoId: string; cnpjConsulta: string; status: 'inicializado' | 'reativado' | 'falha'; mensagem: string }>;
-  }> {
+  ): Promise<NfeSyncActivationResult> {
     if (this.usesDominioSyncSource()) {
-      return this.prepareDominioControls({
-        clienteId: dto.clienteId,
-        ambiente: dto.ambiente ?? NfeAmbiente.producao
-      });
+      const ambiente = dto.ambiente ?? NfeAmbiente.producao;
+      const establishments = await this.resolveTargetEstablishments(dto.clienteId);
+      const dominioResults: NfeSyncActivationResult[] = [];
+      const distribuicaoEstablishments = establishments.filter((item) => this.isCpf(item.cnpj));
+
+      for (const establishment of establishments.filter((item) => this.isCnpj(item.cnpj))) {
+        dominioResults.push(
+          await this.prepareDominioControls({
+            clienteId: dto.clienteId,
+            estabelecimentoId: establishment.id,
+            ambiente
+          })
+        );
+      }
+
+      const distribuicaoResult = await this.ativarSyncNoNsuAtualViaDistribuicao(dto, distribuicaoEstablishments);
+      return this.mergeActivationResults(dto.clienteId, ambiente, [...dominioResults, distribuicaoResult]);
     }
+
+    return this.ativarSyncNoNsuAtualViaDistribuicao(dto);
+  }
+
+  private async ativarSyncNoNsuAtualViaDistribuicao(
+    dto: EnableNfeSyncDto,
+    targetEstablishments?: Awaited<ReturnType<NfeService['resolveTargetEstablishments']>>
+  ): Promise<NfeSyncActivationResult> {
 
     await this.ensureClientEligibleForNfeSync(dto.clienteId);
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
-    const establishments = await this.resolveTargetEstablishments(dto.clienteId);
+    const establishments = targetEstablishments ?? (await this.resolveTargetEstablishments(dto.clienteId));
     const detalhes: Array<{
       estabelecimentoId: string;
       cnpjConsulta: string;
@@ -414,7 +442,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             ambiente
           }
         });
-        const shouldRecaptureBase = existing ? existing.ultimoNsuConsultado === 0n && existing.maxNsu === 0n : false;
+        const wasDominioControl = String(existing?.ultimaMensagem || '').toLowerCase().includes('banco dominio');
+        const shouldRecaptureBase = existing
+          ? (existing.ultimoNsuConsultado === 0n && existing.maxNsu === 0n) || wasDominioControl
+          : false;
 
         if (existing && !shouldRecaptureBase) {
           await this.prisma.nfeSyncControle.update({
@@ -459,7 +490,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
               maxNsu: currentNsuResult.maxNsu,
               status: NfeSyncStatus.ativo,
               ultimaExecucao: new Date(),
-              ultimaMensagem: `Busca de NF-e reativada e reposicionada no NSU atual ${currentNsuResult.maxNsu.toString()}`
+              ultimaMensagem: `Busca de NF-e via SEFAZ reativada e posicionada no NSU atual ${currentNsuResult.maxNsu.toString()}`
             }
           });
           controlesReativados += 1;
@@ -482,7 +513,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             maxNsu: currentNsuResult.maxNsu,
             status: NfeSyncStatus.ativo,
             ultimaExecucao: new Date(),
-            ultimaMensagem: `Busca de NF-e habilitada a partir do NSU atual ${currentNsuResult.maxNsu.toString()}`
+            ultimaMensagem: `Busca de NF-e via SEFAZ habilitada a partir do NSU atual ${currentNsuResult.maxNsu.toString()}`
           }
         });
         controlesInicializados += 1;
@@ -526,10 +557,6 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     falhas: number;
     detalhes: Array<{ clienteId: string; sucesso: boolean; mensagem: string }>;
   }> {
-    if (this.usesDominioSyncSource()) {
-      return this.prepareDominioControlsForAll(dto);
-    }
-
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
     const clients = await this.prisma.cliente.findMany({
       where: {
@@ -1368,22 +1395,28 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async iniciarSync(dto: StartNfeSyncDto): Promise<{ controlesCriadosOuAtualizados: number }> {
-    if (this.usesDominioSyncSource()) {
-      const result = await this.prepareDominioControls({
-        clienteId: dto.clienteId,
-        estabelecimentoId: dto.estabelecimentoId,
-        ambiente: dto.ambiente ?? NfeAmbiente.producao
-      });
-      return { controlesCriadosOuAtualizados: result.controlesCriadosOuReativados };
-    }
-
     await this.ensureClientEligibleForNfeSync(dto.clienteId);
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
-    const controls = await this.resolveTargetEstablishments(dto.clienteId, dto.estabelecimentoId);
+    const establishments = await this.resolveTargetEstablishments(dto.clienteId, dto.estabelecimentoId);
+    const dominioEstablishments = this.usesDominioSyncSource()
+      ? establishments.filter((item) => this.isCnpj(dto.cnpjConsulta ?? item.cnpj))
+      : [];
+    const distribuicaoEstablishments = this.usesDominioSyncSource()
+      ? establishments.filter((item) => this.isCpf(dto.cnpjConsulta ?? item.cnpj))
+      : establishments;
     const nsuInicial = dto.nsuInicial ? BigInt(dto.nsuInicial) : 1n;
     let count = 0;
 
-    for (const establishment of controls) {
+    for (const establishment of dominioEstablishments) {
+      const result = await this.prepareDominioControls({
+        clienteId: dto.clienteId,
+        estabelecimentoId: establishment.id,
+        ambiente
+      });
+      count += result.controlesCriadosOuReativados;
+    }
+
+    for (const establishment of distribuicaoEstablishments) {
       const cnpjConsulta = this.normalizeCnpj(dto.cnpjConsulta) ?? establishment.cnpj;
       await this.findActiveCertificateOrThrow(dto.clienteId, establishment.id, cnpjConsulta);
 
@@ -1441,25 +1474,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   async runNow(dto: RunNfeSyncDto): Promise<NfeSyncRunResult> {
     await this.ensureClientEligibleForNfeSync(dto.clienteId);
-    if (this.isDominioXmlSyncSource()) {
-      return this.runNowViaDominio({
-        clienteId: dto.clienteId,
-        ambiente: dto.ambiente,
-        estabelecimentoId: dto.estabelecimentoId,
-        limitControles: dto.limitControles
-      });
-    }
-
-    if (this.isDominioChaveSyncSource()) {
-      return this.runNowViaDominioConsultaChave({
-        clienteId: dto.clienteId,
-        ambiente: dto.ambiente,
-        estabelecimentoId: dto.estabelecimentoId,
-        limitControles: dto.limitControles
-      });
-    }
-
-    return this.runNowInternal({
+    return this.runNowByConfiguredSources({
       clienteId: dto.clienteId,
       ambiente: dto.ambiente,
       estabelecimentoId: dto.estabelecimentoId,
@@ -1468,21 +1483,37 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async runNowGlobal(): Promise<NfeSyncRunResult> {
-    if (this.isDominioXmlSyncSource()) {
-      return this.runNowViaDominio({
-        limitControles: 50
-      });
+    return this.runNowByConfiguredSources({ limitControles: 50 });
+  }
+
+  private async runNowByConfiguredSources(params: {
+    clienteId?: string;
+    ambiente?: NfeAmbiente;
+    estabelecimentoId?: string;
+    limitControles?: number;
+    defaultCurrentMonthDateRange?: boolean;
+  }): Promise<NfeSyncRunResult> {
+    const sourceMode = this.getSyncSourceMode();
+    if (sourceMode === 'distribuicao') {
+      return this.runNowInternal(params);
     }
 
-    if (this.isDominioChaveSyncSource()) {
-      return this.runNowViaDominioConsultaChave({
-        limitControles: 50
-      });
-    }
+    const dominioPromise =
+      sourceMode === 'dominio'
+        ? this.runNowViaDominio(params)
+        : this.runNowViaDominioConsultaChave(params);
+    const [dominioResult, cpfResult] = await Promise.all([
+      dominioPromise,
+      this.runNowInternal({ ...params, onlyCpf: true })
+    ]);
 
-    return this.runNowInternal({
-      limitControles: 50
-    });
+    return {
+      processed: dominioResult.processed + cpfResult.processed,
+      documentsSaved: dominioResult.documentsSaved + cpfResult.documentsSaved,
+      failures: dominioResult.failures + cpfResult.failures,
+      executionDetails: [...dominioResult.executionDetails, ...cpfResult.executionDetails],
+      failureDetails: [...dominioResult.failureDetails, ...cpfResult.failureDetails]
+    };
   }
 
   async previewDownloadByKey(dto: RunNfeSyncDto): Promise<NfeDownloadByKeyPreviewResult> {
@@ -2011,7 +2042,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     detalhes: Array<{ estabelecimentoId: string; cnpjConsulta: string; status: 'inicializado' | 'reativado' | 'falha'; mensagem: string }>;
   }> {
     await this.ensureClientEligibleForNfeSync(params.clienteId);
-    const establishments = await this.resolveTargetEstablishments(params.clienteId, params.estabelecimentoId);
+    const establishments = (await this.resolveTargetEstablishments(params.clienteId, params.estabelecimentoId)).filter((item) =>
+      this.isCnpj(item.cnpj)
+    );
     const detalhes: Array<{
       estabelecimentoId: string;
       cnpjConsulta: string;
@@ -2180,7 +2213,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     limitControles?: number;
     defaultCurrentMonthDateRange?: boolean;
   }): Promise<NfeSyncRunResult> {
-    const controls = await this.prisma.nfeSyncControle.findMany({
+    const loadedControls = await this.prisma.nfeSyncControle.findMany({
       where: {
         cliente: {
           ativo: true,
@@ -2194,8 +2227,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         ...(params.estabelecimentoId ? { estabelecimentoId: params.estabelecimentoId } : {})
       },
       orderBy: { updatedAt: 'asc' },
-      take: params.limitControles ?? 10
     });
+    const controls = loadedControls.filter((control) => this.isCnpj(control.cnpjConsulta)).slice(0, params.limitControles ?? 10);
     let documentsSaved = 0;
     let failures = 0;
     const executionDetails: NfeSyncRunFailureDetail[] = [];
@@ -2319,7 +2352,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     dataEmissaoInicio?: string;
     scanFullHistory?: boolean;
   }): Promise<NfeSyncRunResult> {
-    const controls = await this.prisma.nfeSyncControle.findMany({
+    const loadedControls = await this.prisma.nfeSyncControle.findMany({
       where: {
         cliente: {
           ativo: true,
@@ -2333,8 +2366,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         ...(params.estabelecimentoId ? { estabelecimentoId: params.estabelecimentoId } : {})
       },
       orderBy: { updatedAt: 'asc' },
-      take: params.limitControles ?? 10
     });
+    const controls = loadedControls.filter((control) => this.isCnpj(control.cnpjConsulta)).slice(0, params.limitControles ?? 10);
 
     let documentsSaved = 0;
     let failures = 0;
@@ -2733,7 +2766,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     dataEmissaoInicio?: string;
     scanFullHistory?: boolean;
   }): Promise<NfeDownloadByKeyPreviewResult> {
-    const controls = await this.prisma.nfeSyncControle.findMany({
+    const loadedControls = await this.prisma.nfeSyncControle.findMany({
       where: {
         cliente: {
           ativo: true,
@@ -2747,8 +2780,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         ...(params.estabelecimentoId ? { estabelecimentoId: params.estabelecimentoId } : {})
       },
       orderBy: { updatedAt: 'asc' },
-      take: params.limitControles ?? 10
     });
+    const controls = loadedControls.filter((control) => this.isCnpj(control.cnpjConsulta)).slice(0, params.limitControles ?? 10);
 
     const rows: NfeDownloadByKeyPreviewRow[] = [];
     let failures = 0;
@@ -2832,8 +2865,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     ambiente?: NfeAmbiente;
     estabelecimentoId?: string;
     limitControles?: number;
+    onlyCpf?: boolean;
   }): Promise<NfeSyncRunResult> {
-    const controls = await this.prisma.nfeSyncControle.findMany({
+    const loadedControls = await this.prisma.nfeSyncControle.findMany({
       where: {
         cliente: {
           ativo: true,
@@ -2847,8 +2881,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         ...(params.estabelecimentoId ? { estabelecimentoId: params.estabelecimentoId } : {})
       },
       orderBy: { updatedAt: 'asc' },
-      take: params.limitControles ?? 10
+      ...(params.onlyCpf ? {} : { take: params.limitControles ?? 10 })
     });
+    const controls = (params.onlyCpf ? loadedControls.filter((control) => this.isCpf(control.cnpjConsulta)) : loadedControls).slice(
+      0,
+      params.limitControles ?? 10
+    );
     let documentsSaved = 0;
 
     for (const control of controls) {
@@ -3878,17 +3916,17 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async runAutomaticSyncCycle(): Promise<void> {
-    if (this.isDominioChaveSyncSource()) {
-      return;
-    }
-
     if (this.autoSyncRunning) {
       return;
     }
 
     this.autoSyncRunning = true;
     try {
-      await this.runNowGlobal();
+      if (this.isDominioChaveSyncSource()) {
+        await this.runNowInternal({ limitControles: 50, onlyCpf: true });
+      } else {
+        await this.runNowGlobal();
+      }
     } catch (error) {
       this.logger.warn(`Falha na execucao automatica de NF-e: ${this.toErrorMessage(error)}`);
     } finally {
@@ -3917,12 +3955,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       const activation = await this.ativarSyncNoNsuAtualParaTodos({
         ambiente: NfeAmbiente.producao
       });
-      const runResult = this.isDominioXmlSyncSource()
-        ? await this.runNowViaDominio({
-            limitControles: 50,
-            defaultCurrentMonthDateRange: true
-          })
-        : await this.runNowGlobal();
+      const runResult = await this.runNowByConfiguredSources({
+        limitControles: 50,
+        defaultCurrentMonthDateRange: this.isDominioXmlSyncSource()
+      });
       this.logger.log(
         `Busca noturna NF-e executada (${executionKey}): ${activation.controlesCriadosOuReativados} controle(s) preparados, ${runResult.documentsSaved} documento(s) salvo(s)`
       );
@@ -4279,6 +4315,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     estabelecimentoId: string,
     cnpjConsulta: string
   ): Promise<Pick<Certificado, 'id'>> {
+    const documentType = this.getDocumentTypeLabel(cnpjConsulta);
     const now = new Date();
     const certificates = await this.prisma.certificado.findMany({
       where: {
@@ -4316,13 +4353,13 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       certificates.find((item) => item.estabelecimentoId === null);
 
     if (!certificate) {
-      throw new BadRequestException(`Nenhum certificado ativo e valido encontrado para o CNPJ ${cnpjConsulta}`);
+      throw new BadRequestException(`Nenhum certificado ativo e valido encontrado para o ${documentType} ${cnpjConsulta}`);
     }
 
     const certificateFileExists = await this.storage.hasObject(certificate.arquivoCriptografadoPath);
     if (!certificateFileExists) {
       throw new BadRequestException(
-        `Arquivo do certificado selecionado (${certificate.nome || certificate.id}) nao encontrado no storage local para o CNPJ ${cnpjConsulta}. Caminho esperado: ${certificate.arquivoCriptografadoPath}. Recadastre ou restaure esse certificado.`
+        `Arquivo do certificado selecionado (${certificate.nome || certificate.id}) nao encontrado no storage local para o ${documentType} ${cnpjConsulta}. Caminho esperado: ${certificate.arquivoCriptografadoPath}. Recadastre ou restaure esse certificado.`
       );
     }
 
@@ -4333,16 +4370,17 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     result: Pick<NfeDistribuicaoResult, 'cStat' | 'xMotivo' | 'maxNsu' | 'ultNsu'>,
     cnpjConsulta: string
   ): void {
+    const documentType = this.getDocumentTypeLabel(cnpjConsulta);
     const normalizedCStat = String(result.cStat || '').trim();
     if (!['137', '138'].includes(normalizedCStat)) {
       throw new BadRequestException(
-        `Distribuicao NF-e retornou cStat ${normalizedCStat || 'desconhecido'} para o CNPJ ${cnpjConsulta}. ${result.xMotivo || 'Sem xMotivo.'}`
+        `Distribuicao NF-e retornou cStat ${normalizedCStat || 'desconhecido'} para o ${documentType} ${cnpjConsulta}. ${result.xMotivo || 'Sem xMotivo.'}`
       );
     }
 
     if (result.maxNsu <= 0n && result.ultNsu <= 0n) {
       throw new BadRequestException(
-        `Distribuicao NF-e nao retornou NSU base valido para o CNPJ ${cnpjConsulta}. cStat ${normalizedCStat}: ${result.xMotivo || 'Sem xMotivo.'}`
+        `Distribuicao NF-e nao retornou NSU base valido para o ${documentType} ${cnpjConsulta}. cStat ${normalizedCStat}: ${result.xMotivo || 'Sem xMotivo.'}`
       );
     }
   }
@@ -4375,6 +4413,36 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       return 'dominio_chave';
     }
     return 'distribuicao';
+  }
+
+  private isCpf(value?: string | null): boolean {
+    return this.normalizeCnpj(value)?.length === 11;
+  }
+
+  private isCnpj(value?: string | null): boolean {
+    return this.normalizeCnpj(value)?.length === 14;
+  }
+
+  private getDocumentTypeLabel(value?: string | null): 'CPF' | 'CNPJ' {
+    return this.isCpf(value) ? 'CPF' : 'CNPJ';
+  }
+
+  private mergeActivationResults(
+    clienteId: string,
+    ambiente: NfeAmbiente,
+    results: NfeSyncActivationResult[]
+  ): NfeSyncActivationResult {
+    const controlesInicializados = results.reduce((total, result) => total + result.controlesInicializados, 0);
+    const controlesReativados = results.reduce((total, result) => total + result.controlesReativados, 0);
+    return {
+      clienteId,
+      ambiente,
+      controlesCriadosOuReativados: controlesInicializados + controlesReativados,
+      controlesInicializados,
+      controlesReativados,
+      falhas: results.reduce((total, result) => total + result.falhas, 0),
+      detalhes: results.flatMap((result) => result.detalhes)
+    };
   }
 
   private usesDominioSyncSource(): boolean {

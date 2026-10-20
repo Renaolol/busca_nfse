@@ -4819,21 +4819,21 @@ function renderNfeSyncPage() {
         : 'revisar certificado ou API';
   const overviewDescription =
     sourceMode === 'dominio'
-      ? 'Ligue a importacao por cliente ou em lote. O backend consulta o banco da Dominio, salva os XMLs no storage local e segue apenas com os registros novos.'
+      ? 'Ligue a importacao por cliente ou em lote. CNPJs consultam a Dominio; produtores cadastrados por CPF consultam a distribuicao DF-e da SEFAZ.'
       : sourceMode === 'dominio_chave'
-        ? 'Ligue os controles por cliente e use o download manual por chave para consultar apenas documentos novos localizados no catalogo da Dominio.'
+        ? 'CNPJs usam o catalogo da Dominio para o download manual por chave; produtores cadastrados por CPF consultam a distribuicao DF-e da SEFAZ.'
         : 'Ligue a busca por cliente ou em lote. O sistema captura o NSU atual como base e segue apenas com as proximas NF-e de entrada e saida.';
   const simplifiedSubtitle =
     sourceMode === 'dominio'
-      ? 'Ao ligar a importacao, o backend resolve os estabelecimentos ativos do cliente e passa a acompanhar novos XMLs no banco da Dominio.'
+      ? 'Ao ligar a importacao, estabelecimentos com CNPJ acompanham novos XMLs na Dominio; estabelecimentos com CPF usam a distribuicao oficial da SEFAZ.'
       : sourceMode === 'dominio_chave'
-        ? 'Ao ligar a rotina, o backend prepara os controles por estabelecimento e usa o catalogo da Dominio como fila de chaves para download manual.'
+        ? 'Ao ligar a rotina, estabelecimentos com CNPJ usam o catalogo da Dominio para download manual por chave e os estabelecimentos com CPF consultam a SEFAZ.'
         : 'Ao ligar a busca, o backend resolve os estabelecimentos ativos do cliente, captura o NSU atual e passa a sincronizar apenas as proximas NF-e.';
   const detailSubtitle =
     sourceMode === 'dominio'
-      ? 'Visao detalhada dos controles usados pelo backend para importar XMLs e manter o cursor incremental por estabelecimento, com download manual por chave disponivel sob demanda.'
+      ? 'Visao detalhada dos controles: CNPJs importam XMLs da Dominio e CPFs sincronizam pela distribuicao DF-e da SEFAZ.'
       : sourceMode === 'dominio_chave'
-        ? 'Visao detalhada dos controles usados pelo backend para varrer o catalogo da Dominio e baixar documentos oficiais por chave.'
+        ? 'Visao detalhada dos controles: CNPJs varrem o catalogo da Dominio e CPFs sincronizam pela distribuicao DF-e da SEFAZ.'
         : 'Visao detalhada dos controles realmente mantidos pelo backend para distribuicao DF-e.';
   const clientCursorLabel = sourceMode === 'distribuicao' ? 'Ult. NSU base' : 'Ult. cursor';
   const controlCursorLabel = sourceMode === 'distribuicao' ? 'Ult. NSU consultado' : 'Cursor atual';
@@ -5230,12 +5230,12 @@ function renderNfeSchedulerStatusCard() {
           <span class="scheduler-dot info"></span>
           <strong>Origem da captura</strong>
         </div>
-        ${statusBadge(sourceMode === 'dominio' ? 'Banco Dominio' : sourceMode === 'dominio_chave' ? 'Dominio + chave' : 'Distribuicao DF-e', 'info')}
+        ${statusBadge(sourceMode === 'dominio' ? 'Dominio (CNPJ) + SEFAZ (CPF)' : sourceMode === 'dominio_chave' ? 'Dominio + chave (CNPJ) + SEFAZ (CPF)' : 'Distribuicao DF-e', 'info')}
         <p>${
           sourceMode === 'dominio'
-            ? 'Os controles ativos importam XMLs diretamente do banco da Dominio e salvam os arquivos no storage local. O download manual por chave fica disponivel como acao complementar.'
+            ? 'Controles com CNPJ importam XMLs do banco da Dominio; controles com CPF consultam a distribuicao DF-e da SEFAZ.'
             : sourceMode === 'dominio_chave'
-              ? 'Os controles ativos usam o catalogo da Dominio para localizar chaves novas e o download oficial ocorre apenas quando voce dispara a rotina manual.'
+              ? 'Controles com CNPJ usam o catalogo da Dominio e o download manual por chave. Controles com CPF seguem consultando a distribuicao DF-e da SEFAZ.'
               : 'Os controles ativos consultam a distribuicao DF-e e persistem os documentos retornados.'
         }</p>
       </div>
@@ -5247,9 +5247,9 @@ function renderNfeSchedulerStatusCard() {
         ${statusBadge(autoSync.running ? 'Executando agora' : autoSync.enabled ? 'Ativo' : 'Inativo', autoTone)}
         <p>${
           sourceMode === 'dominio'
-            ? 'Processa controles ativos em segundo plano para importar novos XMLs sem depender de acao manual.'
+            ? 'Importa XMLs da Dominio para CNPJs e consulta a SEFAZ para CPFs em segundo plano.'
             : sourceMode === 'dominio_chave'
-              ? 'No modo por chave, o ciclo automatico nao executa downloads. A rotina fica reservada para acionamento manual.'
+              ? 'O download por chave para CNPJs fica manual; controles CPF continuam consultando a SEFAZ em segundo plano.'
               : 'Processa controles ativos em segundo plano sem depender de acao manual.'
         }</p>
         <small>Intervalo: ${escapeHtml(formatDurationMs(autoSync.intervalMs || 0))}</small>
