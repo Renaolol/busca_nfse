@@ -1,7 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { NfeAmbiente } from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 
 export class RunSefazCpfImportDto {
   @ApiPropertyOptional({ description: 'Controle CPF que identifica o produtor selecionado no painel.' })
@@ -23,6 +23,16 @@ export class RunSefazCpfImportDto {
   @IsOptional()
   @IsEnum(NfeAmbiente)
   ambiente?: NfeAmbiente;
+
+  @ApiPropertyOptional({ description: 'Data inicial de emissao para importacao manual historica.' })
+  @IsOptional()
+  @IsDateString()
+  dataEmissaoInicio?: string;
+
+  @ApiPropertyOptional({ description: 'Data final de emissao para importacao manual historica.' })
+  @IsOptional()
+  @IsDateString()
+  dataEmissaoFim?: string;
 
   @ApiPropertyOptional({ default: 50, minimum: 1, maximum: 5000, description: 'Quantidade maxima de controles CPF a processar.' })
   @IsOptional()

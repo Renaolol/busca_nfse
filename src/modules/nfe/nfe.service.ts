@@ -1493,6 +1493,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const selectedCertificate = dto.certificadoId
       ? await this.getManualCpfCertificateOrThrow(dto.certificadoId, selectedProducer ?? undefined)
       : null;
+    const hasStartDate = Boolean(dto.dataEmissaoInicio);
+    const hasEndDate = Boolean(dto.dataEmissaoFim);
+    if (hasStartDate !== hasEndDate) {
+      throw new BadRequestException('Informe a data inicial e a data final da busca manual da SEFAZ.');
+    }
+    if ((hasStartDate || hasEndDate) && !selectedProducer) {
+      throw new BadRequestException('Selecione um produtor CPF para importar NF-e por periodo.');
+    }
     if (dto.controleId && !dto.certificadoId) {
       throw new BadRequestException('Selecione o certificado digital do produtor antes de iniciar a consulta SEFAZ.');
     }
@@ -1508,6 +1516,16 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('O certificado selecionado nao pertence ao cliente informado.');
     }
 
+    if (selectedProducer && selectedCertificate && dto.dataEmissaoInicio && dto.dataEmissaoFim) {
+      return this.runManualCpfSefazPeriod({
+        producer: selectedProducer,
+        certificateId: selectedCertificate.id,
+        ambiente: dto.ambiente,
+        dataEmissaoInicio: dto.dataEmissaoInicio,
+        dataEmissaoFim: dto.dataEmissaoFim
+      });
+    }
+
     return this.runNowInternal({
       clienteId: selectedProducer?.clienteId ?? selectedCertificate?.clienteId ?? dto.clienteId,
       estabelecimentoId: selectedProducer?.estabelecimentoId ?? selectedCertificate?.estabelecimentoId ?? undefined,
@@ -1517,6 +1535,178 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       limitControles: dto.limitControles ?? 50,
       onlyCpf: true
     });
+  }
+
+  private async runManualCpfSefazPeriod(params: {
+    producer: Pick<
+      NfeSyncControle,
+      'id' | 'clienteId' | 'estabelecimentoId' | 'cnpjConsulta' | 'ambiente' | 'ultimoNsuConsultado' | 'maxNsu'
+    >;
+    certificateId: string;
+    ambiente?: NfeAmbiente;
+    dataEmissaoInicio: string;
+    dataEmissaoFim: string;
+  }): Promise<NfeSyncRunResult> {
+    const control = params.producer;
+    const ambiente = params.ambiente ?? control.ambiente;
+    if (ambiente !== control.ambiente) {
+      throw new BadRequestException('O ambiente selecionado nao corresponde ao controle do produtor.');
+    }
+
+    const start = this.parseManualSefazDateBoundary(params.dataEmissaoInicio, false);
+    const end = this.parseManualSefazDateBoundary(params.dataEmissaoFim, true);
+    if (!start || !end || start > end) {
+      throw new BadRequestException('Informe um periodo de emissao valido para a busca manual da SEFAZ.');
+    }
+
+    const establishment = await this.getEstablishmentOrThrow(control.estabelecimentoId, control.clienteId);
+    const certificate = await this.findActiveCertificateOrThrow(
+      control.clienteId,
+      control.estabelecimentoId,
+      control.cnpjConsulta,
+      params.certificateId
+    );
+    const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
+    const executionDetail: NfeSyncRunFailureDetail = {
+      kind: 'controle',
+      status: 'persistido',
+      clientId: control.clienteId,
+      estabelecimentoId: control.estabelecimentoId,
+      ambiente,
+      cnpjConsulta: control.cnpjConsulta,
+      mensagem: ''
+    };
+    const failureDetails: NfeSyncRunFailureDetail[] = [];
+    let documentsSaved = 0;
+    let nsusConsultados = 0;
+    let scanCursor = 0n;
+    let targetCursor = control.ultimoNsuConsultado > control.maxNsu ? control.ultimoNsuConsultado : control.maxNsu;
+    let reachedEnd = false;
+    let reachedPageLimit = false;
+    let encounteredNoDocuments = false;
+    const maxBatches = 250;
+
+    for (let batch = 0; batch < maxBatches; batch += 1) {
+      const result = await this.distribuicaoClient.distribuirPorNsu({
+        cnpjConsulta: control.cnpjConsulta,
+        cUfAutor,
+        ultNsu: scanCursor,
+        ambiente,
+        certificateId: certificate.id
+      });
+      nsusConsultados += 1;
+
+      if (result.statusCode !== 200) {
+        const message = result.xMotivo ?? `Falha na distribuicao NF-e. HTTP ${result.statusCode}.`;
+        failureDetails.push({ ...executionDetail, status: 'falha', mensagem: message });
+        break;
+      }
+
+      if (String(result.cStat || '').trim() === '137') {
+        encounteredNoDocuments = true;
+        reachedEnd = true;
+        break;
+      }
+      if (String(result.cStat || '').trim() !== '138') {
+        const message = `Distribuicao NF-e retornou cStat ${result.cStat || 'desconhecido'}. ${result.xMotivo || ''}`.trim();
+        failureDetails.push({ ...executionDetail, status: 'falha', mensagem: message });
+        break;
+      }
+
+      if (targetCursor === 0n) {
+        targetCursor = result.maxNsu;
+      }
+      for (const document of result.documents) {
+        try {
+          const classification = this.parser.classify(document.xml);
+          if (classification.documentType !== 'nfe') {
+            continue;
+          }
+          const documentDate = classification.contentType === 'evento'
+            ? this.parser.parseEvento(document.xml).dataEvento
+            : this.parser.parse(document.xml).dataEmissao;
+          if (!documentDate || documentDate < start || documentDate > end) {
+            continue;
+          }
+          await this.persistDocument({
+            clienteId: control.clienteId,
+            estabelecimentoId: control.estabelecimentoId,
+            ambiente,
+            cnpjConsulta: control.cnpjConsulta,
+            document,
+            origem: NfeDocumentoOrigem.distribuicao_nsu
+          });
+          documentsSaved += 1;
+        } catch (error) {
+          failureDetails.push({
+            ...executionDetail,
+            status: 'falha',
+            chaveAcesso: document.chaveAcesso,
+            mensagem: `Falha ao importar um documento retornado pela SEFAZ: ${this.toErrorMessage(error)}`
+          });
+        }
+      }
+
+      if (result.ultNsu <= scanCursor) {
+        failureDetails.push({
+          ...executionDetail,
+          status: 'falha',
+          mensagem: `A SEFAZ nao avancou o NSU durante a recuperacao historica (NSU ${scanCursor.toString()}).`
+        });
+        break;
+      }
+      scanCursor = result.ultNsu;
+      if (scanCursor >= targetCursor || scanCursor >= result.maxNsu) {
+        reachedEnd = true;
+        break;
+      }
+      if (batch === maxBatches - 1) {
+        reachedPageLimit = true;
+      }
+    }
+
+    if (encounteredNoDocuments && targetCursor > 0n) {
+      failureDetails.push({
+        ...executionDetail,
+        status: 'falha',
+        mensagem: 'A SEFAZ nao disponibilizou documentos historicos para este CPF nesta consulta. O cursor normal foi mantido.'
+      });
+    } else if (reachedPageLimit) {
+      failureDetails.push({
+        ...executionDetail,
+        status: 'falha',
+        mensagem: `A busca historica atingiu o limite de ${maxBatches} lotes. O cursor normal foi mantido; reduza o periodo e tente novamente.`
+      });
+    }
+
+    executionDetail.mensagem = `Busca historica SEFAZ concluida para ${params.dataEmissaoInicio} a ${params.dataEmissaoFim}: ${documentsSaved} documento(s) importado(s), ${nsusConsultados} lote(s) consultado(s). Cursor normal preservado em ${control.ultimoNsuConsultado.toString()}.${reachedEnd ? '' : ' A leitura pode exigir nova tentativa.'}`;
+    return {
+      processed: 1,
+      documentsSaved,
+      failures: failureDetails.length,
+      executionDetails: [executionDetail, ...failureDetails],
+      failureDetails
+    };
+  }
+
+  private parseManualSefazDateBoundary(value: string, endOfDay: boolean): Date | null {
+    const match = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (!match) {
+      return null;
+    }
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const isoDate = `${match[1]}-${match[2]}-${match[3]}`;
+    const checkDate = new Date(`${isoDate}T00:00:00.000Z`);
+    if (
+      checkDate.getUTCFullYear() !== year ||
+      checkDate.getUTCMonth() + 1 !== month ||
+      checkDate.getUTCDate() !== day
+    ) {
+      return null;
+    }
+    return new Date(`${isoDate}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}-03:00`);
   }
 
   private async runNowByConfiguredSources(params: {
@@ -4403,14 +4593,27 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   private async getManualCpfProducerOrThrow(
     controlId: string
-  ): Promise<Pick<NfeSyncControle, 'id' | 'clienteId' | 'estabelecimentoId' | 'cnpjConsulta'>> {
+  ): Promise<
+    Pick<
+      NfeSyncControle,
+      'id' | 'clienteId' | 'estabelecimentoId' | 'cnpjConsulta' | 'ambiente' | 'ultimoNsuConsultado' | 'maxNsu'
+    >
+  > {
     const controls = await this.prisma.nfeSyncControle.findMany({
       where: {
         id: controlId,
         status: { in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api] },
         cliente: { ativo: true, nfeHabilitado: true }
       },
-      select: { id: true, clienteId: true, estabelecimentoId: true, cnpjConsulta: true }
+      select: {
+        id: true,
+        clienteId: true,
+        estabelecimentoId: true,
+        cnpjConsulta: true,
+        ambiente: true,
+        ultimoNsuConsultado: true,
+        maxNsu: true
+      }
     });
     const producer = controls.find((control) => control.id === controlId);
     if (!producer || !this.isCpf(producer.cnpjConsulta)) {

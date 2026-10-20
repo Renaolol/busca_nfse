@@ -192,7 +192,7 @@ export class NfeController {
   @Roles('admin')
   @ApiOperation({
     summary: 'Importa NF-e manualmente pela SEFAZ para controles cadastrados com CPF',
-    description: 'Aceita controleId do produtor, certificadoId, clienteId e ambiente. O controle selecionado define o CPF e o estabelecimento da consulta, e o certificado precisa estar vinculado a esse produtor ou ser titular do mesmo CPF.'
+    description: 'Aceita controleId do produtor, certificadoId, clienteId, ambiente e opcionalmente dataEmissaoInicio/dataEmissaoFim. Quando o periodo e informado, percorre os NSUs historicos disponiveis desde o inicio, importa documentos do periodo e preserva o cursor normal. A disponibilidade depende do historico retido pela SEFAZ. O certificado precisa estar vinculado ao produtor selecionado.'
   })
   runNowCpfViaSefazGlobal(@Body() dto: RunSefazCpfImportDto) {
     return this.nfeService.runNowCpfViaSefazGlobal(dto);

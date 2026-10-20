@@ -5054,7 +5054,7 @@ function renderNfeSyncPage() {
         <button class="btn primary" type="submit" disabled>Buscar NF-e da SEFAZ</button>
       </div>
     </form>
-    <p class="card-subtitle" style="margin:12px 0 0;">A consulta autentica com o certificado escolhido e continua do NSU salvo do produtor. A SEFAZ distribui documentos por NSU; o periodo selecionado filtra as NF-e localizadas depois da importacao.</p>
+    <p class="card-subtitle" style="margin:12px 0 0;">A busca percorre os NSUs historicos ainda disponiveis na SEFAZ, importa somente documentos do periodo escolhido e preserva o cursor normal do produtor. A disponibilidade depende do historico que a SEFAZ mantem para o CPF.</p>
   `;
   const simplifiedContent = `
     <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
@@ -16632,9 +16632,11 @@ async function submitNfeSefazCpfImportForm(form) {
         controleId,
         certificadoId,
         clienteId: producer.clientId,
+        dataEmissaoInicio,
+        dataEmissaoFim,
         ...(ambiente !== 'todos' ? { ambiente } : {})
       },
-      timeoutMs: 120000
+      timeoutMs: 10 * 60 * 1000
     });
     state.nfeLastRunReport = buildNfeRunReport(result);
     state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
