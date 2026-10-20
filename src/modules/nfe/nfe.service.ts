@@ -3,6 +3,7 @@ import {
   Certificado,
   NfeAmbiente,
   NfeDocumentoOrigem,
+  NfeSyncControle,
   NfeSyncStatus,
   NfeTipoRelacao,
   Prisma
@@ -1488,17 +1489,29 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async runNowCpfViaSefazGlobal(dto: RunSefazCpfImportDto = {}): Promise<NfeSyncRunResult> {
+    const selectedProducer = dto.controleId ? await this.getManualCpfProducerOrThrow(dto.controleId) : null;
     const selectedCertificate = dto.certificadoId
-      ? await this.getManualCpfCertificateOrThrow(dto.certificadoId)
+      ? await this.getManualCpfCertificateOrThrow(dto.certificadoId, selectedProducer ?? undefined)
       : null;
-    if (selectedCertificate && dto.clienteId && dto.clienteId !== selectedCertificate.clienteId) {
+    if (dto.controleId && !dto.certificadoId) {
+      throw new BadRequestException('Selecione o certificado digital do produtor antes de iniciar a consulta SEFAZ.');
+    }
+    if (selectedProducer && dto.clienteId && dto.clienteId !== selectedProducer.clienteId) {
+      throw new BadRequestException('O produtor selecionado nao pertence ao cliente informado.');
+    }
+    if (
+      !selectedProducer &&
+      selectedCertificate?.clienteId &&
+      dto.clienteId &&
+      dto.clienteId !== selectedCertificate.clienteId
+    ) {
       throw new BadRequestException('O certificado selecionado nao pertence ao cliente informado.');
     }
 
     return this.runNowInternal({
-      clienteId: selectedCertificate?.clienteId ?? dto.clienteId,
-      estabelecimentoId: selectedCertificate?.estabelecimentoId ?? undefined,
-      cnpjConsulta: selectedCertificate?.cnpjTitular,
+      clienteId: selectedProducer?.clienteId ?? selectedCertificate?.clienteId ?? dto.clienteId,
+      estabelecimentoId: selectedProducer?.estabelecimentoId ?? selectedCertificate?.estabelecimentoId ?? undefined,
+      cnpjConsulta: selectedProducer?.cnpjConsulta ?? selectedCertificate?.cnpjTitular,
       certificateId: selectedCertificate?.id,
       ambiente: dto.ambiente,
       limitControles: dto.limitControles ?? 50,
@@ -4351,7 +4364,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async getManualCpfCertificateOrThrow(
-    certificateId: string
+    certificateId: string,
+    producer?: Pick<NfeSyncControle, 'clienteId' | 'estabelecimentoId' | 'cnpjConsulta'>
   ): Promise<Pick<Certificado, 'id' | 'clienteId' | 'estabelecimentoId' | 'cnpjTitular'>> {
     const now = new Date();
     const certificates = await this.prisma.certificado.findMany({
@@ -4369,14 +4383,40 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     });
     const certificate = certificates.find((item) => item.id === certificateId);
 
-    if (!certificate || !certificate.clienteId) {
-      throw new BadRequestException('O certificado selecionado nao esta ativo, valido e vinculado a um cliente.');
+    if (!certificate) {
+      throw new BadRequestException('O certificado selecionado nao esta ativo e valido.');
     }
-    if (!this.isCpf(certificate.cnpjTitular)) {
+    if (!producer && (!certificate.clienteId || !this.isCpf(certificate.cnpjTitular))) {
       throw new BadRequestException('Selecione um certificado cujo titular esteja cadastrado por CPF.');
+    }
+    if (producer) {
+      const sameProducerCpf = this.normalizeCnpj(certificate.cnpjTitular) === this.normalizeCnpj(producer.cnpjConsulta);
+      const linkedToProducerEstablishment =
+        certificate.clienteId === producer.clienteId && certificate.estabelecimentoId === producer.estabelecimentoId;
+      if (!sameProducerCpf && !linkedToProducerEstablishment) {
+        throw new BadRequestException('O certificado selecionado nao esta vinculado ao produtor escolhido.');
+      }
     }
 
     return certificate;
+  }
+
+  private async getManualCpfProducerOrThrow(
+    controlId: string
+  ): Promise<Pick<NfeSyncControle, 'id' | 'clienteId' | 'estabelecimentoId' | 'cnpjConsulta'>> {
+    const controls = await this.prisma.nfeSyncControle.findMany({
+      where: {
+        id: controlId,
+        status: { in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api] },
+        cliente: { ativo: true, nfeHabilitado: true }
+      },
+      select: { id: true, clienteId: true, estabelecimentoId: true, cnpjConsulta: true }
+    });
+    const producer = controls.find((control) => control.id === controlId);
+    if (!producer || !this.isCpf(producer.cnpjConsulta)) {
+      throw new BadRequestException('O produtor selecionado nao possui um controle CPF ativo para consulta.');
+    }
+    return producer;
   }
 
   private async findActiveCertificateOrThrow(
@@ -4393,6 +4433,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         AND: [
           {
             OR: [
+              ...(preferredCertificateId ? [{ id: preferredCertificateId }] : []),
               {
                 clienteId,
                 estabelecimentoId
@@ -4412,6 +4453,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       orderBy: [{ updatedAt: 'desc' }, { createdAt: 'desc' }],
       select: {
         id: true,
+        clienteId: true,
         nome: true,
         estabelecimentoId: true,
         cnpjTitular: true,
@@ -4431,7 +4473,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException(`Nenhum certificado ativo e valido encontrado para o ${documentType} ${cnpjConsulta}`);
     }
 
-    if (preferredCertificateId && this.normalizeCnpj(certificate.cnpjTitular) !== this.normalizeCnpj(cnpjConsulta)) {
+    const belongsToProducer =
+      this.normalizeCnpj(certificate.cnpjTitular) === this.normalizeCnpj(cnpjConsulta) ||
+      (certificate.clienteId === clienteId && certificate.estabelecimentoId === estabelecimentoId);
+    if (preferredCertificateId && !belongsToProducer) {
       throw new BadRequestException(`O certificado selecionado nao pertence ao CPF ${cnpjConsulta}.`);
     }
 

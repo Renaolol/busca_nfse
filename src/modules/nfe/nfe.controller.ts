@@ -192,7 +192,7 @@ export class NfeController {
   @Roles('admin')
   @ApiOperation({
     summary: 'Importa NF-e manualmente pela SEFAZ para controles cadastrados com CPF',
-    description: 'Aceita certificadoId, clienteId, ambiente e limitControles. Quando certificadoId e informado, consulta somente o CPF e o estabelecimento vinculados a esse certificado, usando-o para autenticar na SEFAZ.'
+    description: 'Aceita controleId do produtor, certificadoId, clienteId e ambiente. O controle selecionado define o CPF e o estabelecimento da consulta, e o certificado precisa estar vinculado a esse produtor ou ser titular do mesmo CPF.'
   })
   runNowCpfViaSefazGlobal(@Body() dto: RunSefazCpfImportDto) {
     return this.nfeService.runNowCpfViaSefazGlobal(dto);

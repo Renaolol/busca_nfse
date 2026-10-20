@@ -643,6 +643,7 @@ const state = {
       cliente: 'Todos',
       tipo: 'Todos',
       cnpj: '',
+      cnpjConsulta: '',
       numero: '',
       chave: '',
       emissaoInicio: '',
@@ -2735,6 +2736,10 @@ function onDocumentChange(event) {
   }
 
   const action = target.getAttribute('data-action');
+  if (action === 'nfe-sefaz-cpf-producer') {
+    updateNfeSefazCpfCertificateOptions(String(target.value || ''));
+    return;
+  }
   if (action === 'nfce-sc-client-select' || action === 'nfce-sc-establishment-select') {
     updateNfceScConfigOptions();
     return;
@@ -4801,6 +4806,87 @@ async function monitorNfceScControl(controlId, clienteId) {
   }
 }
 
+function getNfeSefazCpfProducers(controls = state.nfeSyncControls) {
+  const eligibleClientIds = new Set(getNfeEligibleClients().map((client) => client.id));
+  const producersByKey = new Map();
+  (Array.isArray(controls) ? controls : []).forEach((control) => {
+    const cpf = normalizeDigits(control?.cnpjConsulta || '');
+    if (
+      !eligibleClientIds.has(control?.clientId) ||
+      cpf.length !== 11 ||
+      !['ativo', 'erro_api'].includes(control?.status)
+    ) {
+      return;
+    }
+    const key = [control.clientId, control.estabelecimentoId, cpf].join('|');
+    if (!producersByKey.has(key)) {
+      producersByKey.set(key, {
+        key,
+        controleId: control.id,
+        clientId: control.clientId,
+        cliente: control.cliente || 'Cliente nao identificado',
+        estabelecimentoId: control.estabelecimentoId,
+        estabelecimento: control.estabelecimento || 'Estabelecimento',
+        cnpjConsulta: cpf
+      });
+    }
+  });
+  return Array.from(producersByKey.values()).sort((left, right) =>
+    `${left.cliente} ${left.estabelecimento}`.localeCompare(`${right.cliente} ${right.estabelecimento}`, 'pt-BR')
+  );
+}
+
+function getNfeSefazCpfProducerCertificates(producer) {
+  if (!producer) {
+    return [];
+  }
+  return (state.certificates || []).filter((certificate) => {
+    if (!certificate.ativo || ['Vencido', 'Arquivo ausente'].includes(certificate.status) || certificate.arquivoDisponivel === false) {
+      return false;
+    }
+    const holder = normalizeDigits(certificate.cnpj || '');
+    const sameEstablishment =
+      certificate.clientId === producer.clientId && certificate.estabelecimentoId === producer.estabelecimentoId;
+    const sameCpf =
+      holder === producer.cnpjConsulta &&
+      (!certificate.clientId || certificate.clientId === producer.clientId) &&
+      (!certificate.estabelecimentoId || certificate.estabelecimentoId === producer.estabelecimentoId);
+    return sameEstablishment || sameCpf;
+  });
+}
+
+function renderNfeSefazCpfCertificateOptions(producerKey, producers = getNfeSefazCpfProducers()) {
+  const producer = producers.find((item) => item.controleId === producerKey);
+  const certificates = getNfeSefazCpfProducerCertificates(producer);
+  const labels = certificates.reduce((result, certificate) => {
+    const holder = certificate.cnpj ? ` - Titular ${formatCpfCnpj(certificate.cnpj)}` : '';
+    result[certificate.id] = `${certificate.apelido || 'Certificado'}${holder}`;
+    return result;
+  }, {});
+  const placeholder = !producer
+    ? 'Selecione primeiro o produtor'
+    : certificates.length
+      ? 'Selecione o certificado do produtor'
+      : 'Nenhum certificado disponivel para este produtor';
+  return renderOptions(certificates.map((certificate) => certificate.id), '', labels, placeholder);
+}
+
+function updateNfeSefazCpfCertificateOptions(producerKey) {
+  const form = document.querySelector('#nfeSefazCpfImportForm');
+  const certificateSelect = form?.elements?.certificadoId;
+  if (!form || !certificateSelect) {
+    return;
+  }
+  const producers = getNfeSefazCpfProducers();
+  const certificates = getNfeSefazCpfProducerCertificates(producers.find((producer) => producer.controleId === producerKey));
+  certificateSelect.innerHTML = renderNfeSefazCpfCertificateOptions(producerKey, producers);
+  certificateSelect.disabled = certificates.length === 0;
+  const submitButton = form.querySelector('button[type="submit"]');
+  if (submitButton) {
+    submitButton.disabled = certificates.length === 0;
+  }
+}
+
 function renderNfeSyncPage() {
   const nfeEligibleClients = getNfeEligibleClients();
   const eligibleClientIds = new Set(nfeEligibleClients.map((client) => client.id));
@@ -4811,21 +4897,7 @@ function renderNfeSyncPage() {
       ['ativo', 'erro_api'].includes(control.status)
   );
   const eligibleCpfControlCount = eligibleCpfControls.length;
-  const eligibleCpfCertificates = (state.certificates || []).filter((certificate) => {
-    if (!certificate.ativo || ['Vencido', 'Arquivo ausente'].includes(certificate.status)) {
-      return false;
-    }
-    const certificateCpf = normalizeDigits(certificate.cnpj || '');
-    if (certificateCpf.length !== 11) {
-      return false;
-    }
-    return eligibleCpfControls.some(
-      (control) =>
-        control.clientId === certificate.clientId &&
-        normalizeDigits(control.cnpjConsulta || '') === certificateCpf &&
-        (!certificate.estabelecimentoId || control.estabelecimentoId === certificate.estabelecimentoId)
-    );
-  });
+  const eligibleCpfProducers = getNfeSefazCpfProducers(eligibleCpfControls);
   const controls = getFilteredNfeSyncControls();
   const clientRows = getNfeSyncClientRows(controls, nfeEligibleClients);
   const syncStats = getNfeSyncStats();
@@ -4947,16 +5019,28 @@ function renderNfeSyncPage() {
   const sefazCpfSearchContent = `
     <form id="nfeSefazCpfImportForm" class="form-grid">
       <label class="field">
-        Certificado digital do produtor
-        <select name="certificadoId" required>${renderOptions(
-          eligibleCpfCertificates.map((certificate) => certificate.id),
+        Produtor rural
+        <select name="controleId" data-action="nfe-sefaz-cpf-producer" required>${renderOptions(
+          eligibleCpfProducers.map((producer) => producer.controleId),
           '',
-          eligibleCpfCertificates.reduce((labels, certificate) => {
-            labels[certificate.id] = `${certificate.cliente} - ${certificate.apelido} - CPF ${formatCpfCnpj(certificate.cnpj)}`;
+          eligibleCpfProducers.reduce((labels, producer) => {
+            labels[producer.controleId] = `${producer.cliente} - ${producer.estabelecimento} - CPF ${formatCpfCnpj(producer.cnpjConsulta)}`;
             return labels;
           }, {}),
-          eligibleCpfCertificates.length ? 'Selecione o certificado do produtor' : 'Nenhum certificado CPF elegivel'
+          eligibleCpfProducers.length ? 'Selecione o produtor' : 'Nenhum produtor CPF elegivel'
         )}</select>
+      </label>
+      <label class="field">
+        Certificado digital do produtor
+        <select name="certificadoId" required disabled>${renderNfeSefazCpfCertificateOptions('', eligibleCpfProducers)}</select>
+      </label>
+      <label class="field">
+        Emissao inicial
+        <input name="dataEmissaoInicio" type="date" required />
+      </label>
+      <label class="field">
+        Emissao final
+        <input name="dataEmissaoFim" type="date" required />
       </label>
       <label class="field">
         Ambiente
@@ -4966,15 +5050,11 @@ function renderNfeSyncPage() {
           homologacao: 'Homologacao'
         })}</select>
       </label>
-      <label class="field">
-        Limite de controles CPF
-        <input name="limitControles" type="number" min="1" max="5000" value="50" />
-      </label>
       <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
-        <button class="btn primary" type="submit" ${eligibleCpfCertificates.length ? '' : 'disabled'}>Importar XMLs da SEFAZ</button>
+        <button class="btn primary" type="submit" disabled>Buscar NF-e da SEFAZ</button>
       </div>
     </form>
-    <p class="card-subtitle" style="margin:12px 0 0;">A busca usa o certificado selecionado para autenticar o produtor no SEFAZ e consulta os documentos a partir do NSU salvo para o CPF correspondente.</p>
+    <p class="card-subtitle" style="margin:12px 0 0;">A consulta autentica com o certificado escolhido e continua do NSU salvo do produtor. A SEFAZ distribui documentos por NSU; o periodo selecionado filtra as NF-e localizadas depois da importacao.</p>
   `;
   const simplifiedContent = `
     <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
@@ -5364,6 +5444,7 @@ function renderNfeDocumentsPage() {
         <h3 class="card-title">Consulta de NF-e</h3>
         <p class="card-subtitle">Selecione uma empresa e refine por emissao, relacionamento e disponibilidade do XML completo.</p>
         <form id="nfeDocsFilterForm" class="form-grid">
+          <input type="hidden" name="cnpjConsulta" value="${escapeHtml(state.filters.nfeDocs.cnpjConsulta || '')}" />
           <label class="field">
             Empresa
             <select name="cliente" required>${renderOptions(state.clients.map((client) => client.id), state.filters.nfeDocs.cliente === 'Todos' ? '' : state.filters.nfeDocs.cliente, mapClientOptions(), 'Selecione uma empresa')}</select>
@@ -16519,55 +16600,109 @@ async function runNfeSearchNow() {
 
 async function submitNfeSefazCpfImportForm(form) {
   const data = new FormData(form);
+  const controleId = String(data.get('controleId') || '').trim();
   const certificadoId = String(data.get('certificadoId') || '').trim();
   const ambiente = String(data.get('ambiente') || 'producao').trim();
-  const limitValue = Number(data.get('limitControles') || 50);
-  const limitControles = Number.isInteger(limitValue) && limitValue > 0 ? Math.min(limitValue, 5000) : 50;
-  const certificate = state.certificates.find((item) => item.id === certificadoId);
-  if (!certificate || !certificate.ativo || ['Vencido', 'Arquivo ausente'].includes(certificate.status)) {
-    pushToast('Selecione um certificado CPF ativo e disponivel para consulta.', 'error');
+  const dataEmissaoInicio = String(data.get('dataEmissaoInicio') || '').trim();
+  const dataEmissaoFim = String(data.get('dataEmissaoFim') || '').trim();
+  const producer = getNfeSefazCpfProducers().find((item) => item.controleId === controleId);
+  if (!producer) {
+    pushToast('Selecione um produtor rural CPF elegivel para consulta.', 'error');
     return;
   }
-
-  const certificateCpf = normalizeDigits(certificate.cnpj || '');
-  const eligibleClientIds = new Set(getNfeEligibleClients().map((client) => client.id));
-  const cpfControls = state.nfeSyncControls.filter(
-    (control) =>
-      eligibleClientIds.has(control.clientId) &&
-      control.clientId === certificate.clientId &&
-      normalizeDigits(control.cnpjConsulta || '') === certificateCpf &&
-      (!certificate.estabelecimentoId || control.estabelecimentoId === certificate.estabelecimentoId) &&
-      ['ativo', 'erro_api'].includes(control.status) &&
-      (ambiente === 'todos' || control.ambiente === ambiente)
-  );
-
-  if (!cpfControls.length) {
-    pushToast('Nenhum controle CPF elegivel foi encontrado para o certificado e ambiente selecionados.', 'error');
+  const certificate = state.certificates.find((item) => item.id === certificadoId);
+  if (!certificate || !getNfeSefazCpfProducerCertificates(producer).some((item) => item.id === certificate.id)) {
+    pushToast('Selecione um certificado ativo vinculado ao produtor escolhido.', 'error');
+    return;
+  }
+  if (!dataEmissaoInicio || !dataEmissaoFim) {
+    pushToast('Informe a data inicial e a data final da busca.', 'error');
+    return;
+  }
+  if (Date.parse(dataEmissaoInicio) > Date.parse(dataEmissaoFim)) {
+    pushToast('A data inicial nao pode ser maior que a data final.', 'error');
     return;
   }
 
   try {
-    pushToast(`Importacao manual da SEFAZ iniciada com o certificado ${certificate.apelido}. Aguarde a conclusao.`, 'info');
+    pushToast(`Consulta SEFAZ iniciada para ${producer.cliente} com o certificado ${certificate.apelido}. Aguarde a conclusao.`, 'info');
     const result = await apiRequest('/nfe/sync/rodar-sefaz-cpf', {
       method: 'POST',
       body: {
+        controleId,
         certificadoId,
-        ...(certificate.clientId ? { clienteId: certificate.clientId } : {}),
-        ...(ambiente !== 'todos' ? { ambiente } : {}),
-        limitControles
+        clienteId: producer.clientId,
+        ...(ambiente !== 'todos' ? { ambiente } : {})
       },
       timeoutMs: 120000
     });
     state.nfeLastRunReport = buildNfeRunReport(result);
     state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
-    pushToast(
-      buildNfeRunToastMessage(`Importacao manual SEFAZ por CPF concluida (${certificate.apelido})`, result),
-      Number(result?.failures || 0) > 0 ? 'error' : 'success'
-    );
+    pushToast(buildNfeRunToastMessage(`Consulta SEFAZ concluida para ${producer.cliente} (${certificate.apelido})`, result), Number(result?.failures || 0) > 0 ? 'error' : 'success');
     await refreshApiData();
+    try {
+      const found = await searchNfeSefazCpfPeriod({ producer, ambiente, dataEmissaoInicio, dataEmissaoFim });
+      pushToast(`${found} NF-e localizadas para o produtor no periodo informado.`, found ? 'success' : 'info');
+    } catch (error) {
+      pushToast(`A importacao SEFAZ terminou, mas nao foi possivel filtrar as NF-e pelo periodo: ${toErrorMessage(error)}`, 'error');
+    }
   } catch (error) {
     pushToast(`Falha na importacao manual da SEFAZ: ${toErrorMessage(error)}`, 'error');
   }
+}
+
+async function searchNfeSefazCpfPeriod({ producer, ambiente, dataEmissaoInicio, dataEmissaoFim }) {
+  const query = new URLSearchParams({
+    clienteId: producer.clientId,
+    cnpjConsulta: producer.cnpjConsulta,
+    modelo: '55',
+    all: 'true',
+    dataInicio: `${dataEmissaoInicio}T00:00:00.000-03:00`,
+    dataFim: `${dataEmissaoFim}T23:59:59.999-03:00`
+  });
+  if (ambiente !== 'todos') {
+    query.set('ambiente', ambiente);
+  }
+
+  const payload = normalizePaginatedResponse(
+    await apiRequest(`/nfe?${query.toString()}`, { cache: false, timeoutMs: 60000 })
+  );
+  const mapped = buildNfeDocumentsFromApi(payload.items, state.clients);
+  state.filters.nfeDocs = {
+    ...state.filters.nfeDocs,
+    cliente: producer.clientId,
+    tipo: 'Todos',
+    cnpj: '',
+    cnpjConsulta: producer.cnpjConsulta,
+    numero: '',
+    chave: '',
+    emissaoInicio: dataEmissaoInicio,
+    emissaoFim: dataEmissaoFim,
+    status: 'Todos',
+    eventos: 'Todos',
+    schemaDoc: 'Todos',
+    valorMin: '',
+    valorMax: '',
+    xmlCompleto: 'Todos',
+    ambiente: ambiente === 'todos' ? 'Todos' : ambiente
+  };
+  state.selectedNfeIds = new Set();
+  state.nfeSearch = {
+    ...state.nfeSearch,
+    hasSearched: true,
+    results: getFilteredNfeDocumentsFromSource(mapped),
+    lastQuery: { ...state.filters.nfeDocs, cnpjConsulta: producer.cnpjConsulta },
+    lastSearchedAt: new Date().toISOString(),
+    page: 1,
+    pageSize: payload.pageSize,
+    total: payload.total,
+    totalPages: payload.totalPages
+  };
+  state.tableState.nfeDocs = 'data';
+  state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mapped);
+  navigate('/xmls-nfe');
+  reportIfListingCapped('NF-e', payload);
+  return state.nfeSearch.results.length;
 }
 
 function getFilteredRuns() {
@@ -17246,6 +17381,10 @@ async function applyNfeDocsFilters(form) {
     cliente: String(data.get('cliente') || ''),
     tipo: String(data.get('tipo') || 'Todos'),
     cnpj: normalizeDigits(String(data.get('cnpj') || '')),
+    cnpjConsulta:
+      String(data.get('cliente') || '') === state.filters.nfeDocs.cliente
+        ? String(data.get('cnpjConsulta') || state.filters.nfeDocs.cnpjConsulta || '')
+        : '',
     numero: String(data.get('numero') || '').trim(),
     chave: normalizeDigits(String(data.get('chave') || '')),
     emissaoInicio: String(data.get('emissaoInicio') || ''),
@@ -18140,8 +18279,9 @@ function buildNfeSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE, all
   }
 
   const client = findClientById(filters.cliente);
-  if (client?.cnpj) {
-    query.set('cnpjConsulta', normalizeDigits(client.cnpj));
+  const cnpjConsulta = normalizeDigits(filters.cnpjConsulta || client?.cnpj || '');
+  if (cnpjConsulta) {
+    query.set('cnpjConsulta', cnpjConsulta);
     if (filters.tipo === 'Emitida') {
       query.set('tipoRelacao', 'emitidas');
     } else if (filters.tipo === 'Recebida') {
@@ -23139,6 +23279,7 @@ function mapCertificateFromApi(cert, clientById, fallbackClientId = null) {
     status: deriveCertificateStatus(cert, days),
     ultimaValidacao: cert.updatedAt || cert.createdAt || null,
     ativo: Boolean(cert.ativo),
+    arquivoDisponivel: cert.arquivoDisponivel !== false,
     anotacoes: cert.anotacoes || ''
   };
 }

@@ -1778,7 +1778,7 @@ describe('NfeService', () => {
     expect(dominioXmlSource.listDocuments).not.toHaveBeenCalled();
   });
 
-  it('usa o certificado CPF selecionado para buscar somente o produtor vinculado', async () => {
+  it('usa o certificado vinculado ao estabelecimento do produtor CPF selecionado', async () => {
     prisma.nfeSyncControle.findMany.mockResolvedValue([
       {
         id: 'ctrl-jair',
@@ -1804,7 +1804,7 @@ describe('NfeService', () => {
         nome: 'Certificado Jair',
         clienteId: 'cliente-jair',
         estabelecimentoId: 'estab-jair',
-        cnpjTitular: '01861020970',
+        cnpjTitular: '12345678000199',
         ativo: true,
         arquivoCriptografadoPath: 'certificados/cliente-jair/cert-jair.bin'
       }
@@ -1819,7 +1819,7 @@ describe('NfeService', () => {
       rawResponse: { mock: true }
     });
 
-    await service.runNowCpfViaSefazGlobal({ certificadoId: 'cert-jair' });
+    await service.runNowCpfViaSefazGlobal({ controleId: 'ctrl-jair', certificadoId: 'cert-jair' });
 
     expect(prisma.nfeSyncControle.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
