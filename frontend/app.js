@@ -120,6 +120,7 @@ const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:0
 const AUTH_LOGO_LIGHT_THEME_SRC = '/app/assets/notasync-logo-horizontal-antiga.png';
 const AUTH_LOGO_DEFAULT_SRC = '/app/assets/notasync-logo-horizontal.png';
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
+const NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION = '__all_cpf_clients__';
 let dashboardAutoRefreshTimer = null;
 let dashboardAutoRefreshRunning = false;
 let lastRenderedRouteKey = null;
@@ -1660,10 +1661,6 @@ function onDocumentClick(event) {
       void runNfeSearchNow();
       return;
     }
-    case 'nfe-run-sefaz-cpf': {
-      void runNfeCpfSefazSearch();
-      return;
-    }
     case 'nfe-download-by-key-global': {
       void runNfeDownloadByKey();
       return;
@@ -2530,6 +2527,11 @@ function onDocumentSubmit(event) {
     case 'nfeDominioImportForm': {
       event.preventDefault();
       void submitNfeDominioImportForm(target);
+      return;
+    }
+    case 'nfeSefazCpfImportForm': {
+      event.preventDefault();
+      void submitNfeSefazCpfImportForm(target);
       return;
     }
     case 'nfceScConfigureForm': {
@@ -4803,12 +4805,15 @@ async function monitorNfceScControl(controlId, clienteId) {
 function renderNfeSyncPage() {
   const nfeEligibleClients = getNfeEligibleClients();
   const eligibleClientIds = new Set(nfeEligibleClients.map((client) => client.id));
-  const eligibleCpfControlCount = state.nfeSyncControls.filter(
+  const eligibleCpfControls = state.nfeSyncControls.filter(
     (control) =>
       eligibleClientIds.has(control.clientId) &&
       normalizeDigits(control.cnpjConsulta || '').length === 11 &&
       ['ativo', 'erro_api'].includes(control.status)
-  ).length;
+  );
+  const eligibleCpfControlCount = eligibleCpfControls.length;
+  const eligibleCpfClientIds = new Set(eligibleCpfControls.map((control) => control.clientId));
+  const eligibleCpfClients = nfeEligibleClients.filter((client) => eligibleCpfClientIds.has(client.id));
   const controls = getFilteredNfeSyncControls();
   const clientRows = getNfeSyncClientRows(controls, nfeEligibleClients);
   const syncStats = getNfeSyncStats();
@@ -4928,15 +4933,35 @@ function renderNfeSyncPage() {
     </form>
   `;
   const sefazCpfSearchContent = `
-    <div class="form-grid two">
+    <form id="nfeSefazCpfImportForm" class="form-grid">
       <label class="field">
-        Controles de produtores cadastrados por CPF
-        <input type="text" value="${eligibleCpfControlCount} produtor(es) elegivel(is) para consulta" readonly />
+        Cliente
+        <select name="clienteId">${renderOptions(
+          [NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION, ...eligibleCpfClients.map((client) => client.id)],
+          NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION,
+          {
+            [NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION]: 'Todos os produtores CPF',
+            ...mapClientOptions()
+          }
+        )}</select>
       </label>
-      <div class="stack-actions" style="justify-content:flex-start; align-items:flex-end;">
-        <button class="btn primary" type="button" data-action="nfe-run-sefaz-cpf" ${eligibleCpfControlCount ? '' : 'disabled'}>Buscar somente pela SEFAZ</button>
+      <label class="field">
+        Ambiente
+        <select name="ambiente">${renderOptions(['todos', 'producao', 'homologacao'], 'producao', {
+          todos: 'Todos os ambientes',
+          producao: 'Producao',
+          homologacao: 'Homologacao'
+        })}</select>
+      </label>
+      <label class="field">
+        Limite de controles CPF
+        <input name="limitControles" type="number" min="1" max="5000" value="50" />
+      </label>
+      <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
+        <button class="btn primary" type="submit" ${eligibleCpfControlCount ? '' : 'disabled'}>Importar XMLs da SEFAZ</button>
       </div>
-    </div>
+    </form>
+    <p class="card-subtitle" style="margin:12px 0 0;">A SEFAZ consulta pelo NSU salvo e importa os documentos disponiveis a partir desse cursor. A distribuicao oficial nao aceita filtro por emissao, numero ou fornecedor.</p>
   `;
   const simplifiedContent = `
     <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
@@ -5079,8 +5104,8 @@ function renderNfeSyncPage() {
 
       ${renderCollapsibleCard({
         sectionKey: 'sefazCpf',
-        title: 'Busca SEFAZ para empresas cadastradas por CPF',
-        subtitle: 'Executa a busca manual somente nos controles CPF pela distribuicao DF-e da SEFAZ, sem processar controles CNPJ pela Dominio.',
+        title: 'Importacao manual da SEFAZ',
+        subtitle: `Importa documentos pela distribuicao DF-e somente para controles cadastrados por CPF. ${eligibleCpfControlCount} controle(s) CPF elegivel(is).`,
         contentHtml: sefazCpfSearchContent,
         defaultOpen: true
       })}
@@ -5100,7 +5125,7 @@ function renderNfeSyncPage() {
         defaultOpen: true
       })}
       ${
-        sourceMode !== 'distribuicao'
+        sourceMode !== 'distribuicao' || state.nfeLastRunReport
           ? renderCollapsibleCard({
               sectionKey: 'failures',
               title: sourceMode === 'dominio' ? 'Painel de falhas da importacao' : 'Painel da ultima execucao manual',
@@ -16480,20 +16505,47 @@ async function runNfeSearchNow() {
   }
 }
 
-async function runNfeCpfSefazSearch() {
+async function submitNfeSefazCpfImportForm(form) {
+  const data = new FormData(form);
+  const clienteId = String(data.get('clienteId') || NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION).trim();
+  const ambiente = String(data.get('ambiente') || 'producao').trim();
+  const limitValue = Number(data.get('limitControles') || 50);
+  const limitControles = Number.isInteger(limitValue) && limitValue > 0 ? Math.min(limitValue, 5000) : 50;
+  const eligibleClientIds = new Set(getNfeEligibleClients().map((client) => client.id));
+  const cpfControls = state.nfeSyncControls.filter(
+    (control) =>
+      eligibleClientIds.has(control.clientId) &&
+      normalizeDigits(control.cnpjConsulta || '').length === 11 &&
+      ['ativo', 'erro_api'].includes(control.status) &&
+      (clienteId === NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION || control.clientId === clienteId) &&
+      (ambiente === 'todos' || control.ambiente === ambiente)
+  );
+
+  if (!cpfControls.length) {
+    pushToast('Nenhum controle CPF elegivel foi encontrado para os filtros informados.', 'error');
+    return;
+  }
+
   try {
-    pushToast('Busca de NF-e somente pela SEFAZ iniciada para os produtores cadastrados por CPF. Aguarde a conclusao.', 'info');
+    pushToast(`Importacao manual da SEFAZ iniciada para ${cpfControls.length} controle(s) CPF. Aguarde a conclusao.`, 'info');
     const result = await apiRequest('/nfe/sync/rodar-sefaz-cpf', {
-      method: 'POST'
+      method: 'POST',
+      body: {
+        ...(clienteId !== NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION ? { clienteId } : {}),
+        ...(ambiente !== 'todos' ? { ambiente } : {}),
+        limitControles
+      },
+      timeoutMs: 120000
     });
     state.nfeLastRunReport = buildNfeRunReport(result);
+    state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
     pushToast(
-      buildNfeRunToastMessage('Busca SEFAZ por CPF executada', result),
+      buildNfeRunToastMessage('Importacao manual SEFAZ por CPF concluida', result),
       Number(result?.failures || 0) > 0 ? 'error' : 'success'
     );
     await refreshApiData();
   } catch (error) {
-    pushToast(`Falha ao executar busca SEFAZ por CPF: ${toErrorMessage(error)}`, 'error');
+    pushToast(`Falha na importacao manual da SEFAZ: ${toErrorMessage(error)}`, 'error');
   }
 }
 

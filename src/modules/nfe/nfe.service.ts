@@ -40,6 +40,7 @@ import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
 import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
 import { RunNfeSyncDto } from './dto/run-sync.dto';
+import { RunSefazCpfImportDto } from './dto/run-sefaz-cpf-import.dto';
 import { SincronizarNfeEventosDto } from './dto/sincronizar-eventos.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
 import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
@@ -1486,8 +1487,13 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return this.runNowByConfiguredSources({ limitControles: 50 });
   }
 
-  async runNowCpfViaSefazGlobal(): Promise<NfeSyncRunResult> {
-    return this.runNowInternal({ onlyCpf: true });
+  async runNowCpfViaSefazGlobal(dto: RunSefazCpfImportDto = {}): Promise<NfeSyncRunResult> {
+    return this.runNowInternal({
+      clienteId: dto.clienteId,
+      ambiente: dto.ambiente,
+      limitControles: dto.limitControles ?? 50,
+      onlyCpf: true
+    });
   }
 
   private async runNowByConfiguredSources(params: {

@@ -23,6 +23,7 @@ import { QueryNfeByChaveDto } from './dto/query-by-chave.dto';
 import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
 import { RunNfeSyncDto } from './dto/run-sync.dto';
+import { RunSefazCpfImportDto } from './dto/run-sefaz-cpf-import.dto';
 import { SincronizarNfeEventosDto, SincronizarNfeEventosResponseDto } from './dto/sincronizar-eventos.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
 import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
@@ -190,11 +191,11 @@ export class NfeController {
   @Post('sync/rodar-sefaz-cpf')
   @Roles('admin')
   @ApiOperation({
-    summary: 'Executa busca de NF-e somente pela SEFAZ para controles cadastrados com CPF',
-    description: 'Ignora a origem configurada para CNPJs e consulta exclusivamente os controles CPF pela distribuicao DF-e da SEFAZ.'
+    summary: 'Importa NF-e manualmente pela SEFAZ para controles cadastrados com CPF',
+    description: 'Aceita clienteId, ambiente e limitControles opcionais. Consulta somente CPF pelo NSU salvo e ignora controles CNPJ e a origem Dominio.'
   })
-  runNowCpfViaSefazGlobal() {
-    return this.nfeService.runNowCpfViaSefazGlobal();
+  runNowCpfViaSefazGlobal(@Body() dto: RunSefazCpfImportDto) {
+    return this.nfeService.runNowCpfViaSefazGlobal(dto);
   }
 
   @Post('sync/download-por-chave/preview')

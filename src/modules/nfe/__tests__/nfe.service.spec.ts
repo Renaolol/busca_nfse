@@ -1730,6 +1730,54 @@ describe('NfeService', () => {
     expect(result.processed).toBe(1);
   });
 
+  it('filtra a importacao manual da SEFAZ por cliente, ambiente e limite', async () => {
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-cpf-homologacao',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '01861020970',
+        ambiente: NfeAmbiente.homologacao,
+        ultimoNsuConsultado: 0n,
+        ultimoNsuDistribuido: 0n,
+        maxNsu: 20n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '137',
+      xMotivo: 'Sem novos documentos',
+      ultNsu: 0n,
+      maxNsu: 20n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.runNowCpfViaSefazGlobal({
+      clienteId: 'cliente-1',
+      ambiente: NfeAmbiente.homologacao,
+      limitControles: 1
+    });
+
+    expect(prisma.nfeSyncControle.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          clienteId: 'cliente-1',
+          ambiente: NfeAmbiente.homologacao
+        })
+      })
+    );
+    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cnpjConsulta: '01861020970',
+        ambiente: NfeAmbiente.homologacao
+      })
+    );
+    expect(result.processed).toBe(1);
+    expect(dominioXmlSource.listDocuments).not.toHaveBeenCalled();
+  });
+
   it('exibe falhas retornadas pela SEFAZ na busca manual de CPF', async () => {
     process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
     prisma.nfeSyncControle.findMany.mockResolvedValue([
