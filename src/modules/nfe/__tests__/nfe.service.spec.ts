@@ -1778,6 +1778,66 @@ describe('NfeService', () => {
     expect(dominioXmlSource.listDocuments).not.toHaveBeenCalled();
   });
 
+  it('usa o certificado CPF selecionado para buscar somente o produtor vinculado', async () => {
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-jair',
+        clienteId: 'cliente-jair',
+        estabelecimentoId: 'estab-jair',
+        cnpjConsulta: '01861020970',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 0n,
+        ultimoNsuDistribuido: 0n,
+        maxNsu: 20n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
+      id: 'estab-jair',
+      clienteId: 'cliente-jair',
+      cnpj: '01861020970',
+      municipioCodigoIbge: '4204202'
+    });
+    prisma.certificado.findMany.mockResolvedValue([
+      {
+        id: 'cert-jair',
+        nome: 'Certificado Jair',
+        clienteId: 'cliente-jair',
+        estabelecimentoId: 'estab-jair',
+        cnpjTitular: '01861020970',
+        ativo: true,
+        arquivoCriptografadoPath: 'certificados/cliente-jair/cert-jair.bin'
+      }
+    ]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '137',
+      xMotivo: 'Sem novos documentos',
+      ultNsu: 0n,
+      maxNsu: 20n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    await service.runNowCpfViaSefazGlobal({ certificadoId: 'cert-jair' });
+
+    expect(prisma.nfeSyncControle.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          clienteId: 'cliente-jair',
+          estabelecimentoId: 'estab-jair',
+          cnpjConsulta: '01861020970'
+        })
+      })
+    );
+    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cnpjConsulta: '01861020970',
+        certificateId: 'cert-jair'
+      })
+    );
+  });
+
   it('exibe falhas retornadas pela SEFAZ na busca manual de CPF', async () => {
     process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
     prisma.nfeSyncControle.findMany.mockResolvedValue([

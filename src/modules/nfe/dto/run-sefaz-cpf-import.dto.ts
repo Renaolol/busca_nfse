@@ -4,6 +4,11 @@ import { Type } from 'class-transformer';
 import { IsEnum, IsInt, IsOptional, IsUUID, Max, Min } from 'class-validator';
 
 export class RunSefazCpfImportDto {
+  @ApiPropertyOptional({ description: 'Usa este certificado ativo do produtor para a consulta SEFAZ.' })
+  @IsOptional()
+  @IsUUID()
+  certificadoId?: string;
+
   @ApiPropertyOptional({ description: 'Filtra os controles CPF por cliente; omitido consulta todos os produtores elegiveis.' })
   @IsOptional()
   @IsUUID()

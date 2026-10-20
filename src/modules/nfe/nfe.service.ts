@@ -1488,8 +1488,18 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async runNowCpfViaSefazGlobal(dto: RunSefazCpfImportDto = {}): Promise<NfeSyncRunResult> {
+    const selectedCertificate = dto.certificadoId
+      ? await this.getManualCpfCertificateOrThrow(dto.certificadoId)
+      : null;
+    if (selectedCertificate && dto.clienteId && dto.clienteId !== selectedCertificate.clienteId) {
+      throw new BadRequestException('O certificado selecionado nao pertence ao cliente informado.');
+    }
+
     return this.runNowInternal({
-      clienteId: dto.clienteId,
+      clienteId: selectedCertificate?.clienteId ?? dto.clienteId,
+      estabelecimentoId: selectedCertificate?.estabelecimentoId ?? undefined,
+      cnpjConsulta: selectedCertificate?.cnpjTitular,
+      certificateId: selectedCertificate?.id,
       ambiente: dto.ambiente,
       limitControles: dto.limitControles ?? 50,
       onlyCpf: true
@@ -2874,6 +2884,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     clienteId?: string;
     ambiente?: NfeAmbiente;
     estabelecimentoId?: string;
+    cnpjConsulta?: string;
+    certificateId?: string;
     limitControles?: number;
     onlyCpf?: boolean;
   }): Promise<NfeSyncRunResult> {
@@ -2888,7 +2900,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         },
         ...(params.clienteId ? { clienteId: params.clienteId } : {}),
         ...(params.ambiente ? { ambiente: params.ambiente } : {}),
-        ...(params.estabelecimentoId ? { estabelecimentoId: params.estabelecimentoId } : {})
+        ...(params.estabelecimentoId ? { estabelecimentoId: params.estabelecimentoId } : {}),
+        ...(params.cnpjConsulta ? { cnpjConsulta: params.cnpjConsulta } : {})
       },
       orderBy: { updatedAt: 'asc' },
       ...(params.onlyCpf ? {} : { take: params.limitControles ?? 10 })
@@ -2907,7 +2920,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       const certificate = await this.findActiveCertificateOrThrow(
         control.clienteId,
         control.estabelecimentoId,
-        control.cnpjConsulta
+        control.cnpjConsulta,
+        params.certificateId
       );
       const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
       const result = await this.distribuicaoClient.distribuirPorNsu({
@@ -4336,10 +4350,40 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     );
   }
 
+  private async getManualCpfCertificateOrThrow(
+    certificateId: string
+  ): Promise<Pick<Certificado, 'id' | 'clienteId' | 'estabelecimentoId' | 'cnpjTitular'>> {
+    const now = new Date();
+    const certificates = await this.prisma.certificado.findMany({
+      where: {
+        id: certificateId,
+        ativo: true,
+        OR: [{ validadeFim: null }, { validadeFim: { gt: now } }]
+      },
+      select: {
+        id: true,
+        clienteId: true,
+        estabelecimentoId: true,
+        cnpjTitular: true
+      }
+    });
+    const certificate = certificates.find((item) => item.id === certificateId);
+
+    if (!certificate || !certificate.clienteId) {
+      throw new BadRequestException('O certificado selecionado nao esta ativo, valido e vinculado a um cliente.');
+    }
+    if (!this.isCpf(certificate.cnpjTitular)) {
+      throw new BadRequestException('Selecione um certificado cujo titular esteja cadastrado por CPF.');
+    }
+
+    return certificate;
+  }
+
   private async findActiveCertificateOrThrow(
     clienteId: string,
     estabelecimentoId: string,
-    cnpjConsulta: string
+    cnpjConsulta: string,
+    preferredCertificateId?: string
   ): Promise<Pick<Certificado, 'id'>> {
     const documentType = this.getDocumentTypeLabel(cnpjConsulta);
     const now = new Date();
@@ -4370,16 +4414,25 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         id: true,
         nome: true,
         estabelecimentoId: true,
+        cnpjTitular: true,
         arquivoCriptografadoPath: true
       }
     });
 
-    const certificate =
-      certificates.find((item) => item.estabelecimentoId === estabelecimentoId) ??
-      certificates.find((item) => item.estabelecimentoId === null);
+    const certificate = preferredCertificateId
+      ? certificates.find((item) => item.id === preferredCertificateId)
+      : certificates.find((item) => item.estabelecimentoId === estabelecimentoId) ??
+        certificates.find((item) => item.estabelecimentoId === null);
 
     if (!certificate) {
+      if (preferredCertificateId) {
+        throw new BadRequestException(`O certificado selecionado nao esta ativo e vinculado ao CPF ${cnpjConsulta}.`);
+      }
       throw new BadRequestException(`Nenhum certificado ativo e valido encontrado para o ${documentType} ${cnpjConsulta}`);
+    }
+
+    if (preferredCertificateId && this.normalizeCnpj(certificate.cnpjTitular) !== this.normalizeCnpj(cnpjConsulta)) {
+      throw new BadRequestException(`O certificado selecionado nao pertence ao CPF ${cnpjConsulta}.`);
     }
 
     const certificateFileExists = await this.storage.hasObject(certificate.arquivoCriptografadoPath);

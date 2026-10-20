@@ -62,7 +62,7 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - O fluxo atual implementa `distNSU`, `consNSU` e `consChNFe`.
 - Consultas por estabelecimento aceitam CPF (11 digitos) ou CNPJ (14 digitos). O adapter oficial envia CPF como `<CPF>` no pedido DF-e e CNPJ como `<CNPJ>`.
 - Quando `NFE_SYNC_SOURCE_MODE=dominio` ou `dominio_chave`, os estabelecimentos cadastrados por CPF continuam pela distribuicao oficial da SEFAZ; estabelecimentos cadastrados por CNPJ seguem a origem Dominio configurada.
-- `POST /nfe/sync/rodar-sefaz-cpf` importa manualmente controles ativos ou com erro de API cadastrados com CPF, usando apenas a distribuicao DF-e da SEFAZ. O body aceita `clienteId`, `ambiente` e `limitControles`; sem cliente, consulta todos os produtores elegiveis. A consulta continua do NSU salvo no controle, pois a distribuicao oficial nao aceita filtros por emissao, numero ou fornecedor.
+- `POST /nfe/sync/rodar-sefaz-cpf` importa manualmente controles ativos ou com erro de API cadastrados com CPF, usando apenas a distribuicao DF-e da SEFAZ. O body aceita `certificadoId`, `clienteId`, `ambiente` e `limitControles`; ao informar `certificadoId`, a busca fica limitada ao produtor vinculado e usa esse certificado para autenticar na SEFAZ. A consulta continua do NSU salvo no controle, pois a distribuicao oficial nao aceita filtros por emissao, numero ou fornecedor.
 - `GET /nfe` aceita CPF ou CNPJ em `cnpjConsulta` para filtrar documentos emitidos ou recebidos pelo produtor.
 - O modulo `cte` implementa consulta manual por chave via `CteConsultaV4` e tentativa de captura de eventos retornados pelo autorizador.
 - As rotas manuais permitem testar o ambiente real e recuperar documentos pontuais sem depender do ciclo incremental.

@@ -120,7 +120,6 @@ const NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '00:00', '02:0
 const AUTH_LOGO_LIGHT_THEME_SRC = '/app/assets/notasync-logo-horizontal-antiga.png';
 const AUTH_LOGO_DEFAULT_SRC = '/app/assets/notasync-logo-horizontal.png';
 const NFE_DOMINIO_ALL_CLIENTS_OPTION = '__all_clients__';
-const NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION = '__all_cpf_clients__';
 let dashboardAutoRefreshTimer = null;
 let dashboardAutoRefreshRunning = false;
 let lastRenderedRouteKey = null;
@@ -4812,8 +4811,21 @@ function renderNfeSyncPage() {
       ['ativo', 'erro_api'].includes(control.status)
   );
   const eligibleCpfControlCount = eligibleCpfControls.length;
-  const eligibleCpfClientIds = new Set(eligibleCpfControls.map((control) => control.clientId));
-  const eligibleCpfClients = nfeEligibleClients.filter((client) => eligibleCpfClientIds.has(client.id));
+  const eligibleCpfCertificates = (state.certificates || []).filter((certificate) => {
+    if (!certificate.ativo || ['Vencido', 'Arquivo ausente'].includes(certificate.status)) {
+      return false;
+    }
+    const certificateCpf = normalizeDigits(certificate.cnpj || '');
+    if (certificateCpf.length !== 11) {
+      return false;
+    }
+    return eligibleCpfControls.some(
+      (control) =>
+        control.clientId === certificate.clientId &&
+        normalizeDigits(control.cnpjConsulta || '') === certificateCpf &&
+        (!certificate.estabelecimentoId || control.estabelecimentoId === certificate.estabelecimentoId)
+    );
+  });
   const controls = getFilteredNfeSyncControls();
   const clientRows = getNfeSyncClientRows(controls, nfeEligibleClients);
   const syncStats = getNfeSyncStats();
@@ -4935,14 +4947,15 @@ function renderNfeSyncPage() {
   const sefazCpfSearchContent = `
     <form id="nfeSefazCpfImportForm" class="form-grid">
       <label class="field">
-        Cliente
-        <select name="clienteId">${renderOptions(
-          [NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION, ...eligibleCpfClients.map((client) => client.id)],
-          NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION,
-          {
-            [NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION]: 'Todos os produtores CPF',
-            ...mapClientOptions()
-          }
+        Certificado digital do produtor
+        <select name="certificadoId" required>${renderOptions(
+          eligibleCpfCertificates.map((certificate) => certificate.id),
+          '',
+          eligibleCpfCertificates.reduce((labels, certificate) => {
+            labels[certificate.id] = `${certificate.cliente} - ${certificate.apelido} - CPF ${formatCpfCnpj(certificate.cnpj)}`;
+            return labels;
+          }, {}),
+          eligibleCpfCertificates.length ? 'Selecione o certificado do produtor' : 'Nenhum certificado CPF elegivel'
         )}</select>
       </label>
       <label class="field">
@@ -4958,10 +4971,10 @@ function renderNfeSyncPage() {
         <input name="limitControles" type="number" min="1" max="5000" value="50" />
       </label>
       <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
-        <button class="btn primary" type="submit" ${eligibleCpfControlCount ? '' : 'disabled'}>Importar XMLs da SEFAZ</button>
+        <button class="btn primary" type="submit" ${eligibleCpfCertificates.length ? '' : 'disabled'}>Importar XMLs da SEFAZ</button>
       </div>
     </form>
-    <p class="card-subtitle" style="margin:12px 0 0;">A SEFAZ consulta pelo NSU salvo e importa os documentos disponiveis a partir desse cursor. A distribuicao oficial nao aceita filtro por emissao, numero ou fornecedor.</p>
+    <p class="card-subtitle" style="margin:12px 0 0;">A busca usa o certificado selecionado para autenticar o produtor no SEFAZ e consulta os documentos a partir do NSU salvo para o CPF correspondente.</p>
   `;
   const simplifiedContent = `
     <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
@@ -5102,14 +5115,6 @@ function renderNfeSyncPage() {
 
       ${renderSearchTypeSwitcher('nfe')}
 
-      ${renderCollapsibleCard({
-        sectionKey: 'sefazCpf',
-        title: 'Importacao manual da SEFAZ',
-        subtitle: `Importa documentos pela distribuicao DF-e somente para controles cadastrados por CPF. ${eligibleCpfControlCount} controle(s) CPF elegivel(is).`,
-        contentHtml: sefazCpfSearchContent,
-        defaultOpen: true
-      })}
-
       <section class="stats-grid">
         ${statCard('search', 'Controles ativos', String(syncStats.ativos), queueLabel, 'success')}
         ${statCard('clock', 'Controles pausados', String(syncStats.pausados), 'aguardando retomada', 'neutral')}
@@ -5135,6 +5140,13 @@ function renderNfeSyncPage() {
             })
           : ''
       }
+      ${renderCollapsibleCard({
+        sectionKey: 'sefazCpf',
+        title: 'Importacao manual da SEFAZ',
+        subtitle: `Importa documentos pela distribuicao DF-e somente para controles cadastrados por CPF. ${eligibleCpfControlCount} controle(s) CPF elegivel(is).`,
+        contentHtml: sefazCpfSearchContent,
+        defaultOpen: true
+      })}
       ${
         sourceMode === 'dominio'
           ? renderCollapsibleCard({
@@ -16507,31 +16519,40 @@ async function runNfeSearchNow() {
 
 async function submitNfeSefazCpfImportForm(form) {
   const data = new FormData(form);
-  const clienteId = String(data.get('clienteId') || NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION).trim();
+  const certificadoId = String(data.get('certificadoId') || '').trim();
   const ambiente = String(data.get('ambiente') || 'producao').trim();
   const limitValue = Number(data.get('limitControles') || 50);
   const limitControles = Number.isInteger(limitValue) && limitValue > 0 ? Math.min(limitValue, 5000) : 50;
+  const certificate = state.certificates.find((item) => item.id === certificadoId);
+  if (!certificate || !certificate.ativo || ['Vencido', 'Arquivo ausente'].includes(certificate.status)) {
+    pushToast('Selecione um certificado CPF ativo e disponivel para consulta.', 'error');
+    return;
+  }
+
+  const certificateCpf = normalizeDigits(certificate.cnpj || '');
   const eligibleClientIds = new Set(getNfeEligibleClients().map((client) => client.id));
   const cpfControls = state.nfeSyncControls.filter(
     (control) =>
       eligibleClientIds.has(control.clientId) &&
-      normalizeDigits(control.cnpjConsulta || '').length === 11 &&
+      control.clientId === certificate.clientId &&
+      normalizeDigits(control.cnpjConsulta || '') === certificateCpf &&
+      (!certificate.estabelecimentoId || control.estabelecimentoId === certificate.estabelecimentoId) &&
       ['ativo', 'erro_api'].includes(control.status) &&
-      (clienteId === NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION || control.clientId === clienteId) &&
       (ambiente === 'todos' || control.ambiente === ambiente)
   );
 
   if (!cpfControls.length) {
-    pushToast('Nenhum controle CPF elegivel foi encontrado para os filtros informados.', 'error');
+    pushToast('Nenhum controle CPF elegivel foi encontrado para o certificado e ambiente selecionados.', 'error');
     return;
   }
 
   try {
-    pushToast(`Importacao manual da SEFAZ iniciada para ${cpfControls.length} controle(s) CPF. Aguarde a conclusao.`, 'info');
+    pushToast(`Importacao manual da SEFAZ iniciada com o certificado ${certificate.apelido}. Aguarde a conclusao.`, 'info');
     const result = await apiRequest('/nfe/sync/rodar-sefaz-cpf', {
       method: 'POST',
       body: {
-        ...(clienteId !== NFE_SEFAZ_CPF_ALL_CLIENTS_OPTION ? { clienteId } : {}),
+        certificadoId,
+        ...(certificate.clientId ? { clienteId: certificate.clientId } : {}),
         ...(ambiente !== 'todos' ? { ambiente } : {}),
         limitControles
       },
@@ -16540,7 +16561,7 @@ async function submitNfeSefazCpfImportForm(form) {
     state.nfeLastRunReport = buildNfeRunReport(result);
     state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
     pushToast(
-      buildNfeRunToastMessage('Importacao manual SEFAZ por CPF concluida', result),
+      buildNfeRunToastMessage(`Importacao manual SEFAZ por CPF concluida (${certificate.apelido})`, result),
       Number(result?.failures || 0) > 0 ? 'error' : 'success'
     );
     await refreshApiData();
