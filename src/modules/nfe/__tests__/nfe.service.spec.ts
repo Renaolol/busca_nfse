@@ -1838,6 +1838,99 @@ describe('NfeService', () => {
     );
   });
 
+  it('recupera manualmente NF-e de um periodo via NSUs historicos sem alterar o cursor normal', async () => {
+    const xmlForDate = (key: string, emissionDate: string) => `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe><infNFe Id="NFe${key}">
+  <ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>${emissionDate}T10:00:00-03:00</dhEmi></ide>
+  <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
+  <dest><CPF>01861020970</CPF><xNome>Jair Jungkenn</xNome></dest>
+  <total><ICMSTot><vNF>150.00</vNF></ICMSTot></total>
+</infNFe></NFe><protNFe><infProt><tpAmb>1</tpAmb><cStat>100</cStat></infProt></protNFe></nfeProc>`;
+    const septemberDocument = {
+      nsu: 10n,
+      schema: 'procNFe_v4.00',
+      chaveAcesso: '1'.repeat(44),
+      xml: xmlForDate('1'.repeat(44), '2026-09-01')
+    };
+    const octoberDocument = {
+      nsu: 90n,
+      schema: 'procNFe_v4.00',
+      chaveAcesso: '2'.repeat(44),
+      xml: xmlForDate('2'.repeat(44), '2026-10-01')
+    };
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-jair',
+        clienteId: 'cliente-jair',
+        estabelecimentoId: 'estab-jair',
+        cnpjConsulta: '01861020970',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 100n,
+        maxNsu: 100n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
+      id: 'estab-jair',
+      clienteId: 'cliente-jair',
+      cnpj: '01861020970',
+      municipioCodigoIbge: '4204202'
+    });
+    prisma.certificado.findMany.mockResolvedValue([
+      {
+        id: 'cert-jair',
+        clienteId: 'cliente-jair',
+        estabelecimentoId: 'estab-jair',
+        cnpjTitular: '01861020970',
+        ativo: true,
+        arquivoCriptografadoPath: 'certificados/cliente-jair/cert-jair.bin'
+      }
+    ]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock)
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        cStat: '138',
+        xMotivo: 'Documentos localizados',
+        ultNsu: 50n,
+        maxNsu: 100n,
+        documents: [septemberDocument],
+        rawResponse: { mock: true }
+      })
+      .mockResolvedValueOnce({
+        statusCode: 200,
+        cStat: '138',
+        xMotivo: 'Documentos localizados',
+        ultNsu: 100n,
+        maxNsu: 100n,
+        documents: [octoberDocument],
+        rawResponse: { mock: true }
+      });
+
+    const result = await service.runNowCpfViaSefazGlobal({
+      controleId: 'ctrl-jair',
+      certificadoId: 'cert-jair',
+      clienteId: 'cliente-jair',
+      dataEmissaoInicio: '2026-09-01',
+      dataEmissaoFim: '2026-09-30'
+    });
+
+    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ cnpjConsulta: '01861020970', ultNsu: 0n, certificateId: 'cert-jair' })
+    );
+    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ ultNsu: 50n })
+    );
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({ create: expect.objectContaining({ chaveAcesso: '1'.repeat(44) }) })
+    );
+    expect(prisma.nfeSyncControle.update).not.toHaveBeenCalled();
+    expect(result.documentsSaved).toBe(1);
+    expect(result.failures).toBe(0);
+  });
+
   it('exibe falhas retornadas pela SEFAZ na busca manual de CPF', async () => {
     process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
     prisma.nfeSyncControle.findMany.mockResolvedValue([
