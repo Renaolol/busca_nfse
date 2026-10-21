@@ -1950,6 +1950,105 @@ describe('NfeService', () => {
     expect(result.failures).toBe(0);
   });
 
+  it('permite recuperacao historica durante a pausa incremental cStat 137 sem liberar distNSU', async () => {
+    const cooldownStartedAt = new Date(Date.now() - 5 * 60 * 1000);
+    const control = {
+      id: 'ctrl-cpf-137-historico',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      cnpjConsulta: '01861020970',
+      ambiente: NfeAmbiente.producao,
+      ultimoNsuConsultado: 1n,
+      ultimoNsuDistribuido: 0n,
+      maxNsu: 1n,
+      status: NfeSyncStatus.ativo,
+      ultimaExecucao: cooldownStartedAt,
+      ultimaMensagem: 'cStat 137 - Sem novos documentos. Aguardando pausa para evitar novo bloqueio por consumo indevido.'
+    };
+    prisma.nfeSyncControle.findMany.mockResolvedValue([control]);
+    prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
+      id: control.estabelecimentoId,
+      clienteId: control.clienteId,
+      cnpj: control.cnpjConsulta,
+      municipioCodigoIbge: '4204202'
+    });
+    prisma.certificado.findMany.mockResolvedValue([{
+      id: 'cert-cpf-137-historico',
+      clienteId: control.clienteId,
+      estabelecimentoId: control.estabelecimentoId,
+      cnpjTitular: control.cnpjConsulta,
+      ativo: true,
+      arquivoCriptografadoPath: 'certificados/cliente-1/cert-cpf-137-historico.bin'
+    }]);
+    (distribuicaoClient.consultarPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '632',
+      xMotivo: 'Solicitacao fora do prazo de disponibilidade',
+      ultNsu: 1n,
+      maxNsu: 1n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    const historicalRun = await service.runNowCpfViaSefazGlobal({
+      controleId: control.id,
+      certificadoId: 'cert-cpf-137-historico',
+      clienteId: control.clienteId,
+      dataEmissaoInicio: '2026-09-01',
+      dataEmissaoFim: '2026-09-30'
+    });
+
+    expect(distribuicaoClient.consultarPorNsu).toHaveBeenCalledWith(
+      expect.objectContaining({ nsu: 1n, certificateId: 'cert-cpf-137-historico' })
+    );
+    expect(historicalRun.executionDetails[0].mensagem).toContain('concluida');
+    const completionUpdate = prisma.nfeSyncControle.updateMany.mock.calls.at(-1)?.[0];
+    expect(completionUpdate.data.ultimaExecucao).toEqual(cooldownStartedAt);
+    expect(completionUpdate.data.ultimaMensagem).toContain('cStat 137');
+
+    Object.assign(control, {
+      ultimaExecucao: completionUpdate.data.ultimaExecucao,
+      ultimaMensagem: completionUpdate.data.ultimaMensagem
+    });
+    const incrementalRun = await service.runNowCpfViaSefazGlobal();
+    expect(distribuicaoClient.distribuirPorNsu).not.toHaveBeenCalled();
+    expect(incrementalRun.executionDetails[0].mensagem).toContain('pausada ate');
+  });
+
+  it('mantem cStat 656 bloqueando tambem a recuperacao historica', async () => {
+    const control = {
+      id: 'ctrl-cpf-656-historico',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      cnpjConsulta: '01861020970',
+      ambiente: NfeAmbiente.producao,
+      ultimoNsuConsultado: 1n,
+      ultimoNsuDistribuido: 0n,
+      maxNsu: 1n,
+      status: NfeSyncStatus.ativo,
+      ultimaExecucao: new Date(),
+      ultimaMensagem: 'cStat 656 - Consumo indevido'
+    };
+    prisma.nfeSyncControle.findMany.mockResolvedValue([control]);
+    prisma.certificado.findMany.mockResolvedValue([{
+      id: 'cert-cpf-656-historico',
+      clienteId: control.clienteId,
+      estabelecimentoId: control.estabelecimentoId,
+      cnpjTitular: control.cnpjConsulta,
+      ativo: true,
+      arquivoCriptografadoPath: 'certificados/cliente-1/cert-cpf-656-historico.bin'
+    }]);
+
+    await expect(service.runNowCpfViaSefazGlobal({
+      controleId: control.id,
+      certificadoId: 'cert-cpf-656-historico',
+      clienteId: control.clienteId,
+      dataEmissaoInicio: '2026-09-01',
+      dataEmissaoFim: '2026-09-30'
+    })).rejects.toThrow('pausada ate');
+    expect(distribuicaoClient.consultarPorNsu).not.toHaveBeenCalled();
+  });
+
   it('limita a recuperacao historica a 15 NSUs e salva o ponto para retomar depois de uma hora', async () => {
     const control = {
       id: 'ctrl-cpf-historico',

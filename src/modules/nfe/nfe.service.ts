@@ -1518,7 +1518,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('O produtor selecionado nao pertence ao cliente informado.');
     }
     if (selectedProducer) {
-      const cooldownUntil = this.getSefazDfeCooldownUntil(selectedProducer);
+      const cooldownUntil = this.getSefazDfeCooldownUntil(selectedProducer, hasStartDate && hasEndDate);
       if (cooldownUntil) {
         throw new BadRequestException(this.describeSefazDfeCooldown(cooldownUntil));
       }
@@ -1637,6 +1637,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       mensagem: ''
     };
     const failureDetails: NfeSyncRunFailureDetail[] = [];
+    const previousIncrementalCooldownMessage = this.getSefazDfeIncrementalCooldownMessage(control.ultimaMensagem);
     const existingBackfill = this.parseSefazCpfHistoricalBackfill(control.ultimaMensagem);
     if (existingBackfill && (existingBackfill.dataInicio !== params.dataEmissaoInicio || existingBackfill.dataFim !== params.dataEmissaoFim)) {
       throw new BadRequestException(
@@ -1773,14 +1774,20 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
     const finished = nextNsu <= 0n || reachedOldestAvailableNsu;
     if (finished) {
+      const preserveIncrementalCooldown = Boolean(previousIncrementalCooldownMessage && control.ultimaExecucao);
+      const incrementalCooldownNote = previousIncrementalCooldownMessage === 'cStat137'
+        ? ' A pausa da distribuicao incremental por cStat 137 permanece vigente.'
+        : previousIncrementalCooldownMessage === 'sem_avanco'
+          ? ' A pausa da distribuicao incremental por falta de avanco do NSU permanece vigente.'
+          : '';
       await this.prisma.nfeSyncControle.updateMany({
         where: {
           cnpjConsulta: this.normalizeCnpj(control.cnpjConsulta),
           ambiente
         },
         data: {
-          ultimaExecucao: new Date(),
-          ultimaMensagem: `Recuperacao historica da SEFAZ concluida para ${params.dataEmissaoInicio} a ${params.dataEmissaoFim}. ${reachedOldestAvailableNsu ? 'O NSU consultado atingiu o limite de disponibilidade de 90 dias. ' : ''}O cursor normal ${control.ultimoNsuConsultado.toString()} foi preservado.`
+          ultimaExecucao: preserveIncrementalCooldown ? control.ultimaExecucao : new Date(),
+          ultimaMensagem: `Recuperacao historica da SEFAZ concluida para ${params.dataEmissaoInicio} a ${params.dataEmissaoFim}. ${reachedOldestAvailableNsu ? 'O NSU consultado atingiu o limite de disponibilidade de 90 dias. ' : ''}O cursor normal ${control.ultimoNsuConsultado.toString()} foi preservado.${incrementalCooldownNote}`
         }
       });
       if (reachedOldestAvailableNsu) {
@@ -4929,9 +4936,32 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     NfeService.activeSefazActorQueries.delete(actorKey);
   }
 
-  private getSefazDfeCooldownUntil(control: Pick<NfeSyncControle, 'ultimaExecucao' | 'ultimaMensagem'>): Date | null {
+  private getSefazDfeCooldownUntil(
+    control: Pick<NfeSyncControle, 'ultimaExecucao' | 'ultimaMensagem'>,
+    allowHistoricalPointLookupDuringIncrementalCooldown = false
+  ): Date | null {
     const message = String(control.ultimaMensagem || '');
-    const requiresCooldown = /\bcstat\s*[:=]?\s*(?:137|656)\b|consumo\s+indevido|sem avanc(?:o|ar)(?: o| do) nsu|recuperacao historica cpf pausada/i.test(message);
+    const hasCStat656 = /\bcstat\s*[:=]?\s*656\b/i.test(message);
+    const hasCStat137 = /\bcstat\s*[:=]?\s*137\b/i.test(message);
+    const hasNoNsuAdvance = /sem avan[cç](?:o|ar)(?: o| do) nsu/i.test(message);
+    const historicalRecoveryPaused = /recuperacao historica cpf pausada/i.test(message);
+    const genericConsumptionBlock = /consumo\s+indevido/i.test(message) && !hasCStat137 && !hasNoNsuAdvance;
+    const isIncrementalOnlyCooldown = hasCStat137 || hasNoNsuAdvance;
+    if (
+      allowHistoricalPointLookupDuringIncrementalCooldown &&
+      isIncrementalOnlyCooldown &&
+      !hasCStat656 &&
+      !genericConsumptionBlock &&
+      !historicalRecoveryPaused
+    ) {
+      return null;
+    }
+    const requiresCooldown =
+      hasCStat656 ||
+      hasCStat137 ||
+      hasNoNsuAdvance ||
+      genericConsumptionBlock ||
+      historicalRecoveryPaused;
     if (!requiresCooldown || !control.ultimaExecucao) {
       return null;
     }
@@ -4944,6 +4974,17 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
     const cooldownUntil = new Date(executedAt.getTime() + NfeService.SEFAZ_DFE_COOLDOWN_MS);
     return cooldownUntil.getTime() > Date.now() ? cooldownUntil : null;
+  }
+
+  private getSefazDfeIncrementalCooldownMessage(message?: string | null): 'cStat137' | 'sem_avanco' | null {
+    const normalizedMessage = String(message || '');
+    if (/\bcstat\s*[:=]?\s*137\b/i.test(normalizedMessage)) {
+      return 'cStat137';
+    }
+    if (/sem avan[cç](?:o|ar)(?: o| do) nsu/i.test(normalizedMessage)) {
+      return 'sem_avanco';
+    }
+    return null;
   }
 
   private describeSefazDfeCooldown(cooldownUntil: Date): string {

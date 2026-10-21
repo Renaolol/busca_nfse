@@ -16660,7 +16660,7 @@ async function submitNfeSefazCpfImportForm(form) {
     }
 
   try {
-    pushToast(`Consulta SEFAZ iniciada para ${producer.cliente} com o certificado ${certificate.apelido}. Aguarde a conclusao.`, 'info');
+    pushToast(`Verificando a liberacao da SEFAZ para ${producer.cliente} com o certificado ${certificate.apelido}.`, 'info');
     const result = await apiRequest('/nfe/sync/rodar-sefaz-cpf', {
       method: 'POST',
       body: {
