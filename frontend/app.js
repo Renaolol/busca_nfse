@@ -358,6 +358,7 @@ const state = {
   selectedAlertIds: new Set(),
   selectedXmlIds: new Set(),
   selectedNfeIds: new Set(),
+  selectedCteIds: new Set(),
   selectedNfceScDocumentIds: new Set(),
   selectedXmlReaderIds: new Set(),
   savedXmlReaderIds: new Set(),
@@ -2035,6 +2036,27 @@ function onDocumentClick(event) {
     case 'cte-docs-clear-filters': {
       resetCteDocsSearch();
       render();
+      return;
+    }
+    case 'cte-select': {
+      const cteId = actionNode.getAttribute('data-cte-id');
+      if (!cteId) return;
+      if (actionNode.checked) state.selectedCteIds.add(cteId);
+      else state.selectedCteIds.delete(cteId);
+      renderPreservingScroll();
+      return;
+    }
+    case 'cte-toggle-all': {
+      const checked = actionNode.checked;
+      getFilteredCteDocuments().filter(canDownloadCteDocument).forEach((doc) => {
+        if (checked) state.selectedCteIds.add(doc.id);
+        else state.selectedCteIds.delete(doc.id);
+      });
+      renderPreservingScroll();
+      return;
+    }
+    case 'cte-batch-download': {
+      void downloadSelectedCteBatch();
       return;
     }
     case 'cte-docs-sort': {
@@ -5035,12 +5057,12 @@ function renderNfeSyncPage() {
         <select name="certificadoId" required disabled>${renderNfeSefazCpfCertificateOptions('', eligibleCpfProducers)}</select>
       </label>
       <label class="field">
-        Emissao inicial
-        <input name="dataEmissaoInicio" type="date" required />
+        Emissao inicial (opcional)
+        <input name="dataEmissaoInicio" type="date" />
       </label>
       <label class="field">
-        Emissao final
-        <input name="dataEmissaoFim" type="date" required />
+        Emissao final (opcional)
+        <input name="dataEmissaoFim" type="date" />
       </label>
       <label class="field">
         Ambiente
@@ -5054,7 +5076,7 @@ function renderNfeSyncPage() {
         <button class="btn primary" type="submit" disabled>Buscar NF-e da SEFAZ</button>
       </div>
     </form>
-    <p class="card-subtitle" style="margin:12px 0 0;">A busca percorre os NSUs historicos ainda disponiveis na SEFAZ, importa somente documentos do periodo escolhido e preserva o cursor normal do produtor. A disponibilidade depende do historico que a SEFAZ mantem para o CPF.</p>
+    <p class="card-subtitle" style="margin:12px 0 0;">A consulta usa o certificado selecionado e continua do ultimo NSU salvo para este CPF. Informe as duas datas para filtrar os documentos exibidos depois da importacao; sem datas, a busca apenas atualiza os documentos armazenados. A SEFAZ pode pausar consultas por uma hora apos cStat 137 ou 656.</p>
   `;
   const simplifiedContent = `
     <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
@@ -5971,6 +5993,10 @@ function renderCteSearchSummary() {
 
 function renderCteDocumentsTableCard(docs) {
   ensureSimplesNacionalFlags(docs, 'cte');
+  const selectableDocs = docs.filter(canDownloadCteDocument);
+  const selectedVisibleCount = selectableDocs.filter((doc) => state.selectedCteIds.has(doc.id)).length;
+  const allVisibleSelected = selectableDocs.length > 0 && selectedVisibleCount === selectableDocs.length;
+  const batchDisabled = selectedVisibleCount > 0 ? '' : 'disabled';
   const totalValue = sumListedDocumentValues(docs);
   const totalResults = Number(state.cteSearch.total || docs.length || 0);
   const syncDisabled =
@@ -5984,9 +6010,10 @@ function renderCteDocumentsTableCard(docs) {
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">CT-e encontrados</h3>
-          <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(totalResults))} documento(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(totalResults))} documento(s). ${selectedVisibleCount} selecionado(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
         </div>
         <div class="table-actions">
+          <button class="btn primary" type="button" data-action="cte-batch-download" ${batchDisabled}>Baixar XMLs selecionados</button>
           <button class="btn secondary" type="button" data-action="cte-sync-events-listed" ${syncDisabled}>${escapeHtml(syncLabel)}</button>
         </div>
       </div>
@@ -5994,6 +6021,9 @@ function renderCteDocumentsTableCard(docs) {
         <table>
           <thead>
             <tr>
+              <th>
+                <input type="checkbox" data-action="cte-toggle-all" ${allVisibleSelected ? 'checked' : ''} ${selectableDocs.length ? '' : 'disabled'} aria-label="Selecionar todos os CT-e com XML da listagem" />
+              </th>
               ${renderCteSortHeader('numeroCte', 'Numero')}
               ${renderCteSortHeader('cliente', 'Cliente')}
               ${renderCteSortHeader('tipo', 'Tipo')}
@@ -6009,7 +6039,7 @@ function renderCteDocumentsTableCard(docs) {
           <tbody>
             ${renderTableRowsOrState({
               key: 'cteDocs',
-              colSpan: 10,
+              colSpan: 11,
               rowsHtml: docs
                 .map((doc) => {
                   const syncDisabledRow = state.cteEventsSyncRunning || !canSyncCteEvents(doc) ? 'disabled' : '';
@@ -6021,6 +6051,7 @@ function renderCteDocumentsTableCard(docs) {
                     { label: 'Baixar XML', action: 'cte-download', attrs: { 'cte-id': doc.id } }
                   ];
                   return `<tr data-row-actions-menu-id="${escapeHtml(cteMenuId)}">
+                    <td><input type="checkbox" data-action="cte-select" data-cte-id="${escapeHtml(doc.id)}" ${state.selectedCteIds.has(doc.id) ? 'checked' : ''} ${canDownloadCteDocument(doc) ? '' : 'disabled'} aria-label="Selecionar CT-e ${escapeHtml(doc.numeroCte || '-')}" /></td>
                     <td>${escapeHtml(doc.numeroCte || '-')}</td>
                     <td>${escapeHtml(doc.cliente)}</td>
                     <td>${statusBadge(doc.tipo, doc.tipo === 'Emitido' ? 'success' : doc.tipo === 'Recebido' ? 'info' : 'neutral')}</td>
@@ -16615,8 +16646,8 @@ async function submitNfeSefazCpfImportForm(form) {
     pushToast('Selecione um certificado ativo vinculado ao produtor escolhido.', 'error');
     return;
   }
-  if (!dataEmissaoInicio || !dataEmissaoFim) {
-    pushToast('Informe a data inicial e a data final da busca.', 'error');
+  if (Boolean(dataEmissaoInicio) !== Boolean(dataEmissaoFim)) {
+    pushToast('Informe as duas datas para filtrar os resultados ou deixe ambas em branco.', 'error');
     return;
   }
   if (Date.parse(dataEmissaoInicio) > Date.parse(dataEmissaoFim)) {
@@ -16632,8 +16663,7 @@ async function submitNfeSefazCpfImportForm(form) {
         controleId,
         certificadoId,
         clienteId: producer.clientId,
-        dataEmissaoInicio,
-        dataEmissaoFim,
+        ...(dataEmissaoInicio && dataEmissaoFim ? { dataEmissaoInicio, dataEmissaoFim } : {}),
         ...(ambiente !== 'todos' ? { ambiente } : {})
       },
       timeoutMs: 10 * 60 * 1000
@@ -16642,11 +16672,15 @@ async function submitNfeSefazCpfImportForm(form) {
     state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
     pushToast(buildNfeRunToastMessage(`Consulta SEFAZ concluida para ${producer.cliente} (${certificate.apelido})`, result), Number(result?.failures || 0) > 0 ? 'error' : 'success');
     await refreshApiData();
-    try {
-      const found = await searchNfeSefazCpfPeriod({ producer, ambiente, dataEmissaoInicio, dataEmissaoFim });
-      pushToast(`${found} NF-e localizadas para o produtor no periodo informado.`, found ? 'success' : 'info');
-    } catch (error) {
-      pushToast(`A importacao SEFAZ terminou, mas nao foi possivel filtrar as NF-e pelo periodo: ${toErrorMessage(error)}`, 'error');
+    if (dataEmissaoInicio && dataEmissaoFim) {
+      try {
+        const found = await searchNfeSefazCpfPeriod({ producer, ambiente, dataEmissaoInicio, dataEmissaoFim });
+        pushToast(`${found} NF-e localizadas para o produtor no periodo informado.`, found ? 'success' : 'info');
+      } catch (error) {
+        pushToast(`A importacao SEFAZ terminou, mas nao foi possivel filtrar as NF-e pelo periodo: ${toErrorMessage(error)}`, 'error');
+      }
+    } else {
+      pushToast('Consulta concluida. Os documentos recebidos foram atualizados em Armazenados.', 'success');
     }
   } catch (error) {
     pushToast(`Falha na importacao manual da SEFAZ: ${toErrorMessage(error)}`, 'error');
@@ -17493,6 +17527,7 @@ async function applyCteDocsFilters(form) {
     xmlCompleto: String(data.get('xmlCompleto') || 'Todos'),
     ambiente: String(data.get('ambiente') || 'Todos')
   };
+  state.selectedCteIds = new Set();
 
   await executeCteDocsSearch();
 }
@@ -18885,6 +18920,7 @@ function resetNfceScStoredSearch() {
 }
 
 function resetCteDocsSearch() {
+  state.selectedCteIds = new Set();
   state.filters.cteDocs = {
     cliente: 'Todos',
     tipo: 'Todos',
@@ -25939,6 +25975,10 @@ async function downloadCteXmlById(cteId) {
   pushToast(`Download do CT-e ${doc.numeroCte || doc.chaveAcesso} iniciado.`, 'success');
 }
 
+function canDownloadCteDocument(doc) {
+  return Boolean(doc?.apiCteId && doc?.clientId && (doc.xmlCompletoDisponivel || doc.resumoDisponivel));
+}
+
 async function openXmlViewer(xmlId, options = {}) {
   const xml = findXmlById(xmlId);
   if (!xml) {
@@ -26263,6 +26303,38 @@ async function downloadSelectedNfeBatch(tipoArquivo = 'ambos') {
     );
   } catch (error) {
     pushToast(`Falha ao baixar lote de NF-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function downloadSelectedCteBatch() {
+  const selectedDocs = getFilteredCteDocuments().filter(
+    (doc) => state.selectedCteIds.has(doc.id) && canDownloadCteDocument(doc)
+  );
+  if (!selectedDocs.length) {
+    pushToast('Selecione ao menos um CT-e com XML na listagem atual.', 'error');
+    return;
+  }
+
+  const ids = [...new Set(selectedDocs.map((doc) => doc.apiCteId).filter(Boolean))];
+  const clientIds = [...new Set(selectedDocs.map((doc) => doc.clientId).filter(Boolean))];
+  const body = { ids };
+  if (clientIds.length === 1) body.clienteId = clientIds[0];
+
+  try {
+    const payload = await apiRequest('/cte/download-lote', {
+      method: 'POST',
+      body,
+      timeoutMs: 2 * 60 * 1000
+    });
+    downloadFromPayload(payload, 'cte-lote-xmls.zip');
+    const errorsCount = Array.isArray(payload?.erros) ? payload.erros.length : 0;
+    const included = Number(payload?.totalArquivosIncluidos || 0);
+    pushToast(
+      `Download em lote iniciado: ${included} XML(s) no ZIP${errorsCount ? `, ${errorsCount} aviso(s)` : ''}.`,
+      errorsCount ? 'info' : 'success'
+    );
+  } catch (error) {
+    pushToast(`Falha ao baixar lote de CT-e: ${toErrorMessage(error)}`, 'error');
   }
 }
 

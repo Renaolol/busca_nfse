@@ -1,6 +1,7 @@
 import { BadRequestException, forwardRef, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Certificado, NfeAmbiente, NfeDocumentoOrigem, NfeTipoRelacao, Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
+import JSZip from 'jszip';
 import { MAX_UNPAGINATED_RESULTS } from '../../common/dto/pagination-query.dto';
 import { CTE_CONSULTA_CLIENT, CteConsultaClient, CteConsultaDocument, CteConsultaResult } from '../../integrations/cte-consulta/cte-consulta.types';
 import { NfeService } from '../nfe/nfe.service';
@@ -8,6 +9,7 @@ import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import { CteXmlParserService } from './cte-xml-parser.service';
 import { DashboardCteStatsQueryDto } from './dto/dashboard-stats.dto';
+import { DownloadCteLoteDto } from './dto/download-lote.dto';
 import { QueryCteByChaveDto } from './dto/query-by-chave.dto';
 import { SincronizarCteEventosDto } from './dto/sincronizar-eventos.dto';
 import { QueryCteDto } from './dto/query-cte.dto';
@@ -156,6 +158,85 @@ export class CteService {
       contentType: 'application/xml',
       contentBase64: xmlBuffer.toString('base64'),
       xml
+    };
+  }
+
+  async downloadLote(dto: DownloadCteLoteDto) {
+    const uniqueIds = [...new Set(dto.ids)];
+    const where = this.createCteWhere();
+    const andConditions = this.getAndConditions(where);
+    andConditions.push({ id: { in: uniqueIds } });
+    if (dto.clienteId) {
+      andConditions.push({ clienteId: dto.clienteId });
+    }
+
+    const documents = await this.findManyDocumentosWithEventos({ where });
+    if (!documents.length) {
+      throw new NotFoundException('Nenhum CT-e encontrado para os IDs informados');
+    }
+
+    const documentsById = new Map(documents.map((document) => [document.id, document] as const));
+    const orderedDocuments = uniqueIds
+      .map((id) => documentsById.get(id))
+      .filter((document): document is (typeof documents)[number] => Boolean(document));
+    const idsNaoEncontrados = uniqueIds.filter((id) => !documentsById.has(id));
+    const erros: Array<{ id: string; erro: string }> = [];
+    const zip = new JSZip();
+    let totalArquivosIncluidos = 0;
+
+    for (const document of orderedDocuments) {
+      const xmlPath = document.xmlCompletoPath ?? document.xmlResumoPath;
+      if (!xmlPath) {
+        erros.push({ id: document.id, erro: 'XML nao disponivel para este CT-e' });
+        continue;
+      }
+
+      try {
+        const xmlBuffer = await this.storage.getObject(xmlPath);
+        const fileKey = this.toSafeFileName(document.chaveAcesso);
+        zip.file(`xml/CTE-${fileKey}.xml`, xmlBuffer);
+        totalArquivosIncluidos += 1;
+      } catch (error) {
+        erros.push({ id: document.id, erro: `Falha ao ler XML: ${this.toErrorMessage(error)}` });
+      }
+    }
+
+    if (totalArquivosIncluidos === 0) {
+      throw new NotFoundException('Nenhum XML disponivel para os CT-e selecionados');
+    }
+
+    zip.file(
+      'manifest.json',
+      JSON.stringify(
+        {
+          geradoEm: new Date().toISOString(),
+          totalSolicitados: uniqueIds.length,
+          totalDocumentosEncontrados: documents.length,
+          totalArquivosIncluidos,
+          idsNaoEncontrados,
+          erros
+        },
+        null,
+        2
+      )
+    );
+
+    const zipBuffer = await zip.generateAsync({
+      type: 'nodebuffer',
+      compression: 'DEFLATE',
+      compressionOptions: { level: 6 }
+    });
+    const fileName = `cte-lote-${new Date().toISOString().replace(/[:.]/g, '-')}.zip`;
+
+    return {
+      fileName,
+      contentType: 'application/zip',
+      contentBase64: zipBuffer.toString('base64'),
+      totalSolicitados: uniqueIds.length,
+      totalDocumentosEncontrados: documents.length,
+      totalArquivosIncluidos,
+      idsNaoEncontrados,
+      erros
     };
   }
 
@@ -1131,6 +1212,18 @@ export class CteService {
 
   private toDateKey(value?: Date | null): string {
     return value instanceof Date ? value.toISOString() : '';
+  }
+
+  private toSafeFileName(value?: string | null): string {
+    return (
+      String(value || 'arquivo')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9_-]+/g, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 80)
+        .toLowerCase() || 'arquivo'
+    );
   }
 
   private extractModeloFromChave(chaveAcesso?: string): string | undefined {

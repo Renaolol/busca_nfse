@@ -1,5 +1,6 @@
 import { CteService } from '../cte.service';
 import { CteXmlParserService } from '../cte-xml-parser.service';
+import JSZip from 'jszip';
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LocalStorageService } from '../../storage/storage.service';
 import { NfeService } from '../../nfe/nfe.service';
@@ -133,6 +134,60 @@ describe('CteService', () => {
       pageSize: 100,
       totalPages: 3
     });
+  });
+
+  it('gera um ZIP com os XMLs dos CT-e selecionados dentro do escopo do cliente', async () => {
+    const documentId = '550e8400-e29b-41d4-a716-446655440010';
+    const xml = '<cteProc>mock CT-e</cteProc>';
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: documentId,
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        xmlCompletoPath: 'cte/full.xml',
+        xmlResumoPath: null,
+        eventos: []
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(Buffer.from(xml, 'utf8'));
+
+    const result = await service.downloadLote({ ids: [documentId], clienteId: 'cliente-1' });
+
+    expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([
+            { id: { in: [documentId] } },
+            { clienteId: 'cliente-1' }
+          ])
+        })
+      })
+    );
+    expect(result.totalArquivosIncluidos).toBe(1);
+    expect(result.idsNaoEncontrados).toEqual([]);
+
+    const zip = await JSZip.loadAsync(Buffer.from(result.contentBase64, 'base64'));
+    const xmlEntry = zip.file('xml/CTE-42260795849600000135570010000319691243772228.xml');
+    expect(xmlEntry).not.toBeNull();
+    await expect(xmlEntry!.async('string')).resolves.toBe(xml);
+  });
+
+  it('usa o resumo armazenado quando o CT-e nao tem XML completo', async () => {
+    const documentId = '550e8400-e29b-41d4-a716-446655440011';
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: documentId,
+        chaveAcesso: '42260795849600000135570010000319691243772228',
+        xmlCompletoPath: null,
+        xmlResumoPath: 'cte/summary.xml',
+        eventos: []
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(Buffer.from('<resCTe/>', 'utf8'));
+
+    const result = await service.downloadLote({ ids: [documentId] });
+
+    expect(storage.getObject).toHaveBeenCalledWith('cte/summary.xml');
+    expect(result.totalArquivosIncluidos).toBe(1);
   });
 
   it('colapsa duplicatas legadas por ambiente e chave_acesso na listagem ampla', async () => {

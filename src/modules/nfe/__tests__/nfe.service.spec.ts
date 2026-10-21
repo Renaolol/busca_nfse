@@ -1838,7 +1838,7 @@ describe('NfeService', () => {
     );
   });
 
-  it('recupera manualmente NF-e de um periodo via NSUs historicos sem alterar o cursor normal', async () => {
+  it('consulta o periodo manual a partir do cursor salvo e persiste todos os documentos do lote', async () => {
     const xmlForDate = (key: string, emissionDate: string) => `<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe><infNFe Id="NFe${key}">
   <ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>${emissionDate}T10:00:00-03:00</dhEmi></ide>
@@ -1865,7 +1865,8 @@ describe('NfeService', () => {
         estabelecimentoId: 'estab-jair',
         cnpjConsulta: '01861020970',
         ambiente: NfeAmbiente.producao,
-        ultimoNsuConsultado: 100n,
+        ultimoNsuConsultado: 50n,
+        ultimoNsuDistribuido: 10n,
         maxNsu: 100n,
         status: NfeSyncStatus.ativo
       }
@@ -1886,23 +1887,13 @@ describe('NfeService', () => {
         arquivoCriptografadoPath: 'certificados/cliente-jair/cert-jair.bin'
       }
     ]);
-    (distribuicaoClient.distribuirPorNsu as jest.Mock)
-      .mockResolvedValueOnce({
-        statusCode: 200,
-        cStat: '138',
-        xMotivo: 'Documentos localizados',
-        ultNsu: 50n,
-        maxNsu: 100n,
-        documents: [septemberDocument],
-        rawResponse: { mock: true }
-      })
-      .mockResolvedValueOnce({
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
         statusCode: 200,
         cStat: '138',
         xMotivo: 'Documentos localizados',
         ultNsu: 100n,
         maxNsu: 100n,
-        documents: [octoberDocument],
+        documents: [septemberDocument, octoberDocument],
         rawResponse: { mock: true }
       });
 
@@ -1916,18 +1907,22 @@ describe('NfeService', () => {
 
     expect(distribuicaoClient.distribuirPorNsu).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ cnpjConsulta: '01861020970', ultNsu: 0n, certificateId: 'cert-jair' })
+      expect.objectContaining({ cnpjConsulta: '01861020970', ultNsu: 50n, certificateId: 'cert-jair' })
     );
-    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ ultNsu: 50n })
-    );
-    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledTimes(2);
     expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ create: expect.objectContaining({ chaveAcesso: '1'.repeat(44) }) })
     );
-    expect(prisma.nfeSyncControle.update).not.toHaveBeenCalled();
-    expect(result.documentsSaved).toBe(1);
+    expect(prisma.nfeSyncControle.upsert).not.toHaveBeenCalled();
+    expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'ctrl-jair' },
+      data: expect.objectContaining({
+        ultimoNsuConsultado: 100n,
+        maxNsu: 100n,
+        totalDocumentosBaixados: { increment: 2 }
+      })
+    }));
+    expect(result.documentsSaved).toBe(2);
     expect(result.failures).toBe(0);
   });
 
@@ -1973,6 +1968,65 @@ describe('NfeService', () => {
         data: expect.objectContaining({ status: NfeSyncStatus.erro_api })
       })
     );
+  });
+
+  it.each([
+    ['137', NfeSyncStatus.ativo],
+    ['656', NfeSyncStatus.erro_api]
+  ] as const)('respeita a pausa de uma hora depois de cStat %s', async (cStat, expectedStatus) => {
+    process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
+    const control = {
+      id: 'ctrl-cpf-pausa',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      cnpjConsulta: '01861020970',
+      ambiente: NfeAmbiente.producao,
+      ultimoNsuConsultado: 10n,
+      ultimoNsuDistribuido: 10n,
+      maxNsu: 10n,
+      status: NfeSyncStatus.ativo,
+      ultimaExecucao: null,
+      ultimaMensagem: null
+    };
+    prisma.nfeSyncControle.findMany
+      .mockResolvedValueOnce([control])
+      .mockResolvedValueOnce([{
+        ...control,
+        ultimaExecucao: new Date(),
+        ultimaMensagem: `cStat ${cStat} - ${cStat === '137' ? 'Sem novos documentos' : 'Consumo indevido'}`
+      }]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat,
+      xMotivo: cStat === '137' ? 'Nenhum documento localizado' : 'Consumo indevido',
+      ultNsu: 10n,
+      maxNsu: 10n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+
+    await service.runNowCpfViaSefazGlobal();
+    const secondRun = await service.runNowCpfViaSefazGlobal();
+
+    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledTimes(1);
+    expect(prisma.nfeSyncControle.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { cnpjConsulta: control.cnpjConsulta, ambiente: control.ambiente },
+      data: expect.objectContaining({
+        ultimaExecucao: expect.any(Date),
+        ultimaMensagem: expect.stringContaining(`cStat ${cStat}`)
+      })
+    }));
+    expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: control.id },
+      data: expect.objectContaining({ status: expectedStatus })
+    }));
+    expect(secondRun.executionDetails).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        status: 'persistido',
+        cnpjConsulta: control.cnpjConsulta,
+        mensagem: expect.stringContaining('pausada ate')
+      })
+    ]));
   });
 
   it('aplica o periodo do mes corrente apenas na busca noturna via Dominio', async () => {
@@ -2937,7 +2991,11 @@ describe('NfeService', () => {
       processed: 1,
       documentsSaved: 0,
       failures: 0,
-      executionDetails: [],
+      executionDetails: [expect.objectContaining({
+        status: 'persistido',
+        cnpjConsulta: '12345678000199',
+        mensagem: expect.stringContaining('pausada ate')
+      })],
       failureDetails: []
     });
   });

@@ -1,9 +1,11 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
 import { CteService } from './cte.service';
 import { DashboardCteStatsQueryDto, DashboardCteStatsResponseDto } from './dto/dashboard-stats.dto';
+import { DownloadCteLoteDto } from './dto/download-lote.dto';
+import { DownloadCteLoteResponseDto } from './dto/download-lote-response.dto';
 import { DownloadCteDocumentDto } from './dto/download-document.dto';
 import { QueryCteByChaveDto } from './dto/query-by-chave.dto';
 import { QueryCteDto } from './dto/query-cte.dto';
@@ -40,6 +42,14 @@ export class CteController {
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   getXml(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
     return this.cteService.getXml(id, query.clienteId);
+  }
+
+  @Post('download-lote')
+  @ApiOperation({ summary: 'Gera um ZIP com os XMLs armazenados dos CT-e selecionados' })
+  @ApiOkResponse({ type: DownloadCteLoteResponseDto })
+  @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })
+  downloadLote(@Body() dto: DownloadCteLoteDto) {
+    return this.cteService.downloadLote(dto);
   }
 
   @Post('consultar-chave')

@@ -300,6 +300,7 @@ Eventos sao vinculados pela chave da NFS-e referenciada (`chNFSe`) e salvos em `
 - `GET /nfe/:id/xml`: retorna XML da NF-e com `fileName`, `contentType` e `contentBase64`.
 - `GET /nfe/:id/danfe`: retorna DANFE em PDF com `fileName`, `contentType` e `contentBase64`.
 - `POST /nfe/download-lote`: gera um arquivo ZIP em Base64 para baixar XML/DANFE em lote, com `tipoArquivo=ambos|xml|danfe`. Ao exportar XMLs de NFC-e modelo 65, inclui na mesma pasta `xml/` os XMLs dos eventos vinculados que estiverem armazenados.
+- `POST /cte/download-lote`: gera um arquivo ZIP em Base64 com os XMLs completos ou resumos armazenados dos CT-e selecionados. O endpoint respeita o escopo opcional por `clienteId` e informa no manifesto arquivos ausentes ou falhas de leitura.
 - `POST /nfse/eventos/sincronizar`: consulta manualmente os eventos das NFS-e ja armazenadas, usando a chave de acesso da nota e o certificado do estabelecimento, sem alterar NSU. O import aceita tanto XMLs de evento retornados pelo ADN quanto eventos estruturados em JSON. Quando o ADN responder sem documentos para a chave consultada (por exemplo `E2240` / `NENHUM_DOCUMENTO_LOCALIZADO`), a auditoria trata o caso como `sem_eventos`; o status `nao_localizado_endpoint_eventos` fica reservado para `HTTP 404` anomalo do endpoint.
 - `GET /nfse`, `GET /nfse/separadas` e `GET /nfse/:id` retornam tambem `eventos` vinculados a cada nota.
 - Os endpoints `GET /nfse/:id`, `GET /nfse/:id/xml` e `GET /nfse/:id/danfse` exigem `?clienteId=...` para garantir escopo de acesso por cliente.
@@ -380,6 +381,7 @@ Rotas principais:
 - `GET /cte/:id`
 - `GET /cte/:id/xml`
 - `GET /cte/dashboard-stats`
+- `POST /cte/download-lote`
 - `POST /cte/consultar-chave`
 - `POST /cte/eventos/sincronizar`
 - `GET /nfe/sync/status?clienteId=...`
