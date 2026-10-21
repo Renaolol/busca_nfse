@@ -66,6 +66,13 @@ type NfeNightlySweepSlot = {
 
 type NfeSyncSourceMode = 'distribuicao' | 'dominio' | 'dominio_chave';
 
+type SefazCpfHistoricalBackfill = {
+  nextNsu: bigint;
+  maxNsu: bigint;
+  dataInicio: string;
+  dataFim: string;
+};
+
 type NfeSyncRunFailureDetail = {
   kind: 'documento' | 'controle';
   status:
@@ -155,6 +162,7 @@ type NfeDownloadByKeyPreviewResult = {
 export class NfeService implements OnModuleInit, OnModuleDestroy {
   private static readonly NIGHTLY_SWEEP_AVAILABLE_SLOTS = ['18:00', '20:00', '22:00', '23:00', '00:00', '02:00', '04:00', '06:00'];
   private static readonly SEFAZ_DFE_COOLDOWN_MS = 60 * 60 * 1000;
+  private static readonly SEFAZ_CPF_HISTORICAL_NSUS_PER_RUN = 15;
   private static readonly activeSefazActorQueries = new Set<string>();
   private static readonly NIGHTLY_SWEEP_CONFIG_STORAGE_KEY = 'settings/nfe-nightly-sweep.json';
   private static readonly DOMINIO_CHAVE_DATA_EMISSAO_INICIO = '2026-01-02';
@@ -1606,6 +1614,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     if (!start || !end || start > end) {
       throw new BadRequestException('Informe um periodo de emissao valido para a busca manual da SEFAZ.');
     }
+    const oldestAllowedDate = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000);
+    if (start < oldestAllowedDate) {
+      throw new BadRequestException('A consulta pontual da SEFAZ so disponibiliza NF-e dos ultimos 90 dias.');
+    }
 
     const establishment = await this.getEstablishmentOrThrow(control.estabelecimentoId, control.clienteId);
     const certificate = await this.findActiveCertificateOrThrow(
@@ -1625,136 +1637,198 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       mensagem: ''
     };
     const failureDetails: NfeSyncRunFailureDetail[] = [];
+    const existingBackfill = this.parseSefazCpfHistoricalBackfill(control.ultimaMensagem);
+    if (existingBackfill && (existingBackfill.dataInicio !== params.dataEmissaoInicio || existingBackfill.dataFim !== params.dataEmissaoFim)) {
+      throw new BadRequestException(
+        `Ja existe uma recuperacao historica em andamento para ${existingBackfill.dataInicio} a ${existingBackfill.dataFim}. Retome esse mesmo periodo primeiro.`
+      );
+    }
+
+    const targetNsu = existingBackfill?.maxNsu ??
+      (control.maxNsu > control.ultimoNsuConsultado ? control.maxNsu : control.ultimoNsuConsultado);
+    if (!existingBackfill && targetNsu > 10000n) {
+      throw new BadRequestException(
+        'O historico deste CPF ultrapassa 10.000 NSUs e nao pode ser varrido com seguranca pela consulta pontual. Informe as chaves de acesso para uma recuperacao direcionada.'
+      );
+    }
+    let nextNsu = existingBackfill?.nextNsu ?? targetNsu;
+    if (nextNsu > targetNsu) {
+      nextNsu = targetNsu;
+    }
+    if (targetNsu <= 0n || nextNsu <= 0n) {
+      executionDetail.mensagem = `Nao ha NSU historico disponivel para consultar no periodo ${params.dataEmissaoInicio} a ${params.dataEmissaoFim}. O cursor normal ${control.ultimoNsuConsultado.toString()} foi preservado.`;
+      return {
+        processed: 1,
+        documentsSaved: 0,
+        failures: 0,
+        executionDetails: [executionDetail],
+        failureDetails
+      };
+    }
+
     let documentsSaved = 0;
     let nsusConsultados = 0;
-    let scanCursor = control.ultimoNsuConsultado;
-    const initialCursor = scanCursor;
-    let targetCursor = control.ultimoNsuConsultado > control.maxNsu ? control.ultimoNsuConsultado : control.maxNsu;
-    let reachedEnd = false;
-    let reachedPageLimit = false;
-    let encounteredNoDocuments = false;
+    let reachedOldestAvailableNsu = false;
     let encounteredConsumptionBlock = false;
-    const maxBatches = 250;
+    let stoppedOnError = false;
+    let reachedSearchLimit = false;
+    const maxNsuQueries = NfeService.SEFAZ_CPF_HISTORICAL_NSUS_PER_RUN;
+    const makeBackfillMarker = (cursor: bigint) => this.formatSefazCpfHistoricalBackfill({
+      nextNsu: cursor,
+      maxNsu: targetNsu,
+      dataInicio: params.dataEmissaoInicio,
+      dataFim: params.dataEmissaoFim
+    });
 
-    for (let batch = 0; batch < maxBatches; batch += 1) {
-      const result = await this.distribuicaoClient.distribuirPorNsu({
-        cnpjConsulta: control.cnpjConsulta,
-        cUfAutor,
-        ultNsu: scanCursor,
-        ambiente,
-        certificateId: certificate.id
-      });
-      nsusConsultados += 1;
+    await this.persistSefazCpfHistoricalBackfill(control, makeBackfillMarker(nextNsu), 'Recuperacao historica por NSU iniciada.');
 
-      if (result.statusCode !== 200) {
-        const message = result.xMotivo ?? `Falha na distribuicao NF-e. HTTP ${result.statusCode}.`;
-        failureDetails.push({ ...executionDetail, status: 'falha', mensagem: message });
-        break;
-      }
-
-      const cStat = String(result.cStat || '').trim();
-      if (cStat === '137') {
-        encounteredNoDocuments = true;
-        reachedEnd = true;
-        await this.registerSefazDfeCooldown(control, cStat, result.xMotivo);
-        break;
-      }
-      if (cStat !== '138') {
-        const message = `Distribuicao NF-e retornou cStat ${cStat || 'desconhecido'}. ${result.xMotivo || ''}`.trim();
-        if (cStat === '656') {
-          encounteredConsumptionBlock = true;
-          await this.registerSefazDfeCooldown(control, cStat, result.xMotivo);
-        }
-        failureDetails.push({ ...executionDetail, status: 'falha', mensagem: message });
-        break;
-      }
-
-      if (targetCursor === 0n) {
-        targetCursor = result.maxNsu;
-      }
-      if (result.maxNsu > targetCursor) {
-        targetCursor = result.maxNsu;
-      }
-      for (const document of result.documents) {
-        try {
-          await this.persistDocument({
-            clienteId: control.clienteId,
-            estabelecimentoId: control.estabelecimentoId,
-            ambiente,
-            cnpjConsulta: control.cnpjConsulta,
-            document,
-            origem: NfeDocumentoOrigem.distribuicao_nsu
-          });
-          documentsSaved += 1;
-        } catch (error) {
-          failureDetails.push({
-            ...executionDetail,
-            status: 'falha',
-            chaveAcesso: document.chaveAcesso,
-            mensagem: `Falha ao importar um documento retornado pela SEFAZ: ${this.toErrorMessage(error)}`
-          });
-        }
-      }
-
-      if (result.ultNsu <= scanCursor) {
-        await this.registerSefazDfeCooldown(control, 'sem_avanco', `NSU ${scanCursor.toString()}`);
+    while (nextNsu > 0n && nsusConsultados < maxNsuQueries) {
+      const requestedNsu = nextNsu;
+      let result: NfeDistribuicaoResult;
+      try {
+        result = await this.distribuicaoClient.consultarPorNsu({
+          cnpjConsulta: control.cnpjConsulta,
+          cUfAutor,
+          nsu: requestedNsu,
+          ambiente,
+          certificateId: certificate.id
+        });
+      } catch (error) {
+        stoppedOnError = true;
         failureDetails.push({
           ...executionDetail,
           status: 'falha',
-          mensagem: `A SEFAZ nao avancou o NSU durante a recuperacao historica (NSU ${scanCursor.toString()}).`
+          mensagem: `Falha ao consultar o NSU historico ${requestedNsu.toString()}: ${this.toErrorMessage(error)}`
         });
         break;
       }
-      scanCursor = result.ultNsu;
-      control.ultimoNsuConsultado = scanCursor;
-      control.maxNsu = result.maxNsu;
-      const highestDocumentNsu = result.documents.reduce(
-        (highest, document) => (document.nsu && document.nsu > highest ? document.nsu : highest),
-        control.ultimoNsuDistribuido ?? 0n
-      );
-      control.ultimoNsuDistribuido = highestDocumentNsu;
-      await this.prisma.nfeSyncControle.update({
-        where: { id: control.id },
-        data: {
-          status: NfeSyncStatus.ativo,
-          ultimoNsuConsultado: scanCursor,
-          ultimoNsuDistribuido: highestDocumentNsu,
-          maxNsu: result.maxNsu,
-          ultimaExecucao: new Date(),
-          ultimaMensagem: `Consulta SEFAZ CPF avancou ate o NSU ${scanCursor.toString()}`,
-          totalDocumentosBaixados: { increment: result.documents.length }
-        }
-      });
-      if (scanCursor >= targetCursor || scanCursor >= result.maxNsu) {
-        reachedEnd = true;
+      nsusConsultados += 1;
+
+      const cStat = String(result.cStat || '').trim();
+      if (cStat === '656') {
+        encounteredConsumptionBlock = true;
+        const marker = makeBackfillMarker(requestedNsu);
+        await this.registerSefazDfeCooldown(control, '656', result.xMotivo, marker);
+        failureDetails.push({
+          ...executionDetail,
+          status: 'falha',
+          mensagem: `A SEFAZ bloqueou temporariamente a consulta pontual por NSU. O progresso ficou salvo em ${requestedNsu.toString()} e sera retomado depois da pausa de uma hora.`
+        });
         break;
       }
-      if (batch === maxBatches - 1) {
-        reachedPageLimit = true;
+      if (result.statusCode !== 200 || !['137', '138', '632'].includes(cStat)) {
+        stoppedOnError = true;
+        const message = result.xMotivo ?? `Consulta pontual por NSU retornou cStat ${cStat || 'desconhecido'} (HTTP ${result.statusCode}).`;
+        failureDetails.push({ ...executionDetail, status: 'falha', mensagem: message });
+        break;
       }
+
+      let persistFailed = false;
+      if (cStat === '138') {
+        for (const document of result.documents) {
+          try {
+            const parsed = this.parser.parse(document.xml);
+            const emissionDate = parsed.dataEmissao ?? parsed.dataAutorizacao;
+            if (!emissionDate || emissionDate < start || emissionDate > end) {
+              continue;
+            }
+            await this.persistDocument({
+              clienteId: control.clienteId,
+              estabelecimentoId: control.estabelecimentoId,
+              ambiente,
+              cnpjConsulta: control.cnpjConsulta,
+              document,
+              origem: NfeDocumentoOrigem.distribuicao_nsu
+            });
+            documentsSaved += 1;
+          } catch (error) {
+            persistFailed = true;
+            failureDetails.push({
+              ...executionDetail,
+              status: 'falha',
+              chaveAcesso: document.chaveAcesso,
+              mensagem: `Falha ao importar o documento do NSU ${requestedNsu.toString()}: ${this.toErrorMessage(error)}`
+            });
+          }
+        }
+      }
+
+      if (persistFailed) {
+        stoppedOnError = true;
+        break;
+      }
+      if (cStat === '632') {
+        reachedOldestAvailableNsu = true;
+        nextNsu = 0n;
+        break;
+      }
+
+      nextNsu = requestedNsu - 1n;
+      await this.persistSefazCpfHistoricalBackfill(
+        control,
+        makeBackfillMarker(nextNsu),
+        `Recuperacao historica em andamento. Proximo NSU: ${nextNsu.toString()}.`
+      );
     }
 
-    if (encounteredNoDocuments && targetCursor > 0n) {
+    const finished = nextNsu <= 0n || reachedOldestAvailableNsu;
+    if (finished) {
+      await this.prisma.nfeSyncControle.updateMany({
+        where: {
+          cnpjConsulta: this.normalizeCnpj(control.cnpjConsulta),
+          ambiente
+        },
+        data: {
+          ultimaExecucao: new Date(),
+          ultimaMensagem: `Recuperacao historica da SEFAZ concluida para ${params.dataEmissaoInicio} a ${params.dataEmissaoFim}. ${reachedOldestAvailableNsu ? 'O NSU consultado atingiu o limite de disponibilidade de 90 dias. ' : ''}O cursor normal ${control.ultimoNsuConsultado.toString()} foi preservado.`
+        }
+      });
+      if (reachedOldestAvailableNsu) {
+        nextNsu = 0n;
+      }
+    } else if (!encounteredConsumptionBlock) {
+      reachedSearchLimit = !stoppedOnError && nsusConsultados >= maxNsuQueries;
+      const marker = makeBackfillMarker(nextNsu);
+      const pauseText = reachedSearchLimit ? ' Recuperacao pausada por uma hora para respeitar o limite de consultas da SEFAZ.' : '';
+      await this.persistSefazCpfHistoricalBackfill(
+        control,
+        marker,
+        `${reachedSearchLimit ? 'Recuperacao historica CPF pausada.' : 'Recuperacao historica CPF interrompida.'} Proximo NSU: ${nextNsu.toString()}.${pauseText}`,
+        true
+      );
+    }
+
+    const controlUpdate: Prisma.NfeSyncControleUpdateInput = {};
+    if (finished || reachedSearchLimit) {
+      controlUpdate.status = NfeSyncStatus.ativo;
+    }
+    if (documentsSaved > 0) {
+      controlUpdate.totalDocumentosBaixados = { increment: documentsSaved };
+    }
+    if (Object.keys(controlUpdate).length > 0) {
+      await this.prisma.nfeSyncControle.update({ where: { id: control.id }, data: controlUpdate });
+    }
+
+    executionDetail.mensagem = `Consulta historica SEFAZ CPF ${finished ? 'concluida' : 'parcial'} para ${params.dataEmissaoInicio} a ${params.dataEmissaoFim}: ${documentsSaved} documento(s) importado(s), ${nsusConsultados} NSU(s) consultado(s). ${finished ? 'O cursor normal ' + control.ultimoNsuConsultado.toString() + ' foi preservado.' : `A busca sera retomada do NSU ${nextNsu.toString()} apos a pausa de uma hora.`}`;
+    if (reachedOldestAvailableNsu) {
       failureDetails.push({
         ...executionDetail,
         status: 'persistido',
-        mensagem: 'A SEFAZ informou que nao ha novos documentos. O CPF ficara em espera por uma hora antes da proxima consulta.'
+        mensagem: 'A busca chegou ao limite de disponibilidade retroativa de 90 dias da distribuicao nacional.'
       });
     } else if (encounteredConsumptionBlock) {
       failureDetails.push({
         ...executionDetail,
         status: 'falha',
-        mensagem: 'A SEFAZ bloqueou temporariamente o CPF por consumo indevido. O sistema nao repetira a consulta por uma hora.'
+        mensagem: 'A SEFAZ bloqueou temporariamente a consulta por consumo indevido; o NSU historico pendente foi salvo para retomada apos uma hora.'
       });
-    } else if (reachedPageLimit) {
+    } else if (reachedSearchLimit) {
       failureDetails.push({
         ...executionDetail,
-        status: 'falha',
-        mensagem: `A consulta atingiu o limite de ${maxBatches} lotes. O cursor foi salvo em ${scanCursor.toString()} e continuara desse ponto na proxima execucao.`
+        status: 'persistido',
+        mensagem: `Limite preventivo de ${maxNsuQueries} consultas pontuais nesta execucao. O NSU ${nextNsu.toString()} ficou salvo para retomada apos uma hora.`
       });
     }
-
-    executionDetail.mensagem = `Consulta SEFAZ CPF concluida${reachedEnd ? '' : ' parcialmente'} para o periodo exibido ${params.dataEmissaoInicio} a ${params.dataEmissaoFim}: ${documentsSaved} documento(s) recebido(s), ${nsusConsultados} lote(s) consultado(s). Cursor atualizado de ${initialCursor.toString()} para ${scanCursor.toString()}.${reachedEnd ? '' : ' A rotina continuara desse NSU na proxima execucao.'}`;
     return {
       processed: 1,
       documentsSaved,
@@ -3197,6 +3271,19 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
     for (const control of controls) {
       const actorKey = this.getSefazActorKey(control.cnpjConsulta, control.ambiente);
+      const historicalBackfill = this.parseSefazCpfHistoricalBackfill(control.ultimaMensagem);
+      if (historicalBackfill) {
+        executionDetails.push({
+          kind: 'controle',
+          status: 'persistido',
+          clientId: control.clienteId,
+          estabelecimentoId: control.estabelecimentoId,
+          ambiente: control.ambiente,
+          cnpjConsulta: control.cnpjConsulta,
+          mensagem: `Sincronizacao automatica pausada enquanto a recuperacao historica por NSU estiver em andamento. Proximo NSU historico: ${historicalBackfill.nextNsu.toString()}.`
+        });
+        continue;
+      }
       const cooldownUntil = cooldownsRegisteredThisRun.get(actorKey) ?? this.getSefazDfeCooldownUntil(control);
       if (cooldownUntil) {
         executionDetails.push({
@@ -4844,7 +4931,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   private getSefazDfeCooldownUntil(control: Pick<NfeSyncControle, 'ultimaExecucao' | 'ultimaMensagem'>): Date | null {
     const message = String(control.ultimaMensagem || '');
-    const requiresCooldown = /\bcstat\s*[:=]?\s*(?:137|656)\b|consumo\s+indevido|sem avanc(?:o|ar)(?: o| do) nsu/i.test(message);
+    const requiresCooldown = /\bcstat\s*[:=]?\s*(?:137|656)\b|consumo\s+indevido|sem avanc(?:o|ar)(?: o| do) nsu|recuperacao historica cpf pausada/i.test(message);
     if (!requiresCooldown || !control.ultimaExecucao) {
       return null;
     }
@@ -4868,16 +4955,63 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return `A consulta SEFAZ esta pausada ate ${formattedUntil} (horario de Brasilia) para evitar novo bloqueio por consumo indevido.`;
   }
 
+  private parseSefazCpfHistoricalBackfill(message?: string | null): SefazCpfHistoricalBackfill | null {
+    const match = String(message || '').match(/\[\[SEFAZ_CPF_BACKFILL\|([0-9]+)\|([0-9]+)\|(\d{4}-\d{2}-\d{2})\|(\d{4}-\d{2}-\d{2})\]\]/);
+    if (!match) {
+      return null;
+    }
+    try {
+      return {
+        nextNsu: BigInt(match[1]),
+        maxNsu: BigInt(match[2]),
+        dataInicio: match[3],
+        dataFim: match[4]
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  private formatSefazCpfHistoricalBackfill(state: SefazCpfHistoricalBackfill): string {
+    return `[[SEFAZ_CPF_BACKFILL|${state.nextNsu.toString()}|${state.maxNsu.toString()}|${state.dataInicio}|${state.dataFim}]]`;
+  }
+
+  private async persistSefazCpfHistoricalBackfill(
+    control: Pick<NfeSyncControle, 'id' | 'cnpjConsulta' | 'ambiente' | 'ultimaExecucao' | 'ultimaMensagem'>,
+    marker: string,
+    message: string,
+    pauseForHour = false
+  ): Promise<void> {
+    const now = new Date();
+    const storedMessage = `${message} ${marker}`;
+    await this.prisma.nfeSyncControle.updateMany({
+      where: {
+        cnpjConsulta: this.normalizeCnpj(control.cnpjConsulta),
+        ambiente: control.ambiente
+      },
+      data: {
+        ...(pauseForHour ? { ultimaExecucao: now } : {}),
+        ultimaMensagem: storedMessage
+      }
+    });
+    control.ultimaMensagem = storedMessage;
+    if (pauseForHour) {
+      control.ultimaExecucao = now;
+    }
+  }
+
   private async registerSefazDfeCooldown(
     control: Pick<NfeSyncControle, 'id' | 'cnpjConsulta' | 'ambiente' | 'ultimaExecucao' | 'ultimaMensagem'>,
     cStat: '137' | '656' | 'sem_avanco',
-    reason?: string
+    reason?: string,
+    progressMarker?: string
   ): Promise<Date> {
     const now = new Date();
     const cooldownUntil = new Date(now.getTime() + NfeService.SEFAZ_DFE_COOLDOWN_MS);
-    const message = cStat === 'sem_avanco'
+    const baseMessage = cStat === 'sem_avanco'
       ? `Consulta SEFAZ sem avancar o NSU: ${reason || ''}. ${this.describeSefazDfeCooldown(cooldownUntil)}`
       : `cStat ${cStat} - ${reason || (cStat === '137' ? 'Sem novos documentos' : 'Consumo indevido')}. ${this.describeSefazDfeCooldown(cooldownUntil)}`;
+    const message = `${baseMessage}${progressMarker ? ` ${progressMarker}` : ''}`;
     await this.prisma.nfeSyncControle.updateMany({
       where: {
         cnpjConsulta: this.normalizeCnpj(control.cnpjConsulta),

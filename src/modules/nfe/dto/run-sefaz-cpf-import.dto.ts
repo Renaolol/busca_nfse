@@ -24,12 +24,12 @@ export class RunSefazCpfImportDto {
   @IsEnum(NfeAmbiente)
   ambiente?: NfeAmbiente;
 
-  @ApiPropertyOptional({ description: 'Data inicial opcional para filtrar os documentos exibidos depois da consulta incremental. Deve ser enviada junto com dataEmissaoFim.' })
+  @ApiPropertyOptional({ description: 'Data inicial da recuperacao historica por NSU; deve ser enviada junto com dataEmissaoFim e estar dentro dos ultimos 90 dias.' })
   @IsOptional()
   @IsDateString()
   dataEmissaoInicio?: string;
 
-  @ApiPropertyOptional({ description: 'Data final opcional para filtrar os documentos exibidos depois da consulta incremental. Deve ser enviada junto com dataEmissaoInicio.' })
+  @ApiPropertyOptional({ description: 'Data final da recuperacao historica por NSU; deve ser enviada junto com dataEmissaoInicio.' })
   @IsOptional()
   @IsDateString()
   dataEmissaoFim?: string;

@@ -4599,7 +4599,7 @@ function renderNfceScControlRow(control) {
       <td>${escapeHtml(latestNsu)}</td>
       <td>${statusBadge(statusLabel, isRecoveryProcessing ? 'info' : toneFromNfeSyncStatus(control.status))}</td>
       <td>
-        <span class="row-sub">${escapeHtml(control.ultimaMensagem || 'Aguardando primeira consulta')}</span>
+        <span class="row-sub">${escapeHtml(displayNfeControlMessage(control.ultimaMensagem) || 'Aguardando primeira consulta')}</span>
         ${control.reprocessamentoStatus ? `<span class="row-sub nfce-sc-recovery-status">${statusBadge(`Reprocessamento ${control.reprocessamentoStatus}`, recoveryTone)} ${escapeHtml(control.reprocessamentoMensagem || '')}</span>` : ''}
         <div class="stack-actions" style="justify-content:flex-start;margin-top:6px">
           <button class="btn secondary" type="button" data-action="nfce-sc-run" data-control-id="${escapeHtml(control.id)}" data-client-id="${escapeHtml(control.clienteId)}" ${isAnyProcessing ? 'disabled' : ''}>${runLabel}</button>
@@ -5057,11 +5057,11 @@ function renderNfeSyncPage() {
         <select name="certificadoId" required disabled>${renderNfeSefazCpfCertificateOptions('', eligibleCpfProducers)}</select>
       </label>
       <label class="field">
-        Emissao inicial (opcional)
+        Emissao inicial (consulta historica, ultimos 90 dias)
         <input name="dataEmissaoInicio" type="date" />
       </label>
       <label class="field">
-        Emissao final (opcional)
+        Emissao final (consulta historica)
         <input name="dataEmissaoFim" type="date" />
       </label>
       <label class="field">
@@ -5076,7 +5076,7 @@ function renderNfeSyncPage() {
         <button class="btn primary" type="submit" disabled>Buscar NF-e da SEFAZ</button>
       </div>
     </form>
-    <p class="card-subtitle" style="margin:12px 0 0;">A consulta usa o certificado selecionado e continua do ultimo NSU salvo para este CPF. Informe as duas datas para filtrar os documentos exibidos depois da importacao; sem datas, a busca apenas atualiza os documentos armazenados. A SEFAZ pode pausar consultas por uma hora apos cStat 137 ou 656.</p>
+    <p class="card-subtitle" style="margin:12px 0 0;">Sem datas, a busca incremental continua do ultimo NSU salvo. Com as duas datas, a recuperacao historica consulta NSUs pontuais, salva somente notas do periodo e preserva esse cursor; cada execucao consulta ate 15 NSUs e pode ser retomada apos uma hora, com limite de 10.000 NSUs por recuperacao. A SEFAZ disponibiliza consultas pontuais por ate 90 dias.</p>
   `;
   const simplifiedContent = `
     <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
@@ -5187,7 +5187,7 @@ function renderNfeSyncPage() {
                   <td>${escapeHtml(formatDateTime(control.ultimaExecucao))}</td>
                   <td>
                     ${statusBadge(mapNfeSyncStatusLabel(control.status), toneFromNfeSyncStatus(control.status))}
-                    <span class="row-sub">${escapeHtml(control.ultimaMensagem || '-')}</span>
+                    <span class="row-sub">${escapeHtml(displayNfeControlMessage(control.ultimaMensagem) || '-')}</span>
                   </td>
                   <td>${renderRowActionsMenu(nfeControlMenuId, nfeControlMenuItems)}</td>
                 </tr>`;
@@ -16654,6 +16654,10 @@ async function submitNfeSefazCpfImportForm(form) {
     pushToast('A data inicial nao pode ser maior que a data final.', 'error');
     return;
   }
+    if (dataEmissaoInicio && Date.parse(`${dataEmissaoInicio}T00:00:00`) < Date.now() - 90 * 24 * 60 * 60 * 1000) {
+      pushToast('A recuperacao historica da SEFAZ esta disponivel apenas nos ultimos 90 dias.', 'error');
+      return;
+    }
 
   try {
     pushToast(`Consulta SEFAZ iniciada para ${producer.cliente} com o certificado ${certificate.apelido}. Aguarde a conclusao.`, 'info');
@@ -16675,7 +16679,14 @@ async function submitNfeSefazCpfImportForm(form) {
     if (dataEmissaoInicio && dataEmissaoFim) {
       try {
         const found = await searchNfeSefazCpfPeriod({ producer, ambiente, dataEmissaoInicio, dataEmissaoFim });
-        pushToast(`${found} NF-e localizadas para o produtor no periodo informado.`, found ? 'success' : 'info');
+        const summary = String(result?.executionDetails?.[0]?.mensagem || '');
+        const partial = /consulta historica sefaz cpf parcial/i.test(summary);
+        pushToast(
+          partial
+            ? `${found} NF-e localizadas ate agora. A recuperacao continua do proximo NSU apos a pausa de uma hora.`
+            : `${found} NF-e localizadas para o produtor no periodo informado.`,
+          partial ? 'info' : found ? 'success' : 'info'
+        );
       } catch (error) {
         pushToast(`A importacao SEFAZ terminou, mas nao foi possivel filtrar as NF-e pelo periodo: ${toErrorMessage(error)}`, 'error');
       }
@@ -16683,7 +16694,16 @@ async function submitNfeSefazCpfImportForm(form) {
       pushToast('Consulta concluida. Os documentos recebidos foram atualizados em Armazenados.', 'success');
     }
   } catch (error) {
-    pushToast(`Falha na importacao manual da SEFAZ: ${toErrorMessage(error)}`, 'error');
+    const errorMessage = toErrorMessage(error);
+    const cooldownMatch = errorMessage.match(/A consulta SEFAZ esta pausada ate\s+(.+?)\s+\(horario de Brasilia\)/i);
+    if (cooldownMatch) {
+      pushToast(
+        `Consulta aguardando liberacao: ${cooldownMatch[1]} (horario de Brasilia). Nenhuma nova solicitacao foi enviada a SEFAZ.`,
+        'info'
+      );
+      return;
+    }
+    pushToast(`Falha na importacao manual da SEFAZ: ${errorMessage}`, 'error');
   }
 }
 
@@ -25432,6 +25452,12 @@ function mapNfeSyncStatusLabel(status) {
     erro_certificado: 'Erro de certificado'
   };
   return labels[status] || status || '-';
+}
+
+function displayNfeControlMessage(message) {
+  return String(message || '')
+    .replace(/\[\[SEFAZ_CPF_BACKFILL\|[^\]]*\]\]/g, '')
+    .trim();
 }
 
 function mapNfeAmbienteLabel(ambiente) {

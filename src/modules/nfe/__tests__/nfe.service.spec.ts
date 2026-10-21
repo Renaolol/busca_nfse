@@ -1838,7 +1838,7 @@ describe('NfeService', () => {
     );
   });
 
-  it('consulta o periodo manual a partir do cursor salvo e persiste todos os documentos do lote', async () => {
+  it('recupera NSUs historicos por consNSU, salva apenas o periodo e preserva o cursor incremental', async () => {
     const xmlForDate = (key: string, emissionDate: string) => `<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe><infNFe Id="NFe${key}">
   <ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>${emissionDate}T10:00:00-03:00</dhEmi></ide>
@@ -1865,9 +1865,11 @@ describe('NfeService', () => {
         estabelecimentoId: 'estab-jair',
         cnpjConsulta: '01861020970',
         ambiente: NfeAmbiente.producao,
-        ultimoNsuConsultado: 50n,
-        ultimoNsuDistribuido: 10n,
-        maxNsu: 100n,
+        ultimoNsuConsultado: 2n,
+        ultimoNsuDistribuido: 0n,
+        maxNsu: 2n,
+        ultimaExecucao: null,
+        ultimaMensagem: null,
         status: NfeSyncStatus.ativo
       }
     ]);
@@ -1887,15 +1889,27 @@ describe('NfeService', () => {
         arquivoCriptografadoPath: 'certificados/cliente-jair/cert-jair.bin'
       }
     ]);
-    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
-        statusCode: 200,
-        cStat: '138',
-        xMotivo: 'Documentos localizados',
-        ultNsu: 100n,
-        maxNsu: 100n,
-        documents: [septemberDocument, octoberDocument],
-        rawResponse: { mock: true }
-      });
+    (distribuicaoClient.consultarPorNsu as jest.Mock).mockImplementation(async ({ nsu }: { nsu: bigint }) =>
+      nsu === 2n
+        ? {
+            statusCode: 200,
+            cStat: '138',
+            xMotivo: 'Documento localizado',
+            ultNsu: 2n,
+            maxNsu: 2n,
+            documents: [septemberDocument, octoberDocument],
+            rawResponse: { mock: true }
+          }
+        : {
+            statusCode: 200,
+            cStat: '137',
+            xMotivo: 'Nenhum documento localizado',
+            ultNsu: nsu,
+            maxNsu: 2n,
+            documents: [],
+            rawResponse: { mock: true }
+          }
+    );
 
     const result = await service.runNowCpfViaSefazGlobal({
       controleId: 'ctrl-jair',
@@ -1905,25 +1919,135 @@ describe('NfeService', () => {
       dataEmissaoFim: '2026-09-30'
     });
 
-    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenNthCalledWith(
+    expect(distribuicaoClient.consultarPorNsu).toHaveBeenNthCalledWith(
       1,
-      expect.objectContaining({ cnpjConsulta: '01861020970', ultNsu: 50n, certificateId: 'cert-jair' })
+      expect.objectContaining({ cnpjConsulta: '01861020970', nsu: 2n, certificateId: 'cert-jair' })
     );
-    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledTimes(2);
+    expect(distribuicaoClient.consultarPorNsu).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ cnpjConsulta: '01861020970', nsu: 1n, certificateId: 'cert-jair' })
+    );
+    expect(distribuicaoClient.distribuirPorNsu).not.toHaveBeenCalled();
+    expect(prisma.nfeDocumento.upsert).toHaveBeenCalledTimes(1);
     expect(prisma.nfeDocumento.upsert).toHaveBeenCalledWith(
       expect.objectContaining({ create: expect.objectContaining({ chaveAcesso: '1'.repeat(44) }) })
     );
-    expect(prisma.nfeSyncControle.upsert).not.toHaveBeenCalled();
     expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(expect.objectContaining({
       where: { id: 'ctrl-jair' },
       data: expect.objectContaining({
-        ultimoNsuConsultado: 100n,
-        maxNsu: 100n,
-        totalDocumentosBaixados: { increment: 2 }
+        status: NfeSyncStatus.ativo,
+        totalDocumentosBaixados: { increment: 1 }
       })
     }));
-    expect(result.documentsSaved).toBe(2);
+    expect(prisma.nfeSyncControle.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { cnpjConsulta: '01861020970', ambiente: NfeAmbiente.producao },
+      data: expect.objectContaining({
+        ultimaMensagem: expect.stringContaining('O cursor normal 2 foi preservado')
+      })
+    }));
+    expect(result.executionDetails[0].mensagem).toContain('cursor normal 2 foi preservado');
+    expect(result.documentsSaved).toBe(1);
     expect(result.failures).toBe(0);
+  });
+
+  it('limita a recuperacao historica a 15 NSUs e salva o ponto para retomar depois de uma hora', async () => {
+    const control = {
+      id: 'ctrl-cpf-historico',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      cnpjConsulta: '01861020970',
+      ambiente: NfeAmbiente.producao,
+      ultimoNsuConsultado: 30n,
+      ultimoNsuDistribuido: 0n,
+      maxNsu: 30n,
+      status: NfeSyncStatus.ativo,
+      ultimaExecucao: null,
+      ultimaMensagem: null
+    };
+    prisma.nfeSyncControle.findMany.mockResolvedValue([control]);
+    prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
+      id: 'estab-1',
+      clienteId: 'cliente-1',
+      cnpj: '01861020970',
+      municipioCodigoIbge: '4204202'
+    });
+    prisma.certificado.findMany.mockResolvedValue([{
+      id: 'cert-jair',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      cnpjTitular: '01861020970',
+      ativo: true,
+      arquivoCriptografadoPath: 'certificados/cliente-1/cert-jair.bin'
+    }]);
+    (distribuicaoClient.consultarPorNsu as jest.Mock).mockImplementation(async ({ nsu }: { nsu: bigint }) => ({
+      statusCode: 200,
+      cStat: '137',
+      xMotivo: 'Nenhum documento localizado',
+      ultNsu: nsu,
+      maxNsu: 30n,
+      documents: [],
+      rawResponse: { mock: true }
+    }));
+
+    const result = await service.runNowCpfViaSefazGlobal({
+      controleId: control.id,
+      certificadoId: 'cert-jair',
+      clienteId: control.clienteId,
+      dataEmissaoInicio: '2026-09-01',
+      dataEmissaoFim: '2026-09-30'
+    });
+
+    expect(distribuicaoClient.consultarPorNsu).toHaveBeenCalledTimes(15);
+    expect(distribuicaoClient.consultarPorNsu).toHaveBeenNthCalledWith(
+      15,
+      expect.objectContaining({ nsu: 16n, certificateId: 'cert-jair' })
+    );
+    expect(prisma.nfeSyncControle.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
+      where: { cnpjConsulta: control.cnpjConsulta, ambiente: control.ambiente },
+      data: expect.objectContaining({
+        ultimaExecucao: expect.any(Date),
+        ultimaMensagem: expect.stringContaining('SEFAZ_CPF_BACKFILL|15|30|2026-09-01|2026-09-30')
+      })
+    }));
+    expect(result.executionDetails[0].mensagem).toContain('parcial');
+    expect(result.executionDetails[0].mensagem).toContain('NSU 15');
+    expect(result.failures).toBe(0);
+
+    const automaticRun = await service.runNowCpfViaSefazGlobal();
+    expect(distribuicaoClient.distribuirPorNsu).not.toHaveBeenCalled();
+    expect(automaticRun.executionDetails[0].mensagem).toContain('recuperacao historica por NSU');
+
+    await expect(service.runNowCpfViaSefazGlobal({
+      controleId: control.id,
+      certificadoId: 'cert-jair',
+      clienteId: control.clienteId,
+      dataEmissaoInicio: '2026-09-01',
+      dataEmissaoFim: '2026-09-30'
+    })).rejects.toThrow('pausada ate');
+    expect(distribuicaoClient.consultarPorNsu).toHaveBeenCalledTimes(15);
+
+    Object.assign(control, { ultimaExecucao: new Date(Date.now() - 2 * 60 * 60 * 1000) });
+    (distribuicaoClient.consultarPorNsu as jest.Mock).mockImplementation(async ({ nsu }: { nsu: bigint }) => ({
+      statusCode: 200,
+      cStat: '632',
+      xMotivo: 'Solicitacao fora do prazo de disponibilidade',
+      ultNsu: nsu,
+      maxNsu: 30n,
+      documents: [],
+      rawResponse: { mock: true }
+    }));
+    const resumedRun = await service.runNowCpfViaSefazGlobal({
+      controleId: control.id,
+      certificadoId: 'cert-jair',
+      clienteId: control.clienteId,
+      dataEmissaoInicio: '2026-09-01',
+      dataEmissaoFim: '2026-09-30'
+    });
+    expect(distribuicaoClient.consultarPorNsu).toHaveBeenCalledTimes(16);
+    expect(distribuicaoClient.consultarPorNsu).toHaveBeenLastCalledWith(
+      expect.objectContaining({ nsu: 15n, certificateId: 'cert-jair' })
+    );
+    expect(resumedRun.executionDetails[0].mensagem).toContain('concluida');
   });
 
   it('exibe falhas retornadas pela SEFAZ na busca manual de CPF', async () => {

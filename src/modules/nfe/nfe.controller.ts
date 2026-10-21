@@ -192,7 +192,7 @@ export class NfeController {
   @Roles('admin')
   @ApiOperation({
     summary: 'Importa NF-e manualmente pela SEFAZ para controles cadastrados com CPF',
-    description: 'Aceita controleId do produtor, certificadoId, clienteId, ambiente e opcionalmente dataEmissaoInicio/dataEmissaoFim. A consulta sempre segue o ultimo NSU salvo para o CPF e ambiente e persiste todos os documentos retornados para nao pular itens na sequencia. As datas opcionais filtram os resultados exibidos no painel; elas nao reiniciam o NSU nem limitam o que e salvo. Apos cStat 137 ou 656, novas consultas para o CPF aguardam uma hora. O certificado precisa estar vinculado ao produtor selecionado.'
+    description: 'Aceita controleId do produtor, certificadoId, clienteId, ambiente e opcionalmente dataEmissaoInicio/dataEmissaoFim. Sem datas, a consulta incremental segue o ultimo NSU salvo. Com as duas datas, executa uma recuperacao historica pontual usando consNSU, consulta ate 15 NSUs por execucao (ate 10.000 NSUs no total), persiste somente documentos dentro do periodo e preserva o cursor incremental. A recuperacao historica pode ser retomada apos uma hora e esta limitada a documentos disponibilizados nos ultimos 90 dias. Apos cStat 137 ou 656 na distribuicao incremental, novas consultas para o CPF aguardam uma hora. O certificado precisa estar vinculado ao produtor selecionado.'
   })
   runNowCpfViaSefazGlobal(@Body() dto: RunSefazCpfImportDto) {
     return this.nfeService.runNowCpfViaSefazGlobal(dto);
