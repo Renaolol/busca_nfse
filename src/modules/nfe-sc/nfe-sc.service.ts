@@ -35,6 +35,10 @@ export class NfeScService implements OnModuleInit, OnModuleDestroy {
     @Inject(NFE_SC_CLIENT) private readonly client: NfeScClient
   ) {}
 
+  getClientMode(): 'mock' | 'real' {
+    return process.env.NODE_ENV !== 'test' && process.env.NFE_SC_CLIENT_MODE === 'real' ? 'real' : 'mock';
+  }
+
   onModuleInit(): void {
     this.recoveryTimer = setInterval(() => void this.resumeExpiredExecutions(), NfeScService.RECOVERY_INTERVAL_MS);
     this.recoveryTimer.unref?.();
@@ -199,7 +203,6 @@ export class NfeScService implements OnModuleInit, OnModuleDestroy {
         autorizacaoConfirmadaEm: now,
         autorizacaoConfirmadaPorId: usuarioId,
         status: NfeSyncStatus.ativo,
-        proximaExecucao: null,
         ultimaMensagem: 'Configuracao atualizada; cursor NSU preservado. A SEF/SC validara o vinculo em cada consulta.'
       },
       select: {

@@ -4696,67 +4696,8 @@ describe('NfeService', () => {
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('uses the existing point-by-key method and marks a returned full XML available', async () => {
-    process.env.NFE_DISTRIBUICAO_CLIENT_MODE = 'real';
-    (service as any).automaticXmlRecoveryRunning = false;
-    const key = '4'.repeat(43) + '8';
-    const task = { id: 'task-xml-1', leaseId: 'lease-xml-1' };
-    nfeManifestacaoService.claimDueRecoveryTasks.mockResolvedValueOnce([task]);
-    nfeManifestacaoService.prepareAutomaticRecovery.mockResolvedValueOnce({
-      canQuery: true, status: 'aguardando_xml', clienteId: 'cliente-1', estabelecimentoId: 'estab-1',
-      ambiente: NfeAmbiente.producao, chaveAcesso: key
-    });
-    const querySpy = jest.spyOn(service, 'consultarChave').mockResolvedValue({
-      statusCode: 200, cStat: '138', xMotivo: 'Documento localizado',
-      documentosEncontrados: 1, documentosPersistidos: 1,
-      documentos: [{ schema: 'procNFe_v4.00', xml: 'XML confidencial', chaveAcesso: key }]
-    } as any);
-    const logger = jest.spyOn((service as any).logger, 'log').mockImplementation(() => undefined);
-
-    try {
-      await (service as any).runAutomaticXmlRecoveryCycle();
-
-      expect(querySpy).toHaveBeenCalledWith({
-        clienteId: 'cliente-1', estabelecimentoId: 'estab-1', chaveAcesso: key,
-        ambiente: NfeAmbiente.producao, persistir: true
-      });
-      expect(nfeManifestacaoService.logAutomaticRecoveryDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
-        cStat: '138', documentsReceived: 1, schemas: ['procNFe_v4.00'], result: 'xml_completo_recebido'
-      }));
-      expect(nfeManifestacaoService.recordAutomaticRecoveryResult).toHaveBeenCalledWith('task-xml-1', 'lease-xml-1', expect.objectContaining({
-        status: 'xml_disponivel', cStat: '138', retryAfterMs: null
-      }));
-      expect(JSON.stringify(logger.mock.calls)).not.toContain(key);
-      expect(JSON.stringify(logger.mock.calls)).not.toContain('XML confidencial');
-      expect(JSON.stringify(logger.mock.calls)).not.toContain('12345678000199');
-    } finally {
-      querySpy.mockRestore();
-      logger.mockRestore();
-    }
-  });
-
-  it('keeps cStat 656 as an official wait and schedules the one-hour cooldown', async () => {
-    process.env.NFE_DISTRIBUICAO_CLIENT_MODE = 'real';
-    (service as any).automaticXmlRecoveryRunning = false;
-    nfeManifestacaoService.claimDueRecoveryTasks.mockResolvedValueOnce([{ id: 'task-656', leaseId: 'lease-656' }]);
-    nfeManifestacaoService.prepareAutomaticRecovery.mockResolvedValueOnce({
-      canQuery: true, status: 'aguardando_xml', clienteId: 'cliente-1', estabelecimentoId: 'estab-1',
-      ambiente: NfeAmbiente.producao, chaveAcesso: '4'.repeat(44)
-    });
-    const querySpy = jest.spyOn(service, 'consultarChave').mockResolvedValue({
-      statusCode: 200, cStat: '656', xMotivo: 'Consumo indevido',
-      documentosEncontrados: 0, documentosPersistidos: 0, documentos: []
-    } as any);
-
-    try {
-      await (service as any).runAutomaticXmlRecoveryCycle();
-
-      expect(nfeManifestacaoService.recordAutomaticRecoveryResult).toHaveBeenCalledWith('task-656', 'lease-656', expect.objectContaining({
-        status: 'aguardando_sefaz', cStat: '656', retryAfterMs: 60 * 60 * 1000
-      }));
-      expect(prisma.nfeSyncControle.update).not.toHaveBeenCalled();
-    } finally {
-      querySpy.mockRestore();
-    }
+  it('does not expose the automatic XML recovery worker', () => {
+    expect((service as any).automaticXmlRecoveryTimer).toBeUndefined();
+    expect((service as any).runAutomaticXmlRecoveryCycle).toBeUndefined();
   });
 });

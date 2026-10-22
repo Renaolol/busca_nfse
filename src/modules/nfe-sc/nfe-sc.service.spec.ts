@@ -44,8 +44,11 @@ describe('NfeScService', () => {
     });
   });
 
-  it('preserva cursor ao trocar certificado e nao permite trocar o filtro apos iniciar a coleta', async () => {
-    const current = { id: 'control-1', ultimoNsuConsultado: 81n, indAtor: 3, status: NfeSyncStatus.ativo };
+  it('preserva cursor e intervalo SEF/SC ao trocar certificado e nao permite trocar o filtro apos iniciar a coleta', async () => {
+    const current = {
+      id: 'control-1', ultimoNsuConsultado: 81n, indAtor: 3, status: NfeSyncStatus.ativo,
+      proximaExecucao: new Date(Date.now() + 60_000)
+    };
     const prisma = {
       clienteEstabelecimento: { findFirst: jest.fn().mockResolvedValue({ id: 'estab-1', cnpj: validCpf }) },
       certificado: { findFirst: jest.fn().mockResolvedValue({ id: 'cert-2' }) },
@@ -63,6 +66,7 @@ describe('NfeScService', () => {
     const upsertArgs = prisma.nfeScSyncControle.upsert.mock.calls[0][0];
     expect(upsertArgs.update.certificadoId).toBe('cert-2');
     expect(upsertArgs.update.ultimoNsuConsultado).toBeUndefined();
+    expect(upsertArgs.update.proximaExecucao).toBeUndefined();
     expect(upsertArgs.update.autorizacaoConfirmadaPorId).toBe('admin-1');
 
     await expect(service.configure({

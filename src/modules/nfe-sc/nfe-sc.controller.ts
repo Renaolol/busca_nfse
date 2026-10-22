@@ -37,6 +37,13 @@ class NfeScDocumentsQuery extends NfeScControlsQuery {
 export class NfeScController {
   constructor(private readonly service: NfeScService) {}
 
+  @Get('status')
+  @ApiOperation({ summary: 'Informa se a consulta manual SEF/SC esta em modo mock ou real.' })
+  @ApiOkResponse({ schema: { type: 'object', properties: { clientMode: { type: 'string', enum: ['mock', 'real'] } } } })
+  getStatus() {
+    return { clientMode: this.service.getClientMode() };
+  }
+
   @Get('controles')
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   @ApiOperation({ summary: 'Lista os controles independentes de distribuicao de NF-e modelo 55 da SEF/SC.' })

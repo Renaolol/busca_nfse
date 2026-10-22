@@ -259,17 +259,13 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NfeService.name);
   private autoSyncTimer: NodeJS.Timeout | null = null;
   private nightlySweepTimer: NodeJS.Timeout | null = null;
-  private automaticXmlRecoveryTimer: NodeJS.Timeout | null = null;
   private autoSyncRunning = false;
   private nightlySweepRunning = false;
-  private automaticXmlRecoveryRunning = false;
   private lastNightlySweepExecutionKey: string | null = null;
   private readonly executedNightlySweepKeys = new Set<string>();
   private readonly autoSyncEnabled = process.env.NFE_SYNC_AUTO_RUN_ENABLED !== 'false';
   private readonly autoSyncIntervalMs = this.parsePositiveNumberEnv('NFE_SYNC_AUTO_RUN_INTERVAL_MS', 5 * 60 * 1000);
   private readonly autoSyncStartupDelayMs = this.parsePositiveNumberEnv('NFE_SYNC_AUTO_RUN_STARTUP_DELAY_MS', 15000);
-  private readonly automaticXmlRecoveryEnabled = process.env.NFE_XML_AUTO_RECOVERY_ENABLED !== 'false';
-  private readonly automaticXmlRecoveryIntervalMs = this.parsePositiveNumberEnv('NFE_XML_AUTO_RECOVERY_INTERVAL_MS', 10 * 60 * 1000);
   private nightlySweepEnabled = process.env.NFE_SYNC_NIGHTLY_SWEEP_ENABLED !== 'false';
   private readonly nightlySweepCheckIntervalMs = this.parsePositiveNumberEnv('NFE_SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS', 60000);
   private readonly nightlySweepHour = this.parseBoundedIntegerEnv('NFE_SYNC_NIGHTLY_SWEEP_HOUR', 23, 0, 23);
@@ -318,16 +314,6 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.refreshNightlySweepTimer();
-    if (this.automaticXmlRecoveryEnabled) {
-      this.automaticXmlRecoveryTimer = setInterval(() => {
-        void this.runAutomaticXmlRecoveryCycle();
-      }, this.automaticXmlRecoveryIntervalMs);
-      this.automaticXmlRecoveryTimer.unref?.();
-      const recoveryStartupTimer = setTimeout(() => {
-        void this.runAutomaticXmlRecoveryCycle();
-      }, 30000);
-      recoveryStartupTimer.unref?.();
-    }
   }
 
   onModuleDestroy(): void {
@@ -339,10 +325,6 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     if (this.nightlySweepTimer) {
       clearInterval(this.nightlySweepTimer);
       this.nightlySweepTimer = null;
-    }
-    if (this.automaticXmlRecoveryTimer) {
-      clearInterval(this.automaticXmlRecoveryTimer);
-      this.automaticXmlRecoveryTimer = null;
     }
   }
 
@@ -5263,112 +5245,6 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn('Falha na execucao automatica de NF-e.');
     } finally {
       this.autoSyncRunning = false;
-    }
-  }
-
-  private async runAutomaticXmlRecoveryCycle(): Promise<void> {
-    if (this.automaticXmlRecoveryRunning || process.env.NFE_DISTRIBUICAO_CLIENT_MODE !== 'real') {
-      return;
-    }
-    this.automaticXmlRecoveryRunning = true;
-    try {
-      const tasks = await this.nfeManifestacaoService.claimDueRecoveryTasks(3);
-      for (const task of tasks) {
-        let resultRecorded = false;
-        try {
-          const prepared = await this.nfeManifestacaoService.prepareAutomaticRecovery(task.id, task.leaseId);
-          if (!prepared.canQuery) continue;
-          const query = await this.consultarChave({
-            clienteId: prepared.clienteId,
-            estabelecimentoId: prepared.estabelecimentoId,
-            chaveAcesso: prepared.chaveAcesso,
-            ambiente: prepared.ambiente,
-            persistir: true
-          });
-          const schemas = query.documentos.map((document) => document.schema || 'sem_schema');
-          const schemaCounts = schemas.reduce<Record<string, number>>((counts, schema) => {
-            counts[schema] = (counts[schema] || 0) + 1;
-            return counts;
-          }, {});
-          const hasFullXml = schemas.some((schema) => schema.startsWith('procNFe') || schema.startsWith('NFe_v'));
-          const httpStatus = Number(query.statusCode);
-          const cStat = String(query.cStat || '').trim() || null;
-          const isOfficialCooldown = cStat === '656';
-          const hasResponse = Number.isFinite(httpStatus);
-          const available = httpStatus === 200 && cStat === '138' && hasFullXml;
-          const noDocumentYet = httpStatus === 200 && ['137', '138'].includes(cStat || '') && !hasFullXml;
-          const resultStatus = available
-            ? 'xml_disponivel'
-            : isOfficialCooldown
-              ? 'aguardando_sefaz'
-              : noDocumentYet
-                ? 'aguardando_xml'
-                : 'erro_processamento';
-          const resultLabel = available
-            ? 'xml_completo_recebido'
-            : isOfficialCooldown
-              ? 'bloqueio_oficial_656'
-              : noDocumentYet
-                ? cStat === '137' ? 'xml_ainda_indisponivel' : 'resumo_ainda_indisponivel_como_xml_completo'
-                : 'retorno_ou_processamento_invalido';
-          await this.nfeManifestacaoService.logAutomaticRecoveryDiagnostic({
-            ambiente: prepared.ambiente,
-            actorType: this.isCpf((await this.getEstablishmentOrThrow(prepared.estabelecimentoId, prepared.clienteId)).cnpj) ? 'CPF' : 'CNPJ',
-            httpStatus: Number.isFinite(httpStatus) ? httpStatus : null,
-            cStat,
-            xMotivo: query.xMotivo || null,
-            documentsReceived: Number(query.documentosEncontrados || 0),
-            schemas,
-            result: resultLabel
-          });
-          await this.nfeManifestacaoService.recordAutomaticRecoveryResult(task.id, task.leaseId, {
-            status: resultStatus,
-            cStat,
-            xMotivo: query.xMotivo || null,
-            resultadoConsulta: resultLabel,
-            retryAfterMs: available ? null : isOfficialCooldown ? 60 * 60 * 1000 : noDocumentYet || !hasResponse ? 6 * 60 * 60 * 1000 : null
-          });
-          resultRecorded = true;
-          this.logger.log(JSON.stringify({
-            tipoConsulta: 'consChNFe_automatica',
-            taskId: task.id,
-            ambiente: prepared.ambiente,
-            httpStatus: Number.isFinite(httpStatus) ? httpStatus : null,
-            cStat,
-            documentosRecebidos: Number(query.documentosEncontrados || 0),
-            documentosProcessados: Number(query.documentosPersistidos || 0),
-            schemaCounts,
-            resultado: resultLabel
-          }));
-        } catch (error) {
-          const message = this.toErrorMessage(error);
-          const isSefazWait = /bloqueio|cooldown|restri[cç][aã]o oficial|limite oficial|consulta SEFAZ esta pausada|nenhuma consulta foi enviada/i.test(message);
-          const safeMessage = this.sanitizeSefazDiagnosticText(message) ?? 'Falha ao consultar disponibilidade do XML.';
-          await this.nfeManifestacaoService.recordAutomaticRecoveryResult(task.id, task.leaseId, {
-            status: isSefazWait ? 'aguardando_sefaz' : 'erro_processamento',
-            cStat: null,
-            xMotivo: safeMessage,
-            resultadoConsulta: isSefazWait ? 'consulta_nao_enviada_por_limite' : 'erro_comunicacao_ou_processamento',
-            retryAfterMs: isSefazWait ? 60 * 60 * 1000 : 6 * 60 * 60 * 1000
-          });
-          resultRecorded = true;
-          this.logger.warn(JSON.stringify({
-            tipoConsulta: 'consChNFe_automatica',
-            taskId: task.id,
-            requisicaoReal: false,
-            resultado: isSefazWait ? 'aguardando_liberacao' : 'erro',
-            motivo: safeMessage
-          }));
-        } finally {
-          if (!resultRecorded) {
-            await this.nfeManifestacaoService.releaseRecoveryTask(task.id, task.leaseId);
-          }
-        }
-      }
-    } catch {
-      this.logger.warn('Falha ao processar a fila automatica de recuperacao de XML.');
-    } finally {
-      this.automaticXmlRecoveryRunning = false;
     }
   }
 

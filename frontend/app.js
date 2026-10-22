@@ -38,6 +38,7 @@ const AUTH_STORAGE_KEY = 'gcont:auth:v1';
 const THEME_STORAGE_KEY = 'gcont:theme:v1';
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const activeNfceScMonitors = new Set();
+const activeNfeScManualMonitors = new Set();
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
 const COMPARE_SPED_HISTORY_LIMIT = 10;
 const SIMPLES_NACIONAL_PAGE_SIZE = 50;
@@ -389,6 +390,12 @@ const state = {
   nfeEventsSyncRunning: false,
   cteEventsSyncRunning: false,
   nfeSyncControls: [],
+  nfeScControls: [],
+  nfeScDocuments: [],
+  nfeScClientMode: 'unknown',
+  nfeScManualMessage: '',
+  nfeScManualBusy: false,
+  nfeScManualSelectedProducerKey: '',
   nfceScControls: [],
   nfceScDocuments: [],
   nfceScStoredDocuments: [],
@@ -407,16 +414,6 @@ const state = {
   nfeSchedulerStatus: null,
   nfeLastRunReport: null,
   nfeManualRunStatus: null,
-  nfeAutomationSettings: [],
-  nfeAutomationPending: [],
-  nfeAutomationManifestations: [],
-  nfeAutomationAudit: [],
-  nfeAutomationMessage: '',
-  nfeAutomationBusy: false,
-  nfeSefazDiagnosticMode: null,
-  nfeSefazDiagnosticResult: null,
-  nfeSefazDiagnosticMessage: '',
-  nfeSefazDiagnosticBusy: false,
   nfeSyncSections: {
     scheduler: true,
     failures: false,
@@ -860,10 +857,6 @@ function hydrateFromMocks() {
     xmlsCompletos: state.cteDocuments.filter((doc) => doc.xmlCompletoDisponivel).length
   };
   state.nfeSchedulerStatus = null;
-  state.nfeSefazDiagnosticMode = null;
-  state.nfeSefazDiagnosticResult = null;
-  state.nfeSefazDiagnosticMessage = '';
-  state.nfeSefazDiagnosticBusy = false;
   state.serverResolvedAlerts = {};
   state.alerts = applyResolvedAlertState(deepClone(mockAlerts));
   state.establishmentsByClient = establishmentsByClient;
@@ -904,15 +897,10 @@ async function hydrateFromApi(options = {}) {
     allCertificatesRaw,
     syncByClient,
     nfeSyncByClient,
-    nfeAutomationByClient,
-    nfeAutomationPendingByClient,
-    nfeAutomationManifestationsByClient,
-    nfeAutomationAuditByClient,
     dashboardStats,
     nfeDashboardStats,
     cteDashboardStats,
     nfeSchedulerStatus,
-    nfeSefazDiagnosticMode,
     nfseDocs,
     nfeDocs,
     cteDocs,
@@ -923,24 +911,20 @@ async function hydrateFromApi(options = {}) {
     compareSpedHistoryRaw,
     monofasicoAliquotasConfig,
     nfceScControlsByClient,
-    nfceScDocumentsByClient
+    nfceScDocumentsByClient,
+    nfeScControlsByClient,
+    nfeScDocumentsByClient,
+    nfeScStatus
   ] = await Promise.all([
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/estabelecimentos`, []),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/certificados`, []),
     apiRequest('/certificados').catch(() => null),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/sync/status`, { controles: [], logs: [] }),
     fetchJsonByClientId(clientIds, (clientId) => `/nfe/sync/status?clienteId=${encodeURIComponent(clientId)}`, []),
-    fetchJsonByClientId(clientIds, (clientId) => `/nfe/automacao/configuracoes?clienteId=${encodeURIComponent(clientId)}`, []),
-    fetchJsonByClientId(clientIds, (clientId) => `/nfe/automacao/pendencias?clienteId=${encodeURIComponent(clientId)}`, []),
-    fetchJsonByClientId(clientIds, (clientId) => `/nfe/automacao/manifestacoes?clienteId=${encodeURIComponent(clientId)}`, []),
-    fetchJsonByClientId(clientIds, (clientId) => `/nfe/automacao/auditoria?clienteId=${encodeURIComponent(clientId)}`, []),
     apiRequest('/nfse/dashboard-stats').catch(() => null),
     apiRequest('/nfe/dashboard-stats').catch(() => null),
     apiRequest('/cte/dashboard-stats').catch(() => null),
     apiRequest('/nfe/sync/scheduler-status').catch(() => null),
-    state.auth.user?.role === 'admin'
-      ? apiRequest('/nfe/sync/diagnostico-sefaz/status').catch(() => null)
-      : Promise.resolve(null),
     apiRequest(`/nfse?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
     apiRequest(`/nfe?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
     apiRequest(`/cte?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
@@ -951,7 +935,10 @@ async function hydrateFromApi(options = {}) {
     apiRequest(`/comparacoes-sped?limit=${COMPARE_SPED_HISTORY_LIMIT}`).catch(() => []),
     apiRequest('/nfe/xml-reader30/aliquotas-monofasico').catch(() => null),
     fetchJsonByClientId(clientIds, (clientId) => `/nfce-sc/controles?clienteId=${encodeURIComponent(clientId)}`, []),
-    fetchJsonByClientId(clientIds, (clientId) => `/nfce-sc/documentos?clienteId=${encodeURIComponent(clientId)}`, [])
+    fetchJsonByClientId(clientIds, (clientId) => `/nfce-sc/documentos?clienteId=${encodeURIComponent(clientId)}`, []),
+    fetchJsonByClientId(clientIds, (clientId) => `/nfe-sc/controles?clienteId=${encodeURIComponent(clientId)}`, []),
+    fetchJsonByClientId(clientIds, (clientId) => `/nfe-sc/documentos?clienteId=${encodeURIComponent(clientId)}&page=1&pageSize=100`, { items: [] }),
+    apiRequest('/nfe-sc/status').catch(() => ({ clientMode: 'unknown' }))
   ]);
 
   const nfseDocsPage = normalizePaginatedResponse(nfseDocs);
@@ -973,6 +960,10 @@ async function hydrateFromApi(options = {}) {
   const nfeDocuments = buildNfeDocumentsFromApi(nfeDocsPage.items, clients);
   const nfceScDocumentRows = Object.values(nfceScDocumentsByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
   const nfceScDocuments = buildNfeDocumentsFromApi(nfceScDocumentRows, clients);
+  const nfeScControls = Object.values(nfeScControlsByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
+  const nfeScDocuments = Object.entries(nfeScDocumentsByClient || {}).flatMap(([clienteId, response]) =>
+    (Array.isArray(response?.items) ? response.items : []).map((row) => ({ ...row, clienteId }))
+  );
   const cteDocuments = buildCteDocumentsFromApi(cteDocsPage.items, clients);
   const nfeSyncControls = buildNfeSyncControlsFromApi(nfeSyncByClient, clients, establishmentsByClient);
   const nfceScControls = Object.values(nfceScControlsByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
@@ -990,15 +981,13 @@ async function hydrateFromApi(options = {}) {
   state.nfceScDocuments = nfceScDocuments;
   state.cteDocuments = cteDocuments;
   state.nfeSyncControls = nfeSyncControls;
-  state.nfeAutomationSettings = Object.values(nfeAutomationByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
-  state.nfeAutomationPending = Object.values(nfeAutomationPendingByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
-  state.nfeAutomationManifestations = Object.values(nfeAutomationManifestationsByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
-  state.nfeAutomationAudit = Object.values(nfeAutomationAuditByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
+  state.nfeScControls = nfeScControls;
+  state.nfeScDocuments = nfeScDocuments;
+  state.nfeScClientMode = ['mock', 'real'].includes(nfeScStatus?.clientMode) ? nfeScStatus.clientMode : 'unknown';
   state.nfceScControls = nfceScControls;
   state.nfeDashboardStats = nfeDashboardStats;
   state.cteDashboardStats = cteDashboardStats;
   state.nfeSchedulerStatus = nfeSchedulerStatus;
-  state.nfeSefazDiagnosticMode = nfeSefazDiagnosticMode;
   state.serverResolvedAlerts = buildResolvedAlertsStoreFromApi(persistedAlertResolutions);
   state.alerts = applyResolvedAlertState(alerts);
   state.establishmentsByClient = establishmentsByClient;
@@ -1699,14 +1688,6 @@ function onDocumentClick(event) {
       void stopNfeSefazDiagnosticMode();
       return;
     }
-    case 'nfe-automation-revoke': {
-      void revokeNfeAutomationAuthorization({
-        clienteId: actionNode.getAttribute('data-client-id'),
-        estabelecimentoId: actionNode.getAttribute('data-establishment-id'),
-        ambiente: actionNode.getAttribute('data-ambiente')
-      });
-      return;
-    }
     case 'nfe-download-by-key-global': {
       void runNfeDownloadByKey();
       return;
@@ -2007,28 +1988,6 @@ function onDocumentClick(event) {
         return;
       }
       void downloadNfeDanfeById(nfeId);
-      return;
-    }
-    case 'nfe-manifestacao-open': {
-      const nfeId = actionNode.getAttribute('data-nfe-id');
-      if (nfeId && state.auth.user?.role === 'admin') {
-        openModal({ kind: 'nfe-manifestacao', nfeId });
-      }
-      return;
-    }
-    case 'nfe-manifestacao-retry': {
-      const nfeId = actionNode.getAttribute('data-nfe-id');
-      const current = findNfeById(nfeId);
-      if (current && state.auth.user?.role === 'admin') {
-        openModal({ kind: 'nfe-manifestacao', nfeId: current.id });
-      }
-      return;
-    }
-    case 'nfe-query-full-xml': {
-      const nfeId = actionNode.getAttribute('data-nfe-id');
-      if (nfeId && state.auth.user?.role === 'admin') {
-        void queryFullNfeXmlByKey(nfeId);
-      }
       return;
     }
     case 'nfe-select': {
@@ -2556,12 +2515,6 @@ function onDocumentSubmit(event) {
     return;
   }
 
-  if (target.matches('[data-nfe-automation-setting]')) {
-    event.preventDefault();
-    void submitNfeAutomationSettingForm(target);
-    return;
-  }
-
   switch (target.id) {
     case 'authLoginForm': {
       event.preventDefault();
@@ -2624,19 +2577,9 @@ function onDocumentSubmit(event) {
       void submitNfeDominioImportForm(target);
       return;
     }
-    case 'nfeSefazCpfImportForm': {
+    case 'nfeScManualSearchForm': {
       event.preventDefault();
-      void submitNfeSefazCpfImportForm(target);
-      return;
-    }
-    case 'nfeSefazDiagnosticStartForm': {
-      event.preventDefault();
-      void submitNfeSefazDiagnosticStartForm(target);
-      return;
-    }
-    case 'nfeSefazDiagnosticRunForm': {
-      event.preventDefault();
-      void submitNfeSefazDiagnosticRunForm(target);
+      void submitNfeScManualSearchForm(target);
       return;
     }
     case 'nfceScConfigureForm': {
@@ -2682,11 +2625,6 @@ function onDocumentSubmit(event) {
     case 'nfeRecoverByKeyForm': {
       event.preventDefault();
       void submitNfeRecoverByKeyForm(target);
-      return;
-    }
-    case 'nfeManifestacaoForm': {
-      event.preventDefault();
-      void submitNfeManifestacaoForm(target);
       return;
     }
     case 'eventsSyncCompaniesForm': {
@@ -2846,12 +2784,9 @@ function onDocumentChange(event) {
   }
 
   const action = target.getAttribute('data-action');
-  if (action === 'nfe-sefaz-cpf-producer') {
-    updateNfeSefazCpfCertificateOptions(String(target.value || ''));
-    return;
-  }
-  if (action === 'nfe-sefaz-diagnostic-control') {
-    updateSefazDiagnosticCertificateOptions(String(target.value || ''));
+  if (action === 'nfe-sc-manual-producer') {
+    state.nfeScManualSelectedProducerKey = String(target.value || '');
+    render();
     return;
   }
   if (action === 'nfce-sc-client-select' || action === 'nfce-sc-establishment-select') {
@@ -4920,874 +4855,227 @@ async function monitorNfceScControl(controlId, clienteId) {
   }
 }
 
-function getNfeSefazCpfProducers(controls = state.nfeSyncControls) {
-  const eligibleClientIds = new Set(getNfeEligibleClients().map((client) => client.id));
-  const producersByKey = new Map();
-  (Array.isArray(controls) ? controls : []).forEach((control) => {
-    const cpf = normalizeDigits(control?.cnpjConsulta || '');
-    if (
-      !eligibleClientIds.has(control?.clientId) ||
-      cpf.length !== 11 ||
-      !['ativo', 'erro_api'].includes(control?.status)
-    ) {
-      return;
-    }
-    const key = [control.clientId, control.estabelecimentoId, cpf].join('|');
-    if (!producersByKey.has(key)) {
-      producersByKey.set(key, {
-        key,
-        controleId: control.id,
-        clientId: control.clientId,
-        cliente: control.cliente || 'Cliente nao identificado',
-        estabelecimentoId: control.estabelecimentoId,
-        estabelecimento: control.estabelecimento || 'Estabelecimento',
-        cnpjConsulta: cpf
+function getNfeScManualProducers() {
+  const producers = [];
+  for (const client of getNfeEligibleClients()) {
+    const establishments = state.establishmentsByClient?.[client.id];
+    for (const establishment of Array.isArray(establishments) ? establishments : []) {
+      const cpf = normalizeDigits(establishment?.cnpj || '');
+      if (establishment?.ativo === false || cpf.length !== 11) continue;
+      producers.push({
+        key: `${client.id}|${establishment.id}`,
+        clientId: client.id,
+        cliente: client.razaoSocial || 'Cliente',
+        estabelecimentoId: establishment.id,
+        estabelecimento: establishment.razaoSocial || establishment.municipioNome || 'Estabelecimento',
+        cpf
       });
     }
-  });
-  return Array.from(producersByKey.values()).sort((left, right) =>
+  }
+  return producers.sort((left, right) =>
     `${left.cliente} ${left.estabelecimento}`.localeCompare(`${right.cliente} ${right.estabelecimento}`, 'pt-BR')
   );
 }
 
-function getNfeSefazCpfProducerCertificates(producer) {
-  if (!producer) {
-    return [];
-  }
+function getNfeScManualCertificates(producer) {
+  if (!producer) return [];
   return (state.certificates || []).filter((certificate) => {
-    if (!certificate.ativo || ['Vencido', 'Arquivo ausente'].includes(certificate.status) || certificate.arquivoDisponivel === false) {
-      return false;
-    }
-    const holder = normalizeDigits(certificate.cnpj || '');
-    const sameEstablishment =
-      certificate.clientId === producer.clientId && certificate.estabelecimentoId === producer.estabelecimentoId;
-    const sameCpf =
-      holder === producer.cnpjConsulta &&
-      (!certificate.clientId || certificate.clientId === producer.clientId) &&
+    if (
+      !certificate.ativo ||
+      certificate.tipo !== 'A1' ||
+      ['Vencido', 'Arquivo ausente'].includes(certificate.status) ||
+      certificate.arquivoDisponivel === false
+    ) return false;
+    return (!certificate.clientId || certificate.clientId === producer.clientId) &&
       (!certificate.estabelecimentoId || certificate.estabelecimentoId === producer.estabelecimentoId);
-    return sameEstablishment || sameCpf;
   });
 }
 
-function renderNfeSefazCpfCertificateOptions(producerKey, producers = getNfeSefazCpfProducers()) {
-  const producer = producers.find((item) => item.controleId === producerKey);
-  const certificates = getNfeSefazCpfProducerCertificates(producer);
-  const labels = certificates.reduce((result, certificate) => {
-    const holder = certificate.cnpj ? ` - Titular ${formatCpfCnpj(certificate.cnpj)}` : '';
-    result[certificate.id] = `${certificate.apelido || 'Certificado'}${holder}`;
-    return result;
-  }, {});
-  const placeholder = !producer
-    ? 'Selecione primeiro o produtor'
-    : certificates.length
-      ? 'Selecione o certificado do produtor'
-      : 'Nenhum certificado disponivel para este produtor';
-  return renderOptions(certificates.map((certificate) => certificate.id), '', labels, placeholder);
+function renderNfeScManualCertificateOptions(producerKey, producers = getNfeScManualProducers()) {
+  const producer = producers.find((item) => item.key === producerKey);
+  const certificates = getNfeScManualCertificates(producer);
+  return [
+    `<option value="">${producer ? (certificates.length ? 'Selecione o certificado A1' : 'Nenhum certificado A1 disponivel neste escopo') : 'Selecione primeiro o produtor'}</option>`,
+    ...certificates.map((certificate) => {
+      const scope = certificate.clientId ? 'vinculado ao cliente' : 'compartilhado';
+      return `<option value="${escapeHtml(certificate.id)}">${escapeHtml(`${certificate.apelido || 'Certificado'} · ${scope}`)}</option>`;
+    })
+  ].join('');
 }
 
-function updateNfeSefazCpfCertificateOptions(producerKey) {
-  const form = document.querySelector('#nfeSefazCpfImportForm');
-  const certificateSelect = form?.elements?.certificadoId;
-  if (!form || !certificateSelect) {
+function renderNfeScManualPanel() {
+  const producers = getNfeScManualProducers();
+  const selectedProducer = producers.find((item) => item.key === state.nfeScManualSelectedProducerKey) || producers[0] || null;
+  const certificates = getNfeScManualCertificates(selectedProducer);
+  const modeNotice = state.nfeScClientMode === 'real'
+    ? '<div class="table-state" role="status">Modo real configurado. A consulta sera enviada somente apos confirmacao do vinculo de autorizacao do contabilista na SEF/SC.</div>'
+    : state.nfeScClientMode === 'mock'
+      ? '<div class="table-state" role="status">Modo mock ativo: nenhuma consulta e enviada a SEF/SC e nenhum certificado real e usado. Para uma consulta oficial, configure o cliente real no servidor e confirme o vinculo do contabilista na SEF/SC.</div>'
+      : '<div class="table-state error" role="status">Nao foi possivel confirmar o modo do servico SEF/SC. Atualize a pagina antes de iniciar a busca.</div>';  const selectedControl = selectedProducer
+    ? state.nfeScControls.find((control) => control.estabelecimentoId === selectedProducer.estabelecimentoId && control.clienteId === selectedProducer.clientId)
+    : null;
+  const relatedDocuments = selectedProducer
+    ? state.nfeScDocuments.filter((item) => item.clienteId === selectedProducer.clientId && item.documento?.estabelecimentoId === selectedProducer.estabelecimentoId)
+    : [];
+  const documentRows = relatedDocuments.slice(0, 100).map((item) => {
+    const document = item.document || {};
+    const schema = String(item.schemaDoc || '');
+    const availability = /^resnfe/i.test(schema)
+      ? 'Resumo pendente'
+      : document.xmlCompletoDisponivel
+        ? 'XML completo'
+        : /procEventoNFe/i.test(schema)
+          ? 'Evento NF-e'
+          : 'Documento sem XML completo';
+    return `<tr><td>${escapeHtml(item.nsu || '—')}</td><td>${escapeHtml(document.numeroNfe || '—')}</td><td>${escapeHtml(schema || 'schema desconhecido')}</td><td>${availability}</td><td>${escapeHtml(document.dataEmissao ? formatDateTime(document.dataEmissao) : '—')}</td></tr>`;
+  }).join('');
+  const selectedKey = selectedProducer?.key || '';
+  const nextAllowedAt = selectedControl?.proximaExecucao ? Date.parse(selectedControl.proximaExecucao) : 0;
+  const isRateLimited = Number.isFinite(nextAllowedAt) && nextAllowedAt > Date.now();
+  const isAdmin = state.auth.user?.role === 'admin';
+  return `<div style="display:grid;gap:14px;">
+    ${modeNotice}
+    ${!isAdmin ? '<div class="table-state error">A busca manual SEF/SC está disponível somente para administradores.</div>' : ''}
+    ${state.nfeScManualMessage ? `<div class="table-state ${state.nfeScManualBusy ? 'loading' : ''}" role="status" aria-live="polite">${escapeHtml(state.nfeScManualMessage)}</div>` : ''}
+    <form id="nfeScManualSearchForm" class="form-grid">
+      <label class="field" style="grid-column:span 2;">Produtor rural (CPF)
+        <select name="producerKey" data-action="nfe-sc-manual-producer" required>${[
+          ...(!producers.length ? ['<option value="">Nenhum estabelecimento com CPF cadastrado</option>'] : []),
+          ...producers.map((producer) => `<option value="${escapeHtml(producer.key)}" ${producer.key === selectedKey ? 'selected' : ''}>${escapeHtml(`${producer.cliente} · ${producer.estabelecimento} · CPF ${formatCpfCnpj(producer.cpf)}`)}</option>`)
+        ].join('')}</select>
+      </label>
+      <label class="field" style="grid-column:span 2;">Certificado A1 do contabilista
+        <select name="certificadoId" required ${certificates.length ? '' : 'disabled'}>${renderNfeScManualCertificateOptions(selectedKey, producers)}</select>
+      </label>
+      <label class="field">Papel do contribuinte na NF-e
+        <select name="indAtor">${renderOptions([1, 2, 3, 9], '3', { 1: 'Emitente', 2: 'Destinatario', 3: 'Emitente ou destinatario', 9: 'Emitente e destinatario' })}</select>
+      </label>
+      <label class="field-inline" style="grid-column:span 3;"><input type="checkbox" name="autorizacaoContabilistaConfirmada" value="true" required /><span>Confirmo que o vínculo do titular deste certificado A1 com o produtor foi verificado e autorizado pela SEF/SC.</span></label>
+      <p class="card-subtitle" style="grid-column:span 3;margin:0;">A consulta avança pelo cursor NSU independente da distribuição nacional. O certificado pode ter titular diferente do produtor; a SEF/SC valida o vínculo cadastral em cada consulta. Esta busca não registra Ciência nem manifesta automaticamente a operação.</p>
+      <div class="stack-actions" style="grid-column:span 3;justify-content:flex-start;">
+        <button class="btn primary" type="submit" ${!isAdmin || state.nfeScClientMode === 'unknown' || !producers.length || !certificates.length || state.nfeScManualBusy || isRateLimited ? 'disabled' : ''}>${state.nfeScManualBusy ? 'Consultando SEF/SC…' : isRateLimited ? 'Aguardar intervalo SEF/SC' : 'Buscar NF-e modelo 55'}</button>
+      </div>
+    </form>
+    ${selectedControl ? `<div class="card" style="padding:12px;"><div class="progress-meta"><strong>Estado da busca manual</strong>${statusBadge(selectedControl.status || 'ativo', toneFromNfeSyncStatus(selectedControl.status))}</div><p class="card-subtitle" style="margin:8px 0 0;">NSU salvo: ${escapeHtml(String(selectedControl.ultimoNsuConsultado || '0'))} · ${escapeHtml(selectedControl.ultimaMensagem || 'Sem consulta registrada')}${selectedControl.proximaExecucao ? ` · Próxima consulta permitida: ${escapeHtml(formatDateTime(selectedControl.proximaExecucao))}` : ''}</p></div>` : ''}
+    <div class="card" style="padding:0;overflow:auto;">
+      <div style="padding:12px 14px;"><strong>Documentos recebidos da SEF/SC</strong><span class="row-sub">${relatedDocuments.length} documento(s) neste estabelecimento. Resumos permanecem identificados como pendentes e não contam como XML completo.</span></div>
+      <table><thead><tr><th>NSU SEF/SC</th><th>Número</th><th>Tipo recebido</th><th>Disponibilidade</th><th>Emissão</th></tr></thead><tbody>
+        ${documentRows || '<tr><td colspan="5" class="row-sub">Nenhum documento da SEF/SC foi importado para este produtor ainda.</td></tr>'}
+      </tbody></table>
+    </div>
+    <p class="card-subtitle" style="margin:0;">Ocultar ou separar um resNFe na tela não faz a SEF/SC ou o Ambiente Nacional entregar o XML completo. A disponibilidade depende do serviço e da autorização aplicável ao contribuinte.</p>
+  </div>`;
+}
+
+async function refreshNfeScClientData(clienteId) {
+  const [controls, documents] = await Promise.all([
+    apiRequest(`/nfe-sc/controles?clienteId=${encodeURIComponent(clienteId)}`, { cache: false }),
+    apiRequest(`/nfe-sc/documentos?clienteId=${encodeURIComponent(clienteId)}&page=1&pageSize=100`, { cache: false })
+  ]);
+  state.nfeScControls = [
+    ...state.nfeScControls.filter((control) => control.clienteId !== clienteId),
+    ...(Array.isArray(controls) ? controls : [])
+  ];
+  state.nfeScDocuments = [
+    ...state.nfeScDocuments.filter((item) => item.clienteId !== clienteId),
+    ...(Array.isArray(documents?.items) ? documents.items.map((item) => ({ ...item, clienteId })) : [])
+  ];
+}
+
+async function monitorNfeScManualControl(controlId, clienteId) {
+  if (!controlId || !clienteId || activeNfeScManualMonitors.has(controlId)) return;
+  activeNfeScManualMonitors.add(controlId);
+  try {
+    while (true) {
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+      await refreshNfeScClientData(clienteId);
+      const control = state.nfeScControls.find((item) => item.id === controlId);
+      if (!control || control.status !== 'processando') {
+        state.nfeScManualBusy = false;
+        state.nfeScManualMessage = control?.ultimaMensagem || 'Consulta SEF/SC concluída.';
+        render();
+        if (control?.status === 'ativo' && Number(control.totalDocumentosBaixados || 0) > 0) {
+          pushToast('Busca SEF/SC concluída; documentos recebidos estão listados abaixo.', 'success');
+        } else if (control?.status === 'ativo') {
+          pushToast('Consulta SEF/SC concluída sem documentos novos.', 'info');
+        } else if (control) {
+          pushToast(control.ultimaMensagem || 'A consulta SEF/SC terminou com erro.', 'error');
+        }
+        return;
+      }
+      state.nfeScManualMessage = control.ultimaMensagem || 'Consulta SEF/SC em processamento…';
+      render();
+    }
+  } catch (error) {
+    state.nfeScManualBusy = false;
+    state.nfeScManualMessage = `Não foi possível acompanhar a consulta SEF/SC: ${toErrorMessage(error)}`;
+    render();
+  } finally {
+    activeNfeScManualMonitors.delete(controlId);
+  }
+}
+
+async function submitNfeScManualSearchForm(form) {
+  if (state.nfeScManualBusy) return;
+  if (!['mock', 'real'].includes(state.nfeScClientMode)) {
+    state.nfeScManualMessage = 'Nao foi possivel confirmar o modo do servico SEF/SC. Atualize a pagina antes de iniciar a busca.';
+    render();
     return;
   }
-  const producers = getNfeSefazCpfProducers();
-  const certificates = getNfeSefazCpfProducerCertificates(producers.find((producer) => producer.controleId === producerKey));
-  certificateSelect.innerHTML = renderNfeSefazCpfCertificateOptions(producerKey, producers);
-  certificateSelect.disabled = certificates.length === 0;
-  const submitButton = form.querySelector('button[type="submit"]');
-  if (submitButton) {
-    submitButton.disabled = certificates.length === 0;
+  const data = new FormData(form);
+  const [clienteId, estabelecimentoId] = String(data.get('producerKey') || '').split('|');
+  const certificadoId = String(data.get('certificadoId') || '').trim();
+  if (!clienteId || !estabelecimentoId || !certificadoId || data.get('autorizacaoContabilistaConfirmada') !== 'true') {
+    state.nfeScManualMessage = 'Selecione o produtor, o certificado A1 e confirme o vínculo autorizado na SEF/SC.';
+    render();
+    return;
+  }
+
+  state.nfeScManualBusy = true;
+  state.nfeScManualMessage = state.nfeScClientMode === 'real'
+    ? 'Configurando a consulta manual da SEF/SC…'
+    : 'Executando a simulação local; nenhuma requisição será enviada à SEF/SC.';
+  render();
+  try {
+    const control = await apiRequest('/nfe-sc/controles', {
+      method: 'POST',
+      body: {
+        clienteId,
+        estabelecimentoId,
+        certificadoId,
+        ambiente: 'producao',
+        indAtor: Number(data.get('indAtor') || 3),
+        autorizacaoContabilistaConfirmada: true
+      }
+    });
+    state.nfeScManualMessage = state.nfeScClientMode === 'real'
+      ? 'Consulta enviada à SEF/SC; aguardando retorno.'
+      : 'Consulta de teste iniciada. O modo mock não acessa a SEF/SC nem usa o certificado selecionado.';
+    render();
+    await apiRequest(`/nfe-sc/controles/${encodeURIComponent(control.id)}/rodar-agora`, {
+      method: 'POST',
+      body: { clienteId }
+    });
+    await monitorNfeScManualControl(control.id, clienteId);
+  } catch (error) {
+    state.nfeScManualBusy = false;
+    state.nfeScManualMessage = `A busca manual SEF/SC não foi concluída: ${toErrorMessage(error)}`;
+    render();
   }
 }
 
 function renderNfeSyncPage() {
-  const nfeEligibleClients = getNfeEligibleClients();
-  const eligibleClientIds = new Set(nfeEligibleClients.map((client) => client.id));
-  const eligibleCpfControls = state.nfeSyncControls.filter(
-    (control) =>
-      eligibleClientIds.has(control.clientId) &&
-      normalizeDigits(control.cnpjConsulta || '').length === 11 &&
-      ['ativo', 'erro_api'].includes(control.status)
-  );
-  const eligibleCpfControlCount = eligibleCpfControls.length;
-  const eligibleCpfProducers = getNfeSefazCpfProducers(eligibleCpfControls);
-  const controls = getFilteredNfeSyncControls();
-  const clientRows = getNfeSyncClientRows(controls, nfeEligibleClients);
-  const syncStats = getNfeSyncStats();
-  const statusOptions = uniqueValues(controls.map((control) => control.status));
-  const ambienteOptions = uniqueValues(controls.map((control) => control.ambiente));
-  const nfeStats = getNfeDashboardStats();
-  const sourceMode = getNfeSourceMode();
-  const queueLabel =
-    sourceMode === 'dominio'
-      ? 'prontos para importar XMLs'
-      : sourceMode === 'dominio_chave'
-        ? 'prontos para download por chave'
-        : 'buscando NF-e futuras';
-  const errorLabel =
-    sourceMode === 'dominio'
-      ? 'revisar conexao, cursor ou XMLs'
-      : sourceMode === 'dominio_chave'
-        ? 'revisar certificado, Dominio ou consulta por chave'
-        : 'revisar certificado ou API';
-  const overviewDescription =
-    sourceMode === 'dominio'
-      ? 'Ligue a importacao por cliente ou em lote. CNPJs consultam a Dominio; produtores cadastrados por CPF consultam a distribuicao DF-e da SEFAZ.'
-      : sourceMode === 'dominio_chave'
-        ? 'CNPJs usam o catalogo da Dominio para o download manual por chave; produtores cadastrados por CPF consultam a distribuicao DF-e da SEFAZ.'
-        : 'Ligue a busca por cliente ou em lote. O sistema captura o NSU atual como base e segue apenas com as proximas NF-e de entrada e saida.';
-  const simplifiedSubtitle =
-    sourceMode === 'dominio'
-      ? 'Ao ligar a importacao, estabelecimentos com CNPJ acompanham novos XMLs na Dominio; estabelecimentos com CPF usam a distribuicao oficial da SEFAZ.'
-      : sourceMode === 'dominio_chave'
-        ? 'Ao ligar a rotina, estabelecimentos com CNPJ usam o catalogo da Dominio para download manual por chave e os estabelecimentos com CPF consultam a SEFAZ.'
-        : 'Ao ligar a busca, o backend resolve os estabelecimentos ativos do cliente, captura o NSU atual e passa a sincronizar apenas as proximas NF-e.';
-  const detailSubtitle =
-    sourceMode === 'dominio'
-      ? 'Visao detalhada dos controles: CNPJs importam XMLs da Dominio e CPFs sincronizam pela distribuicao DF-e da SEFAZ.'
-      : sourceMode === 'dominio_chave'
-        ? 'Visao detalhada dos controles: CNPJs varrem o catalogo da Dominio e CPFs sincronizam pela distribuicao DF-e da SEFAZ.'
-        : 'Visao detalhada dos controles realmente mantidos pelo backend para distribuicao DF-e.';
-  const clientCursorLabel = sourceMode === 'distribuicao' ? 'Ult. NSU base' : 'Ult. cursor';
-  const controlCursorLabel = sourceMode === 'distribuicao' ? 'Ult. NSU consultado' : 'Cursor atual';
-  const controlProgressLabel = sourceMode === 'distribuicao' ? 'Ult. NSU distribuido' : 'Cursor salvo';
-  const controlMaxLabel = sourceMode === 'distribuicao' ? 'Max NSU' : 'Maior catalogo';
-  const globalRunLabel =
-    sourceMode === 'dominio' ? 'Rodar importacao agora' : sourceMode === 'dominio_chave' ? 'Download por chave' : 'Rodar busca agora';
-  const clientEnableLabel = sourceMode === 'dominio' ? 'Ligar importacao' : 'Ligar busca';
-  const rowRunLabel =
-    sourceMode === 'dominio' ? 'Importar agora' : sourceMode === 'dominio_chave' ? 'Download por chave' : 'Rodar agora';
-  const globalRunAction = sourceMode === 'dominio_chave' ? 'nfe-download-by-key-global' : 'nfe-run-now';
-  const rowRunAction = sourceMode === 'dominio_chave' ? 'nfe-download-by-key-control' : 'nfe-sync-run-control';
-  const canUseManualDownloadByKey = canUseNfeManualDownloadByKey();
-  const dominioManualImportContent =
-    sourceMode === 'dominio'
-      ? `
-        <form id="nfeDominioImportForm" class="form-grid">
-          <label class="field">
-            Cliente
-            <select name="clienteId">${renderOptions([NFE_DOMINIO_ALL_CLIENTS_OPTION, ...nfeEligibleClients.map((client) => client.id)], NFE_DOMINIO_ALL_CLIENTS_OPTION, {
-              [NFE_DOMINIO_ALL_CLIENTS_OPTION]: 'Todas as empresas',
-              ...mapClientOptions()
-            })}</select>
-          </label>
-          <label class="field">
-            Ambiente
-            <select name="ambiente">${renderOptions(['producao', 'homologacao'], 'producao', {
-              producao: 'Producao',
-              homologacao: 'Homologacao'
-            })}</select>
-          </label>
-          <label class="field">
-            Limite
-            <input name="limit" type="number" min="1" max="5000" value="200" />
-          </label>
-          <label class="field">
-            Emissao inicial
-            <input name="dataEmissaoInicio" type="date" />
-          </label>
-          <label class="field">
-            Emissao final
-            <input name="dataEmissaoFim" type="date" />
-          </label>
-          <label class="field">
-            Numero
-            <input name="numeroDocumento" placeholder="99656206" />
-          </label>
-          <label class="field">
-            Fornecedor
-            <input name="fornecedor" placeholder="VR BENEFICIOS" />
-          </label>
-          <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
-            <button class="btn primary" type="submit">Importar XMLs da Dominio</button>
-          </div>
-        </form>
-        <p class="card-subtitle" style="margin:12px 0 0;">Use este formulario para buscar um periodo especifico diretamente no catalogo da Dominio. O resultado aparece no painel da ultima execucao logo acima.</p>
-      `
-      : '';
-  const filtersContent = `
-    <form id="nfeSyncFilterForm" class="form-grid">
-      <label class="field">
-        Cliente
-        <select name="cliente">${renderOptions(['Todos', ...nfeEligibleClients.map((client) => client.id)], state.filters.nfeSync.cliente, mapClientOptions())}</select>
-      </label>
-      <label class="field">
-        Status
-        <select name="status">${renderOptions(['Todos', ...statusOptions], state.filters.nfeSync.status, mapNfeSyncStatusOptions(statusOptions))}</select>
-      </label>
-      <label class="field">
-        Ambiente
-        <select name="ambiente">${renderOptions(['Todos', ...ambienteOptions], state.filters.nfeSync.ambiente, {
-          Todos: 'Todos',
-          producao: 'Producao',
-          homologacao: 'Homologacao'
-        })}</select>
-      </label>
-      <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
-        <button class="btn primary" type="submit">Filtrar</button>
-        <button class="btn secondary" type="button" data-action="nfe-sync-clear-filters">Limpar</button>
-      </div>
-    </form>
-  `;
-  const sefazCpfSearchContent = `
-    <form id="nfeSefazCpfImportForm" class="form-grid">
-      <label class="field">
-        Produtor rural
-        <select name="controleId" data-action="nfe-sefaz-cpf-producer" required>${renderOptions(
-          eligibleCpfProducers.map((producer) => producer.controleId),
-          '',
-          eligibleCpfProducers.reduce((labels, producer) => {
-            labels[producer.controleId] = `${producer.cliente} - ${producer.estabelecimento} - CPF ${formatCpfCnpj(producer.cnpjConsulta)}`;
-            return labels;
-          }, {}),
-          eligibleCpfProducers.length ? 'Selecione o produtor' : 'Nenhum produtor CPF elegivel'
-        )}</select>
-      </label>
-      <label class="field">
-        Certificado digital do produtor
-        <select name="certificadoId" required disabled>${renderNfeSefazCpfCertificateOptions('', eligibleCpfProducers)}</select>
-      </label>
-      <label class="field">
-        Emissao inicial (consulta historica, ultimos 90 dias)
-        <input name="dataEmissaoInicio" type="date" />
-      </label>
-      <label class="field">
-        Emissao final (consulta historica)
-        <input name="dataEmissaoFim" type="date" />
-      </label>
-      <label class="field">
-        Ambiente
-        <select name="ambiente">${renderOptions(['todos', 'producao', 'homologacao'], 'producao', {
-          todos: 'Todos os ambientes',
-          producao: 'Producao',
-          homologacao: 'Homologacao'
-        })}</select>
-      </label>
-      <div class="stack-actions" style="grid-column: span 3; justify-content:flex-start; align-items:flex-end;">
-        <button class="btn primary" type="submit" disabled>Buscar NF-e da SEFAZ</button>
-      </div>
-    </form>
-    <p class="card-subtitle" style="margin:12px 0 0;">Sem datas, a busca incremental continua do ultimo NSU salvo. Com as duas datas, a recuperacao historica consulta NSUs pontuais, salva somente notas do periodo e preserva esse cursor; cada execucao consulta ate 15 NSUs e pode ser retomada apos uma hora, com limite de 10.000 NSUs por recuperacao. A SEFAZ disponibiliza consultas pontuais por ate 90 dias.</p>
-  `;
-  const simplifiedContent = `
-    <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
-      <div>
-        <p class="card-subtitle">${escapeHtml(simplifiedSubtitle)}</p>
-      </div>
-      <button class="btn secondary" type="button" data-action="nfe-sync-refresh">Atualizar painel</button>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Cliente</th>
-            <th>CNPJ</th>
-            <th>Controles</th>
-            <th>Ultima execucao</th>
-            <th>${escapeHtml(clientCursorLabel)}</th>
-            <th>Documentos</th>
-            <th>Status</th>
-            <th>Acoes</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${renderTableRowsOrState({
-            key: 'nfeSync',
-            colSpan: 8,
-            rowsHtml: clientRows
-              .map((row) => {
-                const nfeSyncClientMenuId = `nfe-sync-client:${row.clientId}`;
-                const nfeSyncClientMenuItems = [
-                  { label: clientEnableLabel, action: 'nfe-client-enable', attrs: { 'client-id': row.clientId } },
-                  { label: 'Pausar', action: 'nfe-client-pause', attrs: { 'client-id': row.clientId } },
-                  { label: 'Ver XMLs', action: 'nfe-open-client-xmls', attrs: { 'client-id': row.clientId } }
-                ];
-                return `<tr data-row-actions-menu-id="${escapeHtml(nfeSyncClientMenuId)}">
-                  <td>${escapeHtml(row.cliente)}</td>
-                  <td>${escapeHtml(formatCnpj(row.cnpj))}</td>
-                  <td>${escapeHtml(String(row.totalControles))}</td>
-                  <td>${escapeHtml(formatDateTime(row.ultimaExecucao))}</td>
-                  <td>${escapeHtml(row.ultimoNsuConsultado)}</td>
-                  <td>${escapeHtml(String(row.totalDocumentosBaixados))}</td>
-                  <td>
-                    ${statusBadge(row.statusLabel, row.statusTone)}
-                    <span class="row-sub">${escapeHtml(row.statusDetail)}</span>
-                  </td>
-                  <td>${renderRowActionsMenu(nfeSyncClientMenuId, nfeSyncClientMenuItems)}</td>
-                </tr>`;
-              })
-              .join(''),
-            emptyMessage: 'Nenhum cliente encontrado para os filtros informados.'
-          })}
-        </tbody>
-      </table>
-    </div>
-  `;
-  const technicalContent = `
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Cliente</th>
-            <th>Estabelecimento</th>
-            <th>CPF/CNPJ consultado</th>
-            <th>Ambiente</th>
-            <th>${escapeHtml(controlCursorLabel)}</th>
-            <th>${escapeHtml(controlProgressLabel)}</th>
-            <th>${escapeHtml(controlMaxLabel)}</th>
-            <th>Documentos</th>
-            <th>Ultima execucao</th>
-            <th>Status</th>
-            <th>Acoes</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${renderTableRowsOrState({
-            key: 'nfeSync',
-            colSpan: 11,
-            rowsHtml: controls
-              .map((control) => {
-                const nfeControlMenuId = `nfe-sync-control:${control.clientId}:${control.estabelecimentoId}:${control.ambiente}`;
-                const nfeControlMenuItems = [
-                  {
-                    label: rowRunLabel,
-                    action: rowRunAction,
-                    attrs: { 'client-id': control.clientId, 'estabelecimento-id': control.estabelecimentoId, ambiente: control.ambiente }
-                  },
-                  canUseManualDownloadByKey && sourceMode !== 'dominio_chave'
-                    ? {
-                        label: 'Download por chave',
-                        action: 'nfe-download-by-key-control',
-                        attrs: { 'client-id': control.clientId, 'estabelecimento-id': control.estabelecimentoId, ambiente: control.ambiente }
-                      }
-                    : null,
-                  { label: 'Pausar', action: 'nfe-sync-pause-control', attrs: { 'client-id': control.clientId, ambiente: control.ambiente } }
-                ];
-                return `<tr data-row-actions-menu-id="${escapeHtml(nfeControlMenuId)}">
-                  <td>${escapeHtml(control.cliente)}</td>
-                  <td>
-                    <span class="row-title">${escapeHtml(control.estabelecimento)}</span>
-                    <span class="row-sub">${escapeHtml(formatCnpj(control.cnpjEstabelecimento))}</span>
-                  </td>
-                  <td>${escapeHtml(formatCpfCnpj(control.cnpjConsulta))}</td>
-                  <td>${statusBadge(mapNfeAmbienteLabel(control.ambiente), control.ambiente === 'producao' ? 'success' : 'warning')}</td>
-                  <td>${escapeHtml(control.ultimoNsuConsultado)}</td>
-                  <td>${escapeHtml(control.ultimoNsuDistribuido)}</td>
-                  <td>${escapeHtml(control.maxNsu)}</td>
-                  <td>${escapeHtml(String(control.totalDocumentosBaixados))}</td>
-                  <td>${escapeHtml(formatDateTime(control.ultimaExecucao))}</td>
-                  <td>
-                    ${statusBadge(mapNfeSyncStatusLabel(control.status), toneFromNfeSyncStatus(control.status))}
-                    <span class="row-sub">${escapeHtml(displayNfeControlMessage(control.ultimaMensagem) || '-')}</span>
-                  </td>
-                  <td>${renderRowActionsMenu(nfeControlMenuId, nfeControlMenuItems)}</td>
-                </tr>`;
-              })
-              .join(''),
-            emptyMessage: 'Nenhum controle de sincronizacao de NF-e encontrado.'
-          })}
-        </tbody>
-      </table>
-    </div>
-  `;
-
   return `
     <section class="page-section">
       ${renderPageHeader({
-        title: 'Buscas NF-e',
-        description: overviewDescription,
-        actions: [
-          actionButton('Ligar todos os clientes', 'nfe-enable-auto-search', 'primary'),
-          actionButton(globalRunLabel, globalRunAction, 'secondary'),
-          ...(canUseManualDownloadByKey && sourceMode !== 'dominio_chave'
-            ? [actionButton('Download por chave', 'nfe-download-by-key-global', 'secondary')]
-            : []),
-          actionButton('Pausar todos', 'nfe-disable-auto-search', 'secondary')
-        ]
+        title: 'Busca manual NF-e · SEF/SC',
+        description: 'Consulta manual da distribuição estadual de NF-e modelo 55 para produtor rural CPF, com cursor NSU independente.',
+        actions: []
       })}
-
-      ${renderSearchTypeSwitcher('nfe')}
-
-      <section class="stats-grid">
-        ${statCard('search', 'Controles ativos', String(syncStats.ativos), queueLabel, 'success')}
-        ${statCard('clock', 'Controles pausados', String(syncStats.pausados), 'aguardando retomada', 'neutral')}
-        ${statCard('alert', 'Controles com erro', String(syncStats.erros), errorLabel, 'danger')}
-        ${statCard('file', 'NF-e no banco', String(nfeStats.totalNfe), `${nfeStats.xmlsCompletos} XML(s) completos`, 'info')}
-      </section>
-
-      ${renderNfeManualRunStatusCard()}
-
-      ${renderCollapsibleCard({
-        sectionKey: 'scheduler',
-        title: 'Rotina automatica NF-e',
-        subtitle: 'Status da origem da captura e dos ciclos automaticos do backend.',
-        contentHtml: renderNfeSchedulerStatusCard(),
-        defaultOpen: true
-      })}
-      ${state.auth.user?.role === 'admin' ? renderCollapsibleCard({
-        sectionKey: 'sefazDiagnostic',
-        title: 'Diagnostico manual SEFAZ',
-        subtitle: 'Sessao temporaria restrita a administradores; pausa o ciclo automatico do controle selecionado e respeita bloqueios oficiais.',
-        contentHtml: renderNfeSefazDiagnosticPanel(),
-        defaultOpen: true
-      }) : ''}
-      ${state.auth.user?.role === 'admin' ? renderCollapsibleCard({
-        sectionKey: 'nfeAutomation',
-        title: 'Obtenção automática de XMLs recebidos',
-        subtitle: 'Autorização e acompanhamento por estabelecimento CPF/CNPJ e ambiente. Ciência automática vem desligada.',
-        contentHtml: renderNfeAutomationPanel(),
-        defaultOpen: true
-      }) : ''}
-      ${
-        sourceMode !== 'distribuicao' || state.nfeLastRunReport
-          ? renderCollapsibleCard({
-              sectionKey: 'failures',
-              title: sourceMode === 'dominio' ? 'Painel de falhas da importacao' : 'Painel da ultima execucao manual',
-              subtitle: 'Mostra a ultima execucao manual feita nesta tela.',
-              contentHtml: renderNfeLastRunPanel(),
-              defaultOpen: false
-            })
-          : ''
-      }
-      ${renderCollapsibleCard({
-        sectionKey: 'sefazCpf',
-        title: 'Importacao manual da SEFAZ',
-        subtitle: `Importa documentos pela distribuicao DF-e somente para controles cadastrados por CPF. ${eligibleCpfControlCount} controle(s) CPF elegivel(is).`,
-        contentHtml: sefazCpfSearchContent,
-        defaultOpen: true
-      })}
-      ${
-        sourceMode === 'dominio'
-          ? renderCollapsibleCard({
-              sectionKey: 'manualImport',
-              title: 'Importacao manual da Dominio',
-              subtitle: 'Busca XMLs por cliente e periodo usando o endpoint direto da Dominio.',
-              contentHtml: dominioManualImportContent,
-              defaultOpen: true
-            })
-          : ''
-      }
-      ${renderCollapsibleCard({
-        sectionKey: 'filters',
-        title: 'Filtros dos controles',
-        subtitle: 'Use os filtros apenas quando precisar refinar a listagem.',
-        contentHtml: filtersContent,
-        defaultOpen: false,
-        className: 'filter-card'
-      })}
-      ${renderCollapsibleCard({
-        sectionKey: 'simplified',
-        title: 'Busca simplificada por cliente',
-        subtitle: simplifiedSubtitle,
-        contentHtml: simplifiedContent,
-        defaultOpen: true
-      })}
-      ${renderCollapsibleCard({
-        sectionKey: 'technical',
-        title: 'Detalhamento tecnico por estabelecimento',
-        subtitle: detailSubtitle,
-        contentHtml: technicalContent,
-        defaultOpen: false
-      })}
+      ${renderNfeScManualPanel()}
     </section>
   `;
 }
-
-function renderNfeLastRunPanel() {
-  const report = state.nfeLastRunReport;
-  const cpfDiagnostics = report?.cpfDiagnostics;
-  const sefazDiagnostics = Array.isArray(report?.sefazDiagnostics) ? report.sefazDiagnostics : [];
-  const rows = Array.isArray(report?.executionDetails)
-    ? report.executionDetails
-    : Array.isArray(report?.failureDetails)
-      ? report.failureDetails
-      : [];
-  const importSummary = normalizeDominioImportSummary(report?.importSummary);
-
-  if (!report) {
-    return `
-      <p class="card-subtitle" style="margin:0;">O painel e preenchido quando voce roda a importacao manualmente pela tela de Buscas NF-e.</p>
-    `;
-  }
-
-  return `
-    <div style="display:flex; justify-content:space-between; gap:12px; flex-wrap:wrap; margin-bottom:12px;">
-      <p class="card-subtitle" style="margin:0;">Ultima execucao manual em ${escapeHtml(formatDateTime(report.executedAt))}.</p>
-      <div class="progress-meta">
-        <span>Controles: <strong>${escapeHtml(String(report.processed || 0))}</strong></span>
-        <span>XMLs salvos: <strong>${escapeHtml(String(report.documentsSaved || 0))}</strong></span>
-        <span>Falhas: <strong>${escapeHtml(String(report.failures || 0))}</strong></span>
-      </div>
-    </div>
-    ${renderNfeSefazDiagnostics(sefazDiagnostics)}
-    ${
-      cpfDiagnostics
-        ? `<div class="card-subtitle" style="margin:0 0 14px; padding:12px; border:1px solid var(--line); border-radius:10px;">
-            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
-              ${statusBadge(mapSefazCpfDiagnosticStatus(cpfDiagnostics.status), toneFromSefazCpfDiagnosticStatus(cpfDiagnostics.status))}
-              <strong>Consulta ${escapeHtml(cpfDiagnostics.method || 'SEFAZ')}</strong>
-              <span>Período ${escapeHtml(cpfDiagnostics.dataEmissaoInicio || '-')} a ${escapeHtml(cpfDiagnostics.dataEmissaoFim || '-')}</span>
-            </div>
-            <div>Consultas: ${escapeHtml(String(cpfDiagnostics.consultasExecutadas ?? 0))} · NSU consultado: ${escapeHtml(cpfDiagnostics.nsuAtual || '-')} · Retoma em: ${escapeHtml(cpfDiagnostics.proximoNsu || 'concluído')}</div>
-            ${cpfDiagnostics.disponivelApos ? `<div>Disponível após: ${escapeHtml(formatDateTime(cpfDiagnostics.disponivelApos))}</div>` : ''}
-            <div>Documentos retornados: ${escapeHtml(String(cpfDiagnostics.documentosRetornados ?? 0))} · XMLs completos: ${escapeHtml(String(cpfDiagnostics.xmlsCompletos ?? 0))} · Resumos: ${escapeHtml(String(cpfDiagnostics.resumos ?? 0))} · Eventos: ${escapeHtml(String(cpfDiagnostics.eventos ?? 0))}</div>
-            <div>Itens importados: ${escapeHtml(String(cpfDiagnostics.documentosImportados ?? 0))} · Fora do período: ${escapeHtml(String(cpfDiagnostics.foraDoPeriodo ?? 0))} · Com falha: ${escapeHtml(String(cpfDiagnostics.descartadosComFalha ?? 0))} · cStat: ${escapeHtml(cpfDiagnostics.cStat || '-')}</div>
-            ${cpfDiagnostics.xMotivo ? `<div>Motivo SEFAZ: ${escapeHtml(cpfDiagnostics.xMotivo)}</div>` : ''}
-          </div>`
-        : ''
-    }
-    ${renderDominioImportSummaryPanel(importSummary, {
-      subtitle: 'O total bruto inclui documentos e eventos importados pela Dominio.'
-    })}
-    <div class="table-actions" style="margin-bottom:12px;">
-      <button class="btn secondary" type="button" data-action="nfe-last-run-import-all" ${rows.length ? '' : 'disabled'}>Importar todos os itens</button>
-    </div>
-    ${
-      rows.length
-        ? `<div class="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Cliente</th>
-                    <th>Estabelecimento</th>
-                    <th>CPF/CNPJ consultado</th>
-                    <th>Status</th>
-                    <th>ID catalogo</th>
-                    <th>Numero NF-e</th>
-                    <th>Chave</th>
-                    <th>Origem</th>
-                    <th>Mensagem</th>
-                    <th>Acoes</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${rows
-                    .map((row) => {
-                      const client = findClientById(row.clientId);
-                      const establishment = findEstablishmentById(row.estabelecimentoId);
-                      const canHandleXml =
-                        row.kind === 'documento' &&
-                        Number(row.catalogoId) > 0 &&
-                        row.status !== 'ignorado_xml_nao_fiscal';
-                      const lastRunMenuId = `nfe-last-run:${row.clientId}:${row.catalogoId}`;
-                      const lastRunMenuItems = canHandleXml
-                        ? [
-                            { label: 'Ver XML', action: 'nfe-last-run-view-xml', attrs: { 'client-id': row.clientId, 'catalogo-id': row.catalogoId } },
-                            { label: 'Importar', action: 'nfe-last-run-import-item', attrs: { 'client-id': row.clientId, 'catalogo-id': row.catalogoId } }
-                          ]
-                        : [];
-                      return `<tr ${canHandleXml ? `data-row-actions-menu-id="${escapeHtml(lastRunMenuId)}"` : ''}>
-                        <td>${escapeHtml(client?.razaoSocial || row.clientId || '-')}</td>
-                        <td>${escapeHtml(
-                          establishment?.razaoSocial || establishment?.municipioNome || row.estabelecimentoId || '-'
-                        )}</td>
-                        <td>${escapeHtml(formatCpfCnpj(row.cnpjConsulta || ''))}</td>
-                        <td>${statusBadge(mapNfeRunItemStatusLabel(row.status), toneFromNfeRunItemStatus(row.status))}</td>
-                        <td>${escapeHtml(row.catalogoId ? String(row.catalogoId) : '-')}</td>
-                        <td>${escapeHtml(formatNfeFailureNumber(row))}</td>
-                        <td>${escapeHtml(row.chaveAcesso || '-')}</td>
-                        <td>${escapeHtml(row.kind === 'controle' ? 'Controle' : 'XML')}</td>
-                        <td>${escapeHtml(row.mensagem || '-')}</td>
-                        <td>
-                          ${canHandleXml ? renderRowActionsMenu(lastRunMenuId, lastRunMenuItems) : '<span class="row-sub">-</span>'}
-                        </td>
-                      </tr>`;
-                    })
-                    .join('')}
-                </tbody>
-              </table>
-            </div>`
-        : report.failures > 0
-          ? `<div class="table-state error">A execucao registrou falhas, mas o backend nao retornou detalhes suficientes para listar cada item.</div>`
-          : `<div class="table-state">Nenhum item detalhado foi retornado para a ultima importacao manual.</div>`
-    }
-  `;
-}
-
-function renderNfeManualRunStatusCard() {
-  const status = state.nfeManualRunStatus;
-  if (!status) {
-    return `<article class="card" style="box-shadow:none; border-style:dashed;"><strong>Status da última consulta NF-e</strong><p class="card-subtitle" style="margin:6px 0 0;">Nenhuma consulta manual foi executada nesta sessão.</p></article>`;
-  }
-  const tone = status.status === 'erro' ? 'danger' : status.status === 'parcial' || status.status === 'consultando' ? 'warning' : status.status === 'novos' ? 'success' : 'neutral';
-  const report = status.report;
-  return `<article class="card" style="box-shadow:none; border-style:dashed;" role="status" aria-live="polite">
-    <div class="progress-meta"><strong>Status da última consulta NF-e</strong>${statusBadge(status.label, tone)}</div>
-    <p class="card-subtitle" style="margin:6px 0;">${escapeHtml(status.message)}</p>
-    <span class="row-sub">${escapeHtml(formatDateTime(status.startedAt))}${status.finishedAt ? ` · Finalizada ${escapeHtml(formatDateTime(status.finishedAt))}` : ''}</span>
-    ${report ? `<div class="progress-meta" style="margin-top:8px; flex-wrap:wrap;"><span>Requisição real enviada: <strong>${report.requestReal ? 'sim' : report.requestUnconfirmed ? 'sem confirmação' : 'não'}</strong></span><span>Recebidos: <strong>${escapeHtml(String(report.documentsReceived))}</strong></span><span>Resumos: <strong>${escapeHtml(String(report.summaries))}</strong></span><span>XMLs completos: <strong>${escapeHtml(String(report.fullXmls))}</strong></span><span>Novos: <strong>${escapeHtml(String(report.documentsNew))}</strong></span><span>Atualizados: <strong>${escapeHtml(String(report.documentsUpdated))}</strong></span><span>Duplicados: <strong>${escapeHtml(String(report.documentsDuplicates))}</strong></span><span>Falhas: <strong>${escapeHtml(String(report.failures))}</strong></span></div>` : ''}
-  </article>`;
-}
-
-function nfeAutomationStatusLabel(status) {
-  const labels = {
-    aguardando_ciencia: 'Ciência aguardando autorização',
-    ciencia_aguardando_envio: 'Ciência aguardando envio',
-    ciencia_registrada: 'Ciência registrada',
-    aguardando_evento_distribuicao: 'Ciencia registrada; aguardando distribuicao do evento',
-    autorizacao_revogada: 'Autorizacao revogada',
-    resumo_nao_autorizado: 'Resumo sem situacao autorizada',
-    aguardando_xml: 'Aguardando XML completo',
-    aguardando_sefaz: 'Aguardando liberação da SEFAZ',
-    xml_disponivel: 'XML disponível',
-    manifestacao_rejeitada: 'Manifestação rejeitada',
-    resultado_indeterminado: 'Resultado indeterminado',
-    certificado_pendente: 'Certificado pendente — motivo anterior não classificado',
-    certificado_nao_cadastrado: 'Certificado não cadastrado',
-    certificado_inativo: 'Certificado inativo',
-    certificado_expirado: 'Certificado expirado',
-    certificado_incompativel: 'Certificado incompatível com o estabelecimento',
-    certificado_indisponivel: 'Certificado indisponível para o serviço',
-    ciencia_fora_prazo: 'Ciência fora do prazo',
-    erro_processamento: 'Erro de processamento'
-  };
-  return labels[status] || status || 'Pendente';
-}
-
-function nfeAutomationNextAction(item) {
-  if (item.proximaTentativaEm) return `Reavaliar automaticamente em ${formatDateTime(item.proximaTentativaEm)}`;
-  const actions = {
-    aguardando_ciencia: 'Conceder autorização expressa para Ciência neste estabelecimento e ambiente.',
-    ciencia_aguardando_envio: 'O worker enviará a Ciência no próximo ciclo automático.',
-    certificado_pendente: 'Verificar o motivo do certificado e corrigir o cadastro.',
-    certificado_nao_cadastrado: 'Cadastrar certificado digital do titular do estabelecimento.',
-    certificado_inativo: 'Ativar ou substituir o certificado do titular.',
-    certificado_expirado: 'Renovar e cadastrar certificado válido do titular.',
-    certificado_incompativel: 'Vincular certificado cujo titular corresponda ao CPF/CNPJ do estabelecimento.',
-    certificado_indisponivel: 'Restaurar o arquivo protegido ou corrigir acesso/senha do certificado.',
-    ciencia_fora_prazo: 'A Ciência não foi enviada; verificar os prazos oficiais.',
-    autorizacao_revogada: 'Conceder novamente autorização expressa, se desejado.',
-    manifestacao_rejeitada: 'Analisar o retorno oficial da SEFAZ antes de qualquer nova ação.',
-    resultado_indeterminado: 'Verificar o evento no portal oficial; o NotaSync bloqueia reenvio automático.',
-    aguardando_evento_distribuicao: 'Aguardar a distribuição oficial do evento.',
-    ciencia_registrada: 'Aguardar ou habilitar a recuperação automática do XML.',
-    aguardando_xml: 'Aguardar a próxima consulta permitida ao serviço oficial.',
-    aguardando_sefaz: 'Aguardar o fim do bloqueio oficial antes de nova consulta.',
-    erro_processamento: 'Revisar o motivo registrado antes de retomar a tarefa.'
-  };
-  return actions[item.status] || 'Consultar o motivo registrado e definir a próxima ação.';
-}
-
-function renderNfeAutomationPanel() {
-  const allRows = Array.isArray(state.nfeAutomationSettings) ? state.nfeAutomationSettings : [];
-  const rows = allRows.filter((row) => String(row.actorType || '').toUpperCase() === 'CPF');
-  const cpfEstablishmentIds = new Set(rows.map((row) => row.estabelecimentoId));
-  const pending = (Array.isArray(state.nfeAutomationPending) ? state.nfeAutomationPending : [])
-    .filter((item) => cpfEstablishmentIds.has(item.estabelecimentoId));
-  const manifests = (Array.isArray(state.nfeAutomationManifestations) ? state.nfeAutomationManifestations : [])
-    .filter((item) => cpfEstablishmentIds.has(item.estabelecimentoId));
-  const audit = (Array.isArray(state.nfeAutomationAudit) ? state.nfeAutomationAudit : [])
-    .filter((item) => cpfEstablishmentIds.has(item.estabelecimentoId));
-  const pendingRows = pending.filter((item) => item.status !== 'xml_disponivel').slice(0, 100);
-  return `<div style="display:grid; gap:14px;">
-    ${state.nfeAutomationMessage ? `<div class="table-state ${state.nfeAutomationBusy ? 'loading' : ''}" role="status" aria-live="polite">${escapeHtml(state.nfeAutomationMessage)}</div>` : ''}
-    <div class="card-subtitle" style="margin:0; padding:12px; border:1px solid var(--line); border-radius:10px;">
-      Ciência da Operação é opcional e apenas registra que o destinatário tomou conhecimento da NF-e; não confirma o recebimento da mercadoria. O evento tem efeito fiscal e não é conclusivo. Após Ciência, o destinatário deve avaliar e registrar sua manifestação conclusiva dentro do prazo aplicável (atualmente até 90 dias da autorização). O NotaSync nunca confirma, desconhece ou declara operação não realizada automaticamente.
-    </div>
-    ${rows.length ? rows.map((row, index) => {
-      const establishment = findEstablishmentById(row.estabelecimentoId);
-      const settingAudit = audit.filter((entry) => entry.estabelecimentoId === row.estabelecimentoId).length;
-      return `<form class="card nfe-automation-setting" id="nfeAutomationForm-${index}" data-nfe-automation-setting style="padding:14px;">
-        <input type="hidden" name="clienteId" value="${escapeHtml(row.clienteId)}" />
-        <input type="hidden" name="estabelecimentoId" value="${escapeHtml(row.estabelecimentoId)}" />
-        <input type="hidden" name="ambiente" value="${escapeHtml(row.ambiente)}" />
-        <div class="progress-meta"><strong>${escapeHtml(establishment?.razaoSocial || establishment?.municipioNome || 'Estabelecimento')} · ${escapeHtml(row.actorType || 'CPF/CNPJ')} · ${escapeHtml(row.ambiente)}</strong>${statusBadge(row.autorizacaoAtiva ? 'Autorização ativa' : 'Sem autorização', row.autorizacaoAtiva ? 'success' : 'neutral')}</div>
-        <div class="form-grid two" style="margin-top:12px;">
-          <label class="field-inline"><input type="checkbox" name="cienciaAutomatica" ${row.cienciaAutomatica ? 'checked' : ''} /><span>Registrar Ciência automaticamente para novas NF-e elegíveis</span></label>
-          <label class="field-inline"><input type="checkbox" name="recuperacaoXmlAutomatica" ${row.recuperacaoXmlAutomatica ? 'checked' : ''} /><span>Consultar e recuperar XML completo automaticamente</span></label>
-          <label class="field-inline" style="grid-column:span 2;"><input type="checkbox" name="confirmacaoExpressa" value="true" /><span>Confirmo expressamente a autorização desta automação para este estabelecimento e ambiente.</span></label>
-          <div class="stack-actions" style="grid-column:span 2; justify-content:flex-start;">
-            <button class="btn primary" type="submit" ${state.nfeAutomationBusy ? 'disabled' : ''}>Salvar configuração</button>
-            ${row.autorizacaoAtiva ? `<button class="btn secondary" type="button" data-action="nfe-automation-revoke" data-client-id="${escapeHtml(row.clienteId)}" data-establishment-id="${escapeHtml(row.estabelecimentoId)}" data-ambiente="${escapeHtml(row.ambiente)}" ${state.nfeAutomationBusy ? 'disabled' : ''}>Revogar autorização para novas Ciências</button>` : ''}
-          </div>
-        </div>
-        <p class="row-sub" style="margin:8px 0 0;">Autorização registrada: ${escapeHtml(row.autorizadaEm ? formatDateTime(row.autorizadaEm) : 'não concedida')}${row.autorizadaPor ? ` por ${escapeHtml(row.autorizadaPor)}` : ''} · Termo ${escapeHtml(row.versaoTermo || '—')} · Alterações auditadas: ${settingAudit} · Manifestações aceitas: ${manifests.filter((item) => item.estabelecimentoId === row.estabelecimentoId && ['registrada', 'registrada_sem_vinculo', 'recebida_da_distribuicao'].includes(item.status)).length}</p>
-      </form>`;
-    }).join('') : `<div class="table-state">Nenhum controle NF-e ativo de CPF encontrado para configurar. Ative a sincronização do produtor rural primeiro.</div>`}
-    <div class="card" style="padding:0; overflow:auto;">
-      <div style="padding:12px 14px;"><strong>Documentos aguardando Ciência ou XML completo</strong><span class="row-sub">${pendingRows.length} item(ns) nesta lista${pending.length > pendingRows.length ? ` · ${pending.length - pendingRows.length} XML(s) já disponíveis` : ''}.</span></div>
-      <table><thead><tr><th>Estabelecimento</th><th>NF-e</th><th>Ambiente</th><th>Status</th><th>Última tentativa</th><th>Próxima ação</th><th>SEFAZ</th><th></th></tr></thead><tbody>
-        ${pendingRows.length ? pendingRows.map((item) => {
-          const establishment = findEstablishmentById(item.estabelecimentoId);
-          const document = state.nfeDocuments.find((doc) => doc.apiNfeId === item.documentoId);
-          return `<tr><td>${escapeHtml(establishment?.razaoSocial || 'Estabelecimento')}</td><td>${escapeHtml(item.numeroNfe || '—')}<span class="row-sub">${escapeHtml(item.schemaDoc || 'sem schema')}</span></td><td>${escapeHtml(item.ambiente)}</td><td>${escapeHtml(nfeAutomationStatusLabel(item.status))}</td><td>${escapeHtml(item.ultimaTentativaEm ? formatDateTime(item.ultimaTentativaEm) : 'nenhuma tentativa')}</td><td>${escapeHtml(nfeAutomationNextAction(item))}</td><td>${escapeHtml([item.cStat, item.xMotivo].filter(Boolean).join(' · ') || '—')}</td><td>${document ? `<button class="btn secondary" type="button" data-action="nfe-details" data-nfe-id="${escapeHtml(document.id)}">Abrir nota</button>` : ''}</td></tr>`;
-        }).join('') : `<tr><td colspan="8" class="row-sub">Não há pendências de obtenção automática neste escopo.</td></tr>`}
-      </tbody></table>
-    </div>
-  </div>`;
-}
-
-function getSefazDiagnosticControls() {
-  const eligibleClientIds = new Set(getNfeEligibleClients().map((client) => client.id));
-  return (state.nfeSyncControls || []).filter((control) =>
-    eligibleClientIds.has(control.clientId) &&
-    ['ativo', 'erro_api'].includes(control.status) &&
-    [11, 14].includes(normalizeDigits(control.cnpjConsulta || '').length)
-  );
-}
-
-function getSefazDiagnosticCertificates(control) {
-  if (!control) return [];
-  return (state.certificates || []).filter((certificate) => {
-    if (!certificate.ativo || ['Vencido', 'Arquivo ausente'].includes(certificate.status) || certificate.arquivoDisponivel === false) {
-      return false;
-    }
-    const holder = normalizeDigits(certificate.cnpj || '');
-    const sameEstablishment = certificate.clientId === control.clientId && certificate.estabelecimentoId === control.estabelecimentoId;
-    const sameHolder = holder === normalizeDigits(control.cnpjConsulta || '') &&
-      (!certificate.clientId || certificate.clientId === control.clientId) &&
-      (!certificate.estabelecimentoId || certificate.estabelecimentoId === control.estabelecimentoId);
-    return sameEstablishment || sameHolder;
-  });
-}
-
-function renderSefazDiagnosticControlOptions(selectedId = '') {
-  const controls = getSefazDiagnosticControls();
-  const labels = controls.reduce((result, control) => {
-    result[control.id] = `${control.cliente} · ${control.estabelecimento} · ${formatCpfCnpj(control.cnpjConsulta)} · ${String(control.ambiente || 'producao').toUpperCase()}`;
-    return result;
-  }, {});
-  return renderOptions(controls.map((control) => control.id), selectedId, labels, 'Selecione o controle');
-}
-
-function renderSefazDiagnosticCertificateOptions(controlId, selectedId = '') {
-  const control = getSefazDiagnosticControls().find((item) => item.id === controlId);
-  const certificates = getSefazDiagnosticCertificates(control);
-  const labels = certificates.reduce((result, certificate) => {
-    result[certificate.id] = `${certificate.apelido || 'Certificado'}${certificate.cnpj ? ` · titular ${formatCpfCnpj(certificate.cnpj)}` : ''}`;
-    return result;
-  }, {});
-  return renderOptions(certificates.map((certificate) => certificate.id), selectedId, labels, control ? 'Selecione o certificado vinculado' : 'Selecione primeiro o controle');
-}
-
-function renderNfeSefazDiagnosticPanel() {
-  const mode = state.nfeSefazDiagnosticMode || { active: false, clientMode: 'mock' };
-  const controls = getSefazDiagnosticControls();
-  const selectedControl = controls.find((control) => control.id === mode.controlId) || null;
-  const result = state.nfeSefazDiagnosticResult?.diagnostic || null;
-  const processingResultLabels = {
-    concluido: 'Concluido',
-    sem_documentos: 'Sem documentos disponiveis',
-    aguardando_sefaz: 'Aguardando SEFAZ',
-    falha: 'Falha'
-  };
-  const clientModeLabel = mode.clientMode === 'real' ? 'cliente real SEFAZ' : 'mock';
-  return `
-    <div style="display:grid; gap:14px;">
-      <div class="card-subtitle" style="margin:0; padding:12px; border:1px solid var(--line); border-radius:10px;">
-        <strong>Cliente ativo:</strong> ${escapeHtml(clientModeLabel)}.
-        ${mode.active ? `<div>Diagnostico ativo ate ${escapeHtml(formatDateTime(mode.expiresAt))}; consultas automaticas deste controle estao suspensas.</div>` : '<div>A sessao dura 30 minutos e pode ser encerrada antes. O modo so ativa quando o cliente real estiver configurado.</div>'}
-      </div>
-      ${state.nfeSefazDiagnosticMessage ? `<div role="status" aria-live="polite" class="card-subtitle" style="margin:0; padding:10px; border-radius:8px; background:var(--surface-muted);">${escapeHtml(state.nfeSefazDiagnosticMessage)}</div>` : ''}
-      ${!mode.active ? `
-        <form id="nfeSefazDiagnosticStartForm" class="form-grid">
-          <label>Controle de CPF/CNPJ
-            <select name="controleId" data-action="nfe-sefaz-diagnostic-control" required>${renderSefazDiagnosticControlOptions()}</select>
-          </label>
-          <label>Certificado ativo
-            <select name="certificadoId" required>${renderSefazDiagnosticCertificateOptions('')}</select>
-          </label>
-          <div class="form-actions"><button class="btn primary" type="submit" ${mode.clientMode === 'real' && controls.length && !state.nfeSefazDiagnosticBusy ? '' : 'disabled'}>Ativar modo por 30 minutos</button></div>
-        </form>
-      ` : `
-        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-          <strong>${escapeHtml(selectedControl ? `${selectedControl.cliente} · ${selectedControl.estabelecimento} · ${formatCpfCnpj(selectedControl.cnpjConsulta)}` : 'Controle selecionado')}</strong>
-          <button class="btn secondary" type="button" data-action="nfe-sefaz-diagnostic-stop" ${state.nfeSefazDiagnosticBusy ? 'disabled' : ''}>Encerrar diagnostico</button>
-        </div>
-        <form id="nfeSefazDiagnosticRunForm" class="form-grid">
-          <label>Tipo de consulta
-            <select name="method"><option value="distNSU">Distribuicao incremental (distNSU)</option><option value="consChNFe">Consulta pontual por chave (consChNFe)</option></select>
-          </label>
-          <label>Chave de acesso para consChNFe
-            <input name="chaveAcesso" inputmode="numeric" maxlength="44" pattern="\\d{44}" placeholder="44 digitos" />
-          </label>
-          <label style="display:flex; align-items:center; gap:8px;">
-            <input type="checkbox" name="persistir" value="true" />
-            Persistir documentos retornados por consChNFe
-          </label>
-          <p class="card-subtitle" style="grid-column:1/-1; margin:0;">distNSU usa o cursor salvo, persiste os documentos retornados e so avanca o cursor quando todos forem processados sem descarte. consChNFe nao altera o cursor. Cada consNSU/consChNFe respeita o limite de 20 por hora e bloqueios oficiais.</p>
-          <div class="form-actions"><button class="btn primary" type="submit" ${state.nfeSefazDiagnosticBusy ? 'disabled' : ''}>Executar uma consulta</button></div>
-        </form>
-      `}
-      ${result ? `
-        <div class="card-subtitle" style="margin:0; padding:12px; border:1px solid var(--line); border-radius:10px;">
-          <strong>Ultimo retorno</strong>
-          <div>Consulta ${escapeHtml(result.method || '-')} · ${escapeHtml(result.clientMode || '-')} · ${escapeHtml(result.actorType || '-')} · HTTP ${escapeHtml(String(result.httpStatus ?? '-'))}</div>
-          <div>cStat ${escapeHtml(result.cStat || '-')} · ${escapeHtml(result.xMotivo || 'Sem xMotivo')}</div>
-          <div>NSU ${escapeHtml(result.ultNsu || '-')} · maxNSU ${escapeHtml(result.maxNsu || '-')}</div>
-          <div>Recebidos ${escapeHtml(String(result.documentsReceived ?? 0))} · decodificados ${escapeHtml(String(result.documentsDecoded ?? 0))} · descartados ${escapeHtml(String(result.docZipDiscarded ?? 0))}</div>
-          <div>Schemas ${escapeHtml(Object.entries(result.schemaCounts || {}).map(([schema, count]) => `${schema}: ${count}`).join(' · ') || '-')}</div>
-          <div>Tentados ${escapeHtml(String(result.documentsAttempted ?? 0))} · processados ${escapeHtml(String(result.documentsProcessed ?? 0))} · falhas ${escapeHtml(String(result.documentsFailed ?? 0))} · nao tentados ${escapeHtml(String(result.documentsNotAttempted ?? 0))}</div>
-          <div>Resultado ${escapeHtml(processingResultLabels[result.processingResult] || 'Indisponivel')} · etapa ${escapeHtml(result.failureStage || 'concluida')} · cursor avancado: ${state.nfeSefazDiagnosticResult?.cursorAdvanced ? 'sim' : 'nao'}</div>
-        </div>
-      ` : ''}
-    </div>
-  `;
-}
-
-function renderNfeSchedulerStatusCard() {
-  const scheduler = state.nfeSchedulerStatus;
-  if (!scheduler) {
-    return `
-      <p class="card-subtitle" style="margin:0;">Status do agendador ainda nao carregado do backend.</p>
-    `;
-  }
-
-  const autoSync = scheduler.autoSync || {};
-  const nightlySweep = scheduler.nightlySweep || {};
-  const sourceMode = getNfeSourceMode();
-  const autoTone = autoSync.running ? 'info' : autoSync.enabled ? 'success' : 'neutral';
-  const nightlyTone = nightlySweep.running ? 'info' : nightlySweep.enabled ? 'success' : 'neutral';
-
-  return `
-    <div class="scheduler-strip">
-      <div class="scheduler-item">
-        <div class="scheduler-heading">
-          <span class="scheduler-dot info"></span>
-          <strong>Origem da captura</strong>
-        </div>
-        ${statusBadge(sourceMode === 'dominio' ? 'Dominio (CNPJ) + SEFAZ (CPF)' : sourceMode === 'dominio_chave' ? 'Dominio + chave (CNPJ) + SEFAZ (CPF)' : 'Distribuicao DF-e', 'info')}
-        <p>${
-          sourceMode === 'dominio'
-            ? 'Controles com CNPJ importam XMLs do banco da Dominio; controles com CPF consultam a distribuicao DF-e da SEFAZ.'
-            : sourceMode === 'dominio_chave'
-              ? 'Controles com CNPJ usam o catalogo da Dominio e o download manual por chave. Controles com CPF seguem consultando a distribuicao DF-e da SEFAZ.'
-              : 'Os controles ativos consultam a distribuicao DF-e e persistem os documentos retornados.'
-        }</p>
-      </div>
-      <div class="scheduler-item">
-        <div class="scheduler-heading">
-          <span class="scheduler-dot ${autoTone}"></span>
-          <strong>Ciclo automatico NF-e</strong>
-        </div>
-        ${statusBadge(autoSync.running ? 'Executando agora' : autoSync.enabled ? 'Ativo' : 'Inativo', autoTone)}
-        <p>${
-          sourceMode === 'dominio'
-            ? 'Importa XMLs da Dominio para CNPJs e consulta a SEFAZ para CPFs em segundo plano.'
-            : sourceMode === 'dominio_chave'
-              ? 'O download por chave para CNPJs fica manual; controles CPF continuam consultando a SEFAZ em segundo plano.'
-              : 'Processa controles ativos em segundo plano sem depender de acao manual.'
-        }</p>
-        <small>Intervalo: ${escapeHtml(formatDurationMs(autoSync.intervalMs || 0))}</small>
-      </div>
-      <div class="scheduler-item">
-        <div class="scheduler-heading">
-          <span class="scheduler-dot ${nightlyTone}"></span>
-          <strong>Busca noturna NF-e</strong>
-        </div>
-        ${statusBadge(nightlySweep.running ? 'Executando agora' : nightlySweep.enabled ? 'Ativa' : 'Inativa', nightlyTone)}
-        <p>${escapeHtml(
-          nightlySweep.activeSlots?.length
-            ? `Slots ativos: ${nightlySweep.activeSlots.join(', ')}`
-            : 'Nenhum horario ativo configurado.'
-        )}</p>
-        <small>Proxima execucao: ${escapeHtml(formatDateTime(nightlySweep.nextRunAt || ''))}</small>
-      </div>
-    </div>
-  `;
-}
-
 function renderNfeDocumentsPage() {
   const docs = getFilteredNfeDocuments();
   const canShowTable =
@@ -12056,8 +11344,6 @@ function renderModal() {
       return renderCertificateNotesModal(state.modal.certId);
     case 'nfe-details':
       return renderNfeDetailsModal(state.modal.nfeId);
-    case 'nfe-manifestacao':
-      return renderNfeManifestacaoModal(state.modal.nfeId);
     case 'nfe-view':
       return renderNfeViewerModal(state.modal.nfeId);
     case 'cte-details':
@@ -12997,6 +12283,22 @@ function renderCertificatePasswordModal() {
   `;
 }
 
+async function openNfeDetails(nfeId) {
+  const doc = findNfeById(nfeId);
+  if (!doc) {
+    pushToast('NF-e nao encontrada.', 'error');
+    return;
+  }
+  if (doc.xmlCompletoDisponivel) {
+    try {
+      await ensureNfeContentLoaded(doc);
+    } catch (error) {
+      pushToast(`Nao foi possivel carregar o XML completo agora: ${toErrorMessage(error)}`, 'info');
+    }
+  }
+  openModal({ kind: 'nfe-details', nfeId });
+}
+
 function renderNfeDetailsModal(nfeId) {
   const doc = findNfeById(nfeId);
   if (!doc) {
@@ -13005,17 +12307,6 @@ function renderNfeDetailsModal(nfeId) {
   const syncEventsDisabled = state.nfeEventsSyncRunning || !canSyncNfeEvents(doc) ? 'disabled' : '';
   const danfeButton = doc.xmlCompletoDisponivel
     ? `<button class="btn secondary" data-action="nfe-download-danfe" data-nfe-id="${doc.id}">Baixar DANFE</button>`
-    : '';
-  const manifestHistory = Array.isArray(doc.manifestacaoHistory?.historico) ? doc.manifestacaoHistory.historico : [];
-  const acceptedManifestation = manifestHistory.some((item) => item.status === 'registrada' || item.status === 'recebida_da_distribuicao');
-  const isAdmin = state.auth.user?.role === 'admin';
-  const canManifest = isAdmin && doc.tipo === 'Recebida' && doc.resumoDisponivel && !doc.xmlCompletoDisponivel;
-  const canQueryFullXml = canManifest && acceptedManifestation && !doc.queryingFullXml;
-  const manifestationRows = manifestHistory.length
-    ? `<div class="table-wrap"><table><thead><tr><th>Evento</th><th>Origem</th><th>Status</th><th>cStat / motivo</th><th>Data</th></tr></thead><tbody>${manifestHistory.map((item) => `<tr><td>${escapeHtml(formatManifestacaoType(item.tipoEvento))}</td><td>${escapeHtml(item.origem || 'notasync')}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml([item.cStat, item.xMotivo].filter(Boolean).join(' - ') || '-')}</td><td>${escapeHtml(formatDateTime(item.processadoEm || item.createdAt))}</td></tr>`).join('')}</tbody></table></div>`
-    : `<p>${isAdmin ? (doc.manifestacaoHistory ? 'Nenhuma manifestação registrada ou recebida para esta NF-e.' : 'Histórico de manifestação ainda não consultado.') : 'Histórico e ações de manifestação disponíveis para administradores.'}</p>`;
-  const manifestationPanel = doc.tipo === 'Recebida' && doc.resumoDisponivel
-    ? `<section style="margin-top:18px;"><h4>Disponibilidade e manifestação</h4><p>${escapeHtml(isAdmin ? formatManifestacaoStatus(doc.manifestacaoHistory?.status) : 'Apenas um resumo está armazenado. Histórico e ações de manifestação disponíveis para administradores.')}</p>${doc.manifestacaoHistory?.error ? `<p class="text-danger">${escapeHtml(doc.manifestacaoHistory.error)}</p>` : ''}${manifestationRows}${canManifest ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;"><button class="btn secondary" data-action="nfe-manifestacao-open" data-nfe-id="${doc.id}">Registrar manifestação</button>${canQueryFullXml ? `<button class="btn primary" data-action="nfe-query-full-xml" data-nfe-id="${doc.id}">Consultar XML disponível</button>` : ''}${doc.queryingFullXml ? '<span>Consultando chave...</span>' : ''}</div>` : ''}</section>`
     : '';
 
   return `
@@ -13049,7 +12340,6 @@ function renderNfeDetailsModal(nfeId) {
             <small style="color:var(--text-secondary); display:block; margin-bottom:8px;">Eventos vinculados</small>
             ${renderXmlEventsList(doc.eventos)}
           </div>
-          ${manifestationPanel}
         </div>
         <div class="modal-footer">
           <button class="btn secondary" data-action="nfe-sync-events" data-nfe-id="${doc.id}" ${syncEventsDisabled}>Buscar eventos</button>
@@ -16983,233 +16273,6 @@ async function runNfeSearchNow() {
   }
 }
 
-function updateSefazDiagnosticCertificateOptions(controlId) {
-  const form = document.querySelector('#nfeSefazDiagnosticStartForm');
-  const certificateSelect = form?.elements?.certificadoId;
-  if (!form || !certificateSelect) return;
-  const optionsHtml = renderSefazDiagnosticCertificateOptions(controlId);
-  certificateSelect.innerHTML = optionsHtml;
-  certificateSelect.disabled = getSefazDiagnosticCertificates(
-    getSefazDiagnosticControls().find((control) => control.id === controlId)
-  ).length === 0;
-}
-
-async function submitNfeSefazDiagnosticStartForm(form) {
-  const data = new FormData(form);
-  const controleId = String(data.get('controleId') || '').trim();
-  const certificadoId = String(data.get('certificadoId') || '').trim();
-  if (!controleId || !certificadoId || state.nfeSefazDiagnosticBusy) return;
-  state.nfeSefazDiagnosticBusy = true;
-  state.nfeSefazDiagnosticMessage = 'Ativando a sessao temporaria e pausando o ciclo automatico deste controle.';
-  render();
-  try {
-    state.nfeSefazDiagnosticMode = await apiRequest('/nfe/sync/diagnostico-sefaz/iniciar', {
-      method: 'POST',
-      body: { controleId, certificadoId }
-    });
-    state.nfeSefazDiagnosticMessage = 'Modo diagnostico ativo. As consultas automaticas deste controle estao pausadas.';
-  } catch (error) {
-    state.nfeSefazDiagnosticMessage = `Nao foi possivel ativar o diagnostico: ${toErrorMessage(error)}`;
-  } finally {
-    state.nfeSefazDiagnosticBusy = false;
-    render();
-  }
-}
-
-async function stopNfeSefazDiagnosticMode() {
-  if (state.nfeSefazDiagnosticBusy) return;
-  state.nfeSefazDiagnosticBusy = true;
-  state.nfeSefazDiagnosticMessage = 'Encerrando o modo diagnostico.';
-  render();
-  try {
-    state.nfeSefazDiagnosticMode = await apiRequest('/nfe/sync/diagnostico-sefaz/encerrar', { method: 'POST' });
-    state.nfeSefazDiagnosticMessage = 'Modo diagnostico encerrado; o agendamento automatico foi liberado para o controle.';
-  } catch (error) {
-    state.nfeSefazDiagnosticMessage = `Nao foi possivel encerrar o diagnostico: ${toErrorMessage(error)}`;
-  } finally {
-    state.nfeSefazDiagnosticBusy = false;
-    render();
-  }
-}
-
-async function submitNfeSefazDiagnosticRunForm(form) {
-  if (state.nfeSefazDiagnosticBusy) return;
-  const data = new FormData(form);
-  const method = String(data.get('method') || 'distNSU');
-  const chaveAcesso = normalizeDigits(String(data.get('chaveAcesso') || ''));
-  if (method === 'consChNFe' && chaveAcesso.length !== 44) {
-    state.nfeSefazDiagnosticMessage = 'Informe uma chave de acesso com 44 digitos para consChNFe.';
-    render();
-    return;
-  }
-  state.nfeSefazDiagnosticBusy = true;
-  state.nfeSefazDiagnosticMessage = `Executando uma consulta manual ${method}.`;
-  render();
-  try {
-    const payload = await apiRequest('/nfe/sync/diagnostico-sefaz/consultar', {
-      method: 'POST',
-      body: {
-        method,
-        ...(method === 'consChNFe' ? { chaveAcesso, persistir: data.get('persistir') === 'true' } : {})
-      },
-      timeoutMs: 10 * 60 * 1000
-    });
-    state.nfeSefazDiagnosticResult = payload;
-    const diagnostic = payload?.diagnostic || {};
-    state.nfeSefazDiagnosticMessage = `${method} retornou cStat ${diagnostic.cStat || 'indisponivel'}: ${diagnostic.xMotivo || 'sem motivo informado'}.`;
-    await refreshApiData();
-  } catch (error) {
-    state.nfeSefazDiagnosticMessage = `A consulta diagnostica falhou: ${toErrorMessage(error)}`;
-  } finally {
-    state.nfeSefazDiagnosticBusy = false;
-    render();
-  }
-}
-
-async function submitNfeSefazCpfImportForm(form) {
-  const data = new FormData(form);
-  const controleId = String(data.get('controleId') || '').trim();
-  const certificadoId = String(data.get('certificadoId') || '').trim();
-  const ambiente = String(data.get('ambiente') || 'producao').trim();
-  const dataEmissaoInicio = String(data.get('dataEmissaoInicio') || '').trim();
-  const dataEmissaoFim = String(data.get('dataEmissaoFim') || '').trim();
-  const producer = getNfeSefazCpfProducers().find((item) => item.controleId === controleId);
-  if (!producer) {
-    state.nfeSefazDiagnosticMessage = 'Selecione um produtor rural CPF elegivel para consulta.';
-    render();
-    return;
-  }
-  const certificate = state.certificates.find((item) => item.id === certificadoId);
-  if (!certificate || !getNfeSefazCpfProducerCertificates(producer).some((item) => item.id === certificate.id)) {
-    state.nfeSefazDiagnosticMessage = 'Selecione um certificado ativo vinculado ao produtor escolhido.';
-    render();
-    return;
-  }
-  if (Boolean(dataEmissaoInicio) !== Boolean(dataEmissaoFim)) {
-    state.nfeSefazDiagnosticMessage = 'Informe as duas datas para filtrar os resultados ou deixe ambas em branco.';
-    render();
-    return;
-  }
-  if (Date.parse(dataEmissaoInicio) > Date.parse(dataEmissaoFim)) {
-    state.nfeSefazDiagnosticMessage = 'A data inicial nao pode ser maior que a data final.';
-    render();
-    return;
-  }
-  if (dataEmissaoInicio && Date.parse(`${dataEmissaoInicio}T00:00:00`) < Date.now() - 90 * 24 * 60 * 60 * 1000) {
-    state.nfeSefazDiagnosticMessage = 'A recuperacao historica da SEFAZ esta disponivel apenas nos ultimos 90 dias.';
-    render();
-    return;
-  }
-
-  try {
-    state.nfeSefazDiagnosticMessage = `Consulta SEFAZ iniciada para ${producer.cliente}. O resultado ficara neste painel.`;
-    state.nfeManualRunStatus = { status: 'consultando', label: 'Consultando SEFAZ', message: `Consulta manual iniciada para ${producer.cliente}. Aguardando o retorno e o processamento dos documentos.`, startedAt: new Date().toISOString(), finishedAt: null, report: null };
-    render();
-    const result = await apiRequest('/nfe/sync/rodar-sefaz-cpf', {
-      method: 'POST',
-      body: {
-        controleId,
-        certificadoId,
-        clienteId: producer.clientId,
-        ...(dataEmissaoInicio && dataEmissaoFim ? { dataEmissaoInicio, dataEmissaoFim } : {}),
-        ...(ambiente !== 'todos' ? { ambiente } : {})
-      },
-      timeoutMs: 10 * 60 * 1000
-    });
-    state.nfeLastRunReport = buildNfeRunReport(result);
-    updateNfeManualRunStatus(result);
-    state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
-    const completion = buildSefazCpfRunToast(result);
-    state.nfeSefazDiagnosticMessage = `${completion.message} Produtor: ${producer.cliente}.`;
-    await refreshApiData();
-    if (dataEmissaoInicio && dataEmissaoFim) {
-      try {
-        const found = await searchNfeSefazCpfPeriod({ producer, ambiente, dataEmissaoInicio, dataEmissaoFim });
-        const status = result?.cpfDiagnostics?.status;
-        const partial = status === 'parcial' || status === 'aguardando_sefaz';
-        const failed = status === 'falha';
-        const noDocuments = status === 'sem_documentos';
-        const message = partial
-          ? `${found} NF-e localizadas ate agora. O ponto de retomada foi salvo para a proxima execucao agendada.`
-          : failed
-            ? `A recuperacao foi interrompida por falha tecnica. Consulte os detalhes da execucao; ${found} NF-e estao armazenadas no periodo.`
-            : noDocuments
-              ? `Nenhum documento foi retornado pela distribuicao nacional para o periodo. Consulte a disponibilidade no SAT/SC separadamente.`
-              : `${found} NF-e localizadas para o produtor no periodo informado.`;
-        state.nfeSefazDiagnosticMessage = message;
-      } catch (error) {
-        state.nfeSefazDiagnosticMessage = `A importacao SEFAZ terminou, mas nao foi possivel filtrar as NF-e pelo periodo: ${toErrorMessage(error)}`;
-      }
-    }
-    render();
-  } catch (error) {
-    const errorMessage = toErrorMessage(error);
-    updateNfeManualRunStatus(null, error);
-    const cooldownMatch = errorMessage.match(/A consulta SEFAZ esta pausada ate\s+(.+?)\s+\(horario de Brasilia\)/i);
-    if (cooldownMatch) {
-      state.nfeSefazDiagnosticMessage = `Consulta aguardando liberacao: ${cooldownMatch[1]} (horario de Brasilia). Nenhuma nova solicitacao foi enviada a SEFAZ.`;
-      render();
-      return;
-    }
-    state.nfeSefazDiagnosticMessage = `Falha na importacao manual da SEFAZ: ${errorMessage}`;
-    render();
-  }
-}
-
-async function searchNfeSefazCpfPeriod({ producer, ambiente, dataEmissaoInicio, dataEmissaoFim }) {
-  const query = new URLSearchParams({
-    clienteId: producer.clientId,
-    cnpjConsulta: producer.cnpjConsulta,
-    modelo: '55',
-    all: 'true',
-    dataInicio: `${dataEmissaoInicio}T00:00:00.000-03:00`,
-    dataFim: `${dataEmissaoFim}T23:59:59.999-03:00`
-  });
-  if (ambiente !== 'todos') {
-    query.set('ambiente', ambiente);
-  }
-
-  const payload = normalizePaginatedResponse(
-    await apiRequest(`/nfe?${query.toString()}`, { cache: false, timeoutMs: 60000 })
-  );
-  const mapped = buildNfeDocumentsFromApi(payload.items, state.clients);
-  state.filters.nfeDocs = {
-    ...state.filters.nfeDocs,
-    cliente: producer.clientId,
-    tipo: 'Todos',
-    cnpj: '',
-    cnpjConsulta: producer.cnpjConsulta,
-    numero: '',
-    chave: '',
-    emissaoInicio: dataEmissaoInicio,
-    emissaoFim: dataEmissaoFim,
-    status: 'Todos',
-    eventos: 'Todos',
-    schemaDoc: 'Todos',
-    valorMin: '',
-    valorMax: '',
-    xmlCompleto: 'Todos',
-    ambiente: ambiente === 'todos' ? 'Todos' : ambiente
-  };
-  state.selectedNfeIds = new Set();
-  state.nfeSearch = {
-    ...state.nfeSearch,
-    hasSearched: true,
-    results: getFilteredNfeDocumentsFromSource(mapped),
-    lastQuery: { ...state.filters.nfeDocs, cnpjConsulta: producer.cnpjConsulta },
-    lastSearchedAt: new Date().toISOString(),
-    page: 1,
-    pageSize: payload.pageSize,
-    total: payload.total,
-    totalPages: payload.totalPages
-  };
-  state.tableState.nfeDocs = 'data';
-  state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, mapped);
-  navigate('/xmls-nfe');
-  reportIfListingCapped('NF-e', payload);
-  return state.nfeSearch.results.length;
-}
-
 function getFilteredRuns() {
   const { periodo, cliente, municipio, status, tipo } = state.filters.runs;
   const now = Date.now();
@@ -17278,64 +16341,6 @@ async function runNfeSyncNow(payload) {
     render();
   } catch (error) {
     updateNfeManualRunStatus(null, error);
-    render();
-  }
-}
-
-async function submitNfeAutomationSettingForm(form) {
-  if (state.nfeAutomationBusy) return;
-  const data = new FormData(form);
-  const cienciaAutomatica = data.get('cienciaAutomatica') === 'on';
-  const recuperacaoXmlAutomatica = data.get('recuperacaoXmlAutomatica') === 'on';
-  const confirmacaoExpressa = data.get('confirmacaoExpressa') === 'true';
-  if (cienciaAutomatica && !confirmacaoExpressa) {
-    state.nfeAutomationMessage = 'Marque a confirmação expressa para autorizar Ciência automática neste estabelecimento e ambiente.';
-    render();
-    return;
-  }
-  state.nfeAutomationBusy = true;
-  state.nfeAutomationMessage = 'Salvando a configuração e registrando a autorização no histórico.';
-  render();
-  try {
-    await apiRequest('/nfe/automacao/configuracoes', {
-      method: 'PUT',
-      body: {
-        clienteId: String(data.get('clienteId') || ''),
-        estabelecimentoId: String(data.get('estabelecimentoId') || ''),
-        ambiente: String(data.get('ambiente') || 'producao'),
-        cienciaAutomatica,
-        recuperacaoXmlAutomatica,
-        confirmacaoExpressa,
-        versaoTermo: '2026-10-v1'
-      }
-    });
-    state.nfeAutomationMessage = 'Configuração salva e auditada para este estabelecimento e ambiente.';
-    await refreshApiData();
-  } catch (error) {
-    state.nfeAutomationMessage = `Não foi possível salvar a configuração: ${toErrorMessage(error)}`;
-  } finally {
-    state.nfeAutomationBusy = false;
-    render();
-  }
-}
-
-async function revokeNfeAutomationAuthorization({ clienteId, estabelecimentoId, ambiente }) {
-  if (state.nfeAutomationBusy || !clienteId || !estabelecimentoId || !ambiente) return;
-  if (!window.confirm('Revogar a autorização para novas Ciências automáticas neste estabelecimento? XMLs já liberados ainda podem ser recuperados se essa opção continuar ativa.')) return;
-  state.nfeAutomationBusy = true;
-  state.nfeAutomationMessage = 'Revogando a autorização para novas Ciências.';
-  render();
-  try {
-    await apiRequest('/nfe/automacao/revogar', {
-      method: 'POST',
-      body: { clienteId, estabelecimentoId, ambiente }
-    });
-    state.nfeAutomationMessage = 'Autorização revogada. Nenhuma nova Ciência automática será enviada para este escopo.';
-    await refreshApiData();
-  } catch (error) {
-    state.nfeAutomationMessage = `Não foi possível revogar a autorização: ${toErrorMessage(error)}`;
-  } finally {
-    state.nfeAutomationBusy = false;
     render();
   }
 }
@@ -26502,167 +25507,6 @@ async function openNfeViewer(nfeId) {
     openModal({ kind: 'nfe-view', nfeId });
   } catch (error) {
     pushToast(`Falha ao carregar XML da NF-e: ${toErrorMessage(error)}`, 'error');
-  }
-}
-
-async function openNfeDetails(nfeId) {
-  const doc = findNfeById(nfeId);
-  if (!doc) {
-    pushToast('NF-e nao encontrada.', 'error');
-    return;
-  }
-
-  if (doc.xmlCompletoDisponivel) {
-    try {
-      await ensureNfeContentLoaded(doc);
-    } catch (error) {
-      pushToast(`Nao foi possivel enriquecer os detalhes da NF-e agora: ${toErrorMessage(error)}`, 'info');
-    }
-  }
-
-  if (doc.apiNfeId && doc.clientId && doc.tipo === 'Recebida' && doc.resumoDisponivel && state.auth.user?.role === 'admin') {
-    try {
-      doc.manifestacaoHistory = await apiRequest(`/nfe/${encodeURIComponent(doc.apiNfeId)}/manifestacoes?clienteId=${encodeURIComponent(doc.clientId)}`);
-    } catch (error) {
-      doc.manifestacaoHistory = { historico: [], error: toErrorMessage(error) };
-    }
-  }
-
-  openModal({ kind: 'nfe-details', nfeId });
-}
-
-function formatManifestacaoType(tipoEvento) {
-  const labels = {
-    '210200': 'Confirmação da Operação',
-    '210210': 'Ciência da Operação',
-    '210220': 'Desconhecimento da Operação',
-    '210240': 'Operação não Realizada'
-  };
-  return labels[String(tipoEvento || '')] || String(tipoEvento || 'Manifestação');
-}
-
-function formatManifestacaoStatus(status) {
-  const labels = {
-    xml_completo_disponivel: 'XML completo disponível.',
-    aguardando_disponibilizacao: 'Manifestacao aceita; o XML pode ser consultado manualmente ou recuperado automaticamente se habilitado.',
-    resumo_disponivel: 'Apenas o resumo esta armazenado. Ciencia automatica depende de autorizacao ativa para este estabelecimento.',
-    sem_xml: 'Nenhum arquivo XML armazenado.'
-  };
-  return labels[String(status || '')] || 'Status de disponibilidade não informado.';
-}
-
-function renderNfeManifestacaoModal(nfeId) {
-  const doc = findNfeById(nfeId);
-  if (!doc || state.auth.user?.role !== 'admin' || !doc.apiNfeId || !doc.clientId || !doc.estabelecimentoId) return '';
-  const submitting = Boolean(state.modal.submitting);
-  const result = state.modal.result;
-  const eventHistory = Array.isArray(doc.manifestacaoHistory?.historico) ? doc.manifestacaoHistory.historico : [];
-  const acceptedHistory = eventHistory.filter((item) => ['registrada', 'registrada_sem_vinculo', 'recebida_da_distribuicao'].includes(item.status));
-  const priorFinal = acceptedHistory.some((item) => ['210200', '210220', '210240'].includes(item.tipoEvento));
-  const registeredCodes = new Set(acceptedHistory.map((item) => String(item.tipoEvento)));
-  const resultMessage = result
-    ? `<div class="alert ${result.status === 'registrada' ? 'success' : result.status === 'registrada_sem_vinculo' ? 'warning' : 'danger'}"><strong>${escapeHtml(result.status)}</strong>${result.cStat ? ` · cStat ${escapeHtml(result.cStat)}` : ''}${result.xMotivo ? `<br>${escapeHtml(result.xMotivo)}` : ''}${result.status === 'falha_local' ? '<br>A validação local falhou antes do envio; nenhum evento foi transmitido.' : ''}${result.status === 'resultado_indeterminado' ? '<br>Verifique o evento no portal oficial antes de tentar novamente.' : ''}</div>`
-    : '';
-  return `
-    <div class="overlay" data-action="overlay-close"><div class="modal" role="dialog" aria-modal="true">
-      <div class="modal-header"><h3 class="modal-title">Manifestação do destinatário</h3><p class="modal-subtitle">NF-e ${escapeHtml(doc.numeroNfe || doc.chaveAcesso)} · ${escapeHtml(doc.cliente)}</p></div>
-      <form id="nfeManifestacaoForm" class="modal-body" data-nfe-id="${escapeHtml(doc.id)}">
-        <label class="field">Evento
-          <select name="tipo" required ${submitting || result ? 'disabled' : ''}>
-            <option value="ciencia_operacao" ${registeredCodes.has('210210') || priorFinal ? 'disabled' : ''}>Ciência da Operação — opcional e não conclusiva</option>
-            <option value="confirmacao_operacao" ${registeredCodes.has('210200') && !priorFinal ? 'disabled' : ''}>Confirmação da Operação — confirma que a operação ocorreu</option>
-            <option value="desconhecimento_operacao" ${registeredCodes.has('210220') && !priorFinal ? 'disabled' : ''}>Desconhecimento da Operação — declara que não reconhece a operação</option>
-            <option value="operacao_nao_realizada" ${registeredCodes.has('210240') && !priorFinal ? 'disabled' : ''}>Operação não Realizada — exige justificativa</option>
-          </select>
-        </label>
-        <label class="field">Justificativa de Operação não Realizada (mínimo 15 caracteres)
-          <textarea name="justificativa" maxlength="255" rows="3" ${submitting || result ? 'disabled' : ''}></textarea>
-        </label>
-        <p>Confirmação da Operação tem efeito jurídico e pode impedir o cancelamento pelo emitente. Não a use apenas para obter o XML. Ciência é opcional e não conclusiva. Manifestações conclusivas devem respeitar o prazo oficial de 90 dias da autorização.</p>
-        <label class="checkbox-field"><input type="checkbox" name="confirmacaoExpressa" required ${submitting || result ? 'disabled' : ''}> Revisei o efeito do evento escolhido e autorizo seu envio à SEFAZ para esta NF-e.</label>
-        ${priorFinal ? '<label class="checkbox-field"><input type="checkbox" name="retificarConclusiva" value="true" required> Estou corrigindo expressamente uma manifestação conclusiva anterior.</label>' : ''}
-        ${resultMessage}
-        ${submitting ? '<p>Enviando uma única requisição à SEFAZ...</p>' : ''}
-        <div class="modal-footer"><button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Fechar</button>${!result ? `<button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>Enviar manifestação</button>` : result.status === 'falha_local' ? `<button class="btn primary" type="button" data-action="nfe-manifestacao-retry" data-nfe-id="${escapeHtml(doc.id)}">Corrigir e tentar novamente</button>` : ''}</div>
-      </form>
-    </div></div>`;
-}
-
-async function submitNfeManifestacaoForm(form) {
-  const doc = findNfeById(form.dataset.nfeId);
-  if (!doc || state.auth.user?.role !== 'admin') return;
-  const data = new FormData(form);
-  const tipo = String(data.get('tipo') || '');
-  const justificativa = String(data.get('justificativa') || '').trim();
-  if (!data.get('confirmacaoExpressa')) {
-    pushToast('Marque a autorização expressa antes de enviar.', 'error');
-    return;
-  }
-  if (tipo === 'operacao_nao_realizada' && justificativa.length < 15) {
-    pushToast('A justificativa de Operação não Realizada deve ter pelo menos 15 caracteres.', 'error');
-    return;
-  }
-  state.modal = { ...state.modal, submitting: true };
-  render();
-  try {
-    const requestId = globalThis.crypto?.randomUUID?.();
-    if (!requestId) throw new Error('Este navegador não oferece identificador seguro para a autorização.');
-    const result = await apiRequest(`/nfe/${encodeURIComponent(doc.apiNfeId)}/manifestacoes`, {
-      method: 'POST',
-      body: {
-        clienteId: doc.clientId,
-        requestId,
-        tipo,
-        ...(tipo === 'operacao_nao_realizada' ? { justificativa } : {}),
-        retificarConclusiva: Boolean(data.get('retificarConclusiva')),
-        confirmacaoExpressa: true
-      },
-      timeoutMs: 120000
-    });
-    state.modal = { ...state.modal, submitting: false, result };
-    try {
-      doc.manifestacaoHistory = await apiRequest(`/nfe/${encodeURIComponent(doc.apiNfeId)}/manifestacoes?clienteId=${encodeURIComponent(doc.clientId)}`);
-    } catch { /* Resultado enviado permanece visível se a atualização falhar. */ }
-    render();
-  } catch (error) {
-    state.modal = { ...state.modal, submitting: false, result: { status: 'falha_local', xMotivo: toErrorMessage(error) } };
-    render();
-  }
-}
-
-async function queryFullNfeXmlByKey(nfeId) {
-  const doc = findNfeById(nfeId);
-  const accepted = Array.isArray(doc?.manifestacaoHistory?.historico) && doc.manifestacaoHistory.historico.some((item) => item.status === 'registrada');
-  if (!doc || !accepted || !doc.apiNfeId || !doc.clientId || !doc.estabelecimentoId || state.auth.user?.role !== 'admin' || doc.queryingFullXml) return;
-  doc.queryingFullXml = true;
-  render();
-  try {
-    const response = await apiRequest('/nfe/sync/consultar-chave', {
-      method: 'POST',
-      body: { clienteId: doc.clientId, estabelecimentoId: doc.estabelecimentoId, chaveAcesso: doc.chaveAcesso, ambiente: doc.ambiente, persistir: true },
-      timeoutMs: 120000
-    });
-    const schemas = (response?.documentos || []).map((item) => item?.schema).filter(Boolean);
-    const complete = schemas.some((schema) => /procNFe|nfeProc/i.test(String(schema)));
-    const summary = schemas.some((schema) => /resNFe/i.test(String(schema)));
-    pushToast(complete && Number(response.documentosPersistidos) > 0
-      ? `XML completo retornado e salvo (${schemas.join(', ')}).`
-      : summary
-        ? `A SEFAZ retornou resumo, sem liberar XML completo nesta consulta. cStat ${response?.cStat || '-'}: ${response?.xMotivo || '-'}`
-        : `Consulta concluída sem XML completo. cStat ${response?.cStat || '-'}: ${response?.xMotivo || 'nenhum documento retornado.'}`,
-    complete && Number(response.documentosPersistidos) > 0 ? 'success' : 'info');
-    await refreshApiData({ silent: true });
-  } catch (error) {
-    pushToast(`Falha na consulta pontual por chave: ${toErrorMessage(error)}`, 'error');
-  } finally {
-    doc.queryingFullXml = false;
-    const currentDoc = findNfeById(nfeId);
-    if (currentDoc && state.modal?.kind === 'nfe-details') {
-      try {
-        currentDoc.manifestacaoHistory = await apiRequest(`/nfe/${encodeURIComponent(currentDoc.apiNfeId)}/manifestacoes?clienteId=${encodeURIComponent(currentDoc.clientId)}`);
-      } catch { /* Preserve the current status if history refresh fails. */ }
-    }
-    render();
   }
 }
 
