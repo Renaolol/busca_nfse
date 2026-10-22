@@ -198,6 +198,24 @@ describe('RealNfeDistribuicaoClient', () => {
     expect(signed).toContain('<Signature');
   });
 
+  it('identifies certificate-loading failures before any manifestation request is sent', async () => {
+    const prisma = { certificado: { findUnique: jest.fn().mockResolvedValue(null) } };
+    const client = new RealNfeDistribuicaoClient(prisma as never, {} as never, {} as never);
+
+    await expect(client.sendManifestacao({
+      cnpjConsulta: '01861020970',
+      chaveAcesso: '4'.repeat(44),
+      tipo: 'ciencia_operacao',
+      sequencia: 1,
+      ambiente: NfeAmbiente.producao,
+      certificateId: 'certificado-ausente'
+    })).rejects.toMatchObject({
+      name: 'NfeManifestacaoClientError',
+      requestMayHaveBeenSent: false,
+      failureStage: 'certificate'
+    });
+  });
+
   it('serializa justificativa somente para Operação não Realizada e escapa conteúdo XML', () => {
     const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
       buildManifestacaoEventXml(params: {

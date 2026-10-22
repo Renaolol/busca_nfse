@@ -186,7 +186,10 @@ export class NfeController {
   @Get('automacao/pendencias')
   @Roles('admin')
   @ApiOkResponse({ schema: { type: 'array', items: { type: 'object', additionalProperties: true } } })
-  @ApiOperation({ summary: 'Lista resumos, Ciências e recuperações XML pendentes no escopo do cliente.' })
+  @ApiOperation({
+    summary: 'Lista resumos, Ciências e recuperações XML pendentes no escopo do cliente.',
+    description: 'Cada item inclui última tentativa, próxima tentativa, cStat/xMotivo e status detalhado. Estados de certificado distinguem ausência, inatividade, expiração, titular incompatível e arquivo/storage indisponível. Ciência aguardando autorização fica parada até consentimento expresso; estados de certificado elegíveis são reavaliados automaticamente após seis horas.'
+  })
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   getAutomacaoPendencias(@Query() query: NfeAutomacaoQueryDto) {
     return this.nfeManifestacaoService.listAutomaticRecoveryItems(query);

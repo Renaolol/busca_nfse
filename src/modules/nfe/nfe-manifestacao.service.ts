@@ -22,7 +22,19 @@ const FINAL_CODES = new Set([
 const TERMINAL_ACCEPTED_STATUSES = new Set(['registrada', 'registrada_sem_vinculo']);
 const INDETERMINATE_STATUSES = new Set(['enviando', 'resultado_indeterminado']);
 export const NFE_AUTOMATION_TERM_VERSION = '2026-10-v1';
-const RECOVERY_STATUSES = ['aguardando_ciencia', 'aguardando_evento_distribuicao', 'aguardando_xml', 'aguardando_sefaz'] as const;
+const CERTIFICATE_RECOVERY_STATUSES = [
+  'certificado_pendente',
+  'certificado_nao_cadastrado',
+  'certificado_inativo',
+  'certificado_expirado',
+  'certificado_incompativel',
+  'certificado_indisponivel'
+] as const;
+const CERTIFICATE_RECOVERY_STATUS_SET = new Set<string>(CERTIFICATE_RECOVERY_STATUSES);
+const RECOVERY_STATUSES = [
+  'aguardando_ciencia', 'ciencia_aguardando_envio', 'aguardando_evento_distribuicao', 'aguardando_xml', 'aguardando_sefaz',
+  ...CERTIFICATE_RECOVERY_STATUSES
+] as const;
 
 type AutomaticRecoveryPreparation =
   | { canQuery: false; status: string }
@@ -36,6 +48,10 @@ type AutomaticRecoveryPreparation =
     };
 
 type ManifestationStatus = 'registrada' | 'registrada_sem_vinculo' | 'rejeitada' | 'falha_local' | 'resultado_indeterminado' | 'enviando';
+
+type CertificateResolution =
+  | { certificate: { id: string; arquivoCriptografadoPath: string }; status: null; reason: null }
+  | { certificate: null; status: typeof CERTIFICATE_RECOVERY_STATUSES[number]; reason: string };
 
 @Injectable()
 export class NfeManifestacaoService {
@@ -183,8 +199,19 @@ export class NfeManifestacaoService {
     }
     if (config.autorizacaoAtiva && config.cienciaAutomatica) {
       await this.prisma.nfeXmlRecuperacao.updateMany({
+        where: { configuracaoId: config.id, status: 'aguardando_ciencia' },
+        data: { status: 'ciencia_aguardando_envio', proximaTentativaEm: now, cStat: null, xMotivo: null }
+      });
+      await this.prisma.nfeXmlRecuperacao.updateMany({
         where: { configuracaoId: config.id, status: 'autorizacao_revogada' },
-        data: { status: 'aguardando_ciencia', proximaTentativaEm: now, cStat: null, xMotivo: null }
+        data: { status: 'ciencia_aguardando_envio', proximaTentativaEm: now, cStat: null, xMotivo: null }
+      });
+      await this.prisma.nfeXmlRecuperacao.updateMany({
+        where: { configuracaoId: config.id, status: { in: [...CERTIFICATE_RECOVERY_STATUSES] } },
+        data: {
+          status: 'ciencia_aguardando_envio', proximaTentativaEm: now, cStat: null,
+          xMotivo: null, resultadoConsulta: 'certificado_revalidar'
+        }
       });
     }
     return this.toPublicAutomationConfig(config);
@@ -284,7 +311,7 @@ export class NfeManifestacaoService {
         proximaTentativaEm: null,
         ultimaTentativaEm: null,
         cStat: null,
-        xMotivo: null,
+        xMotivo: 'Aguardando autorização expressa de Ciência da Operação para este estabelecimento e ambiente. Nenhum evento foi enviado.',
         numeroNfe: document.numeroNfe,
         dataEmissao: document.dataEmissao,
         schemaDoc: document.schemaDoc,
@@ -342,13 +369,17 @@ export class NfeManifestacaoService {
     });
     if (!config || (!config.cienciaAutomatica && !config.recuperacaoXmlAutomatica)) return;
     await this.prisma.nfeXmlRecuperacao.createMany({
-      data: [{
+        data: [{
         nfeDocumentoId: document.id,
         clienteId: document.clienteId,
         estabelecimentoId: document.estabelecimentoId,
         configuracaoId: config.id,
         ambiente: document.ambiente,
-        status: 'aguardando_ciencia'
+          status: config.cienciaAutomatica && config.autorizacaoAtiva ? 'ciencia_aguardando_envio' : 'aguardando_ciencia',
+          proximaTentativaEm: config.autorizacaoAtiva && config.cienciaAutomatica ? new Date() : null,
+          xMotivo: config.autorizacaoAtiva && config.cienciaAutomatica
+            ? null
+            : 'Aguardando autorização expressa de Ciência da Operação para este estabelecimento e ambiente.'
       }],
       skipDuplicates: true
     });
@@ -364,6 +395,8 @@ export class NfeManifestacaoService {
           { OR: [{ leaseAte: null }, { leaseAte: { lt: now } }] },
           { OR: [
             { status: 'aguardando_ciencia', configuracao: { autorizacaoAtiva: true, cienciaAutomatica: true } },
+            { status: 'ciencia_aguardando_envio', configuracao: { autorizacaoAtiva: true, cienciaAutomatica: true } },
+            { status: { in: [...CERTIFICATE_RECOVERY_STATUSES] }, configuracao: { autorizacaoAtiva: true, cienciaAutomatica: true } },
             { status: 'aguardando_evento_distribuicao', configuracao: { autorizacaoAtiva: true, cienciaAutomatica: true } },
             { status: 'aguardando_xml', configuracao: { recuperacaoXmlAutomatica: true } },
             { status: 'aguardando_sefaz', configuracao: { recuperacaoXmlAutomatica: true } }
@@ -424,12 +457,19 @@ export class NfeManifestacaoService {
     }
     if (!acceptedScience && !acceptedConclusive) {
       if (!task.configuracao.autorizacaoAtiva || !task.configuracao.cienciaAutomatica) {
-        await this.updateRecoveryTask(taskId, leaseId, { status: 'aguardando_ciencia', resultadoConsulta: 'autorizacao_ciencia_ausente', proximaTentativaEm: null });
+        await this.updateRecoveryTask(taskId, leaseId, {
+          status: 'aguardando_ciencia',
+          resultadoConsulta: 'autorizacao_ciencia_ausente',
+          xMotivo: 'Aguardando autorização expressa de Ciência da Operação para este estabelecimento e ambiente. Nenhum evento foi enviado.',
+          proximaTentativaEm: null
+        });
         return { canQuery: false, status: 'aguardando_ciencia' };
       }
       const result = await this.registerAutomaticScience(document, task.configuracao.usuarioAutorizouId, task.configuracao.autorizadaEm);
       if (result.status !== 'registrada') {
-        const status = result.status === 'resultado_indeterminado'
+        const status = CERTIFICATE_RECOVERY_STATUS_SET.has(result.status)
+          ? result.status
+          : result.status === 'resultado_indeterminado'
           ? 'resultado_indeterminado'
           : result.status === 'registrada_sem_vinculo'
             ? 'aguardando_evento_distribuicao'
@@ -441,13 +481,17 @@ export class NfeManifestacaoService {
                   ? 'resumo_nao_autorizado'
                 : result.status === 'falha_local' && /autorizacao.*(?:revogada|inativa|desativada)/i.test(result.xMotivo || '')
                   ? 'autorizacao_revogada'
-                : 'manifestacao_rejeitada';
+                : result.status === 'falha_local'
+                  ? 'erro_processamento'
+                  : 'manifestacao_rejeitada';
         await this.updateRecoveryTask(taskId, leaseId, {
           status,
           cStat: result.cStat,
           xMotivo: result.xMotivo,
           resultadoConsulta: result.status,
-          proximaTentativaEm: status === 'aguardando_evento_distribuicao' ? new Date(Date.now() + this.recoveryRetryMs) : null
+          proximaTentativaEm: status === 'aguardando_evento_distribuicao' || CERTIFICATE_RECOVERY_STATUS_SET.has(status)
+            ? new Date(Date.now() + this.recoveryRetryMs)
+            : null
         });
         return { canQuery: false, status };
       }
@@ -742,10 +786,11 @@ export class NfeManifestacaoService {
       return { status: 'falha_local', cStat: null, xMotivo: this.toSafeErrorMessage(error) };
     }
     const actor = this.onlyDigits(document.estabelecimento.cnpj);
-    const certificate = await this.findCertificate(document.clienteId, document.estabelecimentoId, actor);
-    if (!certificate || !(await this.storage.hasObject(certificate.arquivoCriptografadoPath))) {
-      return { status: 'falha_local', cStat: null, xMotivo: 'Nao existe certificado digital ativo, valido e vinculado a identidade do estabelecimento.' };
+    const certificateResolution = await this.resolveCertificate(document.clienteId, document.estabelecimentoId, actor);
+    if (!certificateResolution.certificate) {
+      return { status: certificateResolution.status, cStat: null, xMotivo: certificateResolution.reason };
     }
+    const certificate = certificateResolution.certificate;
     try {
       this.assertScienceDeadline(document.dataAutorizacao ?? document.dataEmissao);
     } catch (error) {
@@ -759,14 +804,17 @@ export class NfeManifestacaoService {
     if ([...priorEvents, ...priorAttempts].some((item) => FINAL_CODES.has(item.tipoEvento) && TERMINAL_ACCEPTED_STATUSES.has(item.status))) {
       return { status: 'falha_local', cStat: null, xMotivo: 'Ja existe manifestacao conclusiva; a Ciencia automatica nao foi enviada.' };
     }
-    const priorScience = [...priorEvents, ...priorAttempts].find((item) => item.tipoEvento === SCIENCE_CODE);
+    const priorScience = [...priorEvents, ...priorAttempts]
+      .filter((item) => item.tipoEvento === SCIENCE_CODE)
+      .sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime())[0];
     if (priorScience) {
       if (priorScience.status === 'registrada') return { status: 'registrada', cStat: priorScience.cStat, xMotivo: priorScience.xMotivo };
       if (priorScience.status === 'registrada_sem_vinculo') return { status: 'registrada_sem_vinculo', cStat: priorScience.cStat, xMotivo: priorScience.xMotivo };
-      if (priorScience.status !== 'falha_local' && priorScience.status !== 'rejeitada') {
+      if (priorScience.status === 'falha_local') {
+        // falha_local means the client proved that no request was sent; it is safe to retry after local remediation.
+      } else {
         return { status: priorScience.status, cStat: priorScience.cStat ?? null, xMotivo: priorScience.xMotivo ?? null };
       }
-      return { status: 'rejeitada', cStat: priorScience.cStat ?? null, xMotivo: priorScience.xMotivo ?? 'Uma tentativa anterior de Ciencia nao foi aceita; a automacao nao repetiu o evento.' };
     }
 
     const currentAuthorization = await this.prisma.nfeAutomacaoConfiguracao.findUnique({
@@ -837,13 +885,16 @@ export class NfeManifestacaoService {
       return { status, cStat: updated.cStat, xMotivo: this.sanitizeSefazText(updated.xMotivo) };
     } catch (error) {
       const status = error instanceof NfeManifestacaoClientError && !error.requestMayHaveBeenSent ? 'falha_local' : 'resultado_indeterminado';
-      const safeMessage = this.toSafeErrorMessage(error);
+      const certificateUnavailable = error instanceof NfeManifestacaoClientError && error.failureStage === 'certificate';
+      const safeMessage = certificateUnavailable
+        ? 'O certificado cadastrado não pôde ser carregado ou descriptografado pelo serviço de manifestação. Verifique o arquivo protegido e a senha cadastrada; nenhum evento foi transmitido.'
+        : this.toSafeErrorMessage(error);
       const updated = await this.prisma.nfeManifestacao.update({
         where: { id: attempt.id },
         data: { status, xMotivo: safeMessage, processadoEm: new Date() }
       });
       this.logSafeResult('ciencia_operacao', document.ambiente, null, null, null, status, safeMessage);
-      return { status, cStat: updated.cStat, xMotivo: safeMessage };
+      return { status: certificateUnavailable ? 'certificado_indisponivel' : status, cStat: updated.cStat, xMotivo: safeMessage };
     }
   }
 
@@ -858,6 +909,7 @@ export class NfeManifestacaoService {
 
   private async enqueueExistingSummaries(config: {
     id: string; clienteId: string; estabelecimentoId: string; ambiente: NfeAmbiente;
+    cienciaAutomatica: boolean; autorizacaoAtiva: boolean;
   }): Promise<void> {
     let cursor: string | undefined;
     while (true) {
@@ -885,7 +937,11 @@ export class NfeManifestacaoService {
           estabelecimentoId: config.estabelecimentoId,
           configuracaoId: config.id,
           ambiente: config.ambiente,
-          status: 'aguardando_ciencia'
+          status: config.cienciaAutomatica && config.autorizacaoAtiva ? 'ciencia_aguardando_envio' : 'aguardando_ciencia',
+          proximaTentativaEm: config.cienciaAutomatica && config.autorizacaoAtiva ? new Date() : null,
+          xMotivo: config.cienciaAutomatica && config.autorizacaoAtiva
+            ? null
+            : 'Aguardando autorização expressa de Ciência da Operação para este estabelecimento e ambiente.'
         })),
         skipDuplicates: true
       });
@@ -961,26 +1017,69 @@ export class NfeManifestacaoService {
   }
 
   private async findCertificate(clienteId: string, estabelecimentoId: string, actor: string) {
+    const resolution = await this.resolveCertificate(clienteId, estabelecimentoId, actor);
+    return resolution.certificate;
+  }
+
+  private async resolveCertificate(clienteId: string, estabelecimentoId: string, actor: string): Promise<CertificateResolution> {
     const now = new Date();
     const certificates = await this.prisma.certificado.findMany({
-      where: {
-        ativo: true,
-        cnpjTitular: actor,
-        OR: [
-          { clienteId, estabelecimentoId },
-          { clienteId, estabelecimentoId: null }
-        ],
-        AND: [{ OR: [{ validadeFim: null }, { validadeFim: { gt: now } }] }]
-      },
+      where: { OR: [{ clienteId, estabelecimentoId }, { clienteId, estabelecimentoId: null }] },
       orderBy: [{ estabelecimentoId: 'desc' }, { updatedAt: 'desc' }, { createdAt: 'desc' }],
-      select: { id: true, arquivoCriptografadoPath: true }
+      select: { id: true, cnpjTitular: true, ativo: true, validadeFim: true, arquivoCriptografadoPath: true }
     });
-    for (const certificate of certificates) {
-      if (await this.storage.hasObject(certificate.arquivoCriptografadoPath)) {
-        return certificate;
+    if (!certificates.length) {
+      return {
+        certificate: null,
+        status: 'certificado_nao_cadastrado',
+        reason: 'Nenhum certificado digital está cadastrado no escopo deste cliente e estabelecimento.'
+      };
+    }
+    const matching = certificates.filter((certificate) => this.onlyDigits(certificate.cnpjTitular) === actor);
+    if (!matching.length) {
+      return {
+        certificate: null,
+        status: 'certificado_incompativel',
+        reason: 'Os certificados cadastrados neste escopo não têm titular igual à identidade CPF/CNPJ do estabelecimento. Nenhum evento foi enviado.'
+      };
+    }
+    const active = matching.filter((certificate) => certificate.ativo);
+    if (!active.length) {
+      return {
+        certificate: null,
+        status: 'certificado_inativo',
+        reason: 'Há certificado com titular compatível, mas todos estão inativos. Ative ou cadastre o certificado correto.'
+      };
+    }
+    const valid = active.filter((certificate) => !certificate.validadeFim || certificate.validadeFim > now);
+    if (!valid.length) {
+      return {
+        certificate: null,
+        status: 'certificado_expirado',
+        reason: 'O certificado com titular compatível está expirado. Nenhum evento foi enviado.'
+      };
+    }
+    let storageUnavailable = false;
+    for (const certificate of valid) {
+      try {
+        if (await this.storage.hasObject(certificate.arquivoCriptografadoPath)) {
+          return {
+            certificate: { id: certificate.id, arquivoCriptografadoPath: certificate.arquivoCriptografadoPath },
+            status: null,
+            reason: null
+          };
+        }
+      } catch {
+        storageUnavailable = true;
       }
     }
-    return null;
+    return {
+      certificate: null,
+      status: 'certificado_indisponivel',
+      reason: storageUnavailable
+        ? 'O armazenamento protegido do certificado não respondeu. A tarefa será reavaliada; nenhum evento foi enviado.'
+        : 'O certificado ativo e válido foi localizado, mas seu arquivo não está acessível no armazenamento protegido. Restaure ou recadastre o certificado.'
+    };
   }
 
   private async loadImportedManifestations(documentId: string): Promise<Array<{

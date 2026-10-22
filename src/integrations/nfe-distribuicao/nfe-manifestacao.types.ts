@@ -35,7 +35,11 @@ export interface NfeManifestacaoClient {
 }
 
 export class NfeManifestacaoClientError extends Error {
-  constructor(message: string, readonly requestMayHaveBeenSent: boolean) {
+  constructor(
+    message: string,
+    readonly requestMayHaveBeenSent: boolean,
+    readonly failureStage?: 'certificate' | 'event_signing' | 'communication' | 'response'
+  ) {
     super(message);
     this.name = 'NfeManifestacaoClientError';
   }

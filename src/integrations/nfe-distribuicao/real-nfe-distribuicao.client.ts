@@ -175,11 +175,15 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeMani
       const certificate = await this.loadCertificate(params.certificateId);
       const pfx = await this.getPfxCredentials(certificate);
       pem = await this.convertPfxToPemCredentials(pfx.pfx, pfx.passphrase);
+    } catch (error) {
+      throw new NfeManifestacaoClientError(this.toErrorMessage(error), false, 'certificate');
+    }
+    try {
       const unsignedEvent = this.buildManifestacaoEventXml(params);
       eventXml = this.signManifestacaoEvent(unsignedEvent, pem.key, pem.cert);
       url = this.buildManifestacaoUrl(params.ambiente);
     } catch (error) {
-      throw new NfeManifestacaoClientError(this.toErrorMessage(error), false);
+      throw new NfeManifestacaoClientError(this.toErrorMessage(error), false, 'event_signing');
     }
     const operation = 'nfeRecepcaoEvento';
     let response: { statusCode: number; headers: IncomingHttpHeaders; body: string };
@@ -194,17 +198,17 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeMani
         RealNfeDistribuicaoClient.MANIFESTACAO_SOAP_NAMESPACE
       );
     } catch (error) {
-      throw new NfeManifestacaoClientError(this.toErrorMessage(error), true);
+      throw new NfeManifestacaoClientError(this.toErrorMessage(error), true, 'communication');
     }
     let parsed: Omit<NfeManifestacaoResult, 'statusCode'>;
     try {
       parsed = this.parseManifestacaoResponse(response.body);
     } catch (error) {
-      throw new NfeManifestacaoClientError(this.toErrorMessage(error), true);
+      throw new NfeManifestacaoClientError(this.toErrorMessage(error), true, 'response');
     }
 
     if (!parsed.cStat) {
-      throw new NfeManifestacaoClientError(`Resposta SOAP de manifestacao sem cStat (HTTP ${response.statusCode}).`, true);
+      throw new NfeManifestacaoClientError(`Resposta SOAP de manifestacao sem cStat (HTTP ${response.statusCode}).`, true, 'response');
     }
 
     return {

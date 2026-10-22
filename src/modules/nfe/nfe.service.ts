@@ -5786,10 +5786,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
     if (producer) {
       const sameProducerCpf = this.normalizeCnpj(certificate.cnpjTitular) === this.normalizeCnpj(producer.cnpjConsulta);
-      const linkedToProducerEstablishment =
-        certificate.clienteId === producer.clienteId && certificate.estabelecimentoId === producer.estabelecimentoId;
-      if (!sameProducerCpf && !linkedToProducerEstablishment) {
-        throw new BadRequestException('O certificado selecionado nao esta vinculado ao produtor escolhido.');
+      const scopedToProducer = certificate.clienteId === producer.clienteId &&
+        (certificate.estabelecimentoId === producer.estabelecimentoId || certificate.estabelecimentoId === null);
+      if (!sameProducerCpf || !scopedToProducer) {
+        throw new BadRequestException('O certificado selecionado deve pertencer ao cliente e ter titular exatamente igual ao CPF do produtor escolhido.');
       }
     }
 
@@ -6243,21 +6243,33 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       }
     });
 
+    const cpfActor = this.isCpf(cnpjConsulta);
+    const holderMatchesActor = (item: Pick<Certificado, 'cnpjTitular'>) =>
+      this.normalizeCnpj(item.cnpjTitular) === this.normalizeCnpj(cnpjConsulta);
     const certificate = preferredCertificateId
       ? certificates.find((item) => item.id === preferredCertificateId)
-      : certificates.find((item) => item.estabelecimentoId === estabelecimentoId) ??
-        certificates.find((item) => item.estabelecimentoId === null);
+      : cpfActor
+        ? certificates.find((item) => item.estabelecimentoId === estabelecimentoId && holderMatchesActor(item)) ??
+          certificates.find((item) => item.estabelecimentoId === null && holderMatchesActor(item))
+        : certificates.find((item) => item.estabelecimentoId === estabelecimentoId) ??
+          certificates.find((item) => item.estabelecimentoId === null);
 
     if (!certificate) {
       if (preferredCertificateId) {
         throw new BadRequestException(`O certificado selecionado nao esta ativo e vinculado ao CPF ${cnpjConsulta}.`);
       }
+      if (cpfActor && certificates.some((item) => item.estabelecimentoId === estabelecimentoId)) {
+        throw new BadRequestException('Existe certificado vinculado ao estabelecimento, mas o titular nao corresponde ao CPF consultado. Selecione ou cadastre o certificado correto.');
+      }
       throw new BadRequestException(`Nenhum certificado ativo e valido encontrado para o ${documentType} ${cnpjConsulta}`);
     }
 
     const belongsToProducer =
-      this.normalizeCnpj(certificate.cnpjTitular) === this.normalizeCnpj(cnpjConsulta) ||
+      holderMatchesActor(certificate) ||
       (certificate.clienteId === clienteId && certificate.estabelecimentoId === estabelecimentoId);
+    if (cpfActor && !holderMatchesActor(certificate)) {
+      throw new BadRequestException('O titular do certificado selecionado nao corresponde ao CPF consultado.');
+    }
     if (preferredCertificateId && !belongsToProducer) {
       throw new BadRequestException(`O certificado selecionado nao pertence ao CPF ${cnpjConsulta}.`);
     }

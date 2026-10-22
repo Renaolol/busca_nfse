@@ -53,6 +53,21 @@ describe('NfeManifestacaoService', () => {
     ...overrides
   });
 
+  const automaticRecoveryTask = (documentOverrides: Record<string, any> = {}) => ({
+    id: 'task-1',
+    leaseId: 'lease-1',
+    configuracao: {
+      cienciaAutomatica: true, recuperacaoXmlAutomatica: true, autorizacaoAtiva: true,
+      usuarioAutorizouId: 'user-1', autorizadaEm: new Date(),
+      clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao
+    },
+    nfeDocumento: {
+      ...document,
+      ...documentOverrides,
+      estabelecimento: { ...document.estabelecimento, ...(documentOverrides.estabelecimento || {}) }
+    }
+  });
+
   beforeEach(() => {
     jest.clearAllMocks();
     process.env.NFE_DISTRIBUICAO_CLIENT_MODE = 'real';
@@ -83,6 +98,9 @@ describe('NfeManifestacaoService', () => {
     prisma.nfeEvento.findMany.mockResolvedValue([]);
     prisma.certificado.findMany.mockResolvedValue([{
       id: 'cert-1',
+      cnpjTitular: '01861020970',
+      ativo: true,
+      validadeFim: null,
       arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin'
     }]);
     storage.hasObject.mockResolvedValue(true);
@@ -162,7 +180,7 @@ describe('NfeManifestacaoService', () => {
     const result = await service.registrar('doc-1', dto() as any, 'user-1');
 
     expect(prisma.certificado.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ cnpjTitular: '01861020970' })
+      where: { OR: [{ clienteId: 'cliente-1', estabelecimentoId: 'estab-1' }, { clienteId: 'cliente-1', estabelecimentoId: null }] }
     }));
     expect(client.sendManifestacao).toHaveBeenCalledWith(expect.objectContaining({
       cnpjConsulta: '01861020970',
@@ -181,12 +199,14 @@ describe('NfeManifestacaoService', () => {
       ...document,
       estabelecimento: { ...document.estabelecimento, cnpj: '12345678000199' }
     });
-    prisma.certificado.findMany.mockResolvedValueOnce([{ id: 'cert-cnpj', arquivoCriptografadoPath: 'certs/cnpj.pfx' }]);
+    prisma.certificado.findMany.mockResolvedValueOnce([{
+      id: 'cert-cnpj', cnpjTitular: '12345678000199', ativo: true, validadeFim: null, arquivoCriptografadoPath: 'certs/cnpj.pfx'
+    }]);
 
     const result = await service.registrar('doc-1', dto({ requestId: '9e6d31c8-8932-41d8-b33c-a9d9481f5840' }) as any);
 
     expect(prisma.certificado.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ cnpjTitular: '12345678000199' })
+      where: { OR: [{ clienteId: 'cliente-1', estabelecimentoId: 'estab-1' }, { clienteId: 'cliente-1', estabelecimentoId: null }] }
     }));
     expect(result.status).toBe('registrada');
   });
@@ -438,7 +458,7 @@ describe('NfeManifestacaoService', () => {
     }));
   });
 
-  it('marks automatic recovery as certificate pending when no valid establishment certificate exists', async () => {
+  it('reports a missing certificate and schedules local revalidation without sending an event', async () => {
     prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce({
       id: 'task-1', leaseId: 'lease-1',
       configuracao: {
@@ -452,8 +472,67 @@ describe('NfeManifestacaoService', () => {
 
     const result = await service.prepareAutomaticRecovery('task-1', 'lease-1');
 
-    expect(result).toEqual({ canQuery: false, status: 'certificado_pendente' });
+    expect(result).toEqual({ canQuery: false, status: 'certificado_nao_cadastrado' });
     expect(client.sendManifestacao).not.toHaveBeenCalled();
+    expect(prisma.nfeXmlRecuperacao.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        status: 'certificado_nao_cadastrado',
+        xMotivo: expect.stringContaining('Nenhum certificado digital'),
+        proximaTentativaEm: expect.any(Date)
+      })
+    }));
+  });
+
+  it.each([
+    ['inactive', { ativo: false }, 'present', 'certificado_inativo'],
+    ['expired', { validadeFim: new Date(Date.now() - 60_000) }, 'present', 'certificado_expirado'],
+    ['wrong titular', { cnpjTitular: '12345678000199' }, 'present', 'certificado_incompativel'],
+    ['missing protected file', {}, 'missing', 'certificado_indisponivel'],
+    ['storage unavailable', {}, 'throws', 'certificado_indisponivel']
+  ])('classifies a %s certificate without sending a manifestation', async (_case, certificateOverride, storageState, expectedStatus) => {
+    prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce(automaticRecoveryTask());
+    prisma.certificado.findMany.mockResolvedValueOnce([{
+      id: 'cert-1', cnpjTitular: '01861020970', ativo: true, validadeFim: null,
+      arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin', ...certificateOverride
+    }]);
+    if (storageState === 'missing') storage.hasObject.mockResolvedValueOnce(false);
+    if (storageState === 'throws') storage.hasObject.mockRejectedValueOnce(new Error('private storage path unavailable'));
+
+    const result = await service.prepareAutomaticRecovery('task-1', 'lease-1');
+
+    expect(result).toEqual({ canQuery: false, status: expectedStatus });
+    expect(client.sendManifestacao).not.toHaveBeenCalled();
+    expect(prisma.nfeXmlRecuperacao.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: expectedStatus, proximaTentativaEm: expect.any(Date), xMotivo: expect.any(String) })
+    }));
+  });
+
+  it('rechecks a prior local certificate failure after remediation without duplicating a transmitted event', async () => {
+    const localFailure = { tipoEvento: '210210', status: 'falha_local', createdAt: new Date(Date.now() - 60_000) };
+    prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce(automaticRecoveryTask());
+    prisma.nfeManifestacao.findMany
+      .mockResolvedValueOnce([localFailure])
+      .mockResolvedValueOnce([localFailure]);
+    prisma.nfeAutomacaoConfiguracao.findUnique.mockResolvedValueOnce({ cienciaAutomatica: true, autorizacaoAtiva: true });
+
+    const result = await service.prepareAutomaticRecovery('task-1', 'lease-1');
+
+    expect(result).toEqual(expect.objectContaining({ canQuery: true, status: 'aguardando_xml' }));
+    expect(client.sendManifestacao).toHaveBeenCalledTimes(1);
+    expect(prisma.nfeManifestacao.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('claims due certificate-blocked tasks so repaired certificates are rechecked automatically', async () => {
+    prisma.nfeXmlRecuperacao.findMany.mockResolvedValueOnce([{ id: 'task-1', status: 'certificado_expirado' }]);
+
+    const claimed = await service.claimDueRecoveryTasks(3);
+
+    expect(claimed).toHaveLength(1);
+    expect(prisma.nfeXmlRecuperacao.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: expect.objectContaining({ in: expect.arrayContaining(['certificado_nao_cadastrado', 'certificado_expirado']) })
+      })
+    }));
   });
 
   it('blocks automatic Science when the official ten-day deadline has expired', async () => {

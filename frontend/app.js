@@ -5522,7 +5522,8 @@ function renderNfeManualRunStatusCard() {
 
 function nfeAutomationStatusLabel(status) {
   const labels = {
-    aguardando_ciencia: 'Aguardando Ciência',
+    aguardando_ciencia: 'Ciência aguardando autorização',
+    ciencia_aguardando_envio: 'Ciência aguardando envio',
     ciencia_registrada: 'Ciência registrada',
     aguardando_evento_distribuicao: 'Ciencia registrada; aguardando distribuicao do evento',
     autorizacao_revogada: 'Autorizacao revogada',
@@ -5532,11 +5533,40 @@ function nfeAutomationStatusLabel(status) {
     xml_disponivel: 'XML disponível',
     manifestacao_rejeitada: 'Manifestação rejeitada',
     resultado_indeterminado: 'Resultado indeterminado',
-    certificado_pendente: 'Certificado pendente',
+    certificado_pendente: 'Certificado pendente — motivo anterior não classificado',
+    certificado_nao_cadastrado: 'Certificado não cadastrado',
+    certificado_inativo: 'Certificado inativo',
+    certificado_expirado: 'Certificado expirado',
+    certificado_incompativel: 'Certificado incompatível com o estabelecimento',
+    certificado_indisponivel: 'Certificado indisponível para o serviço',
     ciencia_fora_prazo: 'Ciência fora do prazo',
     erro_processamento: 'Erro de processamento'
   };
   return labels[status] || status || 'Pendente';
+}
+
+function nfeAutomationNextAction(item) {
+  if (item.proximaTentativaEm) return `Reavaliar automaticamente em ${formatDateTime(item.proximaTentativaEm)}`;
+  const actions = {
+    aguardando_ciencia: 'Conceder autorização expressa para Ciência neste estabelecimento e ambiente.',
+    ciencia_aguardando_envio: 'O worker enviará a Ciência no próximo ciclo automático.',
+    certificado_pendente: 'Verificar o motivo do certificado e corrigir o cadastro.',
+    certificado_nao_cadastrado: 'Cadastrar certificado digital do titular do estabelecimento.',
+    certificado_inativo: 'Ativar ou substituir o certificado do titular.',
+    certificado_expirado: 'Renovar e cadastrar certificado válido do titular.',
+    certificado_incompativel: 'Vincular certificado cujo titular corresponda ao CPF/CNPJ do estabelecimento.',
+    certificado_indisponivel: 'Restaurar o arquivo protegido ou corrigir acesso/senha do certificado.',
+    ciencia_fora_prazo: 'A Ciência não foi enviada; verificar os prazos oficiais.',
+    autorizacao_revogada: 'Conceder novamente autorização expressa, se desejado.',
+    manifestacao_rejeitada: 'Analisar o retorno oficial da SEFAZ antes de qualquer nova ação.',
+    resultado_indeterminado: 'Verificar o evento no portal oficial; o NotaSync bloqueia reenvio automático.',
+    aguardando_evento_distribuicao: 'Aguardar a distribuição oficial do evento.',
+    ciencia_registrada: 'Aguardar ou habilitar a recuperação automática do XML.',
+    aguardando_xml: 'Aguardar a próxima consulta permitida ao serviço oficial.',
+    aguardando_sefaz: 'Aguardar o fim do bloqueio oficial antes de nova consulta.',
+    erro_processamento: 'Revisar o motivo registrado antes de retomar a tarefa.'
+  };
+  return actions[item.status] || 'Consultar o motivo registrado e definir a próxima ação.';
 }
 
 function renderNfeAutomationPanel() {
@@ -5572,17 +5602,17 @@ function renderNfeAutomationPanel() {
             ${row.autorizacaoAtiva ? `<button class="btn secondary" type="button" data-action="nfe-automation-revoke" data-client-id="${escapeHtml(row.clienteId)}" data-establishment-id="${escapeHtml(row.estabelecimentoId)}" data-ambiente="${escapeHtml(row.ambiente)}" ${state.nfeAutomationBusy ? 'disabled' : ''}>Revogar autorização para novas Ciências</button>` : ''}
           </div>
         </div>
-        <p class="row-sub" style="margin:8px 0 0;">Autorização registrada: ${escapeHtml(row.autorizadaEm ? formatDateTime(row.autorizadaEm) : 'não concedida')}${row.autorizadaPor ? ` por ${escapeHtml(row.autorizadaPor)}` : ''} · Termo ${escapeHtml(row.versaoTermo || '—')} · Alterações auditadas: ${settingAudit} · Manifestações registradas: ${manifests.filter((item) => item.estabelecimentoId === row.estabelecimentoId).length}</p>
+        <p class="row-sub" style="margin:8px 0 0;">Autorização registrada: ${escapeHtml(row.autorizadaEm ? formatDateTime(row.autorizadaEm) : 'não concedida')}${row.autorizadaPor ? ` por ${escapeHtml(row.autorizadaPor)}` : ''} · Termo ${escapeHtml(row.versaoTermo || '—')} · Alterações auditadas: ${settingAudit} · Manifestações aceitas: ${manifests.filter((item) => item.estabelecimentoId === row.estabelecimentoId && ['registrada', 'registrada_sem_vinculo', 'recebida_da_distribuicao'].includes(item.status)).length}</p>
       </form>`;
     }).join('') : `<div class="table-state">Nenhum controle NF-e ativo de CPF encontrado para configurar. Ative a sincronização do produtor rural primeiro.</div>`}
     <div class="card" style="padding:0; overflow:auto;">
       <div style="padding:12px 14px;"><strong>Documentos aguardando Ciência ou XML completo</strong><span class="row-sub">${pendingRows.length} item(ns) nesta lista${pending.length > pendingRows.length ? ` · ${pending.length - pendingRows.length} XML(s) já disponíveis` : ''}.</span></div>
-      <table><thead><tr><th>Estabelecimento</th><th>NF-e</th><th>Ambiente</th><th>Status</th><th>Próxima tentativa</th><th>SEFAZ</th><th></th></tr></thead><tbody>
+      <table><thead><tr><th>Estabelecimento</th><th>NF-e</th><th>Ambiente</th><th>Status</th><th>Última tentativa</th><th>Próxima ação</th><th>SEFAZ</th><th></th></tr></thead><tbody>
         ${pendingRows.length ? pendingRows.map((item) => {
           const establishment = findEstablishmentById(item.estabelecimentoId);
           const document = state.nfeDocuments.find((doc) => doc.apiNfeId === item.documentoId);
-          return `<tr><td>${escapeHtml(establishment?.razaoSocial || 'Estabelecimento')}</td><td>${escapeHtml(item.numeroNfe || '—')}<span class="row-sub">${escapeHtml(item.schemaDoc || 'sem schema')}</span></td><td>${escapeHtml(item.ambiente)}</td><td>${escapeHtml(nfeAutomationStatusLabel(item.status))}</td><td>${escapeHtml(item.proximaTentativaEm ? formatDateTime(item.proximaTentativaEm) : 'aguardando ação')}</td><td>${escapeHtml([item.cStat, item.xMotivo].filter(Boolean).join(' · ') || '—')}</td><td>${document ? `<button class="btn secondary" type="button" data-action="nfe-details" data-nfe-id="${escapeHtml(document.id)}">Abrir nota</button>` : ''}</td></tr>`;
-        }).join('') : `<tr><td colspan="7" class="row-sub">Não há pendências de obtenção automática neste escopo.</td></tr>`}
+          return `<tr><td>${escapeHtml(establishment?.razaoSocial || 'Estabelecimento')}</td><td>${escapeHtml(item.numeroNfe || '—')}<span class="row-sub">${escapeHtml(item.schemaDoc || 'sem schema')}</span></td><td>${escapeHtml(item.ambiente)}</td><td>${escapeHtml(nfeAutomationStatusLabel(item.status))}</td><td>${escapeHtml(item.ultimaTentativaEm ? formatDateTime(item.ultimaTentativaEm) : 'nenhuma tentativa')}</td><td>${escapeHtml(nfeAutomationNextAction(item))}</td><td>${escapeHtml([item.cStat, item.xMotivo].filter(Boolean).join(' · ') || '—')}</td><td>${document ? `<button class="btn secondary" type="button" data-action="nfe-details" data-nfe-id="${escapeHtml(document.id)}">Abrir nota</button>` : ''}</td></tr>`;
+        }).join('') : `<tr><td colspan="8" class="row-sub">Não há pendências de obtenção automática neste escopo.</td></tr>`}
       </tbody></table>
     </div>
   </div>`;

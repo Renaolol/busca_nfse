@@ -138,6 +138,7 @@ describe('NfeService', () => {
         id: 'cert-1',
         nome: 'Certificado Principal',
         estabelecimentoId: 'estab-1',
+        cnpjTitular: '01861020970',
         arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin'
       }
     ]);
@@ -1669,6 +1670,7 @@ describe('NfeService', () => {
         id: 'cert-cpf',
         nome: 'Certificado do Produtor',
         estabelecimentoId: 'estab-cpf',
+        cnpjTitular: '01861020970',
         arquivoCriptografadoPath: 'certificados/cliente-1/cert-cpf.bin'
       }
     ]);
@@ -1736,6 +1738,7 @@ describe('NfeService', () => {
         id: 'cert-cpf',
         nome: 'Certificado do Produtor',
         estabelecimentoId: 'estab-cpf',
+        cnpjTitular: '01861020970',
         arquivoCriptografadoPath: 'certificados/cliente-1/cert-cpf.bin'
       }
     ]);
@@ -1971,7 +1974,7 @@ describe('NfeService', () => {
     }
   });
 
-  it('usa o certificado vinculado ao estabelecimento do produtor CPF selecionado', async () => {
+  it('usa o certificado vinculado cujo titular corresponde ao CPF do produtor selecionado', async () => {
     prisma.nfeSyncControle.findMany.mockResolvedValue([
       {
         id: 'ctrl-jair',
@@ -1997,7 +2000,7 @@ describe('NfeService', () => {
         nome: 'Certificado Jair',
         clienteId: 'cliente-jair',
         estabelecimentoId: 'estab-jair',
-        cnpjTitular: '12345678000199',
+        cnpjTitular: '01861020970',
         ativo: true,
         arquivoCriptografadoPath: 'certificados/cliente-jair/cert-jair.bin'
       }
@@ -2029,6 +2032,30 @@ describe('NfeService', () => {
         certificateId: 'cert-jair'
       })
     );
+  });
+
+  it('rejects an establishment-linked certificate whose holder does not match the selected CPF', async () => {
+    const mismatchedCertificate = {
+      id: 'cert-mismatch', clienteId: 'cliente-jair', estabelecimentoId: 'estab-jair',
+      cnpjTitular: '12345678000199', ativo: true, validadeFim: null,
+      arquivoCriptografadoPath: 'certificados/cliente-jair/cert-mismatch.bin'
+    };
+    prisma.certificado.findMany
+      .mockResolvedValueOnce([mismatchedCertificate])
+      .mockResolvedValueOnce([mismatchedCertificate]);
+    prisma.nfeSyncControle.findMany.mockResolvedValueOnce([{
+      id: 'ctrl-jair', clienteId: 'cliente-jair', estabelecimentoId: 'estab-jair',
+      cnpjConsulta: '01861020970', ambiente: NfeAmbiente.producao,
+      ultimoNsuConsultado: 0n, ultimoNsuDistribuido: 0n, maxNsu: 20n, status: NfeSyncStatus.ativo
+    }]);
+
+    await expect((service as any).findActiveCertificateOrThrow(
+      'cliente-jair', 'estab-jair', '01861020970'
+    )).rejects.toThrow('titular nao corresponde ao CPF');
+    await expect(service.runNowCpfViaSefazGlobal({
+      controleId: 'ctrl-jair', certificadoId: 'cert-mismatch', clienteId: 'cliente-jair'
+    } as any)).rejects.toThrow('titular exatamente igual ao CPF');
+    expect(distribuicaoClient.distribuirPorNsu).not.toHaveBeenCalled();
   });
 
   it('recupera NSUs historicos por consNSU, salva apenas o periodo e preserva o cursor incremental', async () => {
