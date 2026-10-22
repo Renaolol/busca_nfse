@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query, Req } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
@@ -30,7 +30,10 @@ import { SincronizarNfeEventosDto, SincronizarNfeEventosResponseDto } from './dt
 import { StartNfeSyncDto } from './dto/start-sync.dto';
 import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
 import { UpdateMonofasicoAliquotasDto } from './dto/update-monofasico-aliquotas.dto';
+import { RegistrarNfeManifestacaoDto } from './dto/registrar-manifestacao.dto';
 import { NfeService } from './nfe.service';
+import { NfeManifestacaoService } from './nfe-manifestacao.service';
+import { AuthenticatedRequest } from '../auth/auth.types';
 
 const sefazDiagnosticsSchema: SchemaObject = {
   type: 'array',
@@ -80,7 +83,7 @@ const nfeSyncRunResponseSchema: SchemaObject = {
 @ApiTags('nfe')
 @Controller('nfe')
 export class NfeController {
-  constructor(private readonly nfeService: NfeService) {}
+  constructor(private readonly nfeService: NfeService, private readonly nfeManifestacaoService: NfeManifestacaoService) {}
 
   @Get('dashboard-stats')
   @ApiOkResponse({ type: DashboardNfeStatsResponseDto })
@@ -105,6 +108,42 @@ export class NfeController {
   @TenantScope({ source: 'query', key: 'clienteId', injectWhenMissing: true })
   findAll(@Query() query: QueryNfeDto) {
     return this.nfeService.findAll(query);
+  }
+
+  @Get(':id/manifestacoes')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Lista o histórico de manifestações registradas pelo NotaSync para uma NF-e.' })
+  @ApiOkResponse({ schema: { type: 'object', properties: {
+    documentoId: { type: 'string' },
+    status: { type: 'string', enum: ['xml_completo_disponivel', 'aguardando_disponibilizacao', 'resumo_disponivel', 'sem_xml'] },
+    resumoDisponivel: { type: 'boolean' },
+    xmlCompletoDisponivel: { type: 'boolean' },
+    historico: { type: 'array', items: { type: 'object' } }
+  } } })
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  getManifestacoes(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
+    return this.nfeManifestacaoService.getHistory(id, query.clienteId);
+  }
+
+  @Post(':id/manifestacoes')
+  @Roles('admin')
+  @ApiOperation({
+    summary: 'Registra uma manifestação do destinatário após autorização expressa do usuário.',
+    description: 'Aceita CPF e CNPJ com certificado cujo titular corresponda exatamente ao estabelecimento. Não envia eventos automaticamente. Ciência é opcional e não conclusiva; eventos conclusivos exigem operação compatível e respeitam o prazo vigente de 90 dias da autorização. Não use Confirmação apenas para obter XML.'
+  })
+  @ApiOkResponse({ schema: { type: 'object', properties: {
+    id: { type: 'string' }, tipoEvento: { type: 'string' }, nSeqEvento: { type: 'integer' },
+    status: { type: 'string', enum: ['registrada', 'registrada_sem_vinculo', 'rejeitada', 'falha_local', 'resultado_indeterminado', 'enviando'] },
+    cStat: { type: 'string', nullable: true }, xMotivo: { type: 'string', nullable: true }, nProt: { type: 'string', nullable: true },
+    autorizacaoExpressaEm: { type: 'string', format: 'date-time' }, processadoEm: { type: 'string', format: 'date-time', nullable: true }
+  } } })
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  registrarManifestacao(
+    @Param('id') id: string,
+    @Body() dto: RegistrarNfeManifestacaoDto,
+    @Req() request: AuthenticatedRequest
+  ) {
+    return this.nfeManifestacaoService.registrar(id, dto, request.authUser?.userId);
   }
 
   @Get('cst-060-analysis')

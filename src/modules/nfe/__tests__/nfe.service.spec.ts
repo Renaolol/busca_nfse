@@ -3902,6 +3902,56 @@ describe('NfeService', () => {
     });
   });
 
+  it('persiste resumo resNFe consultado por CPF como recebida para que apareca no filtro Recebida', async () => {
+    const cpf = '01861020970';
+    const xml = `<resNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01"><chNFe>${'4'.repeat(44)}</chNFe><CNPJ>12345678000199</CNPJ><xNome>Emitente</xNome><dhEmi>2026-06-29T10:00:00-03:00</dhEmi><vNF>88.15</vNF><nProt>135260000000001</nProt><cSitNFe>1</cSitNFe></resNFe>`;
+    prisma.nfeDocumento.findUnique.mockResolvedValueOnce(null);
+    prisma.nfeDocumento.upsert.mockImplementationOnce(async (args: { create: Record<string, unknown> }) => ({ id: 'doc-cpf-summary', ...args.create }));
+
+    await (service as any).persistDocument({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: NfeAmbiente.producao,
+      cnpjConsulta: cpf,
+      document: { nsu: 4n, schema: 'resNFe_v1.01.xsd', xml, chaveAcesso: '4'.repeat(44) },
+      origem: 'distribuicao_nsu' as any
+    });
+
+    const upsert = prisma.nfeDocumento.upsert.mock.calls.at(-1)?.[0];
+    expect(upsert.create).toMatchObject({
+      tipoRelacao: NfeTipoRelacao.recebida,
+      cnpjDestinatario: cpf,
+      resumoDisponivel: true,
+      xmlCompletoDisponivel: false,
+      schemaDoc: 'resNFe_v1.01.xsd'
+    });
+    expect(upsert.create.xmlResumoPath).toContain('/resumos/');
+    expect(upsert.create.xmlCompletoPath).toBeUndefined();
+  });
+
+  it('preserva a classificação existente para NF-e completa consultada por CNPJ', async () => {
+    const cnpj = '99888777000166';
+    const xml = `<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><NFe><infNFe Id="NFe${'4'.repeat(44)}" versao="4.00"><ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>2026-06-29T10:00:00-03:00</dhEmi></ide><emit><CNPJ>12345678000199</CNPJ><xNome>Emitente</xNome></emit><dest><CNPJ>${cnpj}</CNPJ><xNome>Destinatario</xNome></dest><total><ICMSTot><vNF>150.00</vNF></ICMSTot></total></infNFe></NFe><protNFe><infProt><cStat>100</cStat><dhRecbto>2026-06-29T10:00:01-03:00</dhRecbto></infProt></protNFe></nfeProc>`;
+    prisma.nfeDocumento.findUnique.mockResolvedValueOnce(null);
+    prisma.nfeDocumento.upsert.mockImplementationOnce(async (args: { create: Record<string, unknown> }) => ({ id: 'doc-cnpj-full', ...args.create }));
+
+    await (service as any).persistDocument({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: NfeAmbiente.producao,
+      cnpjConsulta: cnpj,
+      document: { nsu: 5n, schema: 'procNFe_v4.00.xsd', xml, chaveAcesso: '4'.repeat(44) },
+      origem: 'distribuicao_nsu' as any
+    });
+
+    expect(prisma.nfeDocumento.upsert.mock.calls.at(-1)?.[0].create).toMatchObject({
+      tipoRelacao: NfeTipoRelacao.recebida,
+      cnpjDestinatario: cnpj,
+      resumoDisponivel: false,
+      xmlCompletoDisponivel: true
+    });
+  });
+
   it('sincroniza eventos de cancelamento para NF-e ja armazenada', async () => {
     prisma.nfeDocumento.findMany.mockResolvedValueOnce([
       {

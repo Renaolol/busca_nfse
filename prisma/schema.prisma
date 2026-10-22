@@ -98,36 +98,37 @@ enum DocumentoConferenciaTipo {
 }
 
 model Cliente {
-  id                 String   @id @default(uuid()) @db.Uuid
-  razaoSocial        String   @map("razao_social") @db.VarChar(255)
-  nomeFantasia       String?  @map("nome_fantasia") @db.VarChar(255)
-  cnpj               String   @unique @db.VarChar(14)
-  responsavelInterno String?  @map("responsavel_interno") @db.VarChar(255)
-  emailResponsavel   String?  @map("email_responsavel") @db.VarChar(255)
-  telefone           String?  @db.VarChar(30)
-  ativo              Boolean  @default(true)
-  nfeHabilitado      Boolean  @default(true) @map("nfe_habilitado")
-  codigoEmpresaDominio Int?   @map("codigo_empresa_dominio")
-  createdAt          DateTime @default(now()) @map("created_at")
-  updatedAt          DateTime @updatedAt @map("updated_at")
+  id                   String   @id @default(uuid()) @db.Uuid
+  razaoSocial          String   @map("razao_social") @db.VarChar(255)
+  nomeFantasia         String?  @map("nome_fantasia") @db.VarChar(255)
+  cnpj                 String   @unique @db.VarChar(14)
+  responsavelInterno   String?  @map("responsavel_interno") @db.VarChar(255)
+  emailResponsavel     String?  @map("email_responsavel") @db.VarChar(255)
+  telefone             String?  @db.VarChar(30)
+  ativo                Boolean  @default(true)
+  nfeHabilitado        Boolean  @default(true) @map("nfe_habilitado")
+  codigoEmpresaDominio Int?     @map("codigo_empresa_dominio")
+  createdAt            DateTime @default(now()) @map("created_at")
+  updatedAt            DateTime @updatedAt @map("updated_at")
 
-  estabelecimentos ClienteEstabelecimento[]
-  certificados     Certificado[]
-  syncControles    NfseSyncControle[]
-  documentos       NfseDocumento[]
-  documentoVinculos NfseDocumentoVinculo[]
-  numeracaoExcecoes NfseNumeracaoExcecao[]
-  contasContabilConfig NfseContaContabilConfig[]
-  nfeSyncControles NfeSyncControle[]
-  nfceScSyncControles NfceScSyncControle[]
-  nfeDocumentos    NfeDocumento[]
-  syncLogs         NfseSyncLog[]
-  auditorias       AuditoriaUsuario[]
-  alertResolutions AlertResolution[]
-  compareSpedHistoricos CompareSpedHistorico[]
-  usuarios         Usuario[]
-  eventosAcesso    EventoAcesso[]
+  estabelecimentos       ClienteEstabelecimento[]
+  certificados           Certificado[]
+  syncControles          NfseSyncControle[]
+  documentos             NfseDocumento[]
+  documentoVinculos      NfseDocumentoVinculo[]
+  numeracaoExcecoes      NfseNumeracaoExcecao[]
+  contasContabilConfig   NfseContaContabilConfig[]
+  nfeSyncControles       NfeSyncControle[]
+  nfceScSyncControles    NfceScSyncControle[]
+  nfeDocumentos          NfeDocumento[]
+  syncLogs               NfseSyncLog[]
+  auditorias             AuditoriaUsuario[]
+  alertResolutions       AlertResolution[]
+  compareSpedHistoricos  CompareSpedHistorico[]
+  usuarios               Usuario[]
+  eventosAcesso          EventoAcesso[]
   conferenciasDocumentos DocumentoConferencia[]
+  nfeManifestacoes       NfeManifestacao[]
 
   @@map("clientes")
 }
@@ -148,14 +149,15 @@ model ClienteEstabelecimento {
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
-  cliente       Cliente            @relation(fields: [clienteId], references: [id], onDelete: Cascade)
-  certificados  Certificado[]
-  syncControles NfseSyncControle[]
-  documentos    NfseDocumento[]
-  documentoVinculos NfseDocumentoVinculo[]
-  nfeSyncControles NfeSyncControle[]
+  cliente             Cliente                @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  certificados        Certificado[]
+  syncControles       NfseSyncControle[]
+  documentos          NfseDocumento[]
+  documentoVinculos   NfseDocumentoVinculo[]
+  nfeSyncControles    NfeSyncControle[]
   nfceScSyncControles NfceScSyncControle[]
-  nfeDocumentos    NfeDocumento[]
+  nfeDocumentos       NfeDocumento[]
+  nfeManifestacoes    NfeManifestacao[]
 
   @@unique([clienteId, cnpj], map: "cliente_estabelecimentos_cliente_id_cnpj_key")
   @@map("cliente_estabelecimentos")
@@ -182,10 +184,11 @@ model Certificado {
   createdAt                   DateTime  @default(now()) @map("created_at")
   updatedAt                   DateTime  @updatedAt @map("updated_at")
 
-  cliente         Cliente?                @relation(fields: [clienteId], references: [id], onDelete: SetNull)
-  estabelecimento ClienteEstabelecimento? @relation(fields: [estabelecimentoId], references: [id], onDelete: SetNull)
-  syncLogs        NfseSyncLog[]
+  cliente             Cliente?                @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  estabelecimento     ClienteEstabelecimento? @relation(fields: [estabelecimentoId], references: [id], onDelete: SetNull)
+  syncLogs            NfseSyncLog[]
   nfceScSyncControles NfceScSyncControle[]
+  nfeManifestacoes    NfeManifestacao[]
 
   @@map("certificados")
 }
@@ -217,43 +220,43 @@ model NfseSyncControle {
 }
 
 model NfseDocumento {
-  id                       String           @id @default(uuid()) @db.Uuid
-  clienteId                String           @map("cliente_id") @db.Uuid
-  estabelecimentoId        String           @map("estabelecimento_id") @db.Uuid
-  ambiente                 Ambiente
-  nsu                      BigInt?
-  chaveAcesso              String           @map("chave_acesso") @db.VarChar(100)
-  numeroNfse               String?          @map("numero_nfse") @db.VarChar(50)
-  serie                    String?          @db.VarChar(50)
-  dataEmissao              DateTime?        @map("data_emissao")
-  competencia              DateTime?        @db.Date
-  dataCancelamento         DateTime?        @map("data_cancelamento")
-  status                   String?          @db.VarChar(50)
-  cnpjPrestador            String?          @map("cnpj_prestador") @db.VarChar(14)
-  razaoSocialPrestador     String?          @map("razao_social_prestador") @db.VarChar(255)
-  cnpjTomador              String?          @map("cnpj_tomador") @db.VarChar(14)
-  razaoSocialTomador       String?          @map("razao_social_tomador") @db.VarChar(255)
-  municipioPrestacaoCodigo String?          @map("municipio_prestacao_codigo") @db.VarChar(7)
-  municipioPrestacaoNome   String?          @map("municipio_prestacao_nome") @db.VarChar(120)
-  valorServico             Decimal?         @map("valor_servico") @db.Decimal(15, 2)
-  valorServicoManual       Decimal?         @map("valor_servico_manual") @db.Decimal(15, 2)
-  valorDeducoes            Decimal?         @map("valor_deducoes") @db.Decimal(15, 2)
-  valorDescontoIncondicionado Decimal?      @map("valor_desconto_incondicionado") @db.Decimal(15, 2)
-  valorDescontoCondicionado Decimal?        @map("valor_desconto_condicionado") @db.Decimal(15, 2)
-  valorIss                 Decimal?         @map("valor_iss") @db.Decimal(15, 2)
-  aliquotaIss              Decimal?         @map("aliquota_iss") @db.Decimal(8, 4)
-  codigoServicoNacional    String?          @map("codigo_servico_nacional") @db.VarChar(50)
-  itemListaServico         String?          @map("item_lista_servico") @db.VarChar(50)
-  descricaoServico         String?          @map("descricao_servico") @db.Text
-  xmlPath                  String?          @map("xml_path") @db.Text
-  danfsePath               String?          @map("danfse_path") @db.Text
-  hashXml                  String?          @map("hash_xml") @db.VarChar(128)
-  chaveSubstituida         String?          @map("chave_substituida") @db.VarChar(100)
-  ignorarNumeracaoValidacao Boolean         @default(false) @map("ignorar_numeracao_validacao")
-  ignorarNumeracaoObservacao String?        @map("ignorar_numeracao_observacao") @db.Text
-  origem                   DocumentoOrigem?
-  createdAt                DateTime         @default(now()) @map("created_at")
-  updatedAt                DateTime         @updatedAt @map("updated_at")
+  id                          String           @id @default(uuid()) @db.Uuid
+  clienteId                   String           @map("cliente_id") @db.Uuid
+  estabelecimentoId           String           @map("estabelecimento_id") @db.Uuid
+  ambiente                    Ambiente
+  nsu                         BigInt?
+  chaveAcesso                 String           @map("chave_acesso") @db.VarChar(100)
+  numeroNfse                  String?          @map("numero_nfse") @db.VarChar(50)
+  serie                       String?          @db.VarChar(50)
+  dataEmissao                 DateTime?        @map("data_emissao")
+  competencia                 DateTime?        @db.Date
+  dataCancelamento            DateTime?        @map("data_cancelamento")
+  status                      String?          @db.VarChar(50)
+  cnpjPrestador               String?          @map("cnpj_prestador") @db.VarChar(14)
+  razaoSocialPrestador        String?          @map("razao_social_prestador") @db.VarChar(255)
+  cnpjTomador                 String?          @map("cnpj_tomador") @db.VarChar(14)
+  razaoSocialTomador          String?          @map("razao_social_tomador") @db.VarChar(255)
+  municipioPrestacaoCodigo    String?          @map("municipio_prestacao_codigo") @db.VarChar(7)
+  municipioPrestacaoNome      String?          @map("municipio_prestacao_nome") @db.VarChar(120)
+  valorServico                Decimal?         @map("valor_servico") @db.Decimal(15, 2)
+  valorServicoManual          Decimal?         @map("valor_servico_manual") @db.Decimal(15, 2)
+  valorDeducoes               Decimal?         @map("valor_deducoes") @db.Decimal(15, 2)
+  valorDescontoIncondicionado Decimal?         @map("valor_desconto_incondicionado") @db.Decimal(15, 2)
+  valorDescontoCondicionado   Decimal?         @map("valor_desconto_condicionado") @db.Decimal(15, 2)
+  valorIss                    Decimal?         @map("valor_iss") @db.Decimal(15, 2)
+  aliquotaIss                 Decimal?         @map("aliquota_iss") @db.Decimal(8, 4)
+  codigoServicoNacional       String?          @map("codigo_servico_nacional") @db.VarChar(50)
+  itemListaServico            String?          @map("item_lista_servico") @db.VarChar(50)
+  descricaoServico            String?          @map("descricao_servico") @db.Text
+  xmlPath                     String?          @map("xml_path") @db.Text
+  danfsePath                  String?          @map("danfse_path") @db.Text
+  hashXml                     String?          @map("hash_xml") @db.VarChar(128)
+  chaveSubstituida            String?          @map("chave_substituida") @db.VarChar(100)
+  ignorarNumeracaoValidacao   Boolean          @default(false) @map("ignorar_numeracao_validacao")
+  ignorarNumeracaoObservacao  String?          @map("ignorar_numeracao_observacao") @db.Text
+  origem                      DocumentoOrigem?
+  createdAt                   DateTime         @default(now()) @map("created_at")
+  updatedAt                   DateTime         @updatedAt @map("updated_at")
 
   cliente         Cliente                @relation(fields: [clienteId], references: [id], onDelete: Cascade)
   estabelecimento ClienteEstabelecimento @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
@@ -305,15 +308,15 @@ model NfseEvento {
 }
 
 model NfseNumeracaoExcecao {
-  id         String                   @id @default(uuid()) @db.Uuid
-  clienteId  String                   @map("cliente_id") @db.Uuid
-  cnpjConsulta String                 @map("cnpj_consulta") @db.VarChar(14)
-  ambiente   Ambiente
-  numeroNfse Int                      @map("numero_nfse")
-  tipo       NfseNumeracaoExcecaoTipo
-  observacao String?                  @db.Text
-  createdAt  DateTime                 @default(now()) @map("created_at")
-  updatedAt  DateTime                 @updatedAt @map("updated_at")
+  id           String                   @id @default(uuid()) @db.Uuid
+  clienteId    String                   @map("cliente_id") @db.Uuid
+  cnpjConsulta String                   @map("cnpj_consulta") @db.VarChar(14)
+  ambiente     Ambiente
+  numeroNfse   Int                      @map("numero_nfse")
+  tipo         NfseNumeracaoExcecaoTipo
+  observacao   String?                  @db.Text
+  createdAt    DateTime                 @default(now()) @map("created_at")
+  updatedAt    DateTime                 @updatedAt @map("updated_at")
 
   cliente Cliente @relation(fields: [clienteId], references: [id], onDelete: Cascade)
 
@@ -360,20 +363,20 @@ model NfseSyncLog {
 }
 
 model NfeSyncControle {
-  id                    String        @id @default(uuid()) @db.Uuid
-  clienteId             String        @map("cliente_id") @db.Uuid
-  estabelecimentoId     String        @map("estabelecimento_id") @db.Uuid
-  cnpjConsulta          String        @map("cnpj_consulta") @db.VarChar(14)
-  ambiente              NfeAmbiente
-  ultimoNsuConsultado   BigInt        @default(0) @map("ultimo_nsu_consultado")
-  ultimoNsuDistribuido  BigInt        @default(0) @map("ultimo_nsu_distribuido")
-  maxNsu                BigInt        @default(0) @map("max_nsu")
-  status                NfeSyncStatus @default(ativo)
-  ultimaExecucao        DateTime?     @map("ultima_execucao")
-  ultimaMensagem        String?       @map("ultima_mensagem") @db.Text
-  totalDocumentosBaixados Int         @default(0) @map("total_documentos_baixados")
-  createdAt             DateTime      @default(now()) @map("created_at")
-  updatedAt             DateTime      @updatedAt @map("updated_at")
+  id                      String        @id @default(uuid()) @db.Uuid
+  clienteId               String        @map("cliente_id") @db.Uuid
+  estabelecimentoId       String        @map("estabelecimento_id") @db.Uuid
+  cnpjConsulta            String        @map("cnpj_consulta") @db.VarChar(14)
+  ambiente                NfeAmbiente
+  ultimoNsuConsultado     BigInt        @default(0) @map("ultimo_nsu_consultado")
+  ultimoNsuDistribuido    BigInt        @default(0) @map("ultimo_nsu_distribuido")
+  maxNsu                  BigInt        @default(0) @map("max_nsu")
+  status                  NfeSyncStatus @default(ativo)
+  ultimaExecucao          DateTime?     @map("ultima_execucao")
+  ultimaMensagem          String?       @map("ultima_mensagem") @db.Text
+  totalDocumentosBaixados Int           @default(0) @map("total_documentos_baixados")
+  createdAt               DateTime      @default(now()) @map("created_at")
+  updatedAt               DateTime      @updatedAt @map("updated_at")
 
   cliente         Cliente                @relation(fields: [clienteId], references: [id], onDelete: Cascade)
   estabelecimento ClienteEstabelecimento @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
@@ -384,93 +387,127 @@ model NfeSyncControle {
 
 // NSU independente da distribuicao nacional de NF-e.
 model NfceScSyncControle {
-  id                    String        @id @default(uuid()) @db.Uuid
-  clienteId             String        @map("cliente_id") @db.Uuid
-  estabelecimentoId     String        @map("estabelecimento_id") @db.Uuid
-  cnpjConsulta          String        @map("cnpj_consulta") @db.VarChar(14)
-  certificadoId         String?       @map("certificado_id") @db.Uuid
-  ambiente              NfeAmbiente
-  indAtor               Int           @default(3) @map("ind_ator")
-  ultimoNsuConsultado   BigInt        @default(0) @map("ultimo_nsu_consultado")
-  status                NfeSyncStatus @default(ativo)
-  ultimaExecucao        DateTime?     @map("ultima_execucao")
-  proximaExecucao       DateTime?     @map("proxima_execucao")
-  ultimaMensagem        String?       @map("ultima_mensagem") @db.Text
-  totalDocumentosBaixados Int         @default(0) @map("total_documentos_baixados")
-  diagnosticoXmlRequisicao String?    @map("diagnostico_xml_requisicao") @db.Text
-  diagnosticoXmlResposta String?      @map("diagnostico_xml_resposta") @db.Text
-  diagnosticoXmlCriadoEm DateTime?    @map("diagnostico_xml_criado_em")
-  reprocessamentoNsuInicial BigInt?    @map("reprocessamento_nsu_inicial")
-  reprocessamentoNsuFinal BigInt?      @map("reprocessamento_nsu_final")
-  reprocessamentoNsuAtual BigInt?      @map("reprocessamento_nsu_atual")
-  reprocessamentoStatus NfceScRecoveryStatus? @map("reprocessamento_status")
-  reprocessamentoTotalDocumentos Int    @default(0) @map("reprocessamento_total_documentos")
-  reprocessamentoMensagem String?       @map("reprocessamento_mensagem") @db.Text
-  reprocessamentoLease DateTime?        @map("reprocessamento_lease")
-  createdAt             DateTime      @default(now()) @map("created_at")
-  updatedAt             DateTime      @updatedAt @map("updated_at")
+  id                             String                @id @default(uuid()) @db.Uuid
+  clienteId                      String                @map("cliente_id") @db.Uuid
+  estabelecimentoId              String                @map("estabelecimento_id") @db.Uuid
+  cnpjConsulta                   String                @map("cnpj_consulta") @db.VarChar(14)
+  certificadoId                  String?               @map("certificado_id") @db.Uuid
+  ambiente                       NfeAmbiente
+  indAtor                        Int                   @default(3) @map("ind_ator")
+  ultimoNsuConsultado            BigInt                @default(0) @map("ultimo_nsu_consultado")
+  status                         NfeSyncStatus         @default(ativo)
+  ultimaExecucao                 DateTime?             @map("ultima_execucao")
+  proximaExecucao                DateTime?             @map("proxima_execucao")
+  ultimaMensagem                 String?               @map("ultima_mensagem") @db.Text
+  totalDocumentosBaixados        Int                   @default(0) @map("total_documentos_baixados")
+  diagnosticoXmlRequisicao       String?               @map("diagnostico_xml_requisicao") @db.Text
+  diagnosticoXmlResposta         String?               @map("diagnostico_xml_resposta") @db.Text
+  diagnosticoXmlCriadoEm         DateTime?             @map("diagnostico_xml_criado_em")
+  reprocessamentoNsuInicial      BigInt?               @map("reprocessamento_nsu_inicial")
+  reprocessamentoNsuFinal        BigInt?               @map("reprocessamento_nsu_final")
+  reprocessamentoNsuAtual        BigInt?               @map("reprocessamento_nsu_atual")
+  reprocessamentoStatus          NfceScRecoveryStatus? @map("reprocessamento_status")
+  reprocessamentoTotalDocumentos Int                   @default(0) @map("reprocessamento_total_documentos")
+  reprocessamentoMensagem        String?               @map("reprocessamento_mensagem") @db.Text
+  reprocessamentoLease           DateTime?             @map("reprocessamento_lease")
+  createdAt                      DateTime              @default(now()) @map("created_at")
+  updatedAt                      DateTime              @updatedAt @map("updated_at")
 
   cliente         Cliente                @relation(fields: [clienteId], references: [id], onDelete: Cascade)
   estabelecimento ClienteEstabelecimento @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
-  certificado     Certificado?            @relation(fields: [certificadoId], references: [id], onDelete: SetNull)
+  certificado     Certificado?           @relation(fields: [certificadoId], references: [id], onDelete: SetNull)
 
   @@unique([clienteId, cnpjConsulta, ambiente], map: "nfce_sc_sync_controle_cliente_cnpj_ambiente_key")
   @@map("nfce_sc_sync_controle")
 }
 
 model NfeDocumento {
-  id                  String              @id @default(uuid()) @db.Uuid
-  clienteId           String              @map("cliente_id") @db.Uuid
-  estabelecimentoId   String              @map("estabelecimento_id") @db.Uuid
-  ambiente            NfeAmbiente
-  nsu                 BigInt?
-  chaveAcesso         String              @map("chave_acesso") @db.VarChar(44)
-  numeroNfe           String?             @map("numero_nfe") @db.VarChar(20)
-  serie               String?             @db.VarChar(20)
-  modelo              String?             @db.VarChar(4)
-  dataEmissao         DateTime?           @map("data_emissao")
-  dataAutorizacao     DateTime?           @map("data_autorizacao")
-  status              String?             @db.VarChar(50)
-  tipoRelacao         NfeTipoRelacao?     @map("tipo_relacao")
-  schemaDoc           String?             @map("schema_doc") @db.VarChar(120)
-  resumoDisponivel    Boolean             @default(false) @map("resumo_disponivel")
-  xmlCompletoDisponivel Boolean           @default(false) @map("xml_completo_disponivel")
-  cnpjEmitente        String?             @map("cnpj_emitente") @db.VarChar(14)
-  razaoSocialEmitente String?             @map("razao_social_emitente") @db.VarChar(255)
-  cnpjDestinatario    String?             @map("cnpj_destinatario") @db.VarChar(14)
-  razaoSocialDestinatario String?         @map("razao_social_destinatario") @db.VarChar(255)
-  valorTotal          Decimal?            @map("valor_total") @db.Decimal(15, 2)
-  xmlResumoPath       String?             @map("xml_resumo_path") @db.Text
-  xmlCompletoPath     String?             @map("xml_completo_path") @db.Text
-  hashResumo          String?             @map("hash_resumo") @db.VarChar(128)
-  hashXmlCompleto     String?             @map("hash_xml_completo") @db.VarChar(128)
-  origem              NfeDocumentoOrigem?
-  createdAt           DateTime            @default(now()) @map("created_at")
-  updatedAt           DateTime            @updatedAt @map("updated_at")
+  id                      String              @id @default(uuid()) @db.Uuid
+  clienteId               String              @map("cliente_id") @db.Uuid
+  estabelecimentoId       String              @map("estabelecimento_id") @db.Uuid
+  ambiente                NfeAmbiente
+  nsu                     BigInt?
+  chaveAcesso             String              @map("chave_acesso") @db.VarChar(44)
+  numeroNfe               String?             @map("numero_nfe") @db.VarChar(20)
+  serie                   String?             @db.VarChar(20)
+  modelo                  String?             @db.VarChar(4)
+  dataEmissao             DateTime?           @map("data_emissao")
+  dataAutorizacao         DateTime?           @map("data_autorizacao")
+  status                  String?             @db.VarChar(50)
+  tipoRelacao             NfeTipoRelacao?     @map("tipo_relacao")
+  schemaDoc               String?             @map("schema_doc") @db.VarChar(120)
+  resumoDisponivel        Boolean             @default(false) @map("resumo_disponivel")
+  xmlCompletoDisponivel   Boolean             @default(false) @map("xml_completo_disponivel")
+  cnpjEmitente            String?             @map("cnpj_emitente") @db.VarChar(14)
+  razaoSocialEmitente     String?             @map("razao_social_emitente") @db.VarChar(255)
+  cnpjDestinatario        String?             @map("cnpj_destinatario") @db.VarChar(14)
+  razaoSocialDestinatario String?             @map("razao_social_destinatario") @db.VarChar(255)
+  valorTotal              Decimal?            @map("valor_total") @db.Decimal(15, 2)
+  xmlResumoPath           String?             @map("xml_resumo_path") @db.Text
+  xmlCompletoPath         String?             @map("xml_completo_path") @db.Text
+  hashResumo              String?             @map("hash_resumo") @db.VarChar(128)
+  hashXmlCompleto         String?             @map("hash_xml_completo") @db.VarChar(128)
+  origem                  NfeDocumentoOrigem?
+  createdAt               DateTime            @default(now()) @map("created_at")
+  updatedAt               DateTime            @updatedAt @map("updated_at")
 
   cliente         Cliente                @relation(fields: [clienteId], references: [id], onDelete: Cascade)
   estabelecimento ClienteEstabelecimento @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
   eventos         NfeEvento[]
+  manifestacoes   NfeManifestacao[]
 
   @@unique([ambiente, chaveAcesso], map: "nfe_documentos_ambiente_chave_acesso_key")
   @@unique([clienteId, ambiente, nsu], map: "nfe_documentos_cliente_id_ambiente_nsu_key")
   @@map("nfe_documentos")
 }
 
-model NfeEvento {
-  id            String    @id @default(uuid()) @db.Uuid
-  nfeDocumentoId String   @map("nfe_documento_id") @db.Uuid
-  chaveAcesso   String    @map("chave_acesso") @db.VarChar(44)
-  tipoEvento    String?   @map("tipo_evento") @db.VarChar(100)
-  dataEvento    DateTime? @map("data_evento")
-  descricao     String?   @db.Text
-  schemaDoc     String?   @map("schema_doc") @db.VarChar(120)
-  xmlPath       String?   @map("xml_path") @db.Text
-  hashXml       String?   @map("hash_xml") @db.VarChar(128)
-  createdAt     DateTime  @default(now()) @map("created_at")
+model NfeManifestacao {
+  id                    String      @id @default(uuid()) @db.Uuid
+  nfeDocumentoId        String      @map("nfe_documento_id") @db.Uuid
+  clienteId             String      @map("cliente_id") @db.Uuid
+  estabelecimentoId     String      @map("estabelecimento_id") @db.Uuid
+  certificadoId         String?     @map("certificado_id") @db.Uuid
+  usuarioId             String?     @map("usuario_id") @db.Uuid
+  requestId             String      @unique @map("request_id") @db.Uuid
+  tipoEvento            String      @map("tipo_evento") @db.VarChar(6)
+  nSeqEvento            Int         @map("n_seq_evento")
+  ambiente              NfeAmbiente
+  status                String      @db.VarChar(30)
+  cStat                 String?     @map("c_stat") @db.VarChar(3)
+  xMotivo               String?     @map("x_motivo") @db.Text
+  nProt                 String?     @map("n_prot") @db.VarChar(15)
+  justificativa         String?     @db.VarChar(255)
+  autorizacaoExpressaEm DateTime    @map("autorizacao_expressa_em")
+  enviadoEm             DateTime?   @map("enviado_em")
+  processadoEm          DateTime?   @map("processado_em")
+  createdAt             DateTime    @default(now()) @map("created_at")
+  updatedAt             DateTime    @updatedAt @map("updated_at")
 
-  nfeDocumento           NfeDocumento            @relation(fields: [nfeDocumentoId], references: [id], onDelete: Cascade)
-  cteDesacordoResolucao  CteDesacordoResolucao?
+  nfeDocumento    NfeDocumento           @relation(fields: [nfeDocumentoId], references: [id], onDelete: Cascade)
+  cliente         Cliente                @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  estabelecimento ClienteEstabelecimento @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
+  certificado     Certificado?           @relation(fields: [certificadoId], references: [id], onDelete: SetNull)
+  usuario         Usuario?               @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([nfeDocumentoId, createdAt], map: "nfe_manifestacoes_documento_created_idx")
+  @@index([clienteId, estabelecimentoId, createdAt], map: "nfe_manifestacoes_scope_created_idx")
+  @@map("nfe_manifestacoes")
+}
+
+model NfeEvento {
+  id             String    @id @default(uuid()) @db.Uuid
+  nfeDocumentoId String    @map("nfe_documento_id") @db.Uuid
+  chaveAcesso    String    @map("chave_acesso") @db.VarChar(44)
+  tipoEvento     String?   @map("tipo_evento") @db.VarChar(100)
+  dataEvento     DateTime? @map("data_evento")
+  descricao      String?   @db.Text
+  schemaDoc      String?   @map("schema_doc") @db.VarChar(120)
+  xmlPath        String?   @map("xml_path") @db.Text
+  hashXml        String?   @map("hash_xml") @db.VarChar(128)
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  nfeDocumento          NfeDocumento           @relation(fields: [nfeDocumentoId], references: [id], onDelete: Cascade)
+  cteDesacordoResolucao CteDesacordoResolucao?
 
   @@unique([nfeDocumentoId, tipoEvento, dataEvento, hashXml], map: "nfe_eventos_documento_tipo_data_hash_key")
   @@map("nfe_eventos")
@@ -518,11 +555,12 @@ model Usuario {
   createdAt         DateTime    @default(now()) @map("created_at")
   updatedAt         DateTime    @updatedAt @map("updated_at")
 
-  cliente       Cliente?          @relation(fields: [clienteId], references: [id], onDelete: SetNull)
-  sessoes       SessaoUsuario[]
-  eventosAcesso EventoAcesso[]
-  auditorias    AuditoriaUsuario[]
-  conferenciasDocumentos DocumentoConferencia[]
+  cliente                    Cliente?                    @relation(fields: [clienteId], references: [id], onDelete: SetNull)
+  sessoes                    SessaoUsuario[]
+  eventosAcesso              EventoAcesso[]
+  auditorias                 AuditoriaUsuario[]
+  conferenciasDocumentos     DocumentoConferencia[]
+  nfeManifestacoes           NfeManifestacao[]
   simplesNacionalImportacoes SimplesNacionalImportacao[]
 
   @@index([clienteId, ativo], map: "usuarios_cliente_id_ativo_idx")
@@ -530,17 +568,17 @@ model Usuario {
 }
 
 model DocumentoConferencia {
-  id            String                  @id @default(uuid()) @db.Uuid
-  usuarioId     String                  @map("usuario_id") @db.Uuid
-  clienteId     String?                 @map("cliente_id") @db.Uuid
+  id            String                   @id @default(uuid()) @db.Uuid
+  usuarioId     String                   @map("usuario_id") @db.Uuid
+  clienteId     String?                  @map("cliente_id") @db.Uuid
   tipoDocumento DocumentoConferenciaTipo @map("tipo_documento")
-  documentoId   String                  @map("documento_id") @db.Uuid
-  conferido     Boolean                 @default(true)
-  conferidoEm   DateTime?               @map("conferido_em")
-  createdAt     DateTime                @default(now()) @map("created_at")
-  updatedAt     DateTime                @updatedAt @map("updated_at")
+  documentoId   String                   @map("documento_id") @db.Uuid
+  conferido     Boolean                  @default(true)
+  conferidoEm   DateTime?                @map("conferido_em")
+  createdAt     DateTime                 @default(now()) @map("created_at")
+  updatedAt     DateTime                 @updatedAt @map("updated_at")
 
-  usuario Usuario @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+  usuario Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
   cliente Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
 
   @@unique([usuarioId, tipoDocumento, documentoId], map: "documento_conferencias_usuario_tipo_documento_key")
@@ -572,16 +610,16 @@ model SessaoUsuario {
 }
 
 model EventoAcesso {
-  id         String           @id @default(uuid()) @db.Uuid
-  usuarioId  String?          @map("usuario_id") @db.Uuid
-  sessaoId   String?          @map("sessao_id") @db.Uuid
-  clienteId  String?          @map("cliente_id") @db.Uuid
-  username   String?          @db.VarChar(80)
-  tipo       EventoAcessoTipo
-  detalhes   Json?
-  ip         String?          @db.VarChar(100)
-  userAgent  String?          @map("user_agent") @db.Text
-  createdAt  DateTime         @default(now()) @map("created_at")
+  id        String           @id @default(uuid()) @db.Uuid
+  usuarioId String?          @map("usuario_id") @db.Uuid
+  sessaoId  String?          @map("sessao_id") @db.Uuid
+  clienteId String?          @map("cliente_id") @db.Uuid
+  username  String?          @db.VarChar(80)
+  tipo      EventoAcessoTipo
+  detalhes  Json?
+  ip        String?          @db.VarChar(100)
+  userAgent String?          @map("user_agent") @db.Text
+  createdAt DateTime         @default(now()) @map("created_at")
 
   usuario Usuario?       @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
   sessao  SessaoUsuario? @relation(fields: [sessaoId], references: [id], onDelete: SetNull)
@@ -594,15 +632,15 @@ model EventoAcesso {
 }
 
 model AlertResolution {
-  id         String   @id @default(uuid()) @db.Uuid
-  alertId    String   @unique @map("alert_id") @db.VarChar(255)
-  clienteId  String?  @map("cliente_id") @db.Uuid
-  origem     String?  @db.VarChar(100)
-  titulo     String?  @db.VarChar(255)
-  fingerprint String  @db.Text
-  resolvedAt DateTime @default(now()) @map("resolved_at")
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  id          String   @id @default(uuid()) @db.Uuid
+  alertId     String   @unique @map("alert_id") @db.VarChar(255)
+  clienteId   String?  @map("cliente_id") @db.Uuid
+  origem      String?  @db.VarChar(100)
+  titulo      String?  @db.VarChar(255)
+  fingerprint String   @db.Text
+  resolvedAt  DateTime @default(now()) @map("resolved_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
 
   cliente Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
 
@@ -610,17 +648,17 @@ model AlertResolution {
 }
 
 model CompareSpedHistorico {
-  id            String   @id @default(uuid()) @db.Uuid
-  clienteId     String?  @map("cliente_id") @db.Uuid
-  clientName    String   @map("client_name") @db.VarChar(255)
-  clientCnpj    String?  @map("client_cnpj") @db.VarChar(14)
-  competence    String?  @db.VarChar(20)
-  sourceFileName String  @map("source_file_name") @db.Text
-  outputFormat  String   @map("output_format") @db.VarChar(10)
-  generatedAt   DateTime @map("generated_at")
-  report        Json
-  createdAt     DateTime @default(now()) @map("created_at")
-  updatedAt     DateTime @updatedAt @map("updated_at")
+  id             String   @id @default(uuid()) @db.Uuid
+  clienteId      String?  @map("cliente_id") @db.Uuid
+  clientName     String   @map("client_name") @db.VarChar(255)
+  clientCnpj     String?  @map("client_cnpj") @db.VarChar(14)
+  competence     String?  @db.VarChar(20)
+  sourceFileName String   @map("source_file_name") @db.Text
+  outputFormat   String   @map("output_format") @db.VarChar(10)
+  generatedAt    DateTime @map("generated_at")
+  report         Json
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
 
   cliente Cliente? @relation(fields: [clienteId], references: [id], onDelete: SetNull)
 

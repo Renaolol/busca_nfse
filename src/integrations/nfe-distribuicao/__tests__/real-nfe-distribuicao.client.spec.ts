@@ -1,5 +1,9 @@
 import { gunzipSync, gzipSync } from 'node:zlib';
+import { generateKeyPairSync } from 'node:crypto';
+import { NfeAmbiente } from '@prisma/client';
+import { SignedXml } from 'xml-crypto';
 import { RealNfeDistribuicaoClient } from '../real-nfe-distribuicao.client';
+import { NFE_MANIFESTACAO_EVENT_CODES } from '../nfe-manifestacao.types';
 
 describe('RealNfeDistribuicaoClient', () => {
   it('extrai retDistDFeInt com docZip compactado em SOAP', () => {
@@ -158,6 +162,69 @@ describe('RealNfeDistribuicaoClient', () => {
 
     expect(request).toContain('<CPF>01861020970</CPF>');
     expect(request).not.toContain('<CNPJ>');
+  });
+
+  it('monta e assina um evento de manifestação CPF referenciando infEvento, sem chamar rede', () => {
+    const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
+      buildManifestacaoEventXml(params: {
+        cnpjConsulta: string;
+        chaveAcesso: string;
+        tipo: 'ciencia_operacao' | 'confirmacao_operacao' | 'desconhecimento_operacao' | 'operacao_nao_realizada';
+        sequencia: number;
+        ambiente: NfeAmbiente;
+      }): string;
+      signManifestacaoEvent(xml: string, privateKey: string, certificatePem: string): string;
+    };
+    const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const publicPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const params = {
+      cnpjConsulta: '018.610.209-70',
+      chaveAcesso: '4'.repeat(44),
+      tipo: 'ciencia_operacao' as const,
+      sequencia: 1,
+      ambiente: NfeAmbiente.producao
+    };
+    const unsigned = client.buildManifestacaoEventXml(params);
+    const signed = client.signManifestacaoEvent(unsigned, privatePem, publicPem);
+    const verifier = new SignedXml({ publicCert: publicPem });
+    const signatureXml = signed.match(/<(?:\w+:)?Signature\b[\s\S]*?<\/(?:\w+:)?Signature>/)?.[0];
+    expect(signatureXml).toBeDefined();
+    verifier.loadSignature(signatureXml!);
+    expect(verifier.checkSignature(signed)).toBe(true);
+    expect(signed).toContain(`<CPF>01861020970</CPF>`);
+    expect(signed).toContain(`<tpEvento>${NFE_MANIFESTACAO_EVENT_CODES.ciencia_operacao}</tpEvento>`);
+    expect(signed).toContain(`Id="ID${NFE_MANIFESTACAO_EVENT_CODES.ciencia_operacao}${params.chaveAcesso}1"`);
+    expect(signed).toContain('<Signature');
+  });
+
+  it('serializa justificativa somente para Operação não Realizada e escapa conteúdo XML', () => {
+    const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
+      buildManifestacaoEventXml(params: {
+        cnpjConsulta: string;
+        chaveAcesso: string;
+        tipo: 'operacao_nao_realizada' | 'ciencia_operacao';
+        sequencia: number;
+        justificativa?: string;
+        ambiente: NfeAmbiente;
+      }): string;
+    };
+    const base = {
+      cnpjConsulta: '12345678000199',
+      chaveAcesso: '4'.repeat(44),
+      sequencia: 1,
+      ambiente: NfeAmbiente.producao
+    };
+    const withReason = client.buildManifestacaoEventXml({
+      ...base,
+      tipo: 'operacao_nao_realizada',
+      justificativa: 'Entrega & produto <divergentes>'
+    });
+    const withoutReason = client.buildManifestacaoEventXml({ ...base, tipo: 'ciencia_operacao', justificativa: 'nao usar' });
+
+    expect(withReason).toContain('<CNPJ>12345678000199</CNPJ>');
+    expect(withReason).toContain('<xJust>Entrega &amp; produto &lt;divergentes&gt;</xJust>');
+    expect(withoutReason).not.toContain('<xJust>');
   });
 
   it('monta envelope SOAP 1.1 para fallback em endpoints .asmx', () => {

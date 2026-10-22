@@ -5250,6 +5250,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       return NfeTipoRelacao.recebida;
     }
 
+    // resNFe omits the destination. The distribution service returns this schema
+    // in the recipient flow; preserve the queried interested party as the recipient.
+    if (parsed.contentType === 'resumo') {
+      return NfeTipoRelacao.recebida;
+    }
+
     return undefined;
   }
 

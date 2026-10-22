@@ -1982,6 +1982,28 @@ function onDocumentClick(event) {
       void downloadNfeDanfeById(nfeId);
       return;
     }
+    case 'nfe-manifestacao-open': {
+      const nfeId = actionNode.getAttribute('data-nfe-id');
+      if (nfeId && state.auth.user?.role === 'admin') {
+        openModal({ kind: 'nfe-manifestacao', nfeId });
+      }
+      return;
+    }
+    case 'nfe-manifestacao-retry': {
+      const nfeId = actionNode.getAttribute('data-nfe-id');
+      const current = findNfeById(nfeId);
+      if (current && state.auth.user?.role === 'admin') {
+        openModal({ kind: 'nfe-manifestacao', nfeId: current.id });
+      }
+      return;
+    }
+    case 'nfe-query-full-xml': {
+      const nfeId = actionNode.getAttribute('data-nfe-id');
+      if (nfeId && state.auth.user?.role === 'admin') {
+        void queryFullNfeXmlByKey(nfeId);
+      }
+      return;
+    }
     case 'nfe-select': {
       const nfeId = actionNode.getAttribute('data-nfe-id');
       if (!nfeId) {
@@ -2627,6 +2649,11 @@ function onDocumentSubmit(event) {
     case 'nfeRecoverByKeyForm': {
       event.preventDefault();
       void submitNfeRecoverByKeyForm(target);
+      return;
+    }
+    case 'nfeManifestacaoForm': {
+      event.preventDefault();
+      void submitNfeManifestacaoForm(target);
       return;
     }
     case 'eventsSyncCompaniesForm': {
@@ -11873,6 +11900,8 @@ function renderModal() {
       return renderCertificateNotesModal(state.modal.certId);
     case 'nfe-details':
       return renderNfeDetailsModal(state.modal.nfeId);
+    case 'nfe-manifestacao':
+      return renderNfeManifestacaoModal(state.modal.nfeId);
     case 'nfe-view':
       return renderNfeViewerModal(state.modal.nfeId);
     case 'cte-details':
@@ -12821,6 +12850,17 @@ function renderNfeDetailsModal(nfeId) {
   const danfeButton = doc.xmlCompletoDisponivel
     ? `<button class="btn secondary" data-action="nfe-download-danfe" data-nfe-id="${doc.id}">Baixar DANFE</button>`
     : '';
+  const manifestHistory = Array.isArray(doc.manifestacaoHistory?.historico) ? doc.manifestacaoHistory.historico : [];
+  const acceptedManifestation = manifestHistory.some((item) => item.status === 'registrada' || item.status === 'recebida_da_distribuicao');
+  const isAdmin = state.auth.user?.role === 'admin';
+  const canManifest = isAdmin && doc.tipo === 'Recebida' && doc.resumoDisponivel && !doc.xmlCompletoDisponivel;
+  const canQueryFullXml = canManifest && acceptedManifestation && !doc.queryingFullXml;
+  const manifestationRows = manifestHistory.length
+    ? `<div class="table-wrap"><table><thead><tr><th>Evento</th><th>Origem</th><th>Status</th><th>cStat / motivo</th><th>Data</th></tr></thead><tbody>${manifestHistory.map((item) => `<tr><td>${escapeHtml(formatManifestacaoType(item.tipoEvento))}</td><td>${escapeHtml(item.origem || 'notasync')}</td><td>${escapeHtml(item.status)}</td><td>${escapeHtml([item.cStat, item.xMotivo].filter(Boolean).join(' - ') || '-')}</td><td>${escapeHtml(formatDateTime(item.processadoEm || item.createdAt))}</td></tr>`).join('')}</tbody></table></div>`
+    : `<p>${isAdmin ? (doc.manifestacaoHistory ? 'Nenhuma manifestação registrada ou recebida para esta NF-e.' : 'Histórico de manifestação ainda não consultado.') : 'Histórico e ações de manifestação disponíveis para administradores.'}</p>`;
+  const manifestationPanel = doc.tipo === 'Recebida' && doc.resumoDisponivel
+    ? `<section style="margin-top:18px;"><h4>Disponibilidade e manifestação</h4><p>${escapeHtml(isAdmin ? formatManifestacaoStatus(doc.manifestacaoHistory?.status) : 'Apenas um resumo está armazenado. Histórico e ações de manifestação disponíveis para administradores.')}</p>${doc.manifestacaoHistory?.error ? `<p class="text-danger">${escapeHtml(doc.manifestacaoHistory.error)}</p>` : ''}${manifestationRows}${canManifest ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;"><button class="btn secondary" data-action="nfe-manifestacao-open" data-nfe-id="${doc.id}">Registrar manifestação</button>${canQueryFullXml ? `<button class="btn primary" data-action="nfe-query-full-xml" data-nfe-id="${doc.id}">Consultar XML disponível</button>` : ''}${doc.queryingFullXml ? '<span>Consultando chave...</span>' : ''}</div>` : ''}</section>`
+    : '';
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -12853,6 +12893,7 @@ function renderNfeDetailsModal(nfeId) {
             <small style="color:var(--text-secondary); display:block; margin-bottom:8px;">Eventos vinculados</small>
             ${renderXmlEventsList(doc.eventos)}
           </div>
+          ${manifestationPanel}
         </div>
         <div class="modal-footer">
           <button class="btn secondary" data-action="nfe-sync-events" data-nfe-id="${doc.id}" ${syncEventsDisabled}>Buscar eventos</button>
@@ -15541,7 +15582,7 @@ function renderNfeStorageBadges(doc) {
     badges.push(statusBadge('XML completo', 'success'));
   }
   if (doc.resumoDisponivel) {
-    badges.push(statusBadge('Resumo', 'info'));
+    badges.push(statusBadge('Resumo disponível', 'info'));
   }
   if (!badges.length) {
     badges.push(statusBadge('Sem arquivo', 'neutral'));
@@ -26175,7 +26216,150 @@ async function openNfeDetails(nfeId) {
     }
   }
 
+  if (doc.apiNfeId && doc.clientId && doc.tipo === 'Recebida' && doc.resumoDisponivel && state.auth.user?.role === 'admin') {
+    try {
+      doc.manifestacaoHistory = await apiRequest(`/nfe/${encodeURIComponent(doc.apiNfeId)}/manifestacoes?clienteId=${encodeURIComponent(doc.clientId)}`);
+    } catch (error) {
+      doc.manifestacaoHistory = { historico: [], error: toErrorMessage(error) };
+    }
+  }
+
   openModal({ kind: 'nfe-details', nfeId });
+}
+
+function formatManifestacaoType(tipoEvento) {
+  const labels = {
+    '210200': 'Confirmação da Operação',
+    '210210': 'Ciência da Operação',
+    '210220': 'Desconhecimento da Operação',
+    '210240': 'Operação não Realizada'
+  };
+  return labels[String(tipoEvento || '')] || String(tipoEvento || 'Manifestação');
+}
+
+function formatManifestacaoStatus(status) {
+  const labels = {
+    xml_completo_disponivel: 'XML completo disponível.',
+    aguardando_disponibilizacao: 'Manifestação aceita; faça uma consulta manual por chave para verificar se o XML completo foi liberado.',
+    resumo_disponivel: 'Apenas o resumo está armazenado. Nenhum evento será enviado automaticamente.',
+    sem_xml: 'Nenhum arquivo XML armazenado.'
+  };
+  return labels[String(status || '')] || 'Status de disponibilidade não informado.';
+}
+
+function renderNfeManifestacaoModal(nfeId) {
+  const doc = findNfeById(nfeId);
+  if (!doc || state.auth.user?.role !== 'admin' || !doc.apiNfeId || !doc.clientId || !doc.estabelecimentoId) return '';
+  const submitting = Boolean(state.modal.submitting);
+  const result = state.modal.result;
+  const eventHistory = Array.isArray(doc.manifestacaoHistory?.historico) ? doc.manifestacaoHistory.historico : [];
+  const acceptedHistory = eventHistory.filter((item) => ['registrada', 'registrada_sem_vinculo', 'recebida_da_distribuicao'].includes(item.status));
+  const priorFinal = acceptedHistory.some((item) => ['210200', '210220', '210240'].includes(item.tipoEvento));
+  const registeredCodes = new Set(acceptedHistory.map((item) => String(item.tipoEvento)));
+  const resultMessage = result
+    ? `<div class="alert ${result.status === 'registrada' ? 'success' : result.status === 'registrada_sem_vinculo' ? 'warning' : 'danger'}"><strong>${escapeHtml(result.status)}</strong>${result.cStat ? ` · cStat ${escapeHtml(result.cStat)}` : ''}${result.xMotivo ? `<br>${escapeHtml(result.xMotivo)}` : ''}${result.status === 'falha_local' ? '<br>A validação local falhou antes do envio; nenhum evento foi transmitido.' : ''}${result.status === 'resultado_indeterminado' ? '<br>Verifique o evento no portal oficial antes de tentar novamente.' : ''}</div>`
+    : '';
+  return `
+    <div class="overlay" data-action="overlay-close"><div class="modal" role="dialog" aria-modal="true">
+      <div class="modal-header"><h3 class="modal-title">Manifestação do destinatário</h3><p class="modal-subtitle">NF-e ${escapeHtml(doc.numeroNfe || doc.chaveAcesso)} · ${escapeHtml(doc.cliente)}</p></div>
+      <form id="nfeManifestacaoForm" class="modal-body" data-nfe-id="${escapeHtml(doc.id)}">
+        <label class="field">Evento
+          <select name="tipo" required ${submitting || result ? 'disabled' : ''}>
+            <option value="ciencia_operacao" ${registeredCodes.has('210210') || priorFinal ? 'disabled' : ''}>Ciência da Operação — opcional e não conclusiva</option>
+            <option value="confirmacao_operacao" ${registeredCodes.has('210200') && !priorFinal ? 'disabled' : ''}>Confirmação da Operação — confirma que a operação ocorreu</option>
+            <option value="desconhecimento_operacao" ${registeredCodes.has('210220') && !priorFinal ? 'disabled' : ''}>Desconhecimento da Operação — declara que não reconhece a operação</option>
+            <option value="operacao_nao_realizada" ${registeredCodes.has('210240') && !priorFinal ? 'disabled' : ''}>Operação não Realizada — exige justificativa</option>
+          </select>
+        </label>
+        <label class="field">Justificativa de Operação não Realizada (mínimo 15 caracteres)
+          <textarea name="justificativa" maxlength="255" rows="3" ${submitting || result ? 'disabled' : ''}></textarea>
+        </label>
+        <p>Confirmação da Operação tem efeito jurídico e pode impedir o cancelamento pelo emitente. Não a use apenas para obter o XML. Ciência é opcional e não conclusiva. Manifestações conclusivas devem respeitar o prazo oficial de 90 dias da autorização.</p>
+        <label class="checkbox-field"><input type="checkbox" name="confirmacaoExpressa" required ${submitting || result ? 'disabled' : ''}> Revisei o efeito do evento escolhido e autorizo seu envio à SEFAZ para esta NF-e.</label>
+        ${priorFinal ? '<label class="checkbox-field"><input type="checkbox" name="retificarConclusiva" value="true" required> Estou corrigindo expressamente uma manifestação conclusiva anterior.</label>' : ''}
+        ${resultMessage}
+        ${submitting ? '<p>Enviando uma única requisição à SEFAZ...</p>' : ''}
+        <div class="modal-footer"><button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Fechar</button>${!result ? `<button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>Enviar manifestação</button>` : result.status === 'falha_local' ? `<button class="btn primary" type="button" data-action="nfe-manifestacao-retry" data-nfe-id="${escapeHtml(doc.id)}">Corrigir e tentar novamente</button>` : ''}</div>
+      </form>
+    </div></div>`;
+}
+
+async function submitNfeManifestacaoForm(form) {
+  const doc = findNfeById(form.dataset.nfeId);
+  if (!doc || state.auth.user?.role !== 'admin') return;
+  const data = new FormData(form);
+  const tipo = String(data.get('tipo') || '');
+  const justificativa = String(data.get('justificativa') || '').trim();
+  if (!data.get('confirmacaoExpressa')) {
+    pushToast('Marque a autorização expressa antes de enviar.', 'error');
+    return;
+  }
+  if (tipo === 'operacao_nao_realizada' && justificativa.length < 15) {
+    pushToast('A justificativa de Operação não Realizada deve ter pelo menos 15 caracteres.', 'error');
+    return;
+  }
+  state.modal = { ...state.modal, submitting: true };
+  render();
+  try {
+    const requestId = globalThis.crypto?.randomUUID?.();
+    if (!requestId) throw new Error('Este navegador não oferece identificador seguro para a autorização.');
+    const result = await apiRequest(`/nfe/${encodeURIComponent(doc.apiNfeId)}/manifestacoes`, {
+      method: 'POST',
+      body: {
+        clienteId: doc.clientId,
+        requestId,
+        tipo,
+        ...(tipo === 'operacao_nao_realizada' ? { justificativa } : {}),
+        retificarConclusiva: Boolean(data.get('retificarConclusiva')),
+        confirmacaoExpressa: true
+      },
+      timeoutMs: 120000
+    });
+    state.modal = { ...state.modal, submitting: false, result };
+    try {
+      doc.manifestacaoHistory = await apiRequest(`/nfe/${encodeURIComponent(doc.apiNfeId)}/manifestacoes?clienteId=${encodeURIComponent(doc.clientId)}`);
+    } catch { /* Resultado enviado permanece visível se a atualização falhar. */ }
+    render();
+  } catch (error) {
+    state.modal = { ...state.modal, submitting: false, result: { status: 'falha_local', xMotivo: toErrorMessage(error) } };
+    render();
+  }
+}
+
+async function queryFullNfeXmlByKey(nfeId) {
+  const doc = findNfeById(nfeId);
+  const accepted = Array.isArray(doc?.manifestacaoHistory?.historico) && doc.manifestacaoHistory.historico.some((item) => item.status === 'registrada');
+  if (!doc || !accepted || !doc.apiNfeId || !doc.clientId || !doc.estabelecimentoId || state.auth.user?.role !== 'admin' || doc.queryingFullXml) return;
+  doc.queryingFullXml = true;
+  render();
+  try {
+    const response = await apiRequest('/nfe/sync/consultar-chave', {
+      method: 'POST',
+      body: { clienteId: doc.clientId, estabelecimentoId: doc.estabelecimentoId, chaveAcesso: doc.chaveAcesso, ambiente: doc.ambiente, persistir: true },
+      timeoutMs: 120000
+    });
+    const schemas = (response?.documentos || []).map((item) => item?.schema).filter(Boolean);
+    const complete = schemas.some((schema) => /procNFe|nfeProc/i.test(String(schema)));
+    const summary = schemas.some((schema) => /resNFe/i.test(String(schema)));
+    pushToast(complete && Number(response.documentosPersistidos) > 0
+      ? `XML completo retornado e salvo (${schemas.join(', ')}).`
+      : summary
+        ? `A SEFAZ retornou resumo, sem liberar XML completo nesta consulta. cStat ${response?.cStat || '-'}: ${response?.xMotivo || '-'}`
+        : `Consulta concluída sem XML completo. cStat ${response?.cStat || '-'}: ${response?.xMotivo || 'nenhum documento retornado.'}`,
+    complete && Number(response.documentosPersistidos) > 0 ? 'success' : 'info');
+    await refreshApiData({ silent: true });
+  } catch (error) {
+    pushToast(`Falha na consulta pontual por chave: ${toErrorMessage(error)}`, 'error');
+  } finally {
+    doc.queryingFullXml = false;
+    const currentDoc = findNfeById(nfeId);
+    if (currentDoc && state.modal?.kind === 'nfe-details') {
+      try {
+        currentDoc.manifestacaoHistory = await apiRequest(`/nfe/${encodeURIComponent(currentDoc.apiNfeId)}/manifestacoes?clienteId=${encodeURIComponent(currentDoc.clientId)}`);
+      } catch { /* Preserve the current status if history refresh fails. */ }
+    }
+    render();
+  }
 }
 
 async function downloadNfeXmlById(nfeId) {

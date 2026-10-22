@@ -7,10 +7,18 @@ import { request as httpsRequest } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
+import { SignedXml } from 'xml-crypto';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocalStorageService } from '../../modules/storage/storage.service';
 import { CryptoService } from '../../modules/shared/crypto.service';
 import { NfeDistribuicaoClient, NfeDistribuicaoDocument, NfeDistribuicaoResult } from './nfe-distribuicao.types';
+import {
+  NFE_MANIFESTACAO_EVENT_CODES,
+  NfeManifestacaoClient,
+  NfeManifestacaoClientError,
+  NfeManifestacaoResult,
+  NfeManifestacaoTipo
+} from './nfe-manifestacao.types';
 
 type PfxCredentials = {
   mode: 'pfx';
@@ -34,8 +42,9 @@ type SoapEnvelopeProfile = {
 };
 
 @Injectable()
-export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
+export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeManifestacaoClient {
   private static readonly SOAP_NAMESPACE = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeDistribuicaoDFe';
+  private static readonly MANIFESTACAO_SOAP_NAMESPACE = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4';
   private static readonly XML_NAMESPACE = 'http://www.portalfiscal.inf.br/nfe';
   private static readonly AN_CUF = '91';
   private static readonly LAYOUT_VERSION = process.env.NFE_DISTRIBUICAO_LAYOUT_VERSION?.trim() || '1.01';
@@ -150,6 +159,60 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     });
   }
 
+  async sendManifestacao(params: {
+    cnpjConsulta: string;
+    chaveAcesso: string;
+    tipo: NfeManifestacaoTipo;
+    sequencia: number;
+    justificativa?: string;
+    ambiente: NfeAmbiente;
+    certificateId: string;
+  }): Promise<NfeManifestacaoResult> {
+    let pem: PemCredentials;
+    let eventXml: string;
+    let url: URL;
+    try {
+      const certificate = await this.loadCertificate(params.certificateId);
+      const pfx = await this.getPfxCredentials(certificate);
+      pem = await this.convertPfxToPemCredentials(pfx.pfx, pfx.passphrase);
+      const unsignedEvent = this.buildManifestacaoEventXml(params);
+      eventXml = this.signManifestacaoEvent(unsignedEvent, pem.key, pem.cert);
+      url = this.buildManifestacaoUrl(params.ambiente);
+    } catch (error) {
+      throw new NfeManifestacaoClientError(this.toErrorMessage(error), false);
+    }
+    const operation = 'nfeRecepcaoEvento';
+    let response: { statusCode: number; headers: IncomingHttpHeaders; body: string };
+    try {
+      response = await this.doSoapRequest(
+        url,
+        pem,
+        eventXml,
+        '1.2',
+        { id: 'manifestacao-evento', includeSoapHeader: false, includeOperationWrapper: true, namespacedBody: true },
+        operation,
+        RealNfeDistribuicaoClient.MANIFESTACAO_SOAP_NAMESPACE
+      );
+    } catch (error) {
+      throw new NfeManifestacaoClientError(this.toErrorMessage(error), true);
+    }
+    let parsed: Omit<NfeManifestacaoResult, 'statusCode'>;
+    try {
+      parsed = this.parseManifestacaoResponse(response.body);
+    } catch (error) {
+      throw new NfeManifestacaoClientError(this.toErrorMessage(error), true);
+    }
+
+    if (!parsed.cStat) {
+      throw new NfeManifestacaoClientError(`Resposta SOAP de manifestacao sem cStat (HTTP ${response.statusCode}).`, true);
+    }
+
+    return {
+      statusCode: response.statusCode,
+      ...parsed
+    };
+  }
+
   private async executeConsulta(params: {
     cnpjConsulta: string;
     ambiente: NfeAmbiente;
@@ -247,6 +310,127 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     return new URL(url);
   }
 
+  private buildManifestacaoUrl(ambiente: NfeAmbiente): URL {
+    const configured = ambiente === NfeAmbiente.producao
+      ? process.env.NFE_MANIFESTACAO_URL_PRODUCAO?.trim()
+      : process.env.NFE_MANIFESTACAO_URL_HOMOLOGACAO?.trim();
+    const url = configured || (ambiente === NfeAmbiente.producao
+      ? 'https://www.nfe.fazenda.gov.br/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx'
+      : 'https://hom1.nfe.fazenda.gov.br/NFeRecepcaoEvento4/NFeRecepcaoEvento4.asmx');
+    return new URL(url);
+  }
+
+  private buildManifestacaoEventXml(params: {
+    cnpjConsulta: string;
+    chaveAcesso: string;
+    tipo: NfeManifestacaoTipo;
+    sequencia: number;
+    justificativa?: string;
+    ambiente: NfeAmbiente;
+  }): string {
+    const tipoEvento = NFE_MANIFESTACAO_EVENT_CODES[params.tipo];
+    const descEvento = this.getManifestacaoDescricao(params.tipo);
+    const digits = String(params.cnpjConsulta || '').replace(/\D/g, '');
+    const actorTag = digits.length === 11 ? 'CPF' : 'CNPJ';
+    const tpAmb = params.ambiente === NfeAmbiente.producao ? '1' : '2';
+    const id = `ID${tipoEvento}${params.chaveAcesso}${params.sequencia}`;
+    const dhEvento = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const justificativa = params.tipo === 'operacao_nao_realizada' && params.justificativa
+      ? `<xJust>${this.escapeXml(params.justificativa)}</xJust>`
+      : '';
+
+    return [
+      '<?xml version="1.0" encoding="utf-8"?>',
+      `<envEvento xmlns="${RealNfeDistribuicaoClient.XML_NAMESPACE}" versao="1.00">`,
+      `<idLote>${Date.now()}</idLote>`,
+      '<evento versao="1.00">',
+      `<infEvento Id="${id}">`,
+      '<cOrgao>91</cOrgao>',
+      `<tpAmb>${tpAmb}</tpAmb>`,
+      `<${actorTag}>${digits}</${actorTag}>`,
+      `<chNFe>${params.chaveAcesso}</chNFe>`,
+      `<dhEvento>${dhEvento}</dhEvento>`,
+      `<tpEvento>${tipoEvento}</tpEvento>`,
+      `<nSeqEvento>${params.sequencia}</nSeqEvento>`,
+      '<verEvento>1.00</verEvento>',
+      '<detEvento versao="1.00">',
+      `<descEvento>${descEvento}</descEvento>`,
+      justificativa,
+      '</detEvento>',
+      '</infEvento>',
+      '</evento>',
+      '</envEvento>'
+    ].join('');
+  }
+
+  private signManifestacaoEvent(xml: string, privateKey: string, certificatePem: string): string {
+    const id = xml.match(/<infEvento\b[^>]*\bId="([^"]+)"/i)?.[1];
+    if (!id) {
+      throw new Error('Evento de manifestacao sem identificador para assinatura.');
+    }
+    const certificate = certificatePem
+      .replace(/-----BEGIN CERTIFICATE-----|-----END CERTIFICATE-----|\s/g, '');
+    const canonicalization = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
+    const signature = new SignedXml({
+      privateKey,
+      publicCert: certificatePem,
+      signatureAlgorithm: 'http://www.w3.org/2000/09/xmldsig#rsa-sha1',
+      canonicalizationAlgorithm: canonicalization,
+      getKeyInfoContent: () => `<X509Data><X509Certificate>${certificate}</X509Certificate></X509Data>`
+    });
+    signature.addReference({
+      xpath: "//*[local-name(.)='infEvento']",
+      uri: `#${id}`,
+      transforms: [
+        'http://www.w3.org/2000/09/xmldsig#enveloped-signature',
+        canonicalization
+      ],
+      digestAlgorithm: 'http://www.w3.org/2000/09/xmldsig#sha1'
+    });
+    signature.computeSignature(xml, {
+      location: { reference: "//*[local-name(.)='infEvento']", action: 'after' }
+    });
+    return signature.getSignedXml();
+  }
+
+  private getManifestacaoDescricao(tipo: NfeManifestacaoTipo): string {
+    const descriptions: Record<NfeManifestacaoTipo, string> = {
+      ciencia_operacao: 'Ciencia da Operacao',
+      confirmacao_operacao: 'Confirmacao da Operacao',
+      desconhecimento_operacao: 'Desconhecimento da Operacao',
+      operacao_nao_realizada: 'Operacao nao Realizada'
+    };
+    return descriptions[tipo];
+  }
+
+  private escapeXml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
+  }
+
+  private parseManifestacaoResponse(response: string): Omit<NfeManifestacaoResult, 'statusCode'> {
+    let decoded = response;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const wrapper = decoded.match(/<(?:\w+:)?nfeRecepcaoEventoResult\b[^>]*>([\s\S]*?)<\/(?:\w+:)?nfeRecepcaoEventoResult>/i)?.[1];
+      decoded = this.decodeXmlEntities(wrapper ?? decoded);
+    }
+    const retEnv = decoded.match(/<(?:\w+:)?retEnvEvento\b[^>]*>[\s\S]*?<\/(?:\w+:)?retEnvEvento>/i)?.[0] ?? decoded;
+    const eventBlock = retEnv.match(/<(?:\w+:)?retEvento\b[^>]*>[\s\S]*?<\/(?:\w+:)?retEvento>/i)?.[0] ?? '';
+    const eventInfo = eventBlock.match(/<(?:\w+:)?infEvento\b[^>]*>[\s\S]*?<\/(?:\w+:)?infEvento>/i)?.[0] ?? eventBlock;
+
+    return {
+      cStat: this.extractFirstTagText(retEnv, 'cStat') ?? null,
+      xMotivo: this.extractFirstTagText(retEnv, 'xMotivo') ?? null,
+      eventCStat: this.extractFirstTagText(eventInfo, 'cStat') ?? null,
+      eventXMotivo: this.extractFirstTagText(eventInfo, 'xMotivo') ?? null,
+      nProt: this.extractFirstTagText(eventInfo, 'nProt') ?? null
+    };
+  }
+
   private buildRequestXml(params: {
     cnpjConsulta: string;
     cUfAutor?: string;
@@ -292,19 +476,20 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
   private buildSoapEnvelope(
     requestXml: string,
     soapVersion: SoapVersion = '1.2',
-    profile: SoapEnvelopeProfile = RealNfeDistribuicaoClient.ENVELOPE_PROFILES[0]
+    profile: SoapEnvelopeProfile = RealNfeDistribuicaoClient.ENVELOPE_PROFILES[0],
+    operation = 'nfeDistDFeInteresse',
+    serviceNamespace = RealNfeDistribuicaoClient.SOAP_NAMESPACE
   ): string {
     const envelopeNamespace =
       soapVersion === '1.2'
         ? 'http://www.w3.org/2003/05/soap-envelope'
         : 'http://schemas.xmlsoap.org/soap/envelope/';
     const prefix = soapVersion === '1.2' ? 'soap12' : 'soap';
-    const operation = 'nfeDistDFeInteresse';
     const bodyTagOpen = profile.namespacedBody
-      ? `<nfeDadosMsg xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`
+      ? `<nfeDadosMsg xmlns="${serviceNamespace}">`
       : '<nfeDadosMsg>';
     const bodyContent = profile.includeOperationWrapper
-      ? [`<${operation} xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`, bodyTagOpen, requestXml, `</nfeDadosMsg>`, `</${operation}>`]
+      ? [`<${operation} xmlns="${serviceNamespace}">`, bodyTagOpen, requestXml, `</nfeDadosMsg>`, `</${operation}>`]
       : [bodyTagOpen, requestXml, `</nfeDadosMsg>`];
 
     return [
@@ -315,7 +500,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
       ...(profile.includeSoapHeader
         ? [
             `<${prefix}:Header>`,
-            `<nfeCabecMsg xmlns="${RealNfeDistribuicaoClient.SOAP_NAMESPACE}">`,
+            `<nfeCabecMsg xmlns="${serviceNamespace}">`,
             `<cUF>${RealNfeDistribuicaoClient.AN_CUF}</cUF>`,
             `<indComp>0</indComp>`,
             `<versaoDados>${RealNfeDistribuicaoClient.LAYOUT_VERSION}</versaoDados>`,
@@ -403,15 +588,17 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     mtls: MutualTlsCredentials,
     requestXml: string,
     soapVersion: SoapVersion,
-    profile: SoapEnvelopeProfile
+    profile: SoapEnvelopeProfile,
+    operation = 'nfeDistDFeInteresse',
+    serviceNamespace = RealNfeDistribuicaoClient.SOAP_NAMESPACE
   ): Promise<{ statusCode: number; headers: IncomingHttpHeaders; body: string }> {
     return new Promise((resolve, reject) => {
-      const envelope = this.buildSoapEnvelope(requestXml, soapVersion, profile);
+      const envelope = this.buildSoapEnvelope(requestXml, soapVersion, profile, operation, serviceNamespace);
       const tlsOptions =
         mtls.mode === 'pfx'
           ? { pfx: mtls.pfx, passphrase: mtls.passphrase }
           : { cert: mtls.cert, key: mtls.key };
-      const soapAction = `${RealNfeDistribuicaoClient.SOAP_NAMESPACE}/nfeDistDFeInteresse`;
+      const soapAction = `${serviceNamespace}/${operation}`;
       const contentType =
         soapVersion === '1.2'
           ? `application/soap+xml; charset=utf-8; action="${soapAction}"`

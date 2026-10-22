@@ -48,6 +48,8 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - `POST /nfe/sync/download-por-chave/executar-global`
 - `POST /nfe/sync/consultar-nsu`
 - `POST /nfe/sync/consultar-chave`
+- `GET /nfe/:id/manifestacoes?clienteId=...` (admin)
+- `POST /nfe/:id/manifestacoes` (admin; evento somente com autorização expressa)
 - `GET /nfe/sync/diagnostico-sefaz/status` (admin)
 - `POST /nfe/sync/diagnostico-sefaz/iniciar` (admin)
 - `POST /nfe/sync/diagnostico-sefaz/consultar` (admin)
@@ -103,12 +105,16 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - `GET /nfe` e `GET /cte` agora aceitam `page` e `pageSize` (padrao `100`, maximo `200`) e retornam `{ items, total, page, pageSize, totalPages }`, permitindo paginacao real no painel de armazenados.
 - Quando `CTE_CONSULTA_CLIENT_MODE=real`, o cliente SOAP de CT-e aplica fallback automatico de namespace, SOAPAction, versao SOAP e formato de `cteDadosMsg` para reduzir rejeicoes tecnicas de consulta por chave. Se ainda retornar `cStat 243`, a resposta deve ser tratada como falha da requisicao ao autorizador, nao como XML de CT-e valido.
 
-## Auditoria da manifestacao do destinatario
+## Manifestacao manual do destinatario e acesso ao XML completo
 
 - A NT 2018.001 registrava que destinatario pessoa fisica ainda nao podia manifestar. Essa informacao ficou superada: a NT 2020.001 incluiu a Manifestacao do Destinatario para CPF, e sua versao 1.60 atualiza os prazos. A manifestacao aplica-se ao destinatario de NF-e modelo 55, nao ao produtor quando ele e apenas o emitente, nem deve ser presumida para NFC-e, NFP-e ou outros modelos.
-- O NotaSync consulta e importa distribuicao DF-e, mas nao envia eventos de manifestacao (`ciencia`, `confirmacao`, `desconhecimento` ou `operacao nao realizada`). Portanto, a aplicacao nao altera o posicionamento juridico do produtor perante uma operacao.
-- Para NF-e recebida, a distribuicao pode entregar um resumo `resNFe`. A Ciencia da Emissao e um evento opcional que pode habilitar o acesso ao XML completo; ela registra apenas conhecimento da emissao e nao confirma que a operacao ocorreu. A confirmacao, o desconhecimento ou a declaracao de operacao nao realizada sao eventos conclusivos e dependem da situacao real. O NotaSync nao deve enviar esses eventos automaticamente. O resumo e classificado como resumo, nunca como XML completo.
-- Se o retorno tiver `resNFe` sem XML completo, isso e diferente de a SEFAZ nao ter retornado documentos. O painel exibe as contagens de resumos e XMLs completos; o operador deve seguir o procedimento de manifestacao no sistema oficial ou solicitar uma decisao de produto antes de automatizar qualquer evento.
+- A tela de detalhes mostra o resumo armazenado, a origem e o historico conhecido de eventos. Um `resNFe` retornado pela SEFAZ e persistido como resumo, relacionado ao estabelecimento consultado como destinatario, e aparece no filtro `Recebida`; isso nao o transforma em XML completo. A migration tambem reclassifica resumos legados sem relacao, desde que o emitente seja diferente do CPF/CNPJ do estabelecimento registrado na consulta.
+- Somente administradores podem consultar o historico ou abrir a acao manual de manifestacao. A aplicacao nao envia eventos automaticamente. O operador deve escolher um dos quatro eventos e confirmar expressamente o envio para aquela NF-e; o registro guarda usuario, certificado, autorizacao, ambiente, sequencia e retorno SEFAZ. A chave e documentos de identificacao nao sao gravados nos logs.
+- Ciencia da Operacao e opcional e nao conclusiva. Confirmacao declara que a operacao ocorreu e pode impedir o cancelamento pelo emitente; Desconhecimento declara que o destinatario nao reconhece a operacao; Operacao nao Realizada exige justificativa. Nenhum evento conclusivo deve ser enviado apenas para obter o XML. Operacao nao Realizada aceita justificativa de 15 a 255 caracteres.
+- Manifestacao conclusiva deve respeitar o prazo oficial de 90 dias da autorizacao, vigente desde 01/06/2026. O servico bloqueia envio fora do prazo localmente; a rejeicao oficial continua sendo exibida e registrada sem ser convertida em sucesso. Reenvio automatico nao ocorre: se o resultado do transporte for indeterminado, o NotaSync bloqueia novo envio ate verificacao no portal oficial.
+- Quando a SEFAZ confirmar o evento com `cStat 135`, o operador pode acionar `Consultar XML disponivel`. Essa acao faz uma unica consulta pontual `consChNFe`, sujeita aos limites e bloqueios oficiais existentes, persiste apenas o que a SEFAZ retornar e nao altera cursores NSU. `cStat 136` fica registrado como evento sem vinculo e nao libera a acao. A tela distingue XML completo, resumo e ausencia de documento.
+- `GET /nfe/:id/manifestacoes?clienteId=...` lista o historico do NotaSync e eventos de manifestacao encontrados na distribuicao. `POST /nfe/:id/manifestacoes` recebe `clienteId`, `requestId` UUID idempotente, `tipo`, `confirmacaoExpressa: true`, `retificarConclusiva` opcional e `justificativa` apenas para Operacao nao Realizada. Ambas as rotas sao restritas ao papel admin e escopadas ao cliente do documento.
+- A assinatura do evento usa o certificado A1 ativo cujo titular corresponde exatamente ao CPF/CNPJ do estabelecimento. Certificados e senhas permanecem criptografados; nenhum certificado e senha sao retornados na API. A integracao usa o endpoint oficial `NFeRecepcaoEvento4` do Ambiente Nacional, sobrescrevivel por `NFE_MANIFESTACAO_URL_PRODUCAO` e `NFE_MANIFESTACAO_URL_HOMOLOGACAO`.
 
 ## Operacao recomendada
 
@@ -129,6 +135,7 @@ Para auditar um caso real sem gravar dados pessoais nos logs, o operador deve an
 - Portal NF-e - MOC 7.0: `https://www.nfe.fazenda.gov.br/portal/exibirArquivo.aspx?conteudo=LrBx7WT9PuA%3D`
 - Portal NF-e - NT 2018.001 (emitente pessoa fisica com IE e certificado e-CPF): `https://www.nfe.fazenda.gov.br/POrtal/exibirArquivo.aspx?conteudo=PSVK9st3J8U%3D`
 - Portal NF-e - NT 2020.001 v.1.60 (manifestacao do destinatario, incluindo CPF; prazo atualizado em 2026): `https://www.nfe.fazenda.gov.br/Portal/exibirArquivo.aspx?AspxAutoDetectCookieSupport=1&conteudo=%2BWTd7iuD21s%3D`
+- Portal NF-e - Web Services, incluindo Recepcao de Eventos do Ambiente Nacional: `https://www.nfe.fazenda.gov.br/PORTAL/WebServices.aspx?AspxAutoDetectCookieSupport=1`
 - Portal NF-e - NT 2014.002 Web Service de Distribuicao de DF-e: `https://www.nfe.fazenda.gov.br/PORTAl/exibirArquivo.aspx?conteudo=C/xkRclIh74%3D`
 - Portal NF-e - FAQ de consulta na internet: `https://www.nfe.fazenda.gov.br/Portal/perguntasFrequentes.aspx?AspxAutoDetectCookieSupport=1&tipoConteudo=auR4yGlWmRY%3D`
 - Portal NF-e - Informe de manifestacao do destinatario em 90 dias (publicado em 27/05/2026, vigente a partir de 01/06/2026): `https://www.nfe.fazenda.gov.br/portal/informe.aspx?AspxAutoDetectCookieSupport=1&Informe=f9R6A+5SmSE%3D&ehCTG=false`
