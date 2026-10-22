@@ -136,6 +136,25 @@ describe('NfeXmlParserService', () => {
     });
   });
 
+  it('parseia CPF do emitente no resumo resNFe e preserva zeros a esquerda', () => {
+    const parsed = service.parse(`<?xml version="1.0" encoding="UTF-8"?>
+<resNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01">
+  <chNFe>35260612345678000199550010000001231000001231</chNFe>
+  <CPF>00186102097</CPF>
+  <xNome>Produtor Rural</xNome>
+  <IE>251040852</IE>
+  <dhEmi>2026-06-29T10:00:00-03:00</dhEmi>
+  <vNF>88.15</vNF>
+  <cSitNFe>1</cSitNFe>
+</resNFe>`);
+
+    expect(parsed).toMatchObject({
+      cnpjEmitente: '00186102097',
+      razaoSocialEmitente: 'Produtor Rural',
+      contentType: 'resumo'
+    });
+  });
+
   it('inspeciona numero da NF-e mesmo sem chave de acesso valida', () => {
     const inspected = service.inspect(`<?xml version="1.0" encoding="UTF-8"?>
 <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe">

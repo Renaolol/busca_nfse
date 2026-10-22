@@ -217,7 +217,7 @@ export class NfeXmlParserService {
       status: this.extract(xml, ['cStat', 'cSitNFe', 'xMotivo']),
       cnpjEmitente:
         this.normalizeCnpj(this.extractNestedAny(xml, ['emit'], ['CNPJ', 'CPF'])) ??
-        this.normalizeCnpj(summary ? this.extract(xml, ['CNPJ']) : undefined),
+        this.normalizeCnpj(summary ? this.extract(xml, ['CNPJ', 'CPF']) : undefined),
       razaoSocialEmitente:
         this.extractNestedAny(xml, ['emit'], ['xNome']) ?? (summary ? this.extract(xml, ['xNome']) : undefined),
       cnpjDestinatario: this.normalizeCnpj(this.extractNestedAny(xml, ['dest'], ['CNPJ', 'CPF'])),

@@ -190,9 +190,42 @@ export class NfeController {
 
   @Post('sync/rodar-sefaz-cpf')
   @Roles('admin')
+  @ApiOkResponse({
+    description: 'A recuperacao com periodo inclui cpfDiagnostics com método, situação, cStat/xMotivo, período, consultas, NSUs, documentos retornados e resultados de processamento.',
+    schema: {
+      type: 'object',
+      properties: {
+        processed: { type: 'integer' },
+        documentsSaved: { type: 'integer' },
+        failures: { type: 'integer' },
+        cpfDiagnostics: {
+          type: 'object',
+          properties: {
+            method: { type: 'string', enum: ['consNSU'] },
+            status: { type: 'string', enum: ['concluida', 'parcial', 'aguardando_sefaz', 'falha', 'sem_documentos'] },
+            dataEmissaoInicio: { type: 'string', format: 'date' },
+            dataEmissaoFim: { type: 'string', format: 'date' },
+            consultasExecutadas: { type: 'integer' },
+            nsuAtual: { type: 'string', nullable: true },
+            proximoNsu: { type: 'string', nullable: true },
+            disponivelApos: { type: 'string', format: 'date-time', nullable: true },
+            documentosRetornados: { type: 'integer' },
+            xmlsCompletos: { type: 'integer' },
+            resumos: { type: 'integer' },
+            eventos: { type: 'integer' },
+            foraDoPeriodo: { type: 'integer' },
+            documentosImportados: { type: 'integer' },
+            descartadosComFalha: { type: 'integer' },
+            cStat: { type: 'string', nullable: true },
+            xMotivo: { type: 'string', nullable: true }
+          }
+        }
+      }
+    }
+  })
   @ApiOperation({
     summary: 'Importa NF-e manualmente pela SEFAZ para controles cadastrados com CPF',
-    description: 'Aceita controleId do produtor, certificadoId, clienteId, ambiente e opcionalmente dataEmissaoInicio/dataEmissaoFim. Sem datas, a consulta incremental segue o ultimo NSU salvo. Com as duas datas, executa uma recuperacao historica pontual usando consNSU, consulta ate 15 NSUs por execucao (ate 10.000 NSUs no total), persiste somente documentos dentro do periodo e preserva o cursor incremental. A recuperacao historica pode prosseguir durante a pausa incremental por cStat 137, respeitando seu limite proprio de consultas, e pode ser retomada apos uma hora quando atingir o limite preventivo. cStat 656 bloqueia todas as consultas por uma hora. A recuperacao esta limitada a documentos disponibilizados nos ultimos 90 dias. O certificado precisa estar vinculado ao produtor selecionado.'
+    description: 'Aceita controleId do produtor, certificadoId, clienteId, ambiente e opcionalmente dataEmissaoInicio/dataEmissaoFim. Sem datas, segue o cursor incremental salvo em distNSU. Com datas, tenta a recuperacao pontual por consNSU a partir do NSU conhecido, filtra emissao localmente e preserva o cursor incremental. O servico nao oferece filtro por data: a NT 2014.002 recomenda distNSU para distribuir o conjunto de documentos; consNSU e consulta pontual, sujeita a no maximo 20 consultas por hora e disponibilidade de 90 dias. A aplicacao limita cada ciclo a 15 consultas consNSU e a busca a 10.000 NSUs. Recuperacoes parciais ficam salvas e o agendador de NF-e tenta retoma-las apos o intervalo, se auto-sync ou a busca noturna estiver habilitada. cStat 656 exige espera de uma hora. A recuperacao nao retrocede nem altera o cursor incremental. A resposta historica inclui contagens e proximo NSU em cpfDiagnostics. O certificado precisa estar vinculado ao produtor selecionado.'
   })
   runNowCpfViaSefazGlobal(@Body() dto: RunSefazCpfImportDto) {
     return this.nfeService.runNowCpfViaSefazGlobal(dto);

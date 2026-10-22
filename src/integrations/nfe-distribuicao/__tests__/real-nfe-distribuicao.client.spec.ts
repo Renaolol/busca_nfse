@@ -170,12 +170,19 @@ describe('RealNfeDistribuicaoClient', () => {
         chaveAcesso: '35260612345678000199550010000001231000001231'
       }
     });
+    const byCpf = client.buildRequestXml({
+      cnpjConsulta: '00186102097',
+      ambiente: 'producao',
+      consulta: { kind: 'distNSU', ultNsu: 0n }
+    });
 
     expect(byNsu).toContain('<tpAmb>2</tpAmb>');
     expect(byNsu).toContain('<consNSU><NSU>000000000000015</NSU></consNSU>');
     expect(byChave).toContain(
       '<consChNFe><chNFe>35260612345678000199550010000001231000001231</chNFe></consChNFe>'
     );
+    expect(byCpf).toContain('<CPF>00186102097</CPF>');
+    expect(byCpf).not.toContain('<CNPJ>');
   });
 
   it('extrai retDistDFeInt com namespace no payload SOAP escapado', () => {

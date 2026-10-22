@@ -4594,7 +4594,7 @@ function renderNfceScControlRow(control) {
   return `
     <tr>
       <td>${escapeHtml(control.estabelecimento?.razaoSocial || control.estabelecimento?.cnpj || '-')}</td>
-      <td>${escapeHtml(formatCnpj(control.cnpjConsulta || ''))}</td>
+      <td>${escapeHtml(formatCpfCnpj(control.cnpjConsulta || ''))}</td>
       <td>${escapeHtml(control.certificado?.nome || 'Nao selecionado')}</td>
       <td>${escapeHtml(latestNsu)}</td>
       <td>${statusBadge(statusLabel, isRecoveryProcessing ? 'info' : toneFromNfeSyncStatus(control.status))}</td>
@@ -5139,7 +5139,7 @@ function renderNfeSyncPage() {
           <tr>
             <th>Cliente</th>
             <th>Estabelecimento</th>
-            <th>CNPJ consulta</th>
+            <th>CPF/CNPJ consultado</th>
             <th>Ambiente</th>
             <th>${escapeHtml(controlCursorLabel)}</th>
             <th>${escapeHtml(controlProgressLabel)}</th>
@@ -5178,7 +5178,7 @@ function renderNfeSyncPage() {
                     <span class="row-title">${escapeHtml(control.estabelecimento)}</span>
                     <span class="row-sub">${escapeHtml(formatCnpj(control.cnpjEstabelecimento))}</span>
                   </td>
-                  <td>${escapeHtml(formatCnpj(control.cnpjConsulta))}</td>
+                  <td>${escapeHtml(formatCpfCnpj(control.cnpjConsulta))}</td>
                   <td>${statusBadge(mapNfeAmbienteLabel(control.ambiente), control.ambiente === 'producao' ? 'success' : 'warning')}</td>
                   <td>${escapeHtml(control.ultimoNsuConsultado)}</td>
                   <td>${escapeHtml(control.ultimoNsuDistribuido)}</td>
@@ -5288,6 +5288,7 @@ function renderNfeSyncPage() {
 
 function renderNfeLastRunPanel() {
   const report = state.nfeLastRunReport;
+  const cpfDiagnostics = report?.cpfDiagnostics;
   const rows = Array.isArray(report?.executionDetails)
     ? report.executionDetails
     : Array.isArray(report?.failureDetails)
@@ -5310,6 +5311,22 @@ function renderNfeLastRunPanel() {
         <span>Falhas: <strong>${escapeHtml(String(report.failures || 0))}</strong></span>
       </div>
     </div>
+    ${
+      cpfDiagnostics
+        ? `<div class="card-subtitle" style="margin:0 0 14px; padding:12px; border:1px solid var(--line); border-radius:10px;">
+            <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:8px;">
+              ${statusBadge(mapSefazCpfDiagnosticStatus(cpfDiagnostics.status), toneFromSefazCpfDiagnosticStatus(cpfDiagnostics.status))}
+              <strong>Consulta ${escapeHtml(cpfDiagnostics.method || 'SEFAZ')}</strong>
+              <span>Período ${escapeHtml(cpfDiagnostics.dataEmissaoInicio || '-')} a ${escapeHtml(cpfDiagnostics.dataEmissaoFim || '-')}</span>
+            </div>
+            <div>Consultas: ${escapeHtml(String(cpfDiagnostics.consultasExecutadas ?? 0))} · NSU consultado: ${escapeHtml(cpfDiagnostics.nsuAtual || '-')} · Retoma em: ${escapeHtml(cpfDiagnostics.proximoNsu || 'concluído')}</div>
+            ${cpfDiagnostics.disponivelApos ? `<div>Disponível após: ${escapeHtml(formatDateTime(cpfDiagnostics.disponivelApos))}</div>` : ''}
+            <div>Documentos retornados: ${escapeHtml(String(cpfDiagnostics.documentosRetornados ?? 0))} · XMLs completos: ${escapeHtml(String(cpfDiagnostics.xmlsCompletos ?? 0))} · Resumos: ${escapeHtml(String(cpfDiagnostics.resumos ?? 0))} · Eventos: ${escapeHtml(String(cpfDiagnostics.eventos ?? 0))}</div>
+            <div>Itens importados: ${escapeHtml(String(cpfDiagnostics.documentosImportados ?? 0))} · Fora do período: ${escapeHtml(String(cpfDiagnostics.foraDoPeriodo ?? 0))} · Com falha: ${escapeHtml(String(cpfDiagnostics.descartadosComFalha ?? 0))} · cStat: ${escapeHtml(cpfDiagnostics.cStat || '-')}</div>
+            ${cpfDiagnostics.xMotivo ? `<div>Motivo SEFAZ: ${escapeHtml(cpfDiagnostics.xMotivo)}</div>` : ''}
+          </div>`
+        : ''
+    }
     ${renderDominioImportSummaryPanel(importSummary, {
       subtitle: 'O total bruto inclui documentos e eventos importados pela Dominio.'
     })}
@@ -5324,7 +5341,7 @@ function renderNfeLastRunPanel() {
                   <tr>
                     <th>Cliente</th>
                     <th>Estabelecimento</th>
-                    <th>CNPJ consulta</th>
+                    <th>CPF/CNPJ consultado</th>
                     <th>Status</th>
                     <th>ID catalogo</th>
                     <th>Numero NF-e</th>
@@ -5355,7 +5372,7 @@ function renderNfeLastRunPanel() {
                         <td>${escapeHtml(
                           establishment?.razaoSocial || establishment?.municipioNome || row.estabelecimentoId || '-'
                         )}</td>
-                        <td>${escapeHtml(formatCnpj(row.cnpjConsulta || ''))}</td>
+                        <td>${escapeHtml(formatCpfCnpj(row.cnpjConsulta || ''))}</td>
                         <td>${statusBadge(mapNfeRunItemStatusLabel(row.status), toneFromNfeRunItemStatus(row.status))}</td>
                         <td>${escapeHtml(row.catalogoId ? String(row.catalogoId) : '-')}</td>
                         <td>${escapeHtml(formatNfeFailureNumber(row))}</td>
@@ -6246,7 +6263,7 @@ function renderNfseGapAuditPage() {
       return `
         <tr data-row-actions-menu-id="${escapeHtml(menuId)}">
           <td><strong>${escapeHtml(row.razaoSocial || 'Sem razao social')}</strong></td>
-          <td>${escapeHtml(formatCnpj(row.cnpjConsulta || ''))}</td>
+          <td>${escapeHtml(formatCpfCnpj(row.cnpjConsulta || ''))}</td>
           <td>${escapeHtml(String(row.totalDocumentosAnalisados || 0))}</td>
           <td>${statusBadge(`${Number(row.totalFaixasLacuna || 0)} faixa(s)`, Number(row.totalFaixasLacuna || 0) > 0 ? 'warning' : 'neutral')}</td>
           <td>${escapeHtml(String(row.totalNumerosPulados || 0))}</td>
@@ -11859,7 +11876,7 @@ function renderNfseRecoverByDpsModal() {
                 <input type="text" value="${escapeHtml(state.modal.clientName || '')}" readonly />
               </label>
               <label>
-                <span>CNPJ consulta</span>
+                <span>CPF/CNPJ consultado</span>
                 <input type="text" name="cnpjConsulta" value="${escapeHtml(state.modal.cnpjConsulta || '')}" readonly />
               </label>
               <label>
@@ -12068,7 +12085,7 @@ function renderNfseRecoverByKeyModal() {
                 <input type="text" value="${escapeHtml(state.modal.clientName || '')}" readonly />
               </label>
               <label>
-                <span>CNPJ consulta</span>
+                <span>CPF/CNPJ consultado</span>
                 <input type="text" name="cnpjConsulta" value="${escapeHtml(state.modal.cnpjConsulta || '')}" readonly />
               </label>
               <label>
@@ -12170,7 +12187,7 @@ function renderNfseNumberingExceptionModal() {
                 <input type="text" value="${escapeHtml(state.modal.clientName || '')}" readonly />
               </label>
               <label>
-                <span>CNPJ consulta</span>
+                <span>CPF/CNPJ consultado</span>
                 <input type="text" name="cnpjConsulta" value="${escapeHtml(state.modal.cnpjConsulta || '')}" readonly />
               </label>
               <label>
@@ -13189,7 +13206,7 @@ function renderPastNsuRecoveryReportModal() {
                 <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(68vh, 760px);">
                   <div style="display:grid; grid-template-columns: minmax(120px, .7fr) minmax(170px, 1fr) minmax(140px, .8fr) minmax(220px, 1.2fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1160px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:1;">
                     <div style="padding:12px 14px;">NSU</div>
-                    <div style="padding:12px 14px;">CNPJ consulta</div>
+                    <div style="padding:12px 14px;">CPF/CNPJ consultado</div>
                     <div style="padding:12px 14px;">Ambiente</div>
                     <div style="padding:12px 14px;">Chave</div>
                     <div style="padding:12px 14px;">Status</div>
@@ -13216,7 +13233,7 @@ function renderPastNsuRecoveryReportModal() {
                 : `
                 <div style="border:1px solid var(--line); border-radius:14px; overflow:auto; background:var(--surface); max-height:min(68vh, 760px);">
                   <div style="display:grid; grid-template-columns: minmax(170px, 1.1fr) minmax(120px, .7fr) minmax(160px, 1fr) minmax(240px, 1.4fr) minmax(160px, .9fr) minmax(320px, 1.6fr); gap:0; min-width:1170px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-secondary); background:var(--surface-alt); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:1;">
-                    <div style="padding:12px 14px;">CNPJ consulta</div>
+                    <div style="padding:12px 14px;">CPF/CNPJ consultado</div>
                     <div style="padding:12px 14px;">Ambiente</div>
                     <div style="padding:12px 14px;">Faixa NSU</div>
                     <div style="padding:12px 14px;">Resultado</div>
@@ -16674,24 +16691,38 @@ async function submitNfeSefazCpfImportForm(form) {
     });
     state.nfeLastRunReport = buildNfeRunReport(result);
     state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
-    pushToast(buildNfeRunToastMessage(`Consulta SEFAZ concluida para ${producer.cliente} (${certificate.apelido})`, result), Number(result?.failures || 0) > 0 ? 'error' : 'success');
+    const completion = buildSefazCpfRunToast(result);
+    pushToast(`${completion.message} Produtor: ${producer.cliente} (${certificate.apelido}).`, completion.tone);
     await refreshApiData();
     if (dataEmissaoInicio && dataEmissaoFim) {
       try {
         const found = await searchNfeSefazCpfPeriod({ producer, ambiente, dataEmissaoInicio, dataEmissaoFim });
-        const summary = String(result?.executionDetails?.[0]?.mensagem || '');
-        const partial = /consulta historica sefaz cpf parcial/i.test(summary);
-        pushToast(
-          partial
-            ? `${found} NF-e localizadas ate agora. A recuperacao continua do proximo NSU apos a pausa de uma hora.`
-            : `${found} NF-e localizadas para o produtor no periodo informado.`,
-          partial ? 'info' : found ? 'success' : 'info'
-        );
+        const status = result?.cpfDiagnostics?.status;
+        const partial = status === 'parcial' || status === 'aguardando_sefaz';
+        const failed = status === 'falha';
+        const noDocuments = status === 'sem_documentos';
+        const message = partial
+          ? `${found} NF-e localizadas ate agora. O ponto de retomada foi salvo para a proxima execucao agendada.`
+          : failed
+            ? `A recuperacao foi interrompida por falha tecnica. Consulte os detalhes da execucao; ${found} NF-e estao armazenadas no periodo.`
+            : noDocuments
+              ? `Nenhum documento foi retornado pela distribuicao nacional para o periodo. Consulte a disponibilidade no SAT/SC separadamente.`
+              : `${found} NF-e localizadas para o produtor no periodo informado.`;
+        pushToast(message, failed ? 'error' : partial || noDocuments ? 'info' : found ? 'success' : 'info');
       } catch (error) {
         pushToast(`A importacao SEFAZ terminou, mas nao foi possivel filtrar as NF-e pelo periodo: ${toErrorMessage(error)}`, 'error');
       }
     } else {
-      pushToast('Consulta concluida. Os documentos recebidos foram atualizados em Armazenados.', 'success');
+      pushToast(
+        result?.cpfDiagnostics?.status === 'sem_documentos' || (!result?.cpfDiagnostics && !Number(result?.documentsSaved || 0) && !Number(result?.failures || 0))
+          ? 'Nenhum documento novo foi importado. O painel de controles mostra cStat, NSU e o motivo retornado pela SEFAZ.'
+          : `${mapSefazCpfDiagnosticStatus(result?.cpfDiagnostics?.status || 'concluida')}. Consulte os documentos recebidos em Armazenados.`,
+        result?.cpfDiagnostics?.status === 'falha' || Number(result?.failures || 0) > 0
+          ? 'error'
+          : result?.cpfDiagnostics?.status === 'concluida' || Number(result?.documentsSaved || 0) > 0
+            ? 'success'
+            : 'info'
+      );
     }
   } catch (error) {
     const errorMessage = toErrorMessage(error);
@@ -17025,10 +17056,70 @@ function buildNfeRunReport(response) {
     processed: Number(response?.processed || 0),
     documentsSaved: Number(response?.documentsSaved || 0),
     failures: Number(response?.failures || 0),
+    cpfDiagnostics: response?.cpfDiagnostics || null,
     importSummary: normalizeDominioImportSummary(response?.importSummary),
     executionDetails: Array.isArray(response?.executionDetails) ? response.executionDetails : [],
     failureDetails: Array.isArray(response?.failureDetails) ? response.failureDetails : []
   };
+}
+
+function mapSefazCpfDiagnosticStatus(status) {
+  switch (status) {
+    case 'concluida':
+      return 'Concluída';
+    case 'parcial':
+      return 'Parcial';
+    case 'aguardando_sefaz':
+      return 'Aguardando SEFAZ';
+    case 'falha':
+      return 'Falha';
+    case 'sem_documentos':
+      return 'Sem documentos disponíveis';
+    default:
+      return status || 'Não informado';
+  }
+}
+
+function toneFromSefazCpfDiagnosticStatus(status) {
+  switch (status) {
+    case 'concluida':
+      return 'success';
+    case 'parcial':
+    case 'aguardando_sefaz':
+      return 'info';
+    case 'falha':
+      return 'danger';
+    case 'sem_documentos':
+      return 'neutral';
+    default:
+      return 'neutral';
+  }
+}
+
+function buildSefazCpfRunToast(response) {
+  const diagnostics = response?.cpfDiagnostics;
+  if (!diagnostics) {
+    const documentsSaved = Number(response?.documentsSaved || 0);
+    const failures = Number(response?.failures || 0);
+    return {
+      message: failures
+        ? buildNfeRunToastMessage('Falha na consulta SEFAZ', response)
+        : documentsSaved
+          ? buildNfeRunToastMessage('Consulta SEFAZ processada', response)
+          : 'Consulta executada sem documentos importados. Verifique o cStat e o motivo no painel de controles.',
+      tone: failures ? 'error' : documentsSaved ? 'success' : 'info'
+    };
+  }
+
+  const message = `${mapSefazCpfDiagnosticStatus(diagnostics.status)}: ${Number(diagnostics.documentosRetornados || 0)} documento(s) retornado(s), ${Number(diagnostics.documentosImportados || 0)} item(ns) importado(s), ${Number(diagnostics.consultasExecutadas || 0)} consulta(s) consNSU.${
+    diagnostics.proximoNsu ? ` Próximo NSU: ${diagnostics.proximoNsu}.` : ''
+  }`;
+  const tone = diagnostics.status === 'falha' || Number(response?.failures || 0) > 0
+    ? 'error'
+    : diagnostics.status === 'concluida'
+      ? 'success'
+      : 'info';
+  return { message, tone };
 }
 
 function buildNfeRunReportFromDominioImport(response, request) {
@@ -21207,7 +21298,7 @@ function buildPastNsuRecoveryLiveRows(execution) {
   const rows = Array.isArray(execution?.rows) ? execution.rows : [];
   return rows.map((row) => ({
     nsuLabel: String(row?.nsu || '-'),
-    cnpjConsulta: formatCnpj(row?.cnpjConsulta || '-') || '-',
+    cnpjConsulta: formatCpfCnpj(row?.cnpjConsulta || '-') || '-',
     ambienteLabel: mapNfseAmbienteLabel(row?.ambiente),
     chaveAcesso: String(row?.chaveAcesso || '-'),
     statusLabel: mapPastNsuRecoveryLiveRowStatusLabel(row?.status, row?.documentKind || null),
@@ -21395,11 +21486,11 @@ function buildDownloadByKeyPreviewRows(rawRows, showClientColumn = false) {
       clientLabel: client?.razaoSocial || 'Cliente nao localizado',
       clientDetail: showClientColumn ? formatCpfCnpj(client?.cnpj || row?.cnpjConsulta || '') : '',
       keyDetail: isControl
-        ? `CNPJ ${formatCnpj(row?.cnpjConsulta || '') || '-'}`
+        ? `CPF/CNPJ ${formatCpfCnpj(row?.cnpjConsulta || '') || '-'}`
         : `Catalogo ${String(row?.catalogoId || '-')} • ${mapNfeAmbienteLabel(row?.ambiente)}`,
       documentLabel: mapDownloadByKeyDocumentLabel(row?.modelo, row?.kind),
       documentDetail: isControl
-        ? `${mapNfeAmbienteLabel(row?.ambiente)} • ${formatCnpj(row?.cnpjConsulta || '') || '-'}`
+        ? `${mapNfeAmbienteLabel(row?.ambiente)} • ${formatCpfCnpj(row?.cnpjConsulta || '') || '-'}`
         : mapNfeAmbienteLabel(row?.ambiente),
       statusLabel: isControl ? 'Erro' : 'Aguardando',
       statusTone: isControl ? 'danger' : 'neutral',
@@ -21502,7 +21593,7 @@ function buildPastNsuRecoveryAuditRows(summary) {
     const status = resolvePastNsuRecoveryStatus(detail);
 
     return {
-      cnpjConsulta: formatCnpj(detail?.cnpjConsulta || '-') || '-',
+      cnpjConsulta: formatCpfCnpj(detail?.cnpjConsulta || '-') || '-',
       ambienteLabel: mapNfseAmbienteLabel(detail?.ambiente),
       nsuRangeLabel: `${String(detail?.nsuInicial || '1')} ate ${String(detail?.nsuFinal || '0')}`,
       resultLabel: isGapAudit
