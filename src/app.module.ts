@@ -13,6 +13,7 @@ import { DocumentChecksModule } from './modules/document-checks/document-checks.
 import { EstablishmentsModule } from './modules/establishments/establishments.module';
 import { HealthModule } from './modules/health/health.module';
 import { NfeModule } from './modules/nfe/nfe.module';
+import { NfeScModule } from './modules/nfe-sc/nfe-sc.module';
 import { NfceScModule } from './modules/nfce-sc/nfce-sc.module';
 import { NfseModule } from './modules/nfse/nfse.module';
 import { SimplesNacionalModule } from './modules/simples-nacional/simples-nacional.module';
@@ -37,6 +38,7 @@ import { PrismaModule } from './prisma/prisma.module';
     SyncModule,
     NfseModule,
     NfeModule,
+    NfeScModule,
     SimplesNacionalModule,
     NfceScModule,
     AuditModule,

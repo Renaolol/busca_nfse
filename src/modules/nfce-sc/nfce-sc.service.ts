@@ -493,8 +493,8 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
           if (current?.reprocessamentoStatus === NfceScRecoveryStatus.processando && current.reprocessamentoLease) {
             await this.stopNsuRecoveryAfterError(id, current.reprocessamentoLease, error);
           }
-        } catch (recoveryError) {
-          this.logger.error(`Falha inesperada no reprocessamento NFC-e SC ${id}: ${this.toErrorMessage(recoveryError)}`);
+        } catch {
+          this.logger.error('Falha inesperada no reprocessamento NFC-e SC.');
         }
       })
       .finally(() => this.runningControls.delete(id));
@@ -703,8 +703,8 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
     if (this.runningControls.has(id)) return;
     this.runningControls.add(id);
     void this.processAllAvailableBatches(id, leaseUntil)
-      .catch((error: unknown) => {
-        this.logger.error(`Falha inesperada no sincronismo NFC-e SC ${id}: ${this.toErrorMessage(error)}`);
+      .catch(() => {
+        this.logger.error('Falha inesperada no sincronismo NFC-e SC.');
       })
       .finally(() => this.runningControls.delete(id));
   }
@@ -876,8 +876,8 @@ export class NfceScService implements OnModuleInit, OnModuleDestroy {
         });
         if (claimed.count) this.startBackgroundExecution(id, leaseUntil);
       }
-    } catch (error) {
-      this.logger.warn(`Nao foi possivel verificar consultas NFC-e SC pendentes: ${this.toErrorMessage(error)}`);
+    } catch {
+      this.logger.warn('Nao foi possivel verificar consultas NFC-e SC pendentes.');
     }
   }
 

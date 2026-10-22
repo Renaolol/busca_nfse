@@ -288,6 +288,34 @@ describe('NfeService', () => {
     });
   });
 
+  it('lista somente NF-e completas por padrao e expõe resumos por filtro explicito', async () => {
+    prisma.nfeDocumento.count.mockResolvedValue(0);
+    prisma.nfeDocumento.findMany.mockResolvedValue([]);
+
+    await service.findAll({ clienteId: 'cliente-1' });
+    expect(prisma.nfeDocumento.count).toHaveBeenLastCalledWith({
+      where: expect.objectContaining({
+        AND: expect.arrayContaining([{ clienteId: 'cliente-1' }, { xmlCompletoDisponivel: true }])
+      })
+    });
+
+    await service.findAll({ clienteId: 'cliente-1', somenteResumos: true });
+    expect(prisma.nfeDocumento.count).toHaveBeenLastCalledWith({
+      where: expect.objectContaining({
+        AND: expect.arrayContaining([
+          { clienteId: 'cliente-1' },
+          { xmlCompletoDisponivel: false },
+          { resumoDisponivel: true }
+        ])
+      })
+    });
+
+    await service.findAll({ clienteId: 'cliente-1', somenteXmlCompleto: false });
+    const inclusiveWhere = (prisma.nfeDocumento.count as jest.Mock).mock.calls.at(-1)?.[0].where;
+    expect(inclusiveWhere.AND).not.toContainEqual({ xmlCompletoDisponivel: true });
+    expect(inclusiveWhere.AND).not.toContainEqual({ xmlCompletoDisponivel: false });
+  });
+
   it('filtra NF-e por dia do calendario e nao inclui 31/07 em uma busca de agosto', async () => {
     const documentos = [
       {
@@ -3980,6 +4008,40 @@ describe('NfeService', () => {
     });
     expect(upsert.create.xmlResumoPath).toContain('/resumos/');
     expect(upsert.create.xmlCompletoPath).toBeUndefined();
+  });
+
+  it('complementa um resumo armazenado quando o XML completo chega depois', async () => {
+    const chaveAcesso = '35260612345678000199550010000001231000001231';
+    const xml = `<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00"><NFe><infNFe Id="NFe${chaveAcesso}" versao="4.00"><ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>2026-06-29T10:00:00-03:00</dhEmi><tpAmb>1</tpAmb></ide><emit><CNPJ>12345678000199</CNPJ><xNome>Emitente</xNome></emit><dest><CPF>01861020970</CPF><xNome>Produtor Rural</xNome></dest><total><ICMSTot><vNF>150.00</vNF></ICMSTot></total></infNFe></NFe><protNFe><infProt><cStat>100</cStat><chNFe>${chaveAcesso}</chNFe><dhRecbto>2026-06-29T10:00:01-03:00</dhRecbto></infProt></protNFe></nfeProc>`;
+    prisma.nfeDocumento.findUnique.mockResolvedValueOnce({
+      id: 'doc-summary',
+      ambiente: NfeAmbiente.producao,
+      chaveAcesso,
+      resumoDisponivel: true,
+      xmlCompletoDisponivel: false,
+      hashResumo: 'hash-summary',
+      eventos: []
+    });
+    prisma.nfeDocumento.upsert.mockResolvedValueOnce({ id: 'doc-summary' });
+
+    await (service as any).persistDocument({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      ambiente: NfeAmbiente.producao,
+      cnpjConsulta: '01861020970',
+      document: { schema: 'nfeProc_v4.00', xml },
+      origem: 'sef_sc_nfe'
+    });
+
+    const upsert = (prisma.nfeDocumento.upsert as jest.Mock).mock.calls.at(-1)?.[0];
+    expect(upsert.where.ambiente_chaveAcesso).toEqual({ ambiente: NfeAmbiente.producao, chaveAcesso });
+    expect(upsert.update).toMatchObject({
+      xmlCompletoDisponivel: true,
+      schemaDoc: 'nfeProc_v4.00',
+      origem: 'sef_sc_nfe'
+    });
+    expect(upsert.update.xmlCompletoPath).toContain('/xml/');
+    expect(upsert.update.resumoDisponivel).toBeUndefined();
   });
 
   it('preserva a classificação existente para NF-e completa consultada por CNPJ', async () => {

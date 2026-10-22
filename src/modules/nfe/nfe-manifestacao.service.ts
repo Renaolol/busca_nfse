@@ -1191,6 +1191,7 @@ export class NfeManifestacaoService {
 
   private sanitizeSefazText(value?: string | null): string | null {
     if (!value) return null;
+    if (/-----BEGIN [^-]+-----|<\??xml\b|<[A-Za-z_:][^>]*>/i.test(value)) return '[conteudo sensivel ocultado]';
     return value
       .replace(/\b\d{44}\b/g, '[chave ocultada]')
       .replace(/\b\d{14}\b/g, '[CNPJ ocultado]')

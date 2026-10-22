@@ -109,6 +109,8 @@ Veja `.env.example`.
 - `NFSE_ADN_PATH_PREFIX`: prefixo da API (padrao `contribuintes`).
 - `NFSE_EMISSOR_PUBLICO_API_BASE_URL_PRODUCAO` e `NFSE_EMISSOR_PUBLICO_API_BASE_URL_RESTRITA`: hosts do Emissor Publico usados para recuperar NFS-e por chave.
 - `NFSE_EMISSOR_PUBLICO_PATH_PREFIX`: prefixo do Emissor Publico (padrao `SefinNacional`).
+- `NFE_SC_CLIENT_MODE`: `mock` por padrao; `real` ativa o download de NF-e modelo 55 pela SEF/SC. Esse fluxo exige confirmacao administrativa do vinculo contabilista e usa cursor separado.
+- `NFE_SC_TIMEOUT_MS`: timeout das chamadas SOAP mTLS de distribuicao NF-e SEF/SC.
 - `NFE_DISTRIBUICAO_CLIENT_MODE`: `mock` ou `real` para ativar o adapter da distribuicao NF-e.
 - `NFE_DISTRIBUICAO_URL_PRODUCAO` e `NFE_DISTRIBUICAO_URL_HOMOLOGACAO`: URLs do `NFeDistribuicaoDFe` do Ambiente Nacional publicadas no portal da NF-e.
 - `NFE_DISTRIBUICAO_TIMEOUT_MS`: timeout das chamadas SOAP de distribuicao NF-e.
@@ -454,6 +456,8 @@ Observacoes:
 - `GET /nfse` e `GET /cte` tambem aceitam `all=true` para retornar todos os registros que casam com o filtro de uma vez so, ignorando `page`/`pageSize` com limite de seguranca de 10000 itens por chamada.
 - `GET /nfe` tambem aceita `all=true` para retornar todos os registros que casam com o filtro de uma vez so, ignorando `page`/`pageSize` sem aplicar limite de seguranca.
 - Quando `NFE_DISTRIBUICAO_CLIENT_MODE=real`, o sistema consulta `distNSU`, `consNSU` e `consChNFe`, descompacta `docZip` e armazena resumos `resNFe` e XMLs completos retornados pelo Ambiente Nacional.
+- A listagem normal de `GET /nfe` e `XMLs NF-e` mostra somente XMLs completos. `somenteResumos=true` abre os resumos `resNFe` pendentes explicitamente; `somenteXmlCompleto=false` inclui ambos. A exibição de um resumo não solicita nem libera o XML completo.
+- A distribuicao SEF/SC de NF-e modelo 55 está isolada em `docs/nfe-sc.md`; ela não altera o cursor nacional nem a integração separada de NFC-e SC.
 - Quando `CTE_CONSULTA_CLIENT_MODE=real`, o sistema usa o endpoint configurado de `CteConsultaV4` para consultar CT-e por chave com o certificado ativo do estabelecimento e pode persistir `retConsSitCTe`, `cteProc`, `CTe`, `procEventoCTe` e `eventoCTe` quando retornados pelo autorizador.
 - O cliente real de CT-e aplica fallback automatico de SOAPAction, versao SOAP, namespace e formato do payload quando o autorizador rejeita a requisicao tecnica. Mesmo assim, retorno `cStat 243` continua significando rejeicao da mensagem enviada, nao XML fiscal valido.
 

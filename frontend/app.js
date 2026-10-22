@@ -666,7 +666,7 @@ const state = {
       schemaDoc: 'Todos',
       valorMin: '',
       valorMax: '',
-      xmlCompleto: 'Todos',
+      xmlCompleto: 'Somente completos',
       ambiente: 'producao'
     },
     nfceScDocs: {
@@ -5812,7 +5812,7 @@ function renderNfeDocumentsPage() {
 
       <article class="card filter-card">
         <h3 class="card-title">Consulta de NF-e</h3>
-        <p class="card-subtitle">Selecione uma empresa e refine por emissao, relacionamento e disponibilidade do XML completo.</p>
+        <p class="card-subtitle">A listagem normal mostra somente XMLs completos. Use o filtro para abrir resumos pendentes explicitamente.</p>
         <form id="nfeDocsFilterForm" class="form-grid">
           <input type="hidden" name="cnpjConsulta" value="${escapeHtml(state.filters.nfeDocs.cnpjConsulta || '')}" />
           <label class="field">
@@ -5853,7 +5853,7 @@ function renderNfeDocumentsPage() {
           </label>
           <label class="field">
             XML completo
-            <select name="xmlCompleto">${renderOptions(['Todos', 'Somente completos', 'Somente resumos'], state.filters.nfeDocs.xmlCompleto)}</select>
+            <select name="xmlCompleto">${renderOptions(['Somente completos', 'Somente resumos', 'Todos (inclui resumos)'], state.filters.nfeDocs.xmlCompleto)}</select>
           </label>
           <label class="field">
             CNPJ
@@ -18102,7 +18102,7 @@ async function applyNfeDocsFilters(form) {
     schemaDoc: String(data.get('schemaDoc') || 'Todos'),
     valorMin: String(data.get('valorMin') || '').trim(),
     valorMax: String(data.get('valorMax') || '').trim(),
-    xmlCompleto: String(data.get('xmlCompleto') || 'Todos'),
+    xmlCompleto: String(data.get('xmlCompleto') || 'Somente completos'),
     ambiente: String(data.get('ambiente') || 'producao')
   };
   state.selectedNfeIds = new Set();
@@ -19034,6 +19034,10 @@ function buildNfeSearchQuery(filters, page = 1, pageSize = SEARCH_PAGE_SIZE, all
     query.set('somenteResumos', 'true');
   }
 
+  if (filters.xmlCompleto === 'Todos (inclui resumos)') {
+    query.set('somenteXmlCompleto', 'false');
+  }
+
   return query;
 }
 
@@ -19237,9 +19241,9 @@ function getFilteredNfeDocumentsFromSource(source) {
     const matchesSchema = filters.schemaDoc === 'Todos' || doc.schemaDoc === filters.schemaDoc;
     const matchesAmbiente = filters.ambiente === 'Todos' || doc.ambiente === filters.ambiente;
     const matchesXmlCompleto =
-      filters.xmlCompleto === 'Todos' ||
+      filters.xmlCompleto === 'Todos (inclui resumos)' ||
       (filters.xmlCompleto === 'Somente completos' && doc.xmlCompletoDisponivel) ||
-      (filters.xmlCompleto === 'Somente resumos' && !doc.xmlCompletoDisponivel);
+      (filters.xmlCompleto === 'Somente resumos' && (doc.resumoDisponivel || String(doc.schemaDoc || '').startsWith('resNFe')));
 
     const emissaoDate = Date.parse(doc.dataEmissao);
     const matchesEmissaoInicio = !filters.emissaoInicio || emissaoDate >= Date.parse(`${filters.emissaoInicio}T00:00:00`);
@@ -19554,7 +19558,7 @@ function resetNfeDocsSearch() {
     schemaDoc: 'Todos',
     valorMin: '',
     valorMax: '',
-    xmlCompleto: 'Todos',
+    xmlCompleto: 'Somente completos',
     ambiente: 'producao'
   };
   state.nfeSearch.hasSearched = false;

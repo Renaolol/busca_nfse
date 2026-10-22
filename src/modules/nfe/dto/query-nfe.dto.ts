@@ -1,9 +1,16 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import { IsBoolean, IsDateString, IsIn, IsNumber, IsOptional, IsString, IsUUID, Length, Matches, Min } from 'class-validator';
 import { NfeAmbiente } from '@prisma/client';
 import { IsEnum } from 'class-validator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
+
+function parseOptionalBoolean(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  if (value === true || value === 'true') return true;
+  if (value === false || value === 'false') return false;
+  return value;
+}
 
 export class QueryNfeDto extends PaginationQueryDto {
   @ApiPropertyOptional()
@@ -77,15 +84,15 @@ export class QueryNfeDto extends PaginationQueryDto {
   @Min(0)
   valorMax?: number;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Sem outro filtro, a listagem normal retorna apenas XMLs completos. Envie false para incluir resumos junto com XMLs completos.' })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }) => parseOptionalBoolean(value))
   @IsBoolean()
   somenteXmlCompleto?: boolean;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({ description: 'Retorna apenas registros identificados como resumos resNFe pendentes; nunca os contabiliza como XML completo.' })
   @IsOptional()
-  @Type(() => Boolean)
+  @Transform(({ value }) => parseOptionalBoolean(value))
   @IsBoolean()
   somenteResumos?: boolean;
 

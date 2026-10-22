@@ -1597,8 +1597,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     try {
       await this.runNightlySweepForAllClients(currentSlot);
-    } catch (error) {
-      this.logger.error(`Falha na busca noturna automatica: ${this.toErrorMessage(error)}`);
+    } catch {
+      this.logger.error('Falha na busca noturna automatica.');
     } finally {
       this.nightlySweepRunning = false;
     }
@@ -1719,8 +1719,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `Recuperacao noturna de NSUs: controles=${result.controlesProcessados}, nsus_consultados=${result.nsusConsultados}, documentos_salvos=${result.documentosSalvos}, falhas=${result.falhas}`
       );
-    } catch (error) {
-      this.logger.error(`Falha na recuperacao noturna de NSUs: ${this.toErrorMessage(error)}`);
+    } catch {
+      this.logger.error('Falha na recuperacao noturna de NSUs.');
     } finally {
       this.nightlyPastNsuRecoveryRunning = false;
     }
@@ -2022,8 +2022,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       if (this.autoEventSyncEnabled && !this.isRateLimitCooldownActive()) {
         await this.runAutomaticEventSyncCycle();
       }
-    } catch (error) {
-      this.logger.error(`Falha na execucao automatica de sync: ${this.toErrorMessage(error)}`);
+    } catch {
+      this.logger.error('Falha na execucao automatica de sync.');
     } finally {
       this.autoSyncRunning = false;
     }
@@ -2955,8 +2955,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         parsedXml = parsedAny.nfse;
         chave = parsedXml.chaveAcesso;
       }
-    } catch (error) {
-      this.logger.warn(`Falha ao parsear XML da chave ${chave ?? 'desconhecida'}: ${this.toErrorMessage(error)}`);
+    } catch {
+      this.logger.warn('Falha ao parsear XML de documento retornado pelo ADN.');
     }
 
     if (!chave) {
@@ -3465,7 +3465,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     if (existingByNsu && existingByNsu.chaveAcesso !== params.chaveAcesso) {
       this.logger.warn(
-        `Documento reconciliado por NSU ${params.nsu.toString()} em ${params.ambiente}; chave anterior ${existingByNsu.chaveAcesso}, nova chave ${params.chaveAcesso}`
+        `Documento reconciliado por NSU ${params.nsu.toString()} em ${params.ambiente}; a chave de acesso foi alterada.`
       );
       await this.detachStaleEventosOnIdentityChange(target.id, params.chaveAcesso);
       return this.updateDocumentoById(target.id, params, { identityChanged: true });
@@ -3498,7 +3498,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
   ): Promise<NfseDocumento> {
     this.logger.log(
-      `NFS-e ${existingByChave.chaveAcesso} ja pertence ao cliente ${existingByChave.clienteId}; registrando vinculo adicional para o cliente ${params.clienteId} sem alterar a custodia original.`
+      'NFS-e existente vinculada a outro cliente; registrando vinculo adicional sem alterar a custodia original.'
     );
 
     const cnpjPrestador = (params.createData.cnpjPrestador as string | null | undefined) ?? existingByChave.cnpjPrestador;
@@ -3554,7 +3554,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.logger.warn(
-      `Documento reconciliado por NSU ${nsu.toString()} em ${params.ambiente}; chave anterior ${existing.chaveAcesso}, nova chave ${params.chaveAcesso}`
+      `Documento reconciliado por NSU ${nsu.toString()} em ${params.ambiente}; a chave de acesso foi alterada.`
     );
 
     await this.detachStaleEventosOnIdentityChange(existing.id, params.chaveAcesso);
@@ -3755,7 +3755,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       }
 
       this.logger.warn(
-        `Reprocessamento ADN falhou temporariamente para o NSU ${params.nsu.toString()} do CNPJ ${params.cnpjConsulta}; tentativa ${attempt} de ${maxAttempts}. Nova tentativa em ${this.pastNsuRetryDelayMs}ms.`
+        `Reprocessamento ADN falhou temporariamente para o NSU ${params.nsu.toString()}; tentativa ${attempt} de ${maxAttempts}. Nova tentativa em ${this.pastNsuRetryDelayMs}ms.`
       );
       await this.sleep(this.pastNsuRetryDelayMs);
     }
@@ -4019,7 +4019,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     } catch (error) {
       const code = typeof error === 'object' && error && 'code' in error ? String(error.code) : null;
       if (code !== 'ENOENT') {
-        this.logger.warn(`Falha ao carregar configuracao da rotina noturna: ${this.toErrorMessage(error)}`);
+        this.logger.warn('Falha ao carregar configuracao da rotina noturna.');
       }
     }
   }

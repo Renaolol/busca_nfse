@@ -738,6 +738,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const andConditions = this.getAndConditions(where);
     const { page, pageSize, skip } = this.resolvePagination(query);
 
+    if (query.somenteResumos) {
+      andConditions.push({ resumoDisponivel: true });
+    } else if (query.somenteXmlCompleto !== false) {
+      andConditions.push({ xmlCompletoDisponivel: true });
+    }
+
     if (cnpjConsulta) {
       const tipoRelacao = query.tipoRelacao ?? 'ambas';
 
@@ -792,8 +798,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       try {
         const xml = (await this.storage.getObject(document.xmlCompletoPath!)).toString('utf8');
         return this.parser.extractCst060Items(xml).map((item) => this.toCst060AnalysisItem(document, item, query.aliquotaInterna));
-      } catch (error) {
-        this.logger.warn(`CST 060: nao foi possivel ler XML ${document.chaveAcesso}: ${this.toErrorMessage(error)}`);
+      } catch {
+        this.logger.warn('CST 060: nao foi possivel ler XML da NF-e.');
         return [];
       }
     });
@@ -803,7 +809,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       .filter((item) => {
         const key = `${item.chaveAcesso}:${item.itemNumero}`;
         if (seenItems.has(key)) {
-          this.logger.warn(`CST 060: item duplicado ignorado (${key}).`);
+          this.logger.warn('CST 060: item duplicado ignorado.');
           return false;
         }
         seenItems.add(key);
@@ -1186,9 +1192,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         take: limit
       });
     } catch (error) {
-      this.logger.warn(
-        `Falha ao preparar sincronizacao manual de eventos de ${params.filtro.toUpperCase()}; retornando detalhe estruturado. ${this.toErrorMessage(error)}`
-      );
+      this.logger.warn(`Falha ao preparar sincronizacao manual de eventos de ${params.filtro.toUpperCase()}; retornando detalhe estruturado.`);
       return this.buildFatalEventoSyncResponse({
         documentoIds: params.documentoIds,
         where,
@@ -1381,6 +1385,46 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       cnpjConsulta: params.cnpjConsulta,
       document: { schema: classified.contentType === 'evento' ? 'procEventoNFe_v1.00' : 'procNFe_v4.00', xml: params.xml },
       origem: NfeDocumentoOrigem.sef_sc_nfce
+    });
+  }
+
+  async persistSefScNfeDocument(params: {
+    clienteId: string;
+    estabelecimentoId: string;
+    ambiente: NfeAmbiente;
+    cpfConsulta: string;
+    xml: string;
+    schema: string;
+  }) {
+    await this.ensureClient(params.clienteId);
+    await this.ensureEstablishment(params.estabelecimentoId, params.clienteId);
+    const classified = this.parser.classify(params.xml);
+    if (classified.documentType !== 'nfe') {
+      throw new BadRequestException('O servico SEF/SC retornou um documento que nao e NF-e');
+    }
+
+    if (classified.contentType === 'evento') {
+      const parsedEvent = this.parser.parseEvento(params.xml);
+      if (this.resolveDocumentoAmbiente(parsedEvent.tpAmb) !== params.ambiente) {
+        throw new BadRequestException('O ambiente do evento SEF/SC diverge do controle configurado');
+      }
+    } else {
+      const parsed = this.parser.parse(params.xml);
+      if (parsed.modelo !== '55') {
+        throw new BadRequestException('O servico SEF/SC retornou um XML que nao e NF-e modelo 55');
+      }
+      if (this.resolveDocumentoAmbiente(parsed.tpAmb) !== params.ambiente) {
+        throw new BadRequestException('O ambiente da NF-e SEF/SC diverge do controle configurado');
+      }
+    }
+
+    return this.persistDocument({
+      clienteId: params.clienteId,
+      estabelecimentoId: params.estabelecimentoId,
+      ambiente: params.ambiente,
+      cnpjConsulta: params.cpfConsulta,
+      document: { schema: params.schema, xml: params.xml },
+      origem: NfeDocumentoOrigem.sef_sc_nfe
     });
   }
 
@@ -4182,7 +4226,13 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       return null;
     }
 
-    return String(value)
+    const rawText = String(value);
+    if (/-----BEGIN [^-]+-----|<\??xml\b|<[A-Za-z_:][^>]*>/i.test(rawText)) {
+      return '[conteudo sensivel ocultado]';
+    }
+
+    return rawText
+      .replace(/\b\d{44}\b/g, '[chave mascarada]')
       .replace(/\b(?:\d[.\-/\s]?){10}\d\b|\b(?:\d[.\-/\s]?){13}\d\b/g, (documentNumber) => {
         const digits = documentNumber.replace(/\D/g, '');
         return `[${digits.length === 11 ? 'CPF' : 'CNPJ'} mascarado]`;
@@ -4428,7 +4478,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       estabelecimentoId: params.estabelecimentoId,
       ambiente: effectiveAmbiente,
       cnpjConsulta: params.cnpjConsulta,
-      parsedEvent
+      parsedEvent,
+      origem: params.origem
     });
 
     await this.prisma.nfeEvento.upsert({
@@ -4468,6 +4519,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     ambiente: NfeAmbiente;
     cnpjConsulta?: string;
     parsedEvent: ParsedDfeEvento;
+    origem: NfeDocumentoOrigem;
   }) {
     const existing = await this.prisma.nfeDocumento.findUnique({
       where: {
@@ -4501,6 +4553,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         modelo,
         status,
         schemaDoc,
+        origem: params.origem,
         tipoRelacao,
         ...(params.parsedEvent.isCancelamento
           ? { dataAutorizacao: existing?.dataAutorizacao, updatedAt: new Date() }
@@ -4519,7 +4572,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           !isCte && tipoRelacao === NfeTipoRelacao.emitida ? cnpjConsulta : undefined,
         cnpjDestinatario:
           !isCte && tipoRelacao === NfeTipoRelacao.recebida ? cnpjConsulta : undefined,
-        origem: NfeDocumentoOrigem.importacao_xml
+        origem: params.origem
       }
     });
   }
@@ -5206,8 +5259,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       } else {
         await this.runNowGlobal();
       }
-    } catch (error) {
-      this.logger.warn(`Falha na execucao automatica de NF-e: ${this.toErrorMessage(error)}`);
+    } catch {
+      this.logger.warn('Falha na execucao automatica de NF-e.');
     } finally {
       this.autoSyncRunning = false;
     }
@@ -5312,8 +5365,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           }
         }
       }
-    } catch (error) {
-      this.logger.warn(`Falha ao processar a fila automática de recuperação de XML: ${this.toErrorMessage(error)}`);
+    } catch {
+      this.logger.warn('Falha ao processar a fila automatica de recuperacao de XML.');
     } finally {
       this.automaticXmlRecoveryRunning = false;
     }
@@ -5404,8 +5457,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       this.logger.log(
         `Busca noturna NF-e executada (${executionKey}): ${activation.controlesCriadosOuReativados} controle(s) preparados, ${runResult.documentsSaved} documento(s) salvo(s)`
       );
-    } catch (error) {
-      this.logger.warn(`Falha na busca noturna de NF-e: ${this.toErrorMessage(error)}`);
+    } catch {
+      this.logger.warn('Falha na busca noturna de NF-e.');
     } finally {
       this.nightlySweepRunning = false;
     }
@@ -5695,7 +5748,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
-        this.logger.warn(`Falha ao carregar configuracao de busca noturna NF-e: ${this.toErrorMessage(error)}`);
+        this.logger.warn('Falha ao carregar configuracao de busca noturna NF-e.');
       }
     }
   }
@@ -5737,7 +5790,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       }
     } catch (error) {
       if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
-        this.logger.warn(`Falha ao carregar configuracao de aliquotas monofasico NF-e: ${this.toErrorMessage(error)}`);
+        this.logger.warn('Falha ao carregar configuracao de aliquotas monofasico NF-e.');
       }
     }
   }
