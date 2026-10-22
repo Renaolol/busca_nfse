@@ -1,5 +1,5 @@
 import { NfeAmbiente, NfeSyncStatus, NfeTipoRelacao, Prisma } from '@prisma/client';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, Logger } from '@nestjs/common';
 import JSZip from 'jszip';
 import { DanfePdfGenerator } from '../../../integrations/danfe/danfe.types';
 import { DominioNfeXmlSource } from '../../../integrations/dominio-nfe/dominio-nfe.types';
@@ -47,7 +47,8 @@ describe('NfeService', () => {
   const storage = {
     getObject: jest.fn(),
     putObject: jest.fn(),
-    hasObject: jest.fn()
+    hasObject: jest.fn(),
+    deleteObject: jest.fn()
   };
 
   const nfseService = {
@@ -89,7 +90,11 @@ describe('NfeService', () => {
   beforeEach(() => {
     jest.useRealTimers();
     jest.clearAllMocks();
+    (service as any).sefazDiagnosticMode = null;
+    (NfeService as any).activeSefazActorQueries.clear();
+    (NfeService as any).activeSefazPointQueryQuotaActors.clear();
     delete process.env.NFE_SYNC_SOURCE_MODE;
+    delete process.env.NFE_DISTRIBUICAO_CLIENT_MODE;
     delete process.env.NFE_DOMINIO_IMPORT_LIMIT_PER_RUN;
     prisma.cliente.findUnique.mockResolvedValue({ id: 'cliente-1', nfeHabilitado: true, codigoEmpresaDominio: 57 });
     prisma.cliente.findMany.mockResolvedValue([
@@ -158,6 +163,7 @@ describe('NfeService', () => {
     });
     storage.putObject.mockResolvedValue(undefined);
     storage.hasObject.mockResolvedValue(true);
+    storage.deleteObject.mockResolvedValue(undefined);
     (dominioXmlSource.listDocuments as jest.Mock).mockResolvedValue([]);
     (dominioXmlSource.listCatalog as jest.Mock).mockResolvedValue([]);
   });
@@ -1495,7 +1501,15 @@ describe('NfeService', () => {
       documentsSaved: 1,
       failures: 0,
       executionDetails: [],
-      failureDetails: []
+      failureDetails: [],
+      sefazDiagnostics: [expect.objectContaining({
+        method: 'distNSU',
+        clientMode: 'mock',
+        actorType: 'CNPJ',
+        cStat: '138',
+        documentsReceived: 1,
+        documentsProcessed: 1
+      })]
     });
   });
 
@@ -1776,6 +1790,162 @@ describe('NfeService', () => {
     );
     expect(result.processed).toBe(1);
     expect(dominioXmlSource.listDocuments).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { actorType: 'CPF' as const, taxId: '01861020970', controlId: 'ctrl-cpf', establishmentId: 'estab-cpf' },
+    { actorType: 'CNPJ' as const, taxId: '12345678000199', controlId: 'ctrl-cnpj', establishmentId: 'estab-1' }
+  ])('registra o retorno distNSU de $actorType sem incluir o identificador fiscal no log', async ({ actorType, taxId, controlId, establishmentId }) => {
+    delete process.env.NFE_DISTRIBUICAO_CLIENT_MODE;
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: controlId,
+        clienteId: 'cliente-1',
+        estabelecimentoId: establishmentId,
+        cnpjConsulta: taxId,
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 0n,
+        ultimoNsuDistribuido: 0n,
+        maxNsu: 0n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
+      id: establishmentId,
+      clienteId: 'cliente-1',
+      cnpj: taxId,
+      municipioCodigoIbge: '4204202'
+    });
+    prisma.certificado.findMany.mockResolvedValue([
+      {
+        id: `cert-${actorType.toLowerCase()}`,
+        clienteId: 'cliente-1',
+        nome: 'Certificado de teste',
+        estabelecimentoId: establishmentId,
+        cnpjTitular: taxId,
+        arquivoCriptografadoPath: 'certificados/teste/cert.bin'
+      }
+    ]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '137',
+      xMotivo: actorType === 'CPF' ? `Sem documentos para CPF ${taxId}` : 'Sem documentos',
+      ultNsu: 0n,
+      maxNsu: 20n,
+      documents: [],
+      rawResponse: '<retDistDFeInt>nao deve ser registrado</retDistDFeInt>'
+    });
+    const loggerSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+
+    try {
+      const result = actorType === 'CPF'
+        ? await service.runNowCpfViaSefazGlobal()
+        : await service.runNow({ clienteId: 'cliente-1' });
+      const diagnostic = result.sefazDiagnostics?.[0];
+      const diagnosticLog = loggerSpy.mock.calls
+        .map(([message]) => String(message))
+        .find((message) => message.includes('nfe_distnsu_diagnostic'));
+
+      expect(diagnostic).toMatchObject({
+        method: 'distNSU',
+        clientMode: 'mock',
+        actorType,
+        ambiente: NfeAmbiente.producao,
+        httpStatus: 200,
+        cStat: '137',
+        ultNsu: '0',
+        maxNsu: '20',
+        documentsReceived: 0,
+        documentsDecoded: 0,
+        docZipDiscarded: 0,
+        schemaCounts: {},
+        documentsFiltered: 0,
+        documentsProcessed: 0,
+        documentsFailed: 0
+      });
+      expect(diagnosticLog).toContain('"event":"nfe_distnsu_diagnostic"');
+      expect(diagnosticLog).toContain(`"actorType":"${actorType}"`);
+      expect(diagnosticLog).not.toContain(taxId);
+      expect(diagnosticLog).not.toContain('nao deve ser registrado');
+      if (actorType === 'CPF') {
+        expect(diagnostic?.xMotivo).toContain('[CPF mascarado]');
+      }
+      expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledWith(
+        expect.objectContaining({ cnpjConsulta: taxId })
+      );
+    } finally {
+      loggerSpy.mockRestore();
+    }
+  });
+
+  it('conta schemas e processamento sem registrar XML bruto no diagnóstico incremental', async () => {
+    prisma.nfeSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-cpf-schema',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-cpf',
+        cnpjConsulta: '01861020970',
+        ambiente: NfeAmbiente.producao,
+        ultimoNsuConsultado: 0n,
+        ultimoNsuDistribuido: 0n,
+        maxNsu: 0n,
+        status: NfeSyncStatus.ativo
+      }
+    ]);
+    prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
+      id: 'estab-cpf',
+      clienteId: 'cliente-1',
+      cnpj: '01861020970',
+      municipioCodigoIbge: '4204202'
+    });
+    prisma.certificado.findMany.mockResolvedValue([
+      {
+        id: 'cert-cpf',
+        clienteId: 'cliente-1',
+        nome: 'Certificado de teste',
+        estabelecimentoId: 'estab-cpf',
+        cnpjTitular: '01861020970',
+        arquivoCriptografadoPath: 'certificados/teste/cert-cpf.bin'
+      }
+    ]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documentos localizados',
+      ultNsu: 1n,
+      maxNsu: 5n,
+      documents: [{ nsu: 1n, schema: 'resNFe_v1.01.xsd', xml: '<resNFe>XML confidencial</resNFe>' }],
+      rawResponse: '<retDistDFeInt>XML bruto confidencial</retDistDFeInt>'
+    });
+    const persistDocumentSpy = jest.spyOn(service as any, 'persistDocument').mockResolvedValue({ id: 'doc-cpf' });
+    const loggerSpy = jest.spyOn(Logger.prototype, 'log').mockImplementation(() => undefined);
+
+    try {
+      const result = await service.runNowCpfViaSefazGlobal();
+      const diagnosticLog = loggerSpy.mock.calls
+        .map(([message]) => String(message))
+        .find((message) => message.includes('nfe_distnsu_diagnostic'));
+
+      expect(result.sefazDiagnostics?.[0]).toMatchObject({
+        actorType: 'CPF',
+        cStat: '138',
+        documentsReceived: 1,
+        documentsDecoded: 1,
+        docZipDiscarded: 0,
+        schemaCounts: { 'resNFe_v1.01.xsd': 1 },
+        documentsFiltered: 0,
+        documentsAttempted: 1,
+        documentsProcessed: 1,
+        documentsFailed: 0,
+        documentsNotAttempted: 0
+      });
+      expect(result.documentsSaved).toBe(1);
+      expect(diagnosticLog).not.toContain('XML confidencial');
+      expect(diagnosticLog).not.toContain('XML bruto confidencial');
+    } finally {
+      persistDocumentSpy.mockRestore();
+      loggerSpy.mockRestore();
+    }
   });
 
   it('usa o certificado vinculado ao estabelecimento do produtor CPF selecionado', async () => {
@@ -3354,7 +3524,15 @@ describe('NfeService', () => {
         cnpjConsulta: '12345678000199',
         mensagem: expect.stringContaining('pausada ate')
       })],
-      failureDetails: []
+      failureDetails: [],
+      sefazDiagnostics: [expect.objectContaining({
+        method: 'distNSU',
+        clientMode: 'mock',
+        actorType: 'CNPJ',
+        cStat: '137',
+        documentsReceived: 0,
+        documentsProcessed: 0
+      })]
     });
   });
 
@@ -4169,5 +4347,187 @@ describe('NfeService', () => {
         }
       ]
     });
+  });
+
+  it('executa diagnostico consChNFe para CPF e nao expoe chave ou CPF no log', async () => {
+    process.env.NFE_DISTRIBUICAO_CLIENT_MODE = 'real';
+    storage.getObject.mockResolvedValue(Buffer.from('{}'));
+    const control = {
+      id: 'ctrl-cpf',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      cnpjConsulta: '01861020970',
+      ambiente: NfeAmbiente.producao,
+      status: 'ativo',
+      ultimoNsuConsultado: 10n,
+      ultimoNsuDistribuido: 10n,
+      maxNsu: 10n,
+      ultimaExecucao: null,
+      ultimaMensagem: null
+    };
+    prisma.nfeSyncControle.findFirst.mockResolvedValue(control);
+    prisma.clienteEstabelecimento.findUnique.mockResolvedValue({
+      id: 'estab-1', clienteId: 'cliente-1', cnpj: '01861020970', municipioCodigoIbge: '4204202'
+    });
+    prisma.certificado.findMany.mockResolvedValue([{
+      id: 'cert-1', clienteId: 'cliente-1', estabelecimentoId: 'estab-1', cnpjTitular: '01861020970',
+      ativo: true, arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin'
+    }]);
+    const chaveAcesso = '4'.repeat(44);
+    (distribuicaoClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado',
+      ultNsu: 0n,
+      maxNsu: 0n,
+      documents: [],
+      rawResponse: { mock: true }
+    });
+    const logger = jest.spyOn((service as any).logger, 'log').mockImplementation(() => undefined);
+
+    await service.startSefazDiagnosticMode({ controleId: control.id, certificadoId: 'cert-1' });
+    const response = await service.executeSefazDiagnosticQuery({ method: 'consChNFe', chaveAcesso });
+
+    expect(distribuicaoClient.consultarPorChave).toHaveBeenCalledWith(expect.objectContaining({
+      cnpjConsulta: '01861020970',
+      chaveAcesso,
+      ambiente: NfeAmbiente.producao,
+      certificateId: 'cert-1'
+    }));
+    expect(response.diagnostic).toMatchObject({ method: 'consChNFe', actorType: 'CPF', cStat: '138', documentsReceived: 0, processingResult: 'concluido' });
+    expect(JSON.stringify(logger.mock.calls)).not.toContain('01861020970');
+    expect(JSON.stringify(logger.mock.calls)).not.toContain(chaveAcesso);
+  });
+
+  it('executa diagnostico distNSU para CNPJ, persiste os documentos e avanca somente o cursor salvo', async () => {
+    process.env.NFE_DISTRIBUICAO_CLIENT_MODE = 'real';
+    storage.getObject.mockResolvedValue(Buffer.from('{}'));
+    const control = {
+      id: 'ctrl-cnpj',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      cnpjConsulta: '12345678000199',
+      ambiente: NfeAmbiente.producao,
+      status: 'ativo',
+      ultimoNsuConsultado: 5n,
+      ultimoNsuDistribuido: 5n,
+      maxNsu: 10n,
+      ultimaExecucao: null,
+      ultimaMensagem: null
+    };
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+  <NFe><infNFe Id="NFe35260612345678000199550010000001231000001231" versao="4.00">
+    <ide><mod>55</mod><serie>1</serie><nNF>123</nNF><dhEmi>2026-06-29T10:00:00-03:00</dhEmi></ide>
+    <emit><CNPJ>12345678000199</CNPJ><xNome>Emitente Teste</xNome></emit>
+    <dest><CNPJ>99888777000166</CNPJ><xNome>Destinatario Teste</xNome></dest>
+    <total><ICMSTot><vNF>150.00</vNF></ICMSTot></total>
+  </infNFe></NFe>
+  <protNFe><infProt><cStat>100</cStat><xMotivo>Autorizado</xMotivo><dhRecbto>2026-06-29T10:00:01-03:00</dhRecbto></infProt></protNFe>
+</nfeProc>`;
+    prisma.nfeSyncControle.findFirst.mockResolvedValue(control);
+    prisma.certificado.findMany.mockResolvedValue([{
+      id: 'cert-1', clienteId: 'cliente-1', estabelecimentoId: 'estab-1', cnpjTitular: control.cnpjConsulta,
+      ativo: true, arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin'
+    }]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado',
+      ultNsu: 6n,
+      maxNsu: 10n,
+      documents: [{ nsu: 6n, schema: 'procNFe_v4.00', xml }],
+      documentExtraction: { docZipCount: 1, discardedCount: 0, schemaCounts: { procNFe_v4_00: 1 } },
+      rawResponse: { mock: true }
+    });
+
+    await service.startSefazDiagnosticMode({ controleId: control.id, certificadoId: 'cert-1' });
+    const response = await service.executeSefazDiagnosticQuery({ method: 'distNSU' });
+
+    expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledWith(expect.objectContaining({
+      cnpjConsulta: '12345678000199', ultNsu: 5n, certificateId: 'cert-1'
+    }));
+    expect(response).toMatchObject({ cursorAdvanced: true, documentsPersisted: 1 });
+    expect(response.diagnostic).toMatchObject({ method: 'distNSU', actorType: 'CNPJ', documentsReceived: 1, documentsProcessed: 1, processingResult: 'concluido' });
+    expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'ctrl-cnpj' },
+      data: expect.objectContaining({ ultimoNsuConsultado: 6n, ultimoNsuDistribuido: 6n, maxNsu: 10n })
+    }));
+  });
+
+  it('nao permite ao modo de diagnostico contornar cStat 137 no distNSU, e diferencia consulta pontual por chave', async () => {
+    process.env.NFE_DISTRIBUICAO_CLIENT_MODE = 'real';
+    storage.getObject.mockResolvedValue(Buffer.from('{}'));
+    const control = {
+      id: 'ctrl-137',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      cnpjConsulta: '12345678000199',
+      ambiente: NfeAmbiente.producao,
+      status: 'ativo',
+      ultimoNsuConsultado: 5n,
+      ultimoNsuDistribuido: 5n,
+      maxNsu: 10n,
+      ultimaExecucao: new Date(),
+      ultimaMensagem: 'cStat 137 - Sem novos documentos'
+    };
+    prisma.nfeSyncControle.findFirst.mockResolvedValue(control);
+    prisma.certificado.findMany.mockResolvedValue([{
+      id: 'cert-1', clienteId: 'cliente-1', estabelecimentoId: 'estab-1', cnpjTitular: control.cnpjConsulta,
+      ativo: true, arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin'
+    }]);
+    (distribuicaoClient.consultarPorChave as jest.Mock).mockResolvedValue({
+      statusCode: 200, cStat: '137', xMotivo: 'Nenhum documento localizado', ultNsu: 0n, maxNsu: 0n, documents: []
+    });
+    await service.startSefazDiagnosticMode({ controleId: control.id, certificadoId: 'cert-1' });
+
+    await expect(service.executeSefazDiagnosticQuery({ method: 'distNSU' })).rejects.toBeInstanceOf(BadRequestException);
+    expect(distribuicaoClient.distribuirPorNsu).not.toHaveBeenCalled();
+    const keyResult = await service.executeSefazDiagnosticQuery({ method: 'consChNFe', chaveAcesso: '4'.repeat(44) });
+    expect(distribuicaoClient.consultarPorChave).toHaveBeenCalledTimes(1);
+    expect(keyResult.diagnostic.processingResult).toBe('sem_documentos');
+  });
+
+  it('nao permite ao modo de diagnostico contornar cStat 656 em nenhum metodo', async () => {
+    process.env.NFE_DISTRIBUICAO_CLIENT_MODE = 'real';
+    const control = {
+      id: 'ctrl-656', clienteId: 'cliente-1', estabelecimentoId: 'estab-1', cnpjConsulta: '12345678000199',
+      ambiente: NfeAmbiente.producao, status: 'ativo', ultimoNsuConsultado: 5n, ultimoNsuDistribuido: 5n,
+      maxNsu: 10n, ultimaExecucao: new Date(), ultimaMensagem: 'cStat 656 - Consumo indevido'
+    };
+    prisma.nfeSyncControle.findFirst.mockResolvedValue(control);
+    prisma.certificado.findMany.mockResolvedValue([{
+      id: 'cert-1', clienteId: 'cliente-1', estabelecimentoId: 'estab-1', cnpjTitular: control.cnpjConsulta,
+      ativo: true, arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin'
+    }]);
+    await service.startSefazDiagnosticMode({ controleId: control.id, certificadoId: 'cert-1' });
+
+    await expect(service.executeSefazDiagnosticQuery({ method: 'distNSU' })).rejects.toBeInstanceOf(BadRequestException);
+    await expect(service.executeSefazDiagnosticQuery({ method: 'consChNFe', chaveAcesso: '4'.repeat(44) }))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(distribuicaoClient.distribuirPorNsu).not.toHaveBeenCalled();
+    expect(distribuicaoClient.consultarPorChave).not.toHaveBeenCalled();
+  });
+
+  it('permite consChNFe durante um cooldown interno de cursor incremental', () => {
+    const control = { ultimaExecucao: new Date(), ultimaMensagem: 'Consulta SEFAZ sem avancar o NSU 10: ultNSU retornado 10.' };
+    expect((service as any).getSefazDfeCooldownUntil(control, 'distNSU')).toBeInstanceOf(Date);
+    expect((service as any).getSefazDfeCooldownUntil(control, 'consChNFe')).toBeNull();
+  });
+
+  it('limita consChNFe/consNSU a 20 chamadas por ator por hora', async () => {
+    process.env.NFE_DISTRIBUICAO_CLIENT_MODE = 'real';
+    let quotaFile = Buffer.from('{}');
+    storage.getObject.mockImplementation(async () => quotaFile);
+    storage.putObject.mockImplementation(async (_key: string, content: Buffer | string) => {
+      quotaFile = (Buffer.isBuffer(content) ? content : Buffer.from(content)) as typeof quotaFile;
+      return 'settings/nfe-sefaz-point-query-quota.json';
+    });
+
+    for (let index = 0; index < 20; index += 1) {
+      await (service as any).reserveOfficialPointQuery('01861020970', NfeAmbiente.producao);
+    }
+    await expect((service as any).reserveOfficialPointQuery('01861020970', NfeAmbiente.producao))
+      .rejects.toBeInstanceOf(BadRequestException);
   });
 });

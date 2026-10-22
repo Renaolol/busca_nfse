@@ -14,6 +14,11 @@ export interface NfeDistribuicaoResult {
   ultNsu: bigint;
   maxNsu: bigint;
   documents: NfeDistribuicaoDocument[];
+  documentExtraction?: {
+    docZipCount: number;
+    discardedCount: number;
+    schemaCounts: Record<string, number>;
+  };
   rawResponse: unknown;
 }
 

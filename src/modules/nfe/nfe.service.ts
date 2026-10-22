@@ -10,6 +10,7 @@ import {
 } from '@prisma/client';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
+import { createHash } from 'node:crypto';
 import JSZip from 'jszip';
 import { DANFE_PDF_GENERATOR, DanfePdfGenerator } from '../../integrations/danfe/danfe.types';
 import {
@@ -42,6 +43,7 @@ import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
 import { RunNfeSyncDto } from './dto/run-sync.dto';
 import { RunSefazCpfImportDto } from './dto/run-sefaz-cpf-import.dto';
+import { ExecuteSefazDiagnosticDto, StartSefazDiagnosticDto } from './dto/sefaz-diagnostic.dto';
 import { SincronizarNfeEventosDto } from './dto/sincronizar-eventos.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
 import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
@@ -56,6 +58,24 @@ type NfeNightlySweepConfigFile = {
 
 type NfeMonofasicoAliquotasConfigFile = {
   periodos?: MonofasicoAliquotaPeriodoDto[];
+};
+
+type SefazDiagnosticModeState = {
+  controlId: string;
+  clienteId: string;
+  estabelecimentoId: string;
+  certificadoId: string;
+  actorHash: string;
+  ambiente: NfeAmbiente;
+  actorType: 'CPF' | 'CNPJ';
+  expiresAt: string;
+};
+
+type SefazDfeQueryMethod = 'distNSU' | 'consNSU' | 'consChNFe';
+
+type SefazPointQueryQuotaEntry = {
+  timestamps: number[];
+  blockedUntil?: number;
 };
 
 type NfeNightlySweepSlot = {
@@ -94,6 +114,31 @@ type SefazCpfHistoricalDiagnostics = {
   descartadosComFalha: number;
 };
 
+type SefazDfeRunDiagnostic = {
+  controlId?: string;
+  estabelecimentoId?: string;
+  method: 'distNSU' | 'consNSU' | 'consChNFe';
+  clientMode: 'real' | 'mock';
+  actorType: 'CPF' | 'CNPJ';
+  ambiente: NfeAmbiente;
+  httpStatus: number | null;
+  cStat: string | null;
+  xMotivo: string | null;
+  ultNsu: string | null;
+  maxNsu: string | null;
+  documentsReceived: number;
+  documentsDecoded: number;
+  docZipDiscarded: number;
+  schemaCounts: Record<string, number>;
+  documentsFiltered: number;
+  documentsAttempted: number;
+  documentsProcessed: number;
+  documentsFailed: number;
+  documentsNotAttempted: number;
+  processingResult: 'concluido' | 'sem_documentos' | 'aguardando_sefaz' | 'falha';
+  failureStage: 'before_response' | 'sefaz_response' | 'docZip_decode' | 'document_parse_or_persist' | 'cursor_update' | null;
+};
+
 type NfeSyncRunFailureDetail = {
   kind: 'documento' | 'controle';
   status:
@@ -124,6 +169,7 @@ type NfeSyncRunResult = {
   executionDetails: NfeSyncRunFailureDetail[];
   failureDetails: NfeSyncRunFailureDetail[];
   cpfDiagnostics?: SefazCpfHistoricalDiagnostics;
+  sefazDiagnostics?: SefazDfeRunDiagnostic[];
 };
 
 type NfeSyncActivationResult = {
@@ -187,6 +233,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   private static readonly SEFAZ_CPF_HISTORICAL_NSUS_PER_RUN = 15;
   private static readonly activeSefazActorQueries = new Set<string>();
   private static readonly NIGHTLY_SWEEP_CONFIG_STORAGE_KEY = 'settings/nfe-nightly-sweep.json';
+  private static readonly SEFAZ_DIAGNOSTIC_MODE_STORAGE_KEY = 'settings/nfe-sefaz-diagnostic-mode.json';
+  private static readonly SEFAZ_POINT_QUERY_QUOTA_STORAGE_KEY = 'settings/nfe-sefaz-point-query-quota.json';
+  private static readonly SEFAZ_DIAGNOSTIC_MODE_TTL_MS = 30 * 60 * 1000;
+  private static readonly SEFAZ_POINT_QUERY_QUOTA_WINDOW_MS = 60 * 60 * 1000;
+  private static readonly SEFAZ_POINT_QUERY_MAX_PER_HOUR = 20;
+  private static readonly activeSefazPointQueryQuotaActors = new Set<string>();
   private static readonly DOMINIO_CHAVE_DATA_EMISSAO_INICIO = '2026-01-02';
   private static readonly MONOFASICO_ALIQUOTAS_STORAGE_KEY = 'settings/nfe-monofasico-aliquotas.json';
   private static readonly MONOFASICO_ALIQUOTAS_DEFAULT: MonofasicoAliquotaPeriodoDto[] = [
@@ -215,6 +267,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     840
   );
   private monofasicoAliquotas: MonofasicoAliquotaPeriodoDto[] = NfeService.MONOFASICO_ALIQUOTAS_DEFAULT;
+  private sefazDiagnosticMode: SefazDiagnosticModeState | null = null;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -230,6 +283,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   async onModuleInit(): Promise<void> {
     await this.loadNightlySweepConfig();
     await this.loadMonofasicoAliquotasConfig();
+    await this.loadSefazDiagnosticMode();
 
     if (this.autoSyncEnabled) {
       this.autoSyncTimer = setInterval(() => {
@@ -1136,7 +1190,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         const cnpjConsulta = establishment.cnpj;
         const certificate = await this.findActiveCertificateOrThrow(document.clienteId, document.estabelecimentoId, cnpjConsulta);
         const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
-        const result = await this.distribuicaoClient.consultarPorChave({
+        const result = await this.consultarPorChaveComLimiteOficial({
           cnpjConsulta,
           cUfAutor,
           chaveAcesso: document.chaveAcesso,
@@ -1520,8 +1574,313 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return this.runNowByConfiguredSources({ limitControles: 50 });
   }
 
+  async getSefazDiagnosticModeStatus() {
+    const mode = this.getActiveSefazDiagnosticMode();
+    return {
+      active: Boolean(mode),
+      expiresAt: mode?.expiresAt ?? null,
+      controlId: mode?.controlId ?? null,
+      estabelecimentoId: mode?.estabelecimentoId ?? null,
+      ambiente: mode?.ambiente ?? null,
+      actorType: mode?.actorType ?? null,
+      clientMode: process.env.NFE_DISTRIBUICAO_CLIENT_MODE === 'real' ? 'real' : 'mock',
+      automaticPaused: Boolean(mode)
+    };
+  }
+
+  async startSefazDiagnosticMode(dto: StartSefazDiagnosticDto) {
+    if (process.env.NFE_DISTRIBUICAO_CLIENT_MODE !== 'real') {
+      throw new BadRequestException('Modo de diagnostico exige NFE_DISTRIBUICAO_CLIENT_MODE=real. Nenhuma consulta foi enviada.');
+    }
+
+    const control = await this.prisma.nfeSyncControle.findFirst({
+      where: {
+        id: dto.controleId,
+        status: { in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api] }
+      }
+    });
+    if (!control) {
+      throw new NotFoundException('Controle de sincronizacao ativo nao encontrado.');
+    }
+
+    await this.ensureClientEligibleForNfeSync(control.clienteId);
+    const establishment = await this.getEstablishmentOrThrow(control.estabelecimentoId, control.clienteId);
+    if (this.normalizeCnpj(establishment.cnpj) !== this.normalizeCnpj(control.cnpjConsulta)) {
+      throw new BadRequestException('O identificador do controle nao corresponde ao estabelecimento selecionado.');
+    }
+    if (dto.ambiente && dto.ambiente !== control.ambiente) {
+      throw new BadRequestException('O ambiente informado difere do ambiente salvo no controle.');
+    }
+
+    await this.findActiveCertificateOrThrow(
+      control.clienteId,
+      control.estabelecimentoId,
+      control.cnpjConsulta,
+      dto.certificadoId
+    );
+
+    const currentMode = this.getActiveSefazDiagnosticMode();
+    if (currentMode && currentMode.controlId !== control.id) {
+      throw new BadRequestException('Ja existe um modo de diagnostico ativo para outro controle. Encerre-o primeiro.');
+    }
+
+    const actorKey = this.getSefazActorKey(control.cnpjConsulta, control.ambiente);
+    if (!this.acquireSefazActorQuery(actorKey)) {
+      throw new BadRequestException('Ja existe uma consulta para este CPF/CNPJ e ambiente em andamento.');
+    }
+
+    try {
+      const mode: SefazDiagnosticModeState = {
+        controlId: control.id,
+        clienteId: control.clienteId,
+        estabelecimentoId: control.estabelecimentoId,
+        certificadoId: dto.certificadoId,
+        actorHash: this.getPointQueryActorHash(control.cnpjConsulta, control.ambiente),
+        ambiente: control.ambiente,
+        actorType: this.getDocumentTypeLabel(control.cnpjConsulta),
+        expiresAt: new Date(Date.now() + NfeService.SEFAZ_DIAGNOSTIC_MODE_TTL_MS).toISOString()
+      };
+      await this.storage.putObject(NfeService.SEFAZ_DIAGNOSTIC_MODE_STORAGE_KEY, JSON.stringify(mode));
+      this.sefazDiagnosticMode = mode;
+      return this.getSefazDiagnosticModeStatus();
+    } finally {
+      this.releaseSefazActorQuery(actorKey);
+    }
+  }
+
+  async stopSefazDiagnosticMode() {
+    await this.storage.deleteObject(NfeService.SEFAZ_DIAGNOSTIC_MODE_STORAGE_KEY);
+    this.sefazDiagnosticMode = null;
+    return this.getSefazDiagnosticModeStatus();
+  }
+
+  async executeSefazDiagnosticQuery(dto: ExecuteSefazDiagnosticDto) {
+    if (process.env.NFE_DISTRIBUICAO_CLIENT_MODE !== 'real') {
+      throw new BadRequestException('Modo de diagnostico exige o cliente real da SEFAZ. Nenhuma consulta foi enviada.');
+    }
+
+    const mode = this.getActiveSefazDiagnosticMode();
+    if (!mode) {
+      throw new BadRequestException('Ative o modo de diagnostico para um controle antes de consultar.');
+    }
+    if (dto.method === 'consChNFe' && !dto.chaveAcesso) {
+      throw new BadRequestException('Informe a chave de acesso para a consulta consChNFe.');
+    }
+    if (dto.method === 'distNSU' && dto.chaveAcesso) {
+      throw new BadRequestException('A consulta distNSU nao aceita chave de acesso.');
+    }
+
+    const control = await this.prisma.nfeSyncControle.findFirst({
+      where: {
+        id: mode.controlId,
+        clienteId: mode.clienteId,
+        estabelecimentoId: mode.estabelecimentoId
+      }
+    });
+    if (!control) {
+      await this.stopSefazDiagnosticMode();
+      throw new NotFoundException('O controle do modo de diagnostico nao existe mais.');
+    }
+    if (control.ambiente !== mode.ambiente || this.getDocumentTypeLabel(control.cnpjConsulta) !== mode.actorType) {
+      throw new BadRequestException('O controle foi alterado desde a ativacao do modo de diagnostico.');
+    }
+
+    const method: SefazDfeQueryMethod = dto.method;
+    const cooldownUntil = this.getSefazDfeCooldownUntil(control, method, method === 'distNSU');
+    if (cooldownUntil) {
+      throw new BadRequestException(this.describeSefazDfeCooldown(cooldownUntil));
+    }
+    const officialRestrictionUntil = await this.getOfficialPointQueryRestrictionUntil(control.cnpjConsulta, control.ambiente);
+    if (officialRestrictionUntil) {
+      throw new BadRequestException(`Restricao oficial SEFAZ vigente ate ${officialRestrictionUntil.toISOString()}.`);
+    }
+
+    const actorKey = this.getSefazActorKey(control.cnpjConsulta, control.ambiente);
+    if (!this.acquireSefazActorQuery(actorKey)) {
+      throw new BadRequestException('Ja existe uma consulta para este CPF/CNPJ e ambiente em andamento.');
+    }
+
+    const diagnostic = this.createSefazDfeFailureDiagnostic(control);
+    diagnostic.method = method;
+    diagnostic.clientMode = 'real';
+    let result: NfeDistribuicaoResult | null = null;
+    let persistenceFailure = false;
+    try {
+      const establishment = await this.getEstablishmentOrThrow(control.estabelecimentoId, control.clienteId);
+      const certificate = await this.findActiveCertificateOrThrow(
+        control.clienteId,
+        control.estabelecimentoId,
+        control.cnpjConsulta,
+        mode.certificadoId
+      );
+      const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
+      result = method === 'distNSU'
+        ? await this.distribuicaoClient.distribuirPorNsu({
+            cnpjConsulta: control.cnpjConsulta,
+            cUfAutor,
+            ultNsu: control.ultimoNsuConsultado,
+            ambiente: control.ambiente,
+            certificateId: certificate.id
+          })
+        : await this.consultarPorChaveComLimiteOficial({
+            cnpjConsulta: control.cnpjConsulta,
+            cUfAutor,
+            chaveAcesso: dto.chaveAcesso!,
+            ambiente: control.ambiente,
+            certificateId: certificate.id
+          });
+
+      Object.assign(diagnostic, this.createSefazDfeRunDiagnostic(control, result), { method, clientMode: 'real' });
+      diagnostic.documentsAttempted = 0;
+      diagnostic.documentsProcessed = 0;
+      diagnostic.documentsFailed = 0;
+      diagnostic.documentsNotAttempted = result.documents.length;
+
+      const persistir = method === 'distNSU' || dto.persistir === true;
+      for (const document of result.documents) {
+        if (!persistir) {
+          continue;
+        }
+        diagnostic.documentsAttempted += 1;
+        diagnostic.documentsNotAttempted = Math.max(0, result.documents.length - diagnostic.documentsAttempted);
+        try {
+          await this.persistDocument({
+            clienteId: control.clienteId,
+            estabelecimentoId: control.estabelecimentoId,
+            ambiente: control.ambiente,
+            cnpjConsulta: control.cnpjConsulta,
+            document,
+            origem: NfeDocumentoOrigem.distribuicao_nsu
+          });
+          diagnostic.documentsProcessed += 1;
+        } catch {
+          persistenceFailure = true;
+          diagnostic.documentsFailed += 1;
+          diagnostic.failureStage = 'document_parse_or_persist';
+        }
+      }
+
+      const cStat = String(result.cStat || '').trim();
+      const xMotivo = this.sanitizeSefazDiagnosticText(result.xMotivo);
+      if (result.statusCode === 200 && cStat === '137') {
+        if (method === 'distNSU') {
+          await this.registerSefazDfeCooldown(control, '137', xMotivo ?? undefined);
+        }
+        diagnostic.processingResult = 'sem_documentos';
+      } else if (cStat === '656') {
+        await this.registerSefazDfeCooldown(control, '656', xMotivo ?? undefined);
+        diagnostic.processingResult = 'aguardando_sefaz';
+        diagnostic.failureStage = 'sefaz_response';
+      } else if (result.statusCode !== 200 || cStat !== '138') {
+        const message = `Consulta SEFAZ retornou cStat ${cStat || 'desconhecido'}: ${xMotivo || 'Sem xMotivo.'}`;
+        await this.prisma.nfeSyncControle.update({
+          where: { id: control.id },
+          data: { status: NfeSyncStatus.erro_api, ultimaExecucao: new Date(), ultimaMensagem: message }
+        });
+        diagnostic.failureStage = 'sefaz_response';
+        diagnostic.processingResult = 'falha';
+      } else if (method === 'distNSU') {
+        const hasExtractionLoss = diagnostic.docZipDiscarded > 0 ||
+          diagnostic.documentsReceived !== diagnostic.documentsDecoded;
+        const allDecodedProcessed = diagnostic.documentsDecoded > 0 &&
+          diagnostic.documentsProcessed === diagnostic.documentsDecoded &&
+          diagnostic.documentsFailed === 0;
+        if (hasExtractionLoss) {
+          diagnostic.failureStage = 'docZip_decode';
+          await this.prisma.nfeSyncControle.update({
+            where: { id: control.id },
+            data: {
+              status: NfeSyncStatus.erro_api,
+              ultimaExecucao: new Date(),
+              ultimaMensagem: `Diagnostico distNSU interrompeu o cursor: ${diagnostic.docZipDiscarded} docZip descartado(s) na extracao.`
+            }
+          });
+        } else if (persistenceFailure) {
+          await this.prisma.nfeSyncControle.update({
+            where: { id: control.id },
+            data: {
+              status: NfeSyncStatus.erro_api,
+              ultimaExecucao: new Date(),
+              ultimaMensagem: 'Diagnostico distNSU: falha ao processar documento; cursor preservado.'
+            }
+          });
+        } else if (result.ultNsu <= control.ultimoNsuConsultado) {
+          const message = `Consulta SEFAZ sem avancar o NSU ${control.ultimoNsuConsultado.toString()}: ultNSU retornado ${result.ultNsu.toString()}.`;
+          await this.registerSefazDfeCooldown(control, 'sem_avanco', message);
+        } else if (allDecodedProcessed) {
+          await this.prisma.nfeSyncControle.update({
+            where: { id: control.id },
+            data: {
+              status: NfeSyncStatus.ativo,
+              ultimoNsuConsultado: result.ultNsu,
+              ultimoNsuDistribuido: result.documents.reduce(
+                (highest, document) => document.nsu && document.nsu > highest ? document.nsu : highest,
+                control.ultimoNsuDistribuido
+              ),
+              maxNsu: result.maxNsu,
+              ultimaExecucao: new Date(),
+              ultimaMensagem: xMotivo || 'Diagnostico distNSU processado.',
+              totalDocumentosBaixados: { increment: diagnostic.documentsProcessed }
+            }
+          });
+        } else {
+          diagnostic.failureStage = 'docZip_decode';
+          await this.prisma.nfeSyncControle.update({
+            where: { id: control.id },
+            data: {
+              status: NfeSyncStatus.erro_api,
+              ultimaExecucao: new Date(),
+              ultimaMensagem: 'Diagnostico distNSU sem documentos decodificados; cursor preservado.'
+            }
+          });
+        }
+      } else {
+        if (dto.persistir === true && diagnostic.documentsFailed === 0) {
+          await this.prisma.nfeSyncControle.update({
+            where: { id: control.id },
+            data: {
+              status: NfeSyncStatus.ativo,
+              ultimaExecucao: new Date(),
+              ultimaMensagem: xMotivo || 'Consulta pontual consChNFe executada.'
+            }
+          });
+        }
+      }
+
+      if (diagnostic.documentsFailed > 0) {
+        diagnostic.documentsNotAttempted = Math.max(
+          0,
+          diagnostic.documentsDecoded - diagnostic.documentsAttempted
+        );
+      }
+      if (diagnostic.failureStage && diagnostic.failureStage !== 'sefaz_response') {
+        diagnostic.processingResult = 'falha';
+      }
+      this.logSefazDfeRunDiagnostic(diagnostic);
+      return {
+        diagnostic,
+        documentsPersisted: diagnostic.documentsProcessed,
+        persistenceRequested: persistir,
+        cursorAdvanced: method === 'distNSU' && diagnostic.failureStage === null &&
+          result.statusCode === 200 && cStat === '138' && result.ultNsu > control.ultimoNsuConsultado
+      };
+    } catch (error) {
+      if (!result) {
+        diagnostic.failureStage = 'before_response';
+      }
+      diagnostic.processingResult = 'falha';
+      this.logSefazDfeRunDiagnostic(diagnostic);
+      throw error;
+    } finally {
+      this.releaseSefazActorQuery(actorKey);
+    }
+  }
+
   async runNowCpfViaSefazGlobal(dto: RunSefazCpfImportDto = {}): Promise<NfeSyncRunResult> {
     const selectedProducer = dto.controleId ? await this.getManualCpfProducerOrThrow(dto.controleId) : null;
+    if (selectedProducer && this.isSefazDiagnosticModeActiveForControl(selectedProducer)) {
+      throw new BadRequestException('O diagnostico esta ativo para este controle. Execute uma consulta pelo painel Diagnostico manual SEFAZ.');
+    }
     const selectedCertificate = dto.certificadoId
       ? await this.getManualCpfCertificateOrThrow(dto.certificadoId, selectedProducer ?? undefined)
       : null;
@@ -1540,7 +1899,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       throw new BadRequestException('O produtor selecionado nao pertence ao cliente informado.');
     }
     if (selectedProducer) {
-      const cooldownUntil = this.getSefazDfeCooldownUntil(selectedProducer, hasStartDate && hasEndDate);
+    const cooldownUntil = this.getSefazDfeCooldownUntil(selectedProducer, hasStartDate && hasEndDate ? 'consNSU' : 'distNSU');
       if (cooldownUntil) {
         throw new BadRequestException(this.describeSefazDfeCooldown(cooldownUntil));
       }
@@ -1743,7 +2102,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       nsuAtual = requestedNsu;
       let result: NfeDistribuicaoResult;
       try {
-        result = await this.distribuicaoClient.consultarPorNsu({
+        result = await this.consultarPorNsuComLimiteOficial({
           cnpjConsulta: control.cnpjConsulta,
           cUfAutor,
           nsu: requestedNsu,
@@ -2015,13 +2374,15 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       dominioPromise,
       this.runNowInternal({ ...params, onlyCpf: true })
     ]);
+    const sefazDiagnostics = [...(dominioResult.sefazDiagnostics ?? []), ...(cpfResult.sefazDiagnostics ?? [])];
 
     return {
       processed: dominioResult.processed + cpfResult.processed,
       documentsSaved: dominioResult.documentsSaved + cpfResult.documentsSaved,
       failures: dominioResult.failures + cpfResult.failures,
       executionDetails: [...dominioResult.executionDetails, ...cpfResult.executionDetails],
-      failureDetails: [...dominioResult.failureDetails, ...cpfResult.failureDetails]
+      failureDetails: [...dominioResult.failureDetails, ...cpfResult.failureDetails],
+      ...(sefazDiagnostics.length ? { sefazDiagnostics } : {})
     };
   }
 
@@ -3088,7 +3449,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             continue;
           }
 
-          const result = await this.distribuicaoClient.consultarPorChave({
+          const result = await this.consultarPorChaveComLimiteOficial({
             cnpjConsulta: control.cnpjConsulta,
             cUfAutor,
             chaveAcesso,
@@ -3403,11 +3764,24 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     let failures = 0;
     const executionDetails: NfeSyncRunFailureDetail[] = [];
     const failureDetails: NfeSyncRunFailureDetail[] = [];
+    const sefazDiagnostics: SefazDfeRunDiagnostic[] = [];
     const cooldownsRegisteredThisRun = new Map<string, Date>();
     const cpfActorsQueriedThisRun = new Set<string>();
 
     for (const control of controls) {
       const actorKey = this.getSefazActorKey(control.cnpjConsulta, control.ambiente);
+      if (this.isSefazDiagnosticModeActiveForControl(control)) {
+        executionDetails.push({
+          kind: 'controle',
+          status: 'persistido',
+          clientId: control.clienteId,
+          estabelecimentoId: control.estabelecimentoId,
+          ambiente: control.ambiente,
+          cnpjConsulta: control.cnpjConsulta,
+          mensagem: 'Consulta automatica suspensa durante o modo de diagnostico manual deste estabelecimento.'
+        });
+        continue;
+      }
       const historicalBackfill = this.parseSefazCpfHistoricalBackfill(control.ultimaMensagem);
       if (historicalBackfill) {
         executionDetails.push({
@@ -3462,6 +3836,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       if (this.isCpf(control.cnpjConsulta)) {
         cpfActorsQueriedThisRun.add(actorKey);
       }
+      let sefazDiagnostic: SefazDfeRunDiagnostic | null = null;
+      let isPersistingDocument = false;
       try {
         const establishment = await this.getEstablishmentOrThrow(control.estabelecimentoId, control.clienteId);
         const certificate = await this.findActiveCertificateOrThrow(
@@ -3479,6 +3855,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           certificateId: certificate.id
         });
         const cStat = String(result.cStat || '').trim();
+        sefazDiagnostic = this.createSefazDfeRunDiagnostic(control, result);
 
         if (result.statusCode === 200 && cStat === '137') {
           const registeredCooldownUntil = await this.registerSefazDfeCooldown(control, cStat, result.xMotivo);
@@ -3533,6 +3910,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
         let highestDocumentNsu = control.ultimoNsuDistribuido;
         for (const document of result.documents) {
+          if (sefazDiagnostic) {
+            sefazDiagnostic.documentsAttempted += 1;
+            sefazDiagnostic.documentsNotAttempted = Math.max(
+              0,
+              sefazDiagnostic.documentsDecoded - sefazDiagnostic.documentsAttempted
+            );
+          }
+          isPersistingDocument = true;
           await this.persistDocument({
             clienteId: control.clienteId,
             estabelecimentoId: control.estabelecimentoId,
@@ -3541,7 +3926,11 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             document,
             origem: NfeDocumentoOrigem.distribuicao_nsu
           });
+          isPersistingDocument = false;
           documentsSaved += 1;
+          if (sefazDiagnostic) {
+            sefazDiagnostic.documentsProcessed += 1;
+          }
           if (document.nsu && document.nsu > highestDocumentNsu) {
             highestDocumentNsu = document.nsu;
           }
@@ -3583,6 +3972,21 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         });
       } catch (error) {
         const message = `Falha ao consultar SEFAZ: ${this.toErrorMessage(error)}`;
+        if (!sefazDiagnostic) {
+          sefazDiagnostic = this.createSefazDfeFailureDiagnostic(control);
+        }
+        if (isPersistingDocument) {
+          sefazDiagnostic.documentsFailed += 1;
+          sefazDiagnostic.failureStage = 'document_parse_or_persist';
+          sefazDiagnostic.documentsNotAttempted = Math.max(
+            0,
+            sefazDiagnostic.documentsDecoded - sefazDiagnostic.documentsAttempted
+          );
+        } else if (sefazDiagnostic.cStat !== null) {
+          sefazDiagnostic.failureStage = 'cursor_update';
+        } else {
+          sefazDiagnostic.failureStage = 'before_response';
+        }
         await this.prisma.nfeSyncControle.update({
           where: { id: control.id },
           data: {
@@ -3604,6 +4008,13 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         executionDetails.push(failureDetail);
         failureDetails.push(failureDetail);
       } finally {
+        if (sefazDiagnostic) {
+          if (sefazDiagnostic.failureStage && sefazDiagnostic.failureStage !== 'sefaz_response') {
+            sefazDiagnostic.processingResult = 'falha';
+          }
+          sefazDiagnostics.push(sefazDiagnostic);
+          this.logSefazDfeRunDiagnostic(sefazDiagnostic);
+        }
         this.releaseSefazActorQuery(actorKey);
       }
     }
@@ -3613,8 +4024,128 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       documentsSaved,
       failures,
       executionDetails,
-      failureDetails
+      failureDetails,
+      ...(sefazDiagnostics.length ? { sefazDiagnostics } : {})
     };
+  }
+
+  private createSefazDfeRunDiagnostic(
+    control: Pick<NfeSyncControle, 'id' | 'estabelecimentoId' | 'cnpjConsulta' | 'ambiente'>,
+    result: NfeDistribuicaoResult
+  ): SefazDfeRunDiagnostic {
+    return {
+      controlId: control.id,
+      estabelecimentoId: control.estabelecimentoId,
+      method: 'distNSU',
+      clientMode: process.env.NFE_DISTRIBUICAO_CLIENT_MODE === 'real' ? 'real' : 'mock',
+      actorType: this.isCpf(control.cnpjConsulta) ? 'CPF' : 'CNPJ',
+      ambiente: control.ambiente,
+      httpStatus: Number.isFinite(result.statusCode) ? result.statusCode : null,
+      cStat: String(result.cStat || '').trim() || null,
+      xMotivo: this.sanitizeSefazDiagnosticText(result.xMotivo),
+      ultNsu: result.ultNsu?.toString() ?? null,
+      maxNsu: result.maxNsu?.toString() ?? null,
+      documentsReceived: result.documentExtraction?.docZipCount ?? result.documents.length,
+      documentsDecoded: result.documents.length,
+      docZipDiscarded: result.documentExtraction?.discardedCount ?? 0,
+      schemaCounts: this.sanitizeSefazSchemaCounts(
+        result.documentExtraction?.schemaCounts ?? this.countSefazDocumentSchemas(result.documents)
+      ),
+      documentsFiltered: 0,
+      documentsAttempted: 0,
+      documentsProcessed: 0,
+      documentsFailed: 0,
+      documentsNotAttempted: result.documents.length,
+      processingResult: result.documentExtraction?.discardedCount
+        ? 'falha'
+        : result.statusCode !== 200
+          ? 'falha'
+          : String(result.cStat || '').trim() === '137'
+            ? 'sem_documentos'
+            : String(result.cStat || '').trim() === '656'
+              ? 'aguardando_sefaz'
+              : String(result.cStat || '').trim() === '138'
+                ? 'concluido'
+                : 'falha',
+      failureStage: result.documentExtraction?.discardedCount
+        ? 'docZip_decode'
+        : result.statusCode !== 200 || !['137', '138'].includes(String(result.cStat || '').trim())
+          ? 'sefaz_response'
+          : null
+    };
+  }
+
+  private createSefazDfeFailureDiagnostic(
+    control: Pick<NfeSyncControle, 'id' | 'estabelecimentoId' | 'cnpjConsulta' | 'ambiente'>
+  ): SefazDfeRunDiagnostic {
+    return {
+      controlId: control.id,
+      estabelecimentoId: control.estabelecimentoId,
+      method: 'distNSU',
+      clientMode: process.env.NFE_DISTRIBUICAO_CLIENT_MODE === 'real' ? 'real' : 'mock',
+      actorType: this.isCpf(control.cnpjConsulta) ? 'CPF' : 'CNPJ',
+      ambiente: control.ambiente,
+      httpStatus: null,
+      cStat: null,
+      xMotivo: null,
+      ultNsu: null,
+      maxNsu: null,
+      documentsReceived: 0,
+      documentsDecoded: 0,
+      docZipDiscarded: 0,
+      schemaCounts: {},
+      documentsFiltered: 0,
+      documentsAttempted: 0,
+      documentsProcessed: 0,
+      documentsFailed: 0,
+      documentsNotAttempted: 0,
+      processingResult: 'falha',
+      failureStage: 'before_response'
+    };
+  }
+
+  private countSefazDocumentSchemas(documents: NfeDistribuicaoDocument[]): Record<string, number> {
+    return documents.reduce<Record<string, number>>((counts, document) => {
+      const schema = String(document.schema || 'sem_schema')
+        .slice(0, 80)
+        .replace(/[^A-Za-z0-9_.-]/g, '_');
+      counts[schema] = (counts[schema] ?? 0) + 1;
+      return counts;
+    }, {});
+  }
+
+  private sanitizeSefazSchemaCounts(schemaCounts: Record<string, number>): Record<string, number> {
+    return Object.entries(schemaCounts).reduce<Record<string, number>>((counts, [schema, count]) => {
+      const safeSchema = String(schema || 'sem_schema')
+        .slice(0, 80)
+        .replace(/[^A-Za-z0-9_.-]/g, '_');
+      counts[safeSchema] = (counts[safeSchema] ?? 0) + Number(count || 0);
+      return counts;
+    }, {});
+  }
+
+  private sanitizeSefazDiagnosticText(value?: string | null): string | null {
+    if (!value) {
+      return null;
+    }
+
+    return String(value)
+      .replace(/\b(?:\d[.\-/\s]?){10}\d\b|\b(?:\d[.\-/\s]?){13}\d\b/g, (documentNumber) => {
+        const digits = documentNumber.replace(/\D/g, '');
+        return `[${digits.length === 11 ? 'CPF' : 'CNPJ'} mascarado]`;
+      })
+      .slice(0, 300);
+  }
+
+  private logSefazDfeRunDiagnostic(diagnostic: SefazDfeRunDiagnostic): void {
+    try {
+      const safeDiagnostic = { ...diagnostic };
+      delete safeDiagnostic.controlId;
+      delete safeDiagnostic.estabelecimentoId;
+      this.logger.log(JSON.stringify({ event: 'nfe_distnsu_diagnostic', ...safeDiagnostic }));
+    } catch {
+      // A falha de logging nao deve alterar o resultado da sincronizacao.
+    }
   }
 
   async consultarNsu(dto: QueryNfeByNsuDto) {
@@ -3622,25 +4153,34 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const establishment = await this.getEstablishmentOrThrow(dto.estabelecimentoId, dto.clienteId);
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
     const cnpjConsulta = establishment.cnpj;
+    const control = await this.findSefazControlForManualQuery(dto.clienteId, dto.estabelecimentoId, cnpjConsulta, ambiente);
+    this.assertSefazManualQueryCooldown(control, 'consNSU');
     const certificate = await this.findActiveCertificateOrThrow(dto.clienteId, dto.estabelecimentoId, cnpjConsulta);
     const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
-    const result = await this.distribuicaoClient.consultarPorNsu({
-      cnpjConsulta,
-      cUfAutor,
-      nsu: BigInt(dto.nsu),
-      ambiente,
-      certificateId: certificate.id
-    });
-
-    return this.handleManualConsultaResult({
-      clienteId: dto.clienteId,
-      estabelecimentoId: dto.estabelecimentoId,
-      ambiente,
-      cnpjConsulta,
-      persistir: dto.persistir !== false,
-      result,
-      requestedNsu: dto.nsu
-    });
+    const actorKey = this.getSefazActorKey(cnpjConsulta, ambiente);
+    if (!this.acquireSefazActorQuery(actorKey)) {
+      throw new BadRequestException('Ja existe uma consulta para este CPF/CNPJ e ambiente em andamento.');
+    }
+    try {
+      const result = await this.consultarPorNsuComLimiteOficial({
+        cnpjConsulta,
+        cUfAutor,
+        nsu: BigInt(dto.nsu),
+        ambiente,
+        certificateId: certificate.id
+      });
+      return this.handleManualConsultaResult({
+        clienteId: dto.clienteId,
+        estabelecimentoId: dto.estabelecimentoId,
+        ambiente,
+        cnpjConsulta,
+        persistir: dto.persistir !== false,
+        result,
+        requestedNsu: dto.nsu
+      });
+    } finally {
+      this.releaseSefazActorQuery(actorKey);
+    }
   }
 
   async consultarChave(dto: QueryNfeByChaveDto) {
@@ -3648,25 +4188,34 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const establishment = await this.getEstablishmentOrThrow(dto.estabelecimentoId, dto.clienteId);
     const ambiente = dto.ambiente ?? NfeAmbiente.producao;
     const cnpjConsulta = establishment.cnpj;
+    const control = await this.findSefazControlForManualQuery(dto.clienteId, dto.estabelecimentoId, cnpjConsulta, ambiente);
+    this.assertSefazManualQueryCooldown(control, 'consChNFe');
     const certificate = await this.findActiveCertificateOrThrow(dto.clienteId, dto.estabelecimentoId, cnpjConsulta);
     const cUfAutor = this.resolveCUfAutorFromEstablishment(establishment);
-    const result = await this.distribuicaoClient.consultarPorChave({
-      cnpjConsulta,
-      cUfAutor,
-      chaveAcesso: dto.chaveAcesso,
-      ambiente,
-      certificateId: certificate.id
-    });
-
-    return this.handleManualConsultaResult({
-      clienteId: dto.clienteId,
-      estabelecimentoId: dto.estabelecimentoId,
-      ambiente,
-      cnpjConsulta,
-      persistir: dto.persistir !== false,
-      result,
-      requestedChave: dto.chaveAcesso
-    });
+    const actorKey = this.getSefazActorKey(cnpjConsulta, ambiente);
+    if (!this.acquireSefazActorQuery(actorKey)) {
+      throw new BadRequestException('Ja existe uma consulta para este CPF/CNPJ e ambiente em andamento.');
+    }
+    try {
+      const result = await this.consultarPorChaveComLimiteOficial({
+        cnpjConsulta,
+        cUfAutor,
+        chaveAcesso: dto.chaveAcesso,
+        ambiente,
+        certificateId: certificate.id
+      });
+      return this.handleManualConsultaResult({
+        clienteId: dto.clienteId,
+        estabelecimentoId: dto.estabelecimentoId,
+        ambiente,
+        cnpjConsulta,
+        persistir: dto.persistir !== false,
+        result,
+        requestedChave: dto.chaveAcesso
+      });
+    } finally {
+      this.releaseSefazActorQuery(actorKey);
+    }
   }
 
   async persistEventDocumentFromExternalSource(params: {
@@ -4615,7 +5164,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       }
 
       const actorKey = this.getSefazActorKey(control.cnpjConsulta, control.ambiente);
-      if (actorsHandled.has(actorKey) || this.getSefazDfeCooldownUntil(control)) {
+      if (actorsHandled.has(actorKey) || this.isSefazDiagnosticModeActiveForControl(control) || this.getSefazDfeCooldownUntil(control, 'consNSU')) {
         continue;
       }
       if (!this.acquireSefazActorQuery(actorKey)) {
@@ -5128,7 +5677,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
   private getSefazDfeCooldownUntil(
     control: Pick<NfeSyncControle, 'ultimaExecucao' | 'ultimaMensagem'>,
-    allowHistoricalPointLookupDuringIncrementalCooldown = false
+    method: SefazDfeQueryMethod = 'distNSU',
+    allowDiagnosticIncrementalNoAdvance = false
   ): Date | null {
     const message = String(control.ultimaMensagem || '');
     const hasCStat656 = /\bcstat\s*[:=]?\s*656\b/i.test(message);
@@ -5136,19 +5686,18 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const hasNoNsuAdvance = /sem avan[cç](?:o|ar)(?: o| do) nsu/i.test(message);
     const historicalRecoveryPaused = /recuperacao historica cpf (?:pausada|interrompida)/i.test(message);
     const genericConsumptionBlock = /consumo\s+indevido/i.test(message) && !hasCStat137 && !hasNoNsuAdvance;
-    const isIncrementalOnlyCooldown = hasCStat137 || hasNoNsuAdvance;
-    if (
-      allowHistoricalPointLookupDuringIncrementalCooldown &&
-      isIncrementalOnlyCooldown &&
-      !hasCStat656 &&
-      !genericConsumptionBlock &&
-      !historicalRecoveryPaused
-    ) {
+    const canIgnoreInternalIncrementalGate = method === 'consChNFe' ||
+      (method === 'distNSU' && allowDiagnosticIncrementalNoAdvance && (hasNoNsuAdvance || historicalRecoveryPaused));
+    // cStat 137 is an official wait for the incremental distNSU stream. The key
+    // lookup remains a separate official point query; internal cursor/backfill
+    // waits do not apply to it.
+    const hasOfficialRestriction = hasCStat656 || (hasCStat137 && method === 'distNSU') || genericConsumptionBlock;
+    if (canIgnoreInternalIncrementalGate && !hasOfficialRestriction && (hasNoNsuAdvance || historicalRecoveryPaused)) {
       return null;
     }
     const requiresCooldown =
       hasCStat656 ||
-      hasCStat137 ||
+      (hasCStat137 && method === 'distNSU') ||
       hasNoNsuAdvance ||
       genericConsumptionBlock ||
       historicalRecoveryPaused;
@@ -5164,6 +5713,209 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
     const cooldownUntil = new Date(executedAt.getTime() + NfeService.SEFAZ_DFE_COOLDOWN_MS);
     return cooldownUntil.getTime() > Date.now() ? cooldownUntil : null;
+  }
+
+  private async findSefazControlForManualQuery(
+    clienteId: string,
+    estabelecimentoId: string,
+    cnpjConsulta: string,
+    ambiente: NfeAmbiente
+  ): Promise<NfeSyncControle | null> {
+    return this.prisma.nfeSyncControle.findFirst({
+      where: { clienteId, estabelecimentoId, cnpjConsulta, ambiente }
+    });
+  }
+
+  private assertSefazManualQueryCooldown(
+    control: Pick<NfeSyncControle, 'ultimaExecucao' | 'ultimaMensagem'> | null,
+    method: 'consNSU' | 'consChNFe'
+  ): void {
+    if (!control) {
+      return;
+    }
+    const cooldownUntil = this.getSefazDfeCooldownUntil(control, method);
+    if (cooldownUntil) {
+      throw new BadRequestException(this.describeSefazDfeCooldown(cooldownUntil));
+    }
+  }
+
+  private async loadSefazDiagnosticMode(): Promise<void> {
+    try {
+      const raw = await this.storage.getObject(NfeService.SEFAZ_DIAGNOSTIC_MODE_STORAGE_KEY);
+      const parsed = JSON.parse(raw.toString('utf8')) as SefazDiagnosticModeState;
+      const expiresAt = Date.parse(parsed.expiresAt);
+      if (
+      parsed.controlId && parsed.clienteId && parsed.estabelecimentoId && parsed.certificadoId && parsed.actorHash &&
+        Number.isFinite(expiresAt) && expiresAt > Date.now() &&
+        (parsed.actorType === 'CPF' || parsed.actorType === 'CNPJ')
+      ) {
+        this.sefazDiagnosticMode = parsed;
+      } else {
+        this.sefazDiagnosticMode = null;
+        await this.storage.deleteObject(NfeService.SEFAZ_DIAGNOSTIC_MODE_STORAGE_KEY);
+      }
+    } catch {
+      this.sefazDiagnosticMode = null;
+    }
+  }
+
+  private getActiveSefazDiagnosticMode(): SefazDiagnosticModeState | null {
+    const mode = this.sefazDiagnosticMode;
+    if (!mode || Date.parse(mode.expiresAt) <= Date.now()) {
+      this.sefazDiagnosticMode = null;
+      return null;
+    }
+    return mode;
+  }
+
+  private isSefazDiagnosticModeActiveForControl(
+    control: Pick<NfeSyncControle, 'id' | 'clienteId' | 'estabelecimentoId' | 'ambiente' | 'cnpjConsulta'>
+  ): boolean {
+    const mode = this.getActiveSefazDiagnosticMode();
+    return Boolean(
+      mode && (
+        (mode.clienteId === control.clienteId && mode.controlId === control.id &&
+          mode.estabelecimentoId === control.estabelecimentoId) ||
+        mode.actorHash === this.getPointQueryActorHash(control.cnpjConsulta, control.ambiente)
+      )
+    );
+  }
+
+  private async readPointQueryQuotaStore(): Promise<Record<string, SefazPointQueryQuotaEntry>> {
+    let raw: Buffer | undefined;
+    try {
+      raw = await this.storage.getObject(NfeService.SEFAZ_POINT_QUERY_QUOTA_STORAGE_KEY);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+        throw new BadRequestException('Nao foi possivel validar o limite oficial de consultas pontuais. Nenhuma consulta foi enviada.');
+      }
+    }
+    if (!raw?.length) {
+      return {};
+    }
+    let parsed: Record<string, SefazPointQueryQuotaEntry>;
+    try {
+      parsed = JSON.parse(raw.toString('utf8')) as Record<string, SefazPointQueryQuotaEntry>;
+    } catch {
+      throw new BadRequestException('O registro de limite oficial de consultas esta invalido. Nenhuma consulta foi enviada.');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new BadRequestException('O registro de limite oficial de consultas esta invalido. Nenhuma consulta foi enviada.');
+    }
+    return parsed;
+  }
+
+  private async writePointQueryQuotaStore(counters: Record<string, SefazPointQueryQuotaEntry>): Promise<void> {
+    await this.storage.putObject(NfeService.SEFAZ_POINT_QUERY_QUOTA_STORAGE_KEY, JSON.stringify(counters));
+  }
+
+  private getPointQueryActorHash(cnpjConsulta: string, ambiente: NfeAmbiente): string {
+    return createHash('sha256')
+      .update(`${this.normalizeCnpj(cnpjConsulta)}|${ambiente}`)
+      .digest('hex');
+  }
+
+  private async reserveOfficialPointQuery(cnpjConsulta: string, ambiente: NfeAmbiente): Promise<number> {
+    if (process.env.NFE_DISTRIBUICAO_CLIENT_MODE !== 'real') {
+      return 0;
+    }
+    const actorHash = this.getPointQueryActorHash(cnpjConsulta, ambiente);
+    if (NfeService.activeSefazPointQueryQuotaActors.has(actorHash)) {
+      throw new BadRequestException('Ja existe uma consulta pontual em andamento para este ator e ambiente.');
+    }
+    NfeService.activeSefazPointQueryQuotaActors.add(actorHash);
+    try {
+      const now = Date.now();
+      const counters = await this.readPointQueryQuotaStore();
+      const entry = counters[actorHash] ?? { timestamps: [] };
+      if (Number(entry.blockedUntil || 0) > now) {
+        throw new BadRequestException(`Restricao oficial de consulta SEFAZ vigente ate ${new Date(Number(entry.blockedUntil)).toISOString()}.`);
+      }
+      const recent = (Array.isArray(entry.timestamps) ? entry.timestamps : [])
+        .filter((timestamp) => Number.isFinite(timestamp) && now - timestamp < NfeService.SEFAZ_POINT_QUERY_QUOTA_WINDOW_MS);
+      if (recent.length >= NfeService.SEFAZ_POINT_QUERY_MAX_PER_HOUR) {
+        throw new BadRequestException('Limite oficial preventivo do NotaSync: 20 consultas pontuais por ator em uma hora. Aguarde a janela de uma hora.');
+      }
+      recent.push(now);
+      counters[actorHash] = { ...entry, timestamps: recent };
+      await this.writePointQueryQuotaStore(counters);
+      return recent.length;
+    } finally {
+      NfeService.activeSefazPointQueryQuotaActors.delete(actorHash);
+    }
+  }
+
+  private async recordOfficialPointQueryRestriction(
+    cnpjConsulta: string,
+    ambiente: NfeAmbiente,
+    cStat?: string
+  ): Promise<void> {
+    if (process.env.NFE_DISTRIBUICAO_CLIENT_MODE !== 'real' || String(cStat || '').trim() !== '656') {
+      return;
+    }
+    const actorHash = this.getPointQueryActorHash(cnpjConsulta, ambiente);
+    const counters = await this.readPointQueryQuotaStore();
+    const entry = counters[actorHash] ?? { timestamps: [] };
+    counters[actorHash] = {
+      ...entry,
+      blockedUntil: Date.now() + NfeService.SEFAZ_DFE_COOLDOWN_MS
+    };
+    await this.writePointQueryQuotaStore(counters);
+  }
+
+  private async getOfficialPointQueryRestrictionUntil(
+    cnpjConsulta: string,
+    ambiente: NfeAmbiente
+  ): Promise<Date | null> {
+    if (process.env.NFE_DISTRIBUICAO_CLIENT_MODE !== 'real') {
+      return null;
+    }
+    const actorHash = this.getPointQueryActorHash(cnpjConsulta, ambiente);
+    const counters = await this.readPointQueryQuotaStore();
+    const blockedUntil = Number(counters[actorHash]?.blockedUntil || 0);
+    return blockedUntil > Date.now() ? new Date(blockedUntil) : null;
+  }
+
+  private async applyOfficialPointQueryRestriction(
+    cnpjConsulta: string,
+    ambiente: NfeAmbiente,
+    cStat?: string,
+    xMotivo?: string
+  ): Promise<void> {
+    const normalizedCStat = String(cStat || '').trim();
+    if (process.env.NFE_DISTRIBUICAO_CLIENT_MODE !== 'real' || normalizedCStat !== '656') {
+      return;
+    }
+    const control = await this.prisma.nfeSyncControle.findFirst({
+      where: { cnpjConsulta: this.normalizeCnpj(cnpjConsulta), ambiente }
+    });
+    if (control) {
+      await this.registerSefazDfeCooldown(
+        control,
+        '656',
+        this.sanitizeSefazDiagnosticText(xMotivo) ?? undefined
+      );
+    } else {
+      await this.recordOfficialPointQueryRestriction(cnpjConsulta, ambiente, normalizedCStat);
+    }
+  }
+
+  private async consultarPorChaveComLimiteOficial(
+    params: Parameters<NfeDistribuicaoClient['consultarPorChave']>[0]
+  ): Promise<NfeDistribuicaoResult> {
+    await this.reserveOfficialPointQuery(params.cnpjConsulta, params.ambiente);
+    const result = await this.distribuicaoClient.consultarPorChave(params);
+    await this.applyOfficialPointQueryRestriction(params.cnpjConsulta, params.ambiente, result.cStat, result.xMotivo);
+    return result;
+  }
+
+  private async consultarPorNsuComLimiteOficial(
+    params: Parameters<NfeDistribuicaoClient['consultarPorNsu']>[0]
+  ): Promise<NfeDistribuicaoResult> {
+    await this.reserveOfficialPointQuery(params.cnpjConsulta, params.ambiente);
+    const result = await this.distribuicaoClient.consultarPorNsu(params);
+    await this.applyOfficialPointQueryRestriction(params.cnpjConsulta, params.ambiente, result.cStat, result.xMotivo);
+    return result;
   }
 
   private getSefazDfeIncrementalCooldownMessage(message?: string | null): 'cStat137' | 'sem_avanco' | null {
@@ -5241,6 +5993,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   ): Promise<Date> {
     const now = new Date();
     const cooldownUntil = new Date(now.getTime() + NfeService.SEFAZ_DFE_COOLDOWN_MS);
+    if (cStat === '656') {
+      await this.recordOfficialPointQueryRestriction(control.cnpjConsulta, control.ambiente, cStat);
+    }
     const baseMessage = cStat === 'sem_avanco'
       ? `Consulta SEFAZ sem avancar o NSU: ${reason || ''}. ${this.describeSefazDfeCooldown(cooldownUntil)}`
       : `cStat ${cStat} - ${reason || (cStat === '137' ? 'Sem novos documentos' : 'Consumo indevido')}. ${this.describeSefazDfeCooldown(cooldownUntil)}`;

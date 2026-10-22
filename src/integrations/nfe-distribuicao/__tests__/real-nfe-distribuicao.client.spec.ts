@@ -15,6 +15,11 @@ describe('RealNfeDistribuicaoClient', () => {
           xml: string;
           chaveAcesso?: string;
         }>;
+        documentExtraction: {
+          docZipCount: number;
+          discardedCount: number;
+          schemaCounts: Record<string, number>;
+        };
       };
     };
 
@@ -55,7 +60,41 @@ describe('RealNfeDistribuicaoClient', () => {
         chaveAcesso: '35260612345678000199550010000001231000001231'
       }
     ]);
+    expect(result.documentExtraction).toEqual({
+      docZipCount: 1,
+      discardedCount: 0,
+      schemaCounts: { 'resNFe_v1.01.xsd': 1 }
+    });
     expect(gunzipSync(Buffer.from(docZip, 'base64')).toString('utf8')).toBe(xml);
+  });
+
+  it('conta docZip recebidos e descartados sem persistir ou registrar seus conteudos', () => {
+    const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
+      parseSoapResponse(body: string): {
+        documents: Array<{ schema: string; xml: string }>;
+        documentExtraction: {
+          docZipCount: number;
+          discardedCount: number;
+          schemaCounts: Record<string, number>;
+        };
+      };
+    };
+    const soap = `<retDistDFeInt xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01">
+  <cStat>138</cStat><xMotivo>Documentos localizados</xMotivo><ultNSU>1</ultNSU><maxNSU>2</maxNSU>
+  <loteDistDFeInt>
+    <docZip NSU="1" schema="resNFe_v1.01.xsd">nao-e-gzip</docZip>
+    <docZip NSU="2">YWJj</docZip>
+  </loteDistDFeInt>
+</retDistDFeInt>`;
+
+    const result = client.parseSoapResponse(soap);
+
+    expect(result.documents).toEqual([]);
+    expect(result.documentExtraction).toEqual({
+      docZipCount: 2,
+      discardedCount: 2,
+      schemaCounts: { 'resNFe_v1.01.xsd': 1, sem_schema: 1 }
+    });
   });
 
   it('monta envelope SOAP com header da AN e payload distNSU', () => {

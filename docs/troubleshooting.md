@@ -39,6 +39,10 @@
 
 ## NF-e nao aparece no painel ou nao captura novas notas
 
+- Em chamadas incrementais, verifique `sefazDiagnostics.clientMode`. Somente `real` representa chamada ao Ambiente Nacional; `mock` e resposta simulada local e nao prova disponibilidade da NF-e. O resumo da execucao na interface e apenas uma contagem e pode indicar consulta concluida sem documentos quando a SEFAZ retorna `cStat 137`.
+- Confira no mesmo diagnostico `cStat`, `xMotivo`, `ultNsu`, `maxNsu`, `documentsReceived`, `documentsDecoded`, `docZipDiscarded`, `schemaCounts`, `documentsProcessed`, `documentsFailed` e `processingResult`. O fluxo `distNSU` nao aplica filtro por periodo/destinatario; se recebeu `docZip` e nao os descompactou/processou, examine `failureStage` e a falha do controle.
+- Para uma chamada manual controlada, administradores podem ativar `Diagnostico manual SEFAZ` por 30 minutos em `Buscas NF-e`. O painel mantem o status visivel, pausa a automacao do ator/ambiente selecionado e separa `distNSU` de `consChNFe`. Consulte primeiro o metodo que pretende testar: o `cStat 137` de `distNSU` bloqueia nova distribuicao incremental por uma hora; ele nao deve bloquear consulta pontual por chave. `cStat 656` e a cota de 20 chamadas pontuais por ator/hora continuam respeitados. Nao repita chamadas para contornar essas restricoes.
+- Para chamadas reais, defina `NFE_DISTRIBUICAO_CLIENT_MODE=real` no ambiente carregado pelo processo NotaSync e reinicie o servico. O instalador Windows nao define esse modo automaticamente.
 - Confirmar se o cliente esta com `nfe_habilitado=true`.
   - A flag pode ser alterada em `Clientes` ou via `POST /clientes/:id/nfe/ativar` / `POST /clientes/:id/nfe/pausar`.
 - Se o cliente estiver desabilitado para NF-e, ele nao aparece em `Buscas NF-e`, nao entra no lote `ativar-todos` e nao participa de `rodar-agora-geral`.

@@ -406,9 +406,14 @@ const state = {
   cteDashboardStats: null,
   nfeSchedulerStatus: null,
   nfeLastRunReport: null,
+  nfeSefazDiagnosticMode: null,
+  nfeSefazDiagnosticResult: null,
+  nfeSefazDiagnosticMessage: '',
+  nfeSefazDiagnosticBusy: false,
   nfeSyncSections: {
     scheduler: true,
     failures: false,
+    sefazDiagnostic: true,
     manualImport: true,
     filters: false,
     simplified: true,
@@ -848,6 +853,10 @@ function hydrateFromMocks() {
     xmlsCompletos: state.cteDocuments.filter((doc) => doc.xmlCompletoDisponivel).length
   };
   state.nfeSchedulerStatus = null;
+  state.nfeSefazDiagnosticMode = null;
+  state.nfeSefazDiagnosticResult = null;
+  state.nfeSefazDiagnosticMessage = '';
+  state.nfeSefazDiagnosticBusy = false;
   state.serverResolvedAlerts = {};
   state.alerts = applyResolvedAlertState(deepClone(mockAlerts));
   state.establishmentsByClient = establishmentsByClient;
@@ -892,6 +901,7 @@ async function hydrateFromApi(options = {}) {
     nfeDashboardStats,
     cteDashboardStats,
     nfeSchedulerStatus,
+    nfeSefazDiagnosticMode,
     nfseDocs,
     nfeDocs,
     cteDocs,
@@ -913,6 +923,9 @@ async function hydrateFromApi(options = {}) {
     apiRequest('/nfe/dashboard-stats').catch(() => null),
     apiRequest('/cte/dashboard-stats').catch(() => null),
     apiRequest('/nfe/sync/scheduler-status').catch(() => null),
+    state.auth.user?.role === 'admin'
+      ? apiRequest('/nfe/sync/diagnostico-sefaz/status').catch(() => null)
+      : Promise.resolve(null),
     apiRequest(`/nfse?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
     apiRequest(`/nfe?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
     apiRequest(`/cte?pageSize=${SEARCH_PAGE_SIZE}`).catch(() => []),
@@ -966,6 +979,7 @@ async function hydrateFromApi(options = {}) {
   state.nfeDashboardStats = nfeDashboardStats;
   state.cteDashboardStats = cteDashboardStats;
   state.nfeSchedulerStatus = nfeSchedulerStatus;
+  state.nfeSefazDiagnosticMode = nfeSefazDiagnosticMode;
   state.serverResolvedAlerts = buildResolvedAlertsStoreFromApi(persistedAlertResolutions);
   state.alerts = applyResolvedAlertState(alerts);
   state.establishmentsByClient = establishmentsByClient;
@@ -1660,6 +1674,10 @@ function onDocumentClick(event) {
     }
     case 'nfe-run-now': {
       void runNfeSearchNow();
+      return;
+    }
+    case 'nfe-sefaz-diagnostic-stop': {
+      void stopNfeSefazDiagnosticMode();
       return;
     }
     case 'nfe-download-by-key-global': {
@@ -2556,6 +2574,16 @@ function onDocumentSubmit(event) {
       void submitNfeSefazCpfImportForm(target);
       return;
     }
+    case 'nfeSefazDiagnosticStartForm': {
+      event.preventDefault();
+      void submitNfeSefazDiagnosticStartForm(target);
+      return;
+    }
+    case 'nfeSefazDiagnosticRunForm': {
+      event.preventDefault();
+      void submitNfeSefazDiagnosticRunForm(target);
+      return;
+    }
     case 'nfceScConfigureForm': {
       event.preventDefault();
       void submitNfceScConfigureForm(target);
@@ -2760,6 +2788,10 @@ function onDocumentChange(event) {
   const action = target.getAttribute('data-action');
   if (action === 'nfe-sefaz-cpf-producer') {
     updateNfeSefazCpfCertificateOptions(String(target.value || ''));
+    return;
+  }
+  if (action === 'nfe-sefaz-diagnostic-control') {
+    updateSefazDiagnosticCertificateOptions(String(target.value || ''));
     return;
   }
   if (action === 'nfce-sc-client-select' || action === 'nfce-sc-establishment-select') {
@@ -5231,6 +5263,13 @@ function renderNfeSyncPage() {
         contentHtml: renderNfeSchedulerStatusCard(),
         defaultOpen: true
       })}
+      ${state.auth.user?.role === 'admin' ? renderCollapsibleCard({
+        sectionKey: 'sefazDiagnostic',
+        title: 'Diagnostico manual SEFAZ',
+        subtitle: 'Sessao temporaria restrita a administradores; pausa o ciclo automatico do controle selecionado e respeita bloqueios oficiais.',
+        contentHtml: renderNfeSefazDiagnosticPanel(),
+        defaultOpen: true
+      }) : ''}
       ${
         sourceMode !== 'distribuicao' || state.nfeLastRunReport
           ? renderCollapsibleCard({
@@ -5289,6 +5328,7 @@ function renderNfeSyncPage() {
 function renderNfeLastRunPanel() {
   const report = state.nfeLastRunReport;
   const cpfDiagnostics = report?.cpfDiagnostics;
+  const sefazDiagnostics = Array.isArray(report?.sefazDiagnostics) ? report.sefazDiagnostics : [];
   const rows = Array.isArray(report?.executionDetails)
     ? report.executionDetails
     : Array.isArray(report?.failureDetails)
@@ -5311,6 +5351,7 @@ function renderNfeLastRunPanel() {
         <span>Falhas: <strong>${escapeHtml(String(report.failures || 0))}</strong></span>
       </div>
     </div>
+    ${renderNfeSefazDiagnostics(sefazDiagnostics)}
     ${
       cpfDiagnostics
         ? `<div class="card-subtitle" style="margin:0 0 14px; padding:12px; border:1px solid var(--line); border-radius:10px;">
@@ -5392,6 +5433,114 @@ function renderNfeLastRunPanel() {
           ? `<div class="table-state error">A execucao registrou falhas, mas o backend nao retornou detalhes suficientes para listar cada item.</div>`
           : `<div class="table-state">Nenhum item detalhado foi retornado para a ultima importacao manual.</div>`
     }
+  `;
+}
+
+function getSefazDiagnosticControls() {
+  const eligibleClientIds = new Set(getNfeEligibleClients().map((client) => client.id));
+  return (state.nfeSyncControls || []).filter((control) =>
+    eligibleClientIds.has(control.clientId) &&
+    ['ativo', 'erro_api'].includes(control.status) &&
+    [11, 14].includes(normalizeDigits(control.cnpjConsulta || '').length)
+  );
+}
+
+function getSefazDiagnosticCertificates(control) {
+  if (!control) return [];
+  return (state.certificates || []).filter((certificate) => {
+    if (!certificate.ativo || ['Vencido', 'Arquivo ausente'].includes(certificate.status) || certificate.arquivoDisponivel === false) {
+      return false;
+    }
+    const holder = normalizeDigits(certificate.cnpj || '');
+    const sameEstablishment = certificate.clientId === control.clientId && certificate.estabelecimentoId === control.estabelecimentoId;
+    const sameHolder = holder === normalizeDigits(control.cnpjConsulta || '') &&
+      (!certificate.clientId || certificate.clientId === control.clientId) &&
+      (!certificate.estabelecimentoId || certificate.estabelecimentoId === control.estabelecimentoId);
+    return sameEstablishment || sameHolder;
+  });
+}
+
+function renderSefazDiagnosticControlOptions(selectedId = '') {
+  const controls = getSefazDiagnosticControls();
+  const labels = controls.reduce((result, control) => {
+    result[control.id] = `${control.cliente} · ${control.estabelecimento} · ${formatCpfCnpj(control.cnpjConsulta)} · ${String(control.ambiente || 'producao').toUpperCase()}`;
+    return result;
+  }, {});
+  return renderOptions(controls.map((control) => control.id), selectedId, labels, 'Selecione o controle');
+}
+
+function renderSefazDiagnosticCertificateOptions(controlId, selectedId = '') {
+  const control = getSefazDiagnosticControls().find((item) => item.id === controlId);
+  const certificates = getSefazDiagnosticCertificates(control);
+  const labels = certificates.reduce((result, certificate) => {
+    result[certificate.id] = `${certificate.apelido || 'Certificado'}${certificate.cnpj ? ` · titular ${formatCpfCnpj(certificate.cnpj)}` : ''}`;
+    return result;
+  }, {});
+  return renderOptions(certificates.map((certificate) => certificate.id), selectedId, labels, control ? 'Selecione o certificado vinculado' : 'Selecione primeiro o controle');
+}
+
+function renderNfeSefazDiagnosticPanel() {
+  const mode = state.nfeSefazDiagnosticMode || { active: false, clientMode: 'mock' };
+  const controls = getSefazDiagnosticControls();
+  const selectedControl = controls.find((control) => control.id === mode.controlId) || null;
+  const result = state.nfeSefazDiagnosticResult?.diagnostic || null;
+  const processingResultLabels = {
+    concluido: 'Concluido',
+    sem_documentos: 'Sem documentos disponiveis',
+    aguardando_sefaz: 'Aguardando SEFAZ',
+    falha: 'Falha'
+  };
+  const clientModeLabel = mode.clientMode === 'real' ? 'cliente real SEFAZ' : 'mock';
+  return `
+    <div style="display:grid; gap:14px;">
+      <div class="card-subtitle" style="margin:0; padding:12px; border:1px solid var(--line); border-radius:10px;">
+        <strong>Cliente ativo:</strong> ${escapeHtml(clientModeLabel)}.
+        ${mode.active ? `<div>Diagnostico ativo ate ${escapeHtml(formatDateTime(mode.expiresAt))}; consultas automaticas deste controle estao suspensas.</div>` : '<div>A sessao dura 30 minutos e pode ser encerrada antes. O modo so ativa quando o cliente real estiver configurado.</div>'}
+      </div>
+      ${state.nfeSefazDiagnosticMessage ? `<div role="status" aria-live="polite" class="card-subtitle" style="margin:0; padding:10px; border-radius:8px; background:var(--surface-muted);">${escapeHtml(state.nfeSefazDiagnosticMessage)}</div>` : ''}
+      ${!mode.active ? `
+        <form id="nfeSefazDiagnosticStartForm" class="form-grid">
+          <label>Controle de CPF/CNPJ
+            <select name="controleId" data-action="nfe-sefaz-diagnostic-control" required>${renderSefazDiagnosticControlOptions()}</select>
+          </label>
+          <label>Certificado ativo
+            <select name="certificadoId" required>${renderSefazDiagnosticCertificateOptions('')}</select>
+          </label>
+          <div class="form-actions"><button class="btn primary" type="submit" ${mode.clientMode === 'real' && controls.length && !state.nfeSefazDiagnosticBusy ? '' : 'disabled'}>Ativar modo por 30 minutos</button></div>
+        </form>
+      ` : `
+        <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          <strong>${escapeHtml(selectedControl ? `${selectedControl.cliente} · ${selectedControl.estabelecimento} · ${formatCpfCnpj(selectedControl.cnpjConsulta)}` : 'Controle selecionado')}</strong>
+          <button class="btn secondary" type="button" data-action="nfe-sefaz-diagnostic-stop" ${state.nfeSefazDiagnosticBusy ? 'disabled' : ''}>Encerrar diagnostico</button>
+        </div>
+        <form id="nfeSefazDiagnosticRunForm" class="form-grid">
+          <label>Tipo de consulta
+            <select name="method"><option value="distNSU">Distribuicao incremental (distNSU)</option><option value="consChNFe">Consulta pontual por chave (consChNFe)</option></select>
+          </label>
+          <label>Chave de acesso para consChNFe
+            <input name="chaveAcesso" inputmode="numeric" maxlength="44" pattern="\\d{44}" placeholder="44 digitos" />
+          </label>
+          <label style="display:flex; align-items:center; gap:8px;">
+            <input type="checkbox" name="persistir" value="true" />
+            Persistir documentos retornados por consChNFe
+          </label>
+          <p class="card-subtitle" style="grid-column:1/-1; margin:0;">distNSU usa o cursor salvo, persiste os documentos retornados e so avanca o cursor quando todos forem processados sem descarte. consChNFe nao altera o cursor. Cada consNSU/consChNFe respeita o limite de 20 por hora e bloqueios oficiais.</p>
+          <div class="form-actions"><button class="btn primary" type="submit" ${state.nfeSefazDiagnosticBusy ? 'disabled' : ''}>Executar uma consulta</button></div>
+        </form>
+      `}
+      ${result ? `
+        <div class="card-subtitle" style="margin:0; padding:12px; border:1px solid var(--line); border-radius:10px;">
+          <strong>Ultimo retorno</strong>
+          <div>Consulta ${escapeHtml(result.method || '-')} · ${escapeHtml(result.clientMode || '-')} · ${escapeHtml(result.actorType || '-')} · HTTP ${escapeHtml(String(result.httpStatus ?? '-'))}</div>
+          <div>cStat ${escapeHtml(result.cStat || '-')} · ${escapeHtml(result.xMotivo || 'Sem xMotivo')}</div>
+          <div>NSU ${escapeHtml(result.ultNsu || '-')} · maxNSU ${escapeHtml(result.maxNsu || '-')}</div>
+          <div>Recebidos ${escapeHtml(String(result.documentsReceived ?? 0))} · decodificados ${escapeHtml(String(result.documentsDecoded ?? 0))} · descartados ${escapeHtml(String(result.docZipDiscarded ?? 0))}</div>
+          <div>Schemas ${escapeHtml(Object.entries(result.schemaCounts || {}).map(([schema, count]) => `${schema}: ${count}`).join(' · ') || '-')}</div>
+          <div>Tentados ${escapeHtml(String(result.documentsAttempted ?? 0))} · processados ${escapeHtml(String(result.documentsProcessed ?? 0))} · falhas ${escapeHtml(String(result.documentsFailed ?? 0))} · nao tentados ${escapeHtml(String(result.documentsNotAttempted ?? 0))}</div>
+          <div>Resultado ${escapeHtml(processingResultLabels[result.processingResult] || 'Indisponivel')} · etapa ${escapeHtml(result.failureStage || 'concluida')} · cursor avancado: ${state.nfeSefazDiagnosticResult?.cursorAdvanced ? 'sim' : 'nao'}</div>
+        </div>
+      ` : ''}
+    </div>
   `;
 }
 
@@ -16621,28 +16770,98 @@ async function disableNfeSearchForAllClients() {
 
 async function runNfeSearchNow() {
   try {
-    pushToast(
-      `${getNfeSourceMode() === 'dominio' ? 'Importacao' : getNfeSourceMode() === 'dominio_chave' ? 'Download por chave' : 'Busca'} de NF-e iniciada para todos os controles ativos. Aguarde a conclusao.`,
-      'info'
-    );
     const result = await apiRequest('/nfe/sync/rodar-agora-geral', {
       method: 'POST'
     });
     state.nfeLastRunReport = buildNfeRunReport(result);
-    pushToast(
-      buildNfeRunToastMessage(
-        getNfeSourceMode() === 'dominio'
-          ? 'Importacao de NF-e executada'
-          : getNfeSourceMode() === 'dominio_chave'
-            ? 'Download por chave executado'
-            : 'Busca de NF-e executada',
-        result
-      ),
-      Number(result?.failures || 0) > 0 ? 'error' : 'success'
-    );
+    state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
     await refreshApiData();
+    render();
   } catch (error) {
     pushToast(`Falha ao executar busca de NF-e: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+function updateSefazDiagnosticCertificateOptions(controlId) {
+  const form = document.querySelector('#nfeSefazDiagnosticStartForm');
+  const certificateSelect = form?.elements?.certificadoId;
+  if (!form || !certificateSelect) return;
+  const optionsHtml = renderSefazDiagnosticCertificateOptions(controlId);
+  certificateSelect.innerHTML = optionsHtml;
+  certificateSelect.disabled = getSefazDiagnosticCertificates(
+    getSefazDiagnosticControls().find((control) => control.id === controlId)
+  ).length === 0;
+}
+
+async function submitNfeSefazDiagnosticStartForm(form) {
+  const data = new FormData(form);
+  const controleId = String(data.get('controleId') || '').trim();
+  const certificadoId = String(data.get('certificadoId') || '').trim();
+  if (!controleId || !certificadoId || state.nfeSefazDiagnosticBusy) return;
+  state.nfeSefazDiagnosticBusy = true;
+  state.nfeSefazDiagnosticMessage = 'Ativando a sessao temporaria e pausando o ciclo automatico deste controle.';
+  render();
+  try {
+    state.nfeSefazDiagnosticMode = await apiRequest('/nfe/sync/diagnostico-sefaz/iniciar', {
+      method: 'POST',
+      body: { controleId, certificadoId }
+    });
+    state.nfeSefazDiagnosticMessage = 'Modo diagnostico ativo. As consultas automaticas deste controle estao pausadas.';
+  } catch (error) {
+    state.nfeSefazDiagnosticMessage = `Nao foi possivel ativar o diagnostico: ${toErrorMessage(error)}`;
+  } finally {
+    state.nfeSefazDiagnosticBusy = false;
+    render();
+  }
+}
+
+async function stopNfeSefazDiagnosticMode() {
+  if (state.nfeSefazDiagnosticBusy) return;
+  state.nfeSefazDiagnosticBusy = true;
+  state.nfeSefazDiagnosticMessage = 'Encerrando o modo diagnostico.';
+  render();
+  try {
+    state.nfeSefazDiagnosticMode = await apiRequest('/nfe/sync/diagnostico-sefaz/encerrar', { method: 'POST' });
+    state.nfeSefazDiagnosticMessage = 'Modo diagnostico encerrado; o agendamento automatico foi liberado para o controle.';
+  } catch (error) {
+    state.nfeSefazDiagnosticMessage = `Nao foi possivel encerrar o diagnostico: ${toErrorMessage(error)}`;
+  } finally {
+    state.nfeSefazDiagnosticBusy = false;
+    render();
+  }
+}
+
+async function submitNfeSefazDiagnosticRunForm(form) {
+  if (state.nfeSefazDiagnosticBusy) return;
+  const data = new FormData(form);
+  const method = String(data.get('method') || 'distNSU');
+  const chaveAcesso = normalizeDigits(String(data.get('chaveAcesso') || ''));
+  if (method === 'consChNFe' && chaveAcesso.length !== 44) {
+    state.nfeSefazDiagnosticMessage = 'Informe uma chave de acesso com 44 digitos para consChNFe.';
+    render();
+    return;
+  }
+  state.nfeSefazDiagnosticBusy = true;
+  state.nfeSefazDiagnosticMessage = `Executando uma consulta manual ${method}.`;
+  render();
+  try {
+    const payload = await apiRequest('/nfe/sync/diagnostico-sefaz/consultar', {
+      method: 'POST',
+      body: {
+        method,
+        ...(method === 'consChNFe' ? { chaveAcesso, persistir: data.get('persistir') === 'true' } : {})
+      },
+      timeoutMs: 10 * 60 * 1000
+    });
+    state.nfeSefazDiagnosticResult = payload;
+    const diagnostic = payload?.diagnostic || {};
+    state.nfeSefazDiagnosticMessage = `${method} retornou cStat ${diagnostic.cStat || 'indisponivel'}: ${diagnostic.xMotivo || 'sem motivo informado'}.`;
+    await refreshApiData();
+  } catch (error) {
+    state.nfeSefazDiagnosticMessage = `A consulta diagnostica falhou: ${toErrorMessage(error)}`;
+  } finally {
+    state.nfeSefazDiagnosticBusy = false;
+    render();
   }
 }
 
@@ -16655,29 +16874,35 @@ async function submitNfeSefazCpfImportForm(form) {
   const dataEmissaoFim = String(data.get('dataEmissaoFim') || '').trim();
   const producer = getNfeSefazCpfProducers().find((item) => item.controleId === controleId);
   if (!producer) {
-    pushToast('Selecione um produtor rural CPF elegivel para consulta.', 'error');
+    state.nfeSefazDiagnosticMessage = 'Selecione um produtor rural CPF elegivel para consulta.';
+    render();
     return;
   }
   const certificate = state.certificates.find((item) => item.id === certificadoId);
   if (!certificate || !getNfeSefazCpfProducerCertificates(producer).some((item) => item.id === certificate.id)) {
-    pushToast('Selecione um certificado ativo vinculado ao produtor escolhido.', 'error');
+    state.nfeSefazDiagnosticMessage = 'Selecione um certificado ativo vinculado ao produtor escolhido.';
+    render();
     return;
   }
   if (Boolean(dataEmissaoInicio) !== Boolean(dataEmissaoFim)) {
-    pushToast('Informe as duas datas para filtrar os resultados ou deixe ambas em branco.', 'error');
+    state.nfeSefazDiagnosticMessage = 'Informe as duas datas para filtrar os resultados ou deixe ambas em branco.';
+    render();
     return;
   }
   if (Date.parse(dataEmissaoInicio) > Date.parse(dataEmissaoFim)) {
-    pushToast('A data inicial nao pode ser maior que a data final.', 'error');
+    state.nfeSefazDiagnosticMessage = 'A data inicial nao pode ser maior que a data final.';
+    render();
     return;
   }
-    if (dataEmissaoInicio && Date.parse(`${dataEmissaoInicio}T00:00:00`) < Date.now() - 90 * 24 * 60 * 60 * 1000) {
-      pushToast('A recuperacao historica da SEFAZ esta disponivel apenas nos ultimos 90 dias.', 'error');
-      return;
-    }
+  if (dataEmissaoInicio && Date.parse(`${dataEmissaoInicio}T00:00:00`) < Date.now() - 90 * 24 * 60 * 60 * 1000) {
+    state.nfeSefazDiagnosticMessage = 'A recuperacao historica da SEFAZ esta disponivel apenas nos ultimos 90 dias.';
+    render();
+    return;
+  }
 
   try {
-    pushToast(`Verificando a liberacao da SEFAZ para ${producer.cliente} com o certificado ${certificate.apelido}.`, 'info');
+    state.nfeSefazDiagnosticMessage = `Consulta SEFAZ iniciada para ${producer.cliente}. O resultado ficara neste painel.`;
+    render();
     const result = await apiRequest('/nfe/sync/rodar-sefaz-cpf', {
       method: 'POST',
       body: {
@@ -16692,7 +16917,7 @@ async function submitNfeSefazCpfImportForm(form) {
     state.nfeLastRunReport = buildNfeRunReport(result);
     state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
     const completion = buildSefazCpfRunToast(result);
-    pushToast(`${completion.message} Produtor: ${producer.cliente} (${certificate.apelido}).`, completion.tone);
+    state.nfeSefazDiagnosticMessage = `${completion.message} Produtor: ${producer.cliente}.`;
     await refreshApiData();
     if (dataEmissaoInicio && dataEmissaoFim) {
       try {
@@ -16708,33 +16933,22 @@ async function submitNfeSefazCpfImportForm(form) {
             : noDocuments
               ? `Nenhum documento foi retornado pela distribuicao nacional para o periodo. Consulte a disponibilidade no SAT/SC separadamente.`
               : `${found} NF-e localizadas para o produtor no periodo informado.`;
-        pushToast(message, failed ? 'error' : partial || noDocuments ? 'info' : found ? 'success' : 'info');
+        state.nfeSefazDiagnosticMessage = message;
       } catch (error) {
-        pushToast(`A importacao SEFAZ terminou, mas nao foi possivel filtrar as NF-e pelo periodo: ${toErrorMessage(error)}`, 'error');
+        state.nfeSefazDiagnosticMessage = `A importacao SEFAZ terminou, mas nao foi possivel filtrar as NF-e pelo periodo: ${toErrorMessage(error)}`;
       }
-    } else {
-      pushToast(
-        result?.cpfDiagnostics?.status === 'sem_documentos' || (!result?.cpfDiagnostics && !Number(result?.documentsSaved || 0) && !Number(result?.failures || 0))
-          ? 'Nenhum documento novo foi importado. O painel de controles mostra cStat, NSU e o motivo retornado pela SEFAZ.'
-          : `${mapSefazCpfDiagnosticStatus(result?.cpfDiagnostics?.status || 'concluida')}. Consulte os documentos recebidos em Armazenados.`,
-        result?.cpfDiagnostics?.status === 'falha' || Number(result?.failures || 0) > 0
-          ? 'error'
-          : result?.cpfDiagnostics?.status === 'concluida' || Number(result?.documentsSaved || 0) > 0
-            ? 'success'
-            : 'info'
-      );
     }
+    render();
   } catch (error) {
     const errorMessage = toErrorMessage(error);
     const cooldownMatch = errorMessage.match(/A consulta SEFAZ esta pausada ate\s+(.+?)\s+\(horario de Brasilia\)/i);
     if (cooldownMatch) {
-      pushToast(
-        `Consulta aguardando liberacao: ${cooldownMatch[1]} (horario de Brasilia). Nenhuma nova solicitacao foi enviada a SEFAZ.`,
-        'info'
-      );
+      state.nfeSefazDiagnosticMessage = `Consulta aguardando liberacao: ${cooldownMatch[1]} (horario de Brasilia). Nenhuma nova solicitacao foi enviada a SEFAZ.`;
+      render();
       return;
     }
-    pushToast(`Falha na importacao manual da SEFAZ: ${errorMessage}`, 'error');
+    state.nfeSefazDiagnosticMessage = `Falha na importacao manual da SEFAZ: ${errorMessage}`;
+    render();
   }
 }
 
@@ -16847,30 +17061,14 @@ function refreshRunningExecution() {
 
 async function runNfeSyncNow(payload) {
   try {
-    const client = payload?.clienteId ? findClientById(payload.clienteId) : null;
-    pushToast(
-      `${
-        getNfeSourceMode() === 'dominio' ? 'Importacao' : getNfeSourceMode() === 'dominio_chave' ? 'Download por chave' : 'Busca'
-      } de NF-e iniciada${client ? ` para ${client.razaoSocial}` : ''}. Aguarde a conclusao da operacao.`,
-      'info'
-    );
     const response = await apiRequest('/nfe/sync/rodar-agora', {
       method: 'POST',
       body: payload
     });
     state.nfeLastRunReport = buildNfeRunReport(response);
-    pushToast(
-      buildNfeRunToastMessage(
-        getNfeSourceMode() === 'dominio'
-          ? 'Importacao NF-e executada'
-          : getNfeSourceMode() === 'dominio_chave'
-            ? 'Download por chave executado'
-            : 'Sincronizacao NF-e executada',
-        response
-      ),
-      Number(response?.failures || 0) > 0 ? 'error' : 'success'
-    );
+    state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
     await refreshApiData();
+    render();
   } catch (error) {
     pushToast(`Falha ao executar sincronizacao NF-e: ${toErrorMessage(error)}`, 'error');
   }
@@ -17057,10 +17255,43 @@ function buildNfeRunReport(response) {
     documentsSaved: Number(response?.documentsSaved || 0),
     failures: Number(response?.failures || 0),
     cpfDiagnostics: response?.cpfDiagnostics || null,
+    sefazDiagnostics: Array.isArray(response?.sefazDiagnostics) ? response.sefazDiagnostics : [],
     importSummary: normalizeDominioImportSummary(response?.importSummary),
     executionDetails: Array.isArray(response?.executionDetails) ? response.executionDetails : [],
     failureDetails: Array.isArray(response?.failureDetails) ? response.failureDetails : []
   };
+}
+
+function renderNfeSefazDiagnostics(diagnostics) {
+  if (!Array.isArray(diagnostics) || diagnostics.length === 0) {
+    return '';
+  }
+
+  const failureStageLabels = {
+    before_response: 'antes da resposta',
+    sefaz_response: 'resposta da SEFAZ',
+    docZip_decode: 'descompactacao do docZip',
+    document_parse_or_persist: 'parse ou persistencia do documento',
+    cursor_update: 'atualizacao do cursor'
+  };
+  return `<div class="card-subtitle" style="margin:0 0 14px; padding:12px; border:1px solid var(--line); border-radius:10px;">
+    <strong>Diagnostico da distribuicao SEFAZ</strong>
+    ${diagnostics.map((diagnostic) => {
+      const establishment = findEstablishmentById(diagnostic.estabelecimentoId);
+      const schemaCounts = Object.entries(diagnostic.schemaCounts || {})
+        .map(([schema, count]) => `${escapeHtml(schema)}: ${escapeHtml(String(count))}`)
+        .join(', ') || 'nenhum';
+      const modeLabel = diagnostic.clientMode === 'real' ? 'cliente real' : 'mock local';
+      return `<div style="margin-top:8px;">
+        <div>${escapeHtml(establishment?.razaoSocial || establishment?.municipioNome || diagnostic.actorType || 'Ator')} · ${escapeHtml(String(diagnostic.ambiente || '-'))} · ${escapeHtml(modeLabel)}</div>
+        <div>HTTP ${escapeHtml(String(diagnostic.httpStatus ?? '-'))} · cStat ${escapeHtml(diagnostic.cStat || '-')} · ${escapeHtml(diagnostic.xMotivo || 'sem xMotivo')}</div>
+        <div>ultNSU ${escapeHtml(diagnostic.ultNsu || '-')} · maxNSU ${escapeHtml(diagnostic.maxNsu || '-')}</div>
+        <div>docZip recebidos ${escapeHtml(String(diagnostic.documentsReceived ?? 0))} · descompactados ${escapeHtml(String(diagnostic.documentsDecoded ?? 0))} · descartados no adapter ${escapeHtml(String(diagnostic.docZipDiscarded ?? 0))} · schemas ${schemaCounts}</div>
+        <div>Filtrados ${escapeHtml(String(diagnostic.documentsFiltered ?? 0))} · tentados ${escapeHtml(String(diagnostic.documentsAttempted ?? 0))} · processados ${escapeHtml(String(diagnostic.documentsProcessed ?? 0))} · falhas ${escapeHtml(String(diagnostic.documentsFailed ?? 0))} · nao tentados ${escapeHtml(String(diagnostic.documentsNotAttempted ?? 0))}</div>
+        ${diagnostic.failureStage ? `<div>Etapa da falha: ${escapeHtml(failureStageLabels[diagnostic.failureStage] || diagnostic.failureStage)}</div>` : ''}
+      </div>`;
+    }).join('')}
+  </div>`;
 }
 
 function mapSefazCpfDiagnosticStatus(status) {

@@ -186,6 +186,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
         ultNsu: parsed.ultNsu,
         maxNsu: parsed.maxNsu,
         documents: parsed.documents,
+        documentExtraction: parsed.documentExtraction,
         rawResponse: parsed.rawXml
       };
     } catch (error) {
@@ -507,6 +508,11 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     ultNsu: bigint;
     maxNsu: bigint;
     documents: NfeDistribuicaoDocument[];
+    documentExtraction: {
+      docZipCount: number;
+      discardedCount: number;
+      schemaCounts: Record<string, number>;
+    };
     rawXml: string;
   } {
     const fault = this.extractSoapFault(body);
@@ -524,12 +530,19 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     const ultNsu = this.parseOptionalBigInt(this.extractFirstTagText(innerXml, 'ultNSU')) ?? 0n;
     const maxNsu = this.parseOptionalBigInt(this.extractFirstTagText(innerXml, 'maxNSU')) ?? 0n;
 
+    const extraction = this.extractDocuments(innerXml);
+
     return {
       cStat,
       xMotivo,
       ultNsu,
       maxNsu,
-      documents: this.extractDocuments(innerXml),
+      documents: extraction.documents,
+      documentExtraction: {
+        docZipCount: extraction.docZipCount,
+        discardedCount: extraction.discardedCount,
+        schemaCounts: extraction.schemaCounts
+      },
       rawXml: innerXml
     };
   }
@@ -607,17 +620,27 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
     return `HTTP ${statusCode}${interestingHeaders ? ` [${interestingHeaders}]` : ''}. Preview: ${this.previewBody(body)}`;
   }
 
-  private extractDocuments(retXml: string): NfeDistribuicaoDocument[] {
-    const matches = retXml.matchAll(/<docZip\b([^>]*)>([\s\S]*?)<\/docZip>/gi);
+  private extractDocuments(retXml: string): {
+    documents: NfeDistribuicaoDocument[];
+    docZipCount: number;
+    discardedCount: number;
+    schemaCounts: Record<string, number>;
+  } {
+    const matches = [...retXml.matchAll(/<docZip\b([^>]*)>([\s\S]*?)<\/docZip>/gi)];
     const documents: NfeDistribuicaoDocument[] = [];
+    const schemaCounts: Record<string, number> = {};
+    let discardedCount = 0;
 
     for (const match of matches) {
       const attributes = match[1] ?? '';
       const payload = this.cleanTextContent(match[2] ?? '');
       const schema = this.extractAttribute(attributes, 'schema');
       const xml = this.extractXml(payload);
+      const schemaName = schema || 'sem_schema';
+      schemaCounts[schemaName] = (schemaCounts[schemaName] ?? 0) + 1;
 
       if (!schema || !xml) {
+        discardedCount += 1;
         continue;
       }
 
@@ -629,7 +652,12 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient {
       });
     }
 
-    return documents;
+    return {
+      documents,
+      docZipCount: matches.length,
+      discardedCount,
+      schemaCounts
+    };
   }
 
   private extractXml(payload: string): string | null {

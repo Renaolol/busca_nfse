@@ -1,5 +1,6 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
+import type { SchemaObject } from '@nestjs/swagger/dist/interfaces/open-api-spec.interface';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
@@ -24,11 +25,57 @@ import { QueryNfeByNsuDto } from './dto/query-by-nsu.dto';
 import { QueryNfeDto } from './dto/query-nfe.dto';
 import { RunNfeSyncDto } from './dto/run-sync.dto';
 import { RunSefazCpfImportDto } from './dto/run-sefaz-cpf-import.dto';
+import { ExecuteSefazDiagnosticDto, StartSefazDiagnosticDto } from './dto/sefaz-diagnostic.dto';
 import { SincronizarNfeEventosDto, SincronizarNfeEventosResponseDto } from './dto/sincronizar-eventos.dto';
 import { StartNfeSyncDto } from './dto/start-sync.dto';
 import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
 import { UpdateMonofasicoAliquotasDto } from './dto/update-monofasico-aliquotas.dto';
 import { NfeService } from './nfe.service';
+
+const sefazDiagnosticsSchema: SchemaObject = {
+  type: 'array',
+  items: {
+    type: 'object',
+    properties: {
+      controlId: { type: 'string' },
+      estabelecimentoId: { type: 'string' },
+      method: { type: 'string', enum: ['distNSU', 'consNSU', 'consChNFe'] },
+      clientMode: { type: 'string', enum: ['real', 'mock'] },
+      actorType: { type: 'string', enum: ['CPF', 'CNPJ'] },
+      ambiente: { type: 'string' },
+      httpStatus: { type: 'integer', nullable: true },
+      cStat: { type: 'string', nullable: true },
+      xMotivo: { type: 'string', nullable: true },
+      ultNsu: { type: 'string', nullable: true },
+      maxNsu: { type: 'string', nullable: true },
+      documentsReceived: { type: 'integer' },
+      documentsDecoded: { type: 'integer' },
+      docZipDiscarded: { type: 'integer' },
+      schemaCounts: { type: 'object', additionalProperties: { type: 'integer' } },
+      documentsFiltered: { type: 'integer' },
+      documentsAttempted: { type: 'integer' },
+      documentsProcessed: { type: 'integer' },
+      documentsFailed: { type: 'integer' },
+      documentsNotAttempted: { type: 'integer' },
+      processingResult: { type: 'string', enum: ['concluido', 'sem_documentos', 'aguardando_sefaz', 'falha'] },
+      failureStage: {
+        type: 'string',
+        enum: ['before_response', 'sefaz_response', 'docZip_decode', 'document_parse_or_persist', 'cursor_update', null],
+        nullable: true
+      }
+    }
+  }
+};
+
+const nfeSyncRunResponseSchema: SchemaObject = {
+  type: 'object',
+  properties: {
+    processed: { type: 'integer' },
+    documentsSaved: { type: 'integer' },
+    failures: { type: 'integer' },
+    sefazDiagnostics: sefazDiagnosticsSchema
+  }
+};
 
 @ApiTags('nfe')
 @Controller('nfe')
@@ -177,6 +224,10 @@ export class NfeController {
   }
 
   @Post('sync/rodar-agora')
+  @ApiOkResponse({
+    description: 'Retorna contagens da execucao e diagnósticos sem identificador fiscal ou XML bruto para cada chamada distNSU.',
+    schema: nfeSyncRunResponseSchema
+  })
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   runNow(@Body() dto: RunNfeSyncDto) {
     return this.nfeService.runNow(dto);
@@ -184,6 +235,10 @@ export class NfeController {
 
   @Post('sync/rodar-agora-geral')
   @Roles('admin')
+  @ApiOkResponse({
+    description: 'Retorna contagens da execucao e diagnósticos sem identificador fiscal ou XML bruto para cada chamada distNSU.',
+    schema: nfeSyncRunResponseSchema
+  })
   runNowGlobal() {
     return this.nfeService.runNowGlobal();
   }
@@ -198,6 +253,7 @@ export class NfeController {
         processed: { type: 'integer' },
         documentsSaved: { type: 'integer' },
         failures: { type: 'integer' },
+        sefazDiagnostics: sefazDiagnosticsSchema,
         cpfDiagnostics: {
           type: 'object',
           properties: {
@@ -229,6 +285,70 @@ export class NfeController {
   })
   runNowCpfViaSefazGlobal(@Body() dto: RunSefazCpfImportDto) {
     return this.nfeService.runNowCpfViaSefazGlobal(dto);
+  }
+
+  @Get('sync/diagnostico-sefaz/status')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Consulta o estado seguro do modo temporario de diagnostico SEFAZ.' })
+  @ApiOkResponse({ schema: { type: 'object', properties: {
+    active: { type: 'boolean' }, expiresAt: { type: 'string', nullable: true, format: 'date-time' },
+    controlId: { type: 'string', nullable: true, format: 'uuid' },
+    estabelecimentoId: { type: 'string', nullable: true, format: 'uuid' },
+    ambiente: { type: 'string', nullable: true }, actorType: { type: 'string', nullable: true, enum: ['CPF', 'CNPJ'] },
+    clientMode: { type: 'string', enum: ['real', 'mock'] }, automaticPaused: { type: 'boolean' }
+  } } })
+  getSefazDiagnosticModeStatus() {
+    return this.nfeService.getSefazDiagnosticModeStatus();
+  }
+
+  @Post('sync/diagnostico-sefaz/iniciar')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Ativa por 30 minutos o modo de diagnostico para um unico controle.' })
+  @ApiOkResponse({ schema: { type: 'object', properties: {
+    active: { type: 'boolean' }, expiresAt: { type: 'string', nullable: true, format: 'date-time' },
+    controlId: { type: 'string', nullable: true, format: 'uuid' },
+    estabelecimentoId: { type: 'string', nullable: true, format: 'uuid' },
+    ambiente: { type: 'string', nullable: true }, actorType: { type: 'string', nullable: true, enum: ['CPF', 'CNPJ'] },
+    clientMode: { type: 'string', enum: ['real', 'mock'] }, automaticPaused: { type: 'boolean' }
+  } } })
+  startSefazDiagnosticMode(@Body() dto: StartSefazDiagnosticDto) {
+    return this.nfeService.startSefazDiagnosticMode(dto);
+  }
+
+  @Post('sync/diagnostico-sefaz/encerrar')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Encerra o modo temporario de diagnostico SEFAZ.' })
+  @ApiOkResponse({ schema: { type: 'object', properties: {
+    active: { type: 'boolean' }, clientMode: { type: 'string', enum: ['real', 'mock'] }, automaticPaused: { type: 'boolean' }
+  } } })
+  stopSefazDiagnosticMode() {
+    return this.nfeService.stopSefazDiagnosticMode();
+  }
+
+  @Post('sync/diagnostico-sefaz/consultar')
+  @Roles('admin')
+  @ApiOperation({
+    summary: 'Executa uma consulta SEFAZ manual controlada por distNSU ou consChNFe.',
+    description: 'Exige modo real, sessao de diagnostico ativa, certificado vinculado, respeita cStat 137/656 e limita consChNFe/consNSU a 20 consultas por ator por hora. distNSU persiste documentos e so avanca o cursor quando a extracao e a persistencia terminam sem perda.'
+  })
+  @ApiOkResponse({ schema: { type: 'object', properties: {
+    diagnostic: { type: 'object', properties: {
+      method: { type: 'string', enum: ['distNSU', 'consNSU', 'consChNFe'] },
+      clientMode: { type: 'string', enum: ['real', 'mock'] }, actorType: { type: 'string', enum: ['CPF', 'CNPJ'] },
+      httpStatus: { type: 'integer', nullable: true }, cStat: { type: 'string', nullable: true },
+      xMotivo: { type: 'string', nullable: true }, ultNsu: { type: 'string', nullable: true },
+      maxNsu: { type: 'string', nullable: true }, documentsReceived: { type: 'integer' },
+      documentsDecoded: { type: 'integer' }, docZipDiscarded: { type: 'integer' },
+      schemaCounts: { type: 'object', additionalProperties: { type: 'integer' } },
+      documentsAttempted: { type: 'integer' }, documentsProcessed: { type: 'integer' },
+      documentsFailed: { type: 'integer' }, documentsNotAttempted: { type: 'integer' },
+      processingResult: { type: 'string', enum: ['concluido', 'sem_documentos', 'aguardando_sefaz', 'falha'] },
+      failureStage: { type: 'string', nullable: true }
+    } },
+    documentsPersisted: { type: 'integer' }, persistenceRequested: { type: 'boolean' }, cursorAdvanced: { type: 'boolean' }
+  } } })
+  executeSefazDiagnosticQuery(@Body() dto: ExecuteSefazDiagnosticDto) {
+    return this.nfeService.executeSefazDiagnosticQuery(dto);
   }
 
   @Post('sync/download-por-chave/preview')
