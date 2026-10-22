@@ -123,7 +123,7 @@ A listagem normal `XMLs NF-e` mostra somente documentos com XML completo. Resumo
 
 ## Interface manual e resumos
 
-A tela `Buscas NF-e` agora apresenta somente a busca manual de NF-e modelo 55 da SEF/SC. Os controles de Ciência e recuperação automática de XML e suas pendências foram removidos da interface. O worker de recuperação automática está desligado; não há envio automático de manifestação nem consulta automática de XML completo. Os dados e registros já persistidos permanecem no banco.
+A tela `Buscas NF-e` mantém os painéis de rotina, filtros, status, controles e consultas manuais existentes, além de uma seção independente para a busca manual de NF-e modelo 55 da SEF/SC. Foram removidos da interface somente os controles de automação de Ciência/recuperação de XML e a lista de documentos pendentes mostrados nesses controles. O worker de recuperação automática está desligado; não há envio automático de manifestação nem consulta automática de XML completo. Os dados e registros já persistidos permanecem no banco.
 
 A busca SEF/SC usa um cursor próprio, exige confirmação administrativa de que o vínculo do contabilista foi verificado na SEF/SC e depende da autorização que a SEF/SC valida em cada chamada. No modo padrão `mock`, nenhuma requisição real é enviada e nenhum certificado real é usado. Consulte [docs/nfe-sc.md](nfe-sc.md) para configuração e regras oficiais.
 
