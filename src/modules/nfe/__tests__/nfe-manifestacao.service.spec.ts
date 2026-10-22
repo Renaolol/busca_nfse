@@ -4,6 +4,7 @@ import { NfeManifestacaoClient, NfeManifestacaoClientError } from '../../../inte
 import { PrismaService } from '../../../prisma/prisma.service';
 import { LocalStorageService } from '../../storage/storage.service';
 import { NfeManifestacaoService } from '../nfe-manifestacao.service';
+import { NFE_AUTOMATION_TERM_VERSION } from '../nfe-manifestacao.service';
 
 describe('NfeManifestacaoService', () => {
   const validAccessKey = '4'.repeat(43) + '8';
@@ -25,11 +26,17 @@ describe('NfeManifestacaoService', () => {
   };
 
   const prisma = {
-    nfeDocumento: { findFirst: jest.fn() },
+    nfeDocumento: { findFirst: jest.fn(), findMany: jest.fn() },
     nfeManifestacao: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
     nfeEvento: { findMany: jest.fn() },
-    certificado: { findMany: jest.fn() }
+    certificado: { findMany: jest.fn() },
+    clienteEstabelecimento: { findFirst: jest.fn() },
+    nfeSyncControle: { findMany: jest.fn() },
+    nfeAutomacaoConfiguracao: { findMany: jest.fn(), findUnique: jest.fn(), upsert: jest.fn(), update: jest.fn() },
+    nfeAutomacaoAuditoria: { create: jest.fn() },
+    nfeXmlRecuperacao: { findMany: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn(), createMany: jest.fn(), updateMany: jest.fn(), update: jest.fn() }
   };
+  (prisma as any).$transaction = jest.fn((work: (transaction: typeof prisma) => unknown) => work(prisma));
   const storage = { hasObject: jest.fn(), getObject: jest.fn() };
   const client: NfeManifestacaoClient = { sendManifestacao: jest.fn() };
   const service = new NfeManifestacaoService(
@@ -53,6 +60,26 @@ describe('NfeManifestacaoService', () => {
     prisma.nfeManifestacao.findMany.mockResolvedValue([]);
     prisma.nfeManifestacao.findUnique.mockResolvedValue(null);
     prisma.nfeEvento.findMany.mockResolvedValue([]);
+    prisma.clienteEstabelecimento.findFirst.mockResolvedValue({ id: 'estab-1', clienteId: 'cliente-1', cnpj: '01861020970' });
+    prisma.nfeSyncControle.findMany.mockResolvedValue([]);
+    prisma.nfeAutomacaoConfiguracao.findMany.mockResolvedValue([]);
+    prisma.nfeAutomacaoConfiguracao.findUnique.mockResolvedValue(null);
+    prisma.nfeAutomacaoConfiguracao.upsert.mockResolvedValue({
+      id: 'config-1', clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao,
+      cienciaAutomatica: true, recuperacaoXmlAutomatica: false, autorizacaoAtiva: true,
+      autorizadaEm: new Date(), versaoTermo: NFE_AUTOMATION_TERM_VERSION, revogadaEm: null
+    });
+    prisma.nfeAutomacaoConfiguracao.update.mockResolvedValue({
+      id: 'config-1', clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao,
+      cienciaAutomatica: false, recuperacaoXmlAutomatica: false, autorizacaoAtiva: false,
+      autorizadaEm: new Date(), versaoTermo: NFE_AUTOMATION_TERM_VERSION, revogadaEm: new Date()
+    });
+    prisma.nfeAutomacaoAuditoria.create.mockResolvedValue({});
+    prisma.nfeDocumento.findMany.mockResolvedValue([]);
+    prisma.nfeXmlRecuperacao.findMany.mockResolvedValue([]);
+    prisma.nfeXmlRecuperacao.findUnique.mockResolvedValue(null);
+    prisma.nfeXmlRecuperacao.createMany.mockResolvedValue({ count: 0 });
+    prisma.nfeXmlRecuperacao.updateMany.mockResolvedValue({ count: 1 });
     prisma.nfeEvento.findMany.mockResolvedValue([]);
     prisma.certificado.findMany.mockResolvedValue([{
       id: 'cert-1',
@@ -86,6 +113,48 @@ describe('NfeManifestacaoService', () => {
     await expect(service.registrar('doc-1', dto({ confirmacaoExpressa: false }) as any)).rejects.toBeInstanceOf(BadRequestException);
     expect(client.sendManifestacao).not.toHaveBeenCalled();
     expect(prisma.nfeManifestacao.create).not.toHaveBeenCalled();
+  });
+
+  it('exige consentimento e versão vigente do termo para ativar Ciência automática', async () => {
+    await expect(service.updateAutomationSettings({
+      clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao,
+      cienciaAutomatica: true, recuperacaoXmlAutomatica: false,
+      confirmacaoExpressa: false, versaoTermo: NFE_AUTOMATION_TERM_VERSION
+    }, 'user-1')).rejects.toBeInstanceOf(BadRequestException);
+    expect(prisma.nfeAutomacaoConfiguracao.upsert).not.toHaveBeenCalled();
+  });
+
+  it('registra escopo por estabelecimento e auditoria ao conceder autorização automática', async () => {
+    const result = await service.updateAutomationSettings({
+      clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao,
+      cienciaAutomatica: true, recuperacaoXmlAutomatica: false,
+      confirmacaoExpressa: true, versaoTermo: NFE_AUTOMATION_TERM_VERSION
+    }, 'user-1');
+    expect(prisma.nfeAutomacaoConfiguracao.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { clienteId_estabelecimentoId_ambiente: { clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao } },
+      create: expect.objectContaining({ clienteId: 'cliente-1', estabelecimentoId: 'estab-1', cienciaAutomatica: true, usuarioAutorizouId: 'user-1' })
+    }));
+    expect(prisma.nfeAutomacaoAuditoria.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ usuarioId: 'user-1', acao: 'autorizacao_concedida', autorizacaoAtiva: true })
+    }));
+    expect(result.autorizacaoAtiva).toBe(true);
+  });
+
+  it('revoga a autorização para novas Ciências sem desativar a recuperação de XML', async () => {
+    prisma.nfeAutomacaoConfiguracao.findUnique.mockResolvedValueOnce({ id: 'config-1', autorizacaoAtiva: true });
+    prisma.nfeAutomacaoConfiguracao.update.mockResolvedValueOnce({
+      id: 'config-1', clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao,
+      cienciaAutomatica: false, recuperacaoXmlAutomatica: true, autorizacaoAtiva: false,
+      autorizadaEm: new Date(), versaoTermo: NFE_AUTOMATION_TERM_VERSION, revogadaEm: new Date()
+    });
+    const result = await service.revokeAutomationAuthorization({
+      clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao
+    }, 'user-2');
+    expect(result.autorizacaoAtiva).toBe(false);
+    expect(result.recuperacaoXmlAutomatica).toBe(true);
+    expect(prisma.nfeAutomacaoAuditoria.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ usuarioId: 'user-2', acao: 'autorizacao_revogada', recuperacaoXml: true })
+    }));
   });
 
   it('registra a manifestação CPF aceita e mantém o histórico sem expor o CPF', async () => {
@@ -233,5 +302,216 @@ describe('NfeManifestacaoService', () => {
     expect(result.historico).toEqual(expect.arrayContaining([
       expect.objectContaining({ status: 'resultado_indeterminado', cStat: null })
     ]));
+  });
+
+  it('revokes consent and records the audit when automatic Science is switched off', async () => {
+    prisma.nfeAutomacaoConfiguracao.findUnique.mockResolvedValueOnce({ id: 'config-1', autorizacaoAtiva: true });
+    prisma.nfeAutomacaoConfiguracao.upsert.mockResolvedValueOnce({
+      id: 'config-1', clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao,
+      cienciaAutomatica: false, recuperacaoXmlAutomatica: true, autorizacaoAtiva: false,
+      autorizadaEm: new Date(), versaoTermo: NFE_AUTOMATION_TERM_VERSION, revogadaEm: new Date()
+    });
+
+    await service.updateAutomationSettings({
+      clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao,
+      cienciaAutomatica: false, recuperacaoXmlAutomatica: true
+    }, 'user-2');
+
+    expect(prisma.nfeAutomacaoConfiguracao.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      update: expect.objectContaining({ autorizacaoAtiva: false, revogadaPorId: 'user-2' })
+    }));
+    expect(prisma.nfeAutomacaoAuditoria.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ acao: 'autorizacao_revogada', autorizacaoAtiva: false, recuperacaoXml: true })
+    }));
+  });
+
+  it('lists unqueued received summaries as pending manual Science', async () => {
+    prisma.nfeXmlRecuperacao.findMany.mockResolvedValueOnce([]);
+    prisma.nfeDocumento.findMany.mockResolvedValueOnce([{
+      id: 'doc-1', clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao,
+      numeroNfe: '5307', dataEmissao: new Date('2026-06-29T13:00:00Z'), schemaDoc: 'resNFe_v1.01.xsd',
+      resumoDisponivel: true, xmlCompletoDisponivel: false
+    }]);
+
+    const result = await service.listAutomaticRecoveryItems({ clienteId: 'cliente-1' } as any);
+
+    expect(result).toEqual([expect.objectContaining({ documentoId: 'doc-1', status: 'aguardando_ciencia', resumoDisponivel: true })]);
+    expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ clienteId: 'cliente-1', tipoRelacao: 'recebida', xmlRecuperacao: null })
+    }));
+  });
+
+  it('keeps a summary pending without automatic consent and sends no event', async () => {
+    prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce({
+      id: 'task-1', leaseId: 'lease-1',
+      configuracao: { cienciaAutomatica: false, recuperacaoXmlAutomatica: true, autorizacaoAtiva: false },
+      nfeDocumento: { ...document, estabelecimento: { ...document.estabelecimento } }
+    });
+
+    const result = await service.prepareAutomaticRecovery('task-1', 'lease-1');
+
+    expect(result).toEqual({ canQuery: false, status: 'aguardando_ciencia' });
+    expect(client.sendManifestacao).not.toHaveBeenCalled();
+  });
+
+  it('registers authorized Science before allowing a full XML query', async () => {
+    prisma.nfeAutomacaoConfiguracao.findUnique.mockResolvedValueOnce({ cienciaAutomatica: true, autorizacaoAtiva: true });
+    prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce({
+      id: 'task-1', leaseId: 'lease-1',
+      configuracao: {
+        cienciaAutomatica: true, recuperacaoXmlAutomatica: true, autorizacaoAtiva: true,
+        usuarioAutorizouId: 'user-1', autorizadaEm: new Date(),
+        clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao
+      },
+      nfeDocumento: { ...document, estabelecimento: { ...document.estabelecimento } }
+    });
+
+    const result = await service.prepareAutomaticRecovery('task-1', 'lease-1');
+
+    expect(result).toEqual(expect.objectContaining({ canQuery: true, status: 'aguardando_xml', estabelecimentoId: 'estab-1' }));
+    expect(client.sendManifestacao).toHaveBeenCalledTimes(1);
+    expect(prisma.nfeManifestacao.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ tipoEvento: '210210', usuarioId: 'user-1', estabelecimentoId: 'estab-1', status: 'enviando' })
+    }));
+  });
+
+  it.each(['2', '3', '9'])('does not send automatic Science when resNFe cSitNFe is %s', async (cSitNFe) => {
+    prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce({
+      id: 'task-1', leaseId: 'lease-1',
+      configuracao: {
+        cienciaAutomatica: true, recuperacaoXmlAutomatica: true, autorizacaoAtiva: true,
+        usuarioAutorizouId: 'user-1', autorizadaEm: new Date(),
+        clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao
+      },
+      nfeDocumento: { ...document, status: cSitNFe, estabelecimento: { ...document.estabelecimento } }
+    });
+    prisma.nfeDocumento.findFirst.mockResolvedValueOnce({
+      ...document, status: cSitNFe, estabelecimento: { ...document.estabelecimento }, eventos: []
+    });
+
+    const result = await service.prepareAutomaticRecovery('task-1', 'lease-1');
+
+    expect(result).toEqual({ canQuery: false, status: 'resumo_nao_autorizado' });
+    expect(prisma.nfeManifestacao.create).not.toHaveBeenCalled();
+    expect(client.sendManifestacao).not.toHaveBeenCalled();
+  });
+
+  it('does not repeat an indeterminate Science event or allow an XML query', async () => {
+    prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce({
+      id: 'task-1', leaseId: 'lease-1',
+      configuracao: {
+        cienciaAutomatica: true, recuperacaoXmlAutomatica: true, autorizacaoAtiva: true,
+        clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao
+      },
+      nfeDocumento: { ...document, estabelecimento: { ...document.estabelecimento } }
+    });
+    prisma.nfeManifestacao.findMany.mockResolvedValueOnce([{ tipoEvento: '210210', status: 'resultado_indeterminado' }]);
+
+    const result = await service.prepareAutomaticRecovery('task-1', 'lease-1');
+
+    expect(result).toEqual({ canQuery: false, status: 'resultado_indeterminado' });
+    expect(client.sendManifestacao).not.toHaveBeenCalled();
+  });
+
+  it('waits for event distribution after cStat 136 and never sends a duplicate Science', async () => {
+    prisma.nfeAutomacaoConfiguracao.findUnique.mockResolvedValueOnce({ cienciaAutomatica: true, autorizacaoAtiva: true });
+    prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce({
+      id: 'task-1', leaseId: 'lease-1',
+      configuracao: {
+        cienciaAutomatica: true, recuperacaoXmlAutomatica: true, autorizacaoAtiva: true,
+        usuarioAutorizouId: 'user-1', autorizadaEm: new Date(),
+        clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao
+      },
+      nfeDocumento: { ...document, estabelecimento: { ...document.estabelecimento } }
+    });
+    prisma.nfeManifestacao.findMany.mockResolvedValueOnce([]);
+    (client.sendManifestacao as jest.Mock).mockResolvedValueOnce({
+      statusCode: 200, cStat: '128', eventCStat: '136', eventXMotivo: 'Event recorded without linkage', xMotivo: 'Batch processed'
+    });
+
+    const result = await service.prepareAutomaticRecovery('task-1', 'lease-1');
+
+    expect(result).toEqual({ canQuery: false, status: 'aguardando_evento_distribuicao' });
+    expect(client.sendManifestacao).toHaveBeenCalledTimes(1);
+    expect(prisma.nfeXmlRecuperacao.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'aguardando_evento_distribuicao', resultadoConsulta: 'registrada_sem_vinculo' })
+    }));
+  });
+
+  it('marks automatic recovery as certificate pending when no valid establishment certificate exists', async () => {
+    prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce({
+      id: 'task-1', leaseId: 'lease-1',
+      configuracao: {
+        cienciaAutomatica: true, recuperacaoXmlAutomatica: true, autorizacaoAtiva: true,
+        usuarioAutorizouId: 'user-1', autorizadaEm: new Date(),
+        clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao
+      },
+      nfeDocumento: { ...document, estabelecimento: { ...document.estabelecimento } }
+    });
+    prisma.certificado.findMany.mockResolvedValueOnce([]);
+
+    const result = await service.prepareAutomaticRecovery('task-1', 'lease-1');
+
+    expect(result).toEqual({ canQuery: false, status: 'certificado_pendente' });
+    expect(client.sendManifestacao).not.toHaveBeenCalled();
+  });
+
+  it('blocks automatic Science when the official ten-day deadline has expired', async () => {
+    const expired = new Date(Date.now() - 11 * 24 * 60 * 60 * 1000);
+    prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce({
+      id: 'task-1', leaseId: 'lease-1',
+      configuracao: {
+        cienciaAutomatica: true, recuperacaoXmlAutomatica: true, autorizacaoAtiva: true,
+        usuarioAutorizouId: 'user-1', autorizadaEm: new Date(),
+        clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao
+      },
+      nfeDocumento: { ...document, dataAutorizacao: expired, estabelecimento: { ...document.estabelecimento } }
+    });
+    prisma.nfeDocumento.findFirst.mockResolvedValueOnce({
+      ...document, dataAutorizacao: expired, estabelecimento: { ...document.estabelecimento }
+    });
+
+    const result = await service.prepareAutomaticRecovery('task-1', 'lease-1');
+
+    expect(result).toEqual({ canQuery: false, status: 'ciencia_fora_prazo' });
+    expect(client.sendManifestacao).not.toHaveBeenCalled();
+  });
+
+  it('requeues previously registered Science when automatic XML retrieval is enabled later', async () => {
+    prisma.nfeAutomacaoConfiguracao.findUnique.mockResolvedValueOnce({ id: 'config-1', autorizacaoAtiva: false });
+    prisma.nfeAutomacaoConfiguracao.upsert.mockResolvedValueOnce({
+      id: 'config-1', clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao,
+      cienciaAutomatica: false, recuperacaoXmlAutomatica: true, autorizacaoAtiva: false,
+      autorizadaEm: null, versaoTermo: null, revogadaEm: null
+    });
+
+    await service.updateAutomationSettings({
+      clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao,
+      cienciaAutomatica: false, recuperacaoXmlAutomatica: true
+    });
+
+    expect(prisma.nfeXmlRecuperacao.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { configuracaoId: 'config-1', status: 'ciencia_registrada' },
+      data: expect.objectContaining({ status: 'aguardando_xml' })
+    }));
+  });
+
+  it('rechecks current consent immediately before automatic Science transmission', async () => {
+    prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce({
+      id: 'task-1', leaseId: 'lease-1',
+      configuracao: {
+        cienciaAutomatica: true, recuperacaoXmlAutomatica: true, autorizacaoAtiva: true,
+        usuarioAutorizouId: 'user-1', autorizadaEm: new Date(),
+        clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao
+      },
+      nfeDocumento: { ...document, estabelecimento: { ...document.estabelecimento } }
+    });
+    prisma.nfeAutomacaoConfiguracao.findUnique.mockResolvedValueOnce(null);
+
+    const result = await service.prepareAutomaticRecovery('task-1', 'lease-1');
+
+    expect(result).toEqual({ canQuery: false, status: 'autorizacao_revogada' });
+    expect(prisma.nfeManifestacao.create).not.toHaveBeenCalled();
+    expect(client.sendManifestacao).not.toHaveBeenCalled();
   });
 });

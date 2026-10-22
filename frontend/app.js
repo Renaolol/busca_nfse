@@ -406,6 +406,13 @@ const state = {
   cteDashboardStats: null,
   nfeSchedulerStatus: null,
   nfeLastRunReport: null,
+  nfeManualRunStatus: null,
+  nfeAutomationSettings: [],
+  nfeAutomationPending: [],
+  nfeAutomationManifestations: [],
+  nfeAutomationAudit: [],
+  nfeAutomationMessage: '',
+  nfeAutomationBusy: false,
   nfeSefazDiagnosticMode: null,
   nfeSefazDiagnosticResult: null,
   nfeSefazDiagnosticMessage: '',
@@ -897,6 +904,10 @@ async function hydrateFromApi(options = {}) {
     allCertificatesRaw,
     syncByClient,
     nfeSyncByClient,
+    nfeAutomationByClient,
+    nfeAutomationPendingByClient,
+    nfeAutomationManifestationsByClient,
+    nfeAutomationAuditByClient,
     dashboardStats,
     nfeDashboardStats,
     cteDashboardStats,
@@ -919,6 +930,10 @@ async function hydrateFromApi(options = {}) {
     apiRequest('/certificados').catch(() => null),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/sync/status`, { controles: [], logs: [] }),
     fetchJsonByClientId(clientIds, (clientId) => `/nfe/sync/status?clienteId=${encodeURIComponent(clientId)}`, []),
+    fetchJsonByClientId(clientIds, (clientId) => `/nfe/automacao/configuracoes?clienteId=${encodeURIComponent(clientId)}`, []),
+    fetchJsonByClientId(clientIds, (clientId) => `/nfe/automacao/pendencias?clienteId=${encodeURIComponent(clientId)}`, []),
+    fetchJsonByClientId(clientIds, (clientId) => `/nfe/automacao/manifestacoes?clienteId=${encodeURIComponent(clientId)}`, []),
+    fetchJsonByClientId(clientIds, (clientId) => `/nfe/automacao/auditoria?clienteId=${encodeURIComponent(clientId)}`, []),
     apiRequest('/nfse/dashboard-stats').catch(() => null),
     apiRequest('/nfe/dashboard-stats').catch(() => null),
     apiRequest('/cte/dashboard-stats').catch(() => null),
@@ -975,6 +990,10 @@ async function hydrateFromApi(options = {}) {
   state.nfceScDocuments = nfceScDocuments;
   state.cteDocuments = cteDocuments;
   state.nfeSyncControls = nfeSyncControls;
+  state.nfeAutomationSettings = Object.values(nfeAutomationByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
+  state.nfeAutomationPending = Object.values(nfeAutomationPendingByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
+  state.nfeAutomationManifestations = Object.values(nfeAutomationManifestationsByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
+  state.nfeAutomationAudit = Object.values(nfeAutomationAuditByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
   state.nfceScControls = nfceScControls;
   state.nfeDashboardStats = nfeDashboardStats;
   state.cteDashboardStats = cteDashboardStats;
@@ -1678,6 +1697,14 @@ function onDocumentClick(event) {
     }
     case 'nfe-sefaz-diagnostic-stop': {
       void stopNfeSefazDiagnosticMode();
+      return;
+    }
+    case 'nfe-automation-revoke': {
+      void revokeNfeAutomationAuthorization({
+        clienteId: actionNode.getAttribute('data-client-id'),
+        estabelecimentoId: actionNode.getAttribute('data-establishment-id'),
+        ambiente: actionNode.getAttribute('data-ambiente')
+      });
       return;
     }
     case 'nfe-download-by-key-global': {
@@ -2526,6 +2553,12 @@ function onDocumentSubmit(event) {
   if (target.matches('[data-nfce-sc-reprocess-form]')) {
     event.preventDefault();
     void submitNfceScRecoveryForm(target);
+    return;
+  }
+
+  if (target.matches('[data-nfe-automation-setting]')) {
+    event.preventDefault();
+    void submitNfeAutomationSettingForm(target);
     return;
   }
 
@@ -5283,6 +5316,8 @@ function renderNfeSyncPage() {
         ${statCard('file', 'NF-e no banco', String(nfeStats.totalNfe), `${nfeStats.xmlsCompletos} XML(s) completos`, 'info')}
       </section>
 
+      ${renderNfeManualRunStatusCard()}
+
       ${renderCollapsibleCard({
         sectionKey: 'scheduler',
         title: 'Rotina automatica NF-e',
@@ -5295,6 +5330,13 @@ function renderNfeSyncPage() {
         title: 'Diagnostico manual SEFAZ',
         subtitle: 'Sessao temporaria restrita a administradores; pausa o ciclo automatico do controle selecionado e respeita bloqueios oficiais.',
         contentHtml: renderNfeSefazDiagnosticPanel(),
+        defaultOpen: true
+      }) : ''}
+      ${state.auth.user?.role === 'admin' ? renderCollapsibleCard({
+        sectionKey: 'nfeAutomation',
+        title: 'Obtenção automática de XMLs recebidos',
+        subtitle: 'Autorização e acompanhamento por estabelecimento CPF/CNPJ e ambiente. Ciência automática vem desligada.',
+        contentHtml: renderNfeAutomationPanel(),
         defaultOpen: true
       }) : ''}
       ${
@@ -5461,6 +5503,84 @@ function renderNfeLastRunPanel() {
           : `<div class="table-state">Nenhum item detalhado foi retornado para a ultima importacao manual.</div>`
     }
   `;
+}
+
+function renderNfeManualRunStatusCard() {
+  const status = state.nfeManualRunStatus;
+  if (!status) {
+    return `<article class="card" style="box-shadow:none; border-style:dashed;"><strong>Status da última consulta NF-e</strong><p class="card-subtitle" style="margin:6px 0 0;">Nenhuma consulta manual foi executada nesta sessão.</p></article>`;
+  }
+  const tone = status.status === 'erro' ? 'danger' : status.status === 'parcial' || status.status === 'consultando' ? 'warning' : status.status === 'novos' ? 'success' : 'neutral';
+  const report = status.report;
+  return `<article class="card" style="box-shadow:none; border-style:dashed;" role="status" aria-live="polite">
+    <div class="progress-meta"><strong>Status da última consulta NF-e</strong>${statusBadge(status.label, tone)}</div>
+    <p class="card-subtitle" style="margin:6px 0;">${escapeHtml(status.message)}</p>
+    <span class="row-sub">${escapeHtml(formatDateTime(status.startedAt))}${status.finishedAt ? ` · Finalizada ${escapeHtml(formatDateTime(status.finishedAt))}` : ''}</span>
+    ${report ? `<div class="progress-meta" style="margin-top:8px; flex-wrap:wrap;"><span>Requisição real enviada: <strong>${report.requestReal ? 'sim' : report.requestUnconfirmed ? 'sem confirmação' : 'não'}</strong></span><span>Recebidos: <strong>${escapeHtml(String(report.documentsReceived))}</strong></span><span>Resumos: <strong>${escapeHtml(String(report.summaries))}</strong></span><span>XMLs completos: <strong>${escapeHtml(String(report.fullXmls))}</strong></span><span>Novos: <strong>${escapeHtml(String(report.documentsNew))}</strong></span><span>Atualizados: <strong>${escapeHtml(String(report.documentsUpdated))}</strong></span><span>Duplicados: <strong>${escapeHtml(String(report.documentsDuplicates))}</strong></span><span>Falhas: <strong>${escapeHtml(String(report.failures))}</strong></span></div>` : ''}
+  </article>`;
+}
+
+function nfeAutomationStatusLabel(status) {
+  const labels = {
+    aguardando_ciencia: 'Aguardando Ciência',
+    ciencia_registrada: 'Ciência registrada',
+    aguardando_evento_distribuicao: 'Ciencia registrada; aguardando distribuicao do evento',
+    autorizacao_revogada: 'Autorizacao revogada',
+    resumo_nao_autorizado: 'Resumo sem situacao autorizada',
+    aguardando_xml: 'Aguardando XML completo',
+    aguardando_sefaz: 'Aguardando liberação da SEFAZ',
+    xml_disponivel: 'XML disponível',
+    manifestacao_rejeitada: 'Manifestação rejeitada',
+    resultado_indeterminado: 'Resultado indeterminado',
+    certificado_pendente: 'Certificado pendente',
+    ciencia_fora_prazo: 'Ciência fora do prazo',
+    erro_processamento: 'Erro de processamento'
+  };
+  return labels[status] || status || 'Pendente';
+}
+
+function renderNfeAutomationPanel() {
+  const rows = Array.isArray(state.nfeAutomationSettings) ? state.nfeAutomationSettings : [];
+  const pending = Array.isArray(state.nfeAutomationPending) ? state.nfeAutomationPending : [];
+  const manifests = Array.isArray(state.nfeAutomationManifestations) ? state.nfeAutomationManifestations : [];
+  const audit = Array.isArray(state.nfeAutomationAudit) ? state.nfeAutomationAudit : [];
+  const pendingRows = pending.filter((item) => item.status !== 'xml_disponivel').slice(0, 100);
+  return `<div style="display:grid; gap:14px;">
+    ${state.nfeAutomationMessage ? `<div class="table-state ${state.nfeAutomationBusy ? 'loading' : ''}" role="status" aria-live="polite">${escapeHtml(state.nfeAutomationMessage)}</div>` : ''}
+    <div class="card-subtitle" style="margin:0; padding:12px; border:1px solid var(--line); border-radius:10px;">
+      Ciência da Operação é opcional e apenas registra que o destinatário tomou conhecimento da NF-e; não confirma o recebimento da mercadoria. O evento tem efeito fiscal e não é conclusivo. Após Ciência, o destinatário deve avaliar e registrar sua manifestação conclusiva dentro do prazo aplicável (atualmente até 90 dias da autorização). O NotaSync nunca confirma, desconhece ou declara operação não realizada automaticamente.
+    </div>
+    ${rows.length ? rows.map((row, index) => {
+      const establishment = findEstablishmentById(row.estabelecimentoId);
+      const settingAudit = audit.filter((entry) => entry.estabelecimentoId === row.estabelecimentoId).length;
+      return `<form class="card nfe-automation-setting" id="nfeAutomationForm-${index}" data-nfe-automation-setting style="padding:14px;">
+        <input type="hidden" name="clienteId" value="${escapeHtml(row.clienteId)}" />
+        <input type="hidden" name="estabelecimentoId" value="${escapeHtml(row.estabelecimentoId)}" />
+        <input type="hidden" name="ambiente" value="${escapeHtml(row.ambiente)}" />
+        <div class="progress-meta"><strong>${escapeHtml(establishment?.razaoSocial || establishment?.municipioNome || 'Estabelecimento')} · ${escapeHtml(row.actorType || 'CPF/CNPJ')} · ${escapeHtml(row.ambiente)}</strong>${statusBadge(row.autorizacaoAtiva ? 'Autorização ativa' : 'Sem autorização', row.autorizacaoAtiva ? 'success' : 'neutral')}</div>
+        <div class="form-grid two" style="margin-top:12px;">
+          <label class="field-inline"><input type="checkbox" name="cienciaAutomatica" ${row.cienciaAutomatica ? 'checked' : ''} /><span>Registrar Ciência automaticamente para novas NF-e elegíveis</span></label>
+          <label class="field-inline"><input type="checkbox" name="recuperacaoXmlAutomatica" ${row.recuperacaoXmlAutomatica ? 'checked' : ''} /><span>Consultar e recuperar XML completo automaticamente</span></label>
+          <label class="field-inline" style="grid-column:span 2;"><input type="checkbox" name="confirmacaoExpressa" value="true" /><span>Confirmo expressamente a autorização desta automação para este estabelecimento e ambiente.</span></label>
+          <div class="stack-actions" style="grid-column:span 2; justify-content:flex-start;">
+            <button class="btn primary" type="submit" ${state.nfeAutomationBusy ? 'disabled' : ''}>Salvar configuração</button>
+            ${row.autorizacaoAtiva ? `<button class="btn secondary" type="button" data-action="nfe-automation-revoke" data-client-id="${escapeHtml(row.clienteId)}" data-establishment-id="${escapeHtml(row.estabelecimentoId)}" data-ambiente="${escapeHtml(row.ambiente)}" ${state.nfeAutomationBusy ? 'disabled' : ''}>Revogar autorização para novas Ciências</button>` : ''}
+          </div>
+        </div>
+        <p class="row-sub" style="margin:8px 0 0;">Autorização registrada: ${escapeHtml(row.autorizadaEm ? formatDateTime(row.autorizadaEm) : 'não concedida')}${row.autorizadaPor ? ` por ${escapeHtml(row.autorizadaPor)}` : ''} · Termo ${escapeHtml(row.versaoTermo || '—')} · Alterações auditadas: ${settingAudit} · Manifestações registradas: ${manifests.filter((item) => item.estabelecimentoId === row.estabelecimentoId).length}</p>
+      </form>`;
+    }).join('') : `<div class="table-state">Nenhum controle NF-e ativo encontrado para configurar. Ative a sincronização do estabelecimento CPF/CNPJ primeiro.</div>`}
+    <div class="card" style="padding:0; overflow:auto;">
+      <div style="padding:12px 14px;"><strong>Documentos aguardando Ciência ou XML completo</strong><span class="row-sub">${pendingRows.length} item(ns) nesta lista${pending.length > pendingRows.length ? ` · ${pending.length - pendingRows.length} XML(s) já disponíveis` : ''}.</span></div>
+      <table><thead><tr><th>Estabelecimento</th><th>NF-e</th><th>Ambiente</th><th>Status</th><th>Próxima tentativa</th><th>SEFAZ</th><th></th></tr></thead><tbody>
+        ${pendingRows.length ? pendingRows.map((item) => {
+          const establishment = findEstablishmentById(item.estabelecimentoId);
+          const document = state.nfeDocuments.find((doc) => doc.apiNfeId === item.documentoId);
+          return `<tr><td>${escapeHtml(establishment?.razaoSocial || 'Estabelecimento')}</td><td>${escapeHtml(item.numeroNfe || '—')}<span class="row-sub">${escapeHtml(item.schemaDoc || 'sem schema')}</span></td><td>${escapeHtml(item.ambiente)}</td><td>${escapeHtml(nfeAutomationStatusLabel(item.status))}</td><td>${escapeHtml(item.proximaTentativaEm ? formatDateTime(item.proximaTentativaEm) : 'aguardando ação')}</td><td>${escapeHtml([item.cStat, item.xMotivo].filter(Boolean).join(' · ') || '—')}</td><td>${document ? `<button class="btn secondary" type="button" data-action="nfe-details" data-nfe-id="${escapeHtml(document.id)}">Abrir nota</button>` : ''}</td></tr>`;
+        }).join('') : `<tr><td colspan="7" class="row-sub">Não há pendências de obtenção automática neste escopo.</td></tr>`}
+      </tbody></table>
+    </div>
+  </div>`;
 }
 
 function getSefazDiagnosticControls() {
@@ -5926,6 +6046,7 @@ function renderNfeSearchSummary() {
         <span>Resultado: <strong>${escapeHtml(String(totalResults))} NF-e</strong></span>
         <span>Pagina: <strong>${escapeHtml(`${state.nfeSearch.page}/${Math.max(1, state.nfeSearch.totalPages || 1)}`)}</strong></span>
         <span>Valor somado: <strong>${escapeHtml(formatCurrency(totalValue))}</strong></span>
+        <span class="row-sub">Soma apenas NF-e autorizadas; canceladas e denegadas ficam fora.</span>
         <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.nfeSearch.lastSearchedAt || new Date().toISOString()))}</strong></span>
       </div>
     </article>
@@ -5951,7 +6072,7 @@ function renderNfeDocumentsTableCard(docs) {
       <div class="xml-batch-bar">
         <div>
           <h3 class="card-title">NF-e encontradas</h3>
-          <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(totalResults))} documento(s). ${selectedVisibleCount} selecionado(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}.</p>
+          <p class="card-subtitle">Mostrando ${escapeHtml(String(docs.length))} de ${escapeHtml(String(totalResults))} documento(s). ${selectedVisibleCount} selecionado(s). Valor total: ${escapeHtml(formatCurrency(totalValue))}. Soma apenas NF-e autorizadas; canceladas e denegadas ficam fora.</p>
         </div>
         <div class="table-actions">
           <button class="btn secondary" type="button" data-action="nfe-sync-events-listed" ${syncDisabled}>${escapeHtml(syncLabel)}</button>
@@ -16810,16 +16931,20 @@ async function disableNfeSearchForAllClients() {
 }
 
 async function runNfeSearchNow() {
+  state.nfeManualRunStatus = { status: 'consultando', label: 'Consultando SEFAZ', message: 'A consulta manual foi iniciada. Aguardando o retorno da SEFAZ e o processamento dos documentos.', startedAt: new Date().toISOString(), finishedAt: null, report: null };
+  render();
   try {
     const result = await apiRequest('/nfe/sync/rodar-agora-geral', {
       method: 'POST'
     });
     state.nfeLastRunReport = buildNfeRunReport(result);
+    updateNfeManualRunStatus(result);
     state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
     await refreshApiData();
     render();
   } catch (error) {
-    pushToast(`Falha ao executar busca de NF-e: ${toErrorMessage(error)}`, 'error');
+    updateNfeManualRunStatus(null, error);
+    render();
   }
 }
 
@@ -16943,6 +17068,7 @@ async function submitNfeSefazCpfImportForm(form) {
 
   try {
     state.nfeSefazDiagnosticMessage = `Consulta SEFAZ iniciada para ${producer.cliente}. O resultado ficara neste painel.`;
+    state.nfeManualRunStatus = { status: 'consultando', label: 'Consultando SEFAZ', message: `Consulta manual iniciada para ${producer.cliente}. Aguardando o retorno e o processamento dos documentos.`, startedAt: new Date().toISOString(), finishedAt: null, report: null };
     render();
     const result = await apiRequest('/nfe/sync/rodar-sefaz-cpf', {
       method: 'POST',
@@ -16956,6 +17082,7 @@ async function submitNfeSefazCpfImportForm(form) {
       timeoutMs: 10 * 60 * 1000
     });
     state.nfeLastRunReport = buildNfeRunReport(result);
+    updateNfeManualRunStatus(result);
     state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
     const completion = buildSefazCpfRunToast(result);
     state.nfeSefazDiagnosticMessage = `${completion.message} Produtor: ${producer.cliente}.`;
@@ -16982,6 +17109,7 @@ async function submitNfeSefazCpfImportForm(form) {
     render();
   } catch (error) {
     const errorMessage = toErrorMessage(error);
+    updateNfeManualRunStatus(null, error);
     const cooldownMatch = errorMessage.match(/A consulta SEFAZ esta pausada ate\s+(.+?)\s+\(horario de Brasilia\)/i);
     if (cooldownMatch) {
       state.nfeSefazDiagnosticMessage = `Consulta aguardando liberacao: ${cooldownMatch[1]} (horario de Brasilia). Nenhuma nova solicitacao foi enviada a SEFAZ.`;
@@ -17101,17 +17229,79 @@ function refreshRunningExecution() {
 }
 
 async function runNfeSyncNow(payload) {
+  state.nfeManualRunStatus = { status: 'consultando', label: 'Consultando SEFAZ', message: 'A consulta manual foi iniciada. Aguardando o retorno da SEFAZ e o processamento dos documentos.', startedAt: new Date().toISOString(), finishedAt: null, report: null };
+  render();
   try {
     const response = await apiRequest('/nfe/sync/rodar-agora', {
       method: 'POST',
       body: payload
     });
     state.nfeLastRunReport = buildNfeRunReport(response);
+    updateNfeManualRunStatus(response);
     state.nfeSyncSections = { ...state.nfeSyncSections, failures: true };
     await refreshApiData();
     render();
   } catch (error) {
-    pushToast(`Falha ao executar sincronizacao NF-e: ${toErrorMessage(error)}`, 'error');
+    updateNfeManualRunStatus(null, error);
+    render();
+  }
+}
+
+async function submitNfeAutomationSettingForm(form) {
+  if (state.nfeAutomationBusy) return;
+  const data = new FormData(form);
+  const cienciaAutomatica = data.get('cienciaAutomatica') === 'on';
+  const recuperacaoXmlAutomatica = data.get('recuperacaoXmlAutomatica') === 'on';
+  const confirmacaoExpressa = data.get('confirmacaoExpressa') === 'true';
+  if (cienciaAutomatica && !confirmacaoExpressa) {
+    state.nfeAutomationMessage = 'Marque a confirmação expressa para autorizar Ciência automática neste estabelecimento e ambiente.';
+    render();
+    return;
+  }
+  state.nfeAutomationBusy = true;
+  state.nfeAutomationMessage = 'Salvando a configuração e registrando a autorização no histórico.';
+  render();
+  try {
+    await apiRequest('/nfe/automacao/configuracoes', {
+      method: 'PUT',
+      body: {
+        clienteId: String(data.get('clienteId') || ''),
+        estabelecimentoId: String(data.get('estabelecimentoId') || ''),
+        ambiente: String(data.get('ambiente') || 'producao'),
+        cienciaAutomatica,
+        recuperacaoXmlAutomatica,
+        confirmacaoExpressa,
+        versaoTermo: '2026-10-v1'
+      }
+    });
+    state.nfeAutomationMessage = 'Configuração salva e auditada para este estabelecimento e ambiente.';
+    await refreshApiData();
+  } catch (error) {
+    state.nfeAutomationMessage = `Não foi possível salvar a configuração: ${toErrorMessage(error)}`;
+  } finally {
+    state.nfeAutomationBusy = false;
+    render();
+  }
+}
+
+async function revokeNfeAutomationAuthorization({ clienteId, estabelecimentoId, ambiente }) {
+  if (state.nfeAutomationBusy || !clienteId || !estabelecimentoId || !ambiente) return;
+  if (!window.confirm('Revogar a autorização para novas Ciências automáticas neste estabelecimento? XMLs já liberados ainda podem ser recuperados se essa opção continuar ativa.')) return;
+  state.nfeAutomationBusy = true;
+  state.nfeAutomationMessage = 'Revogando a autorização para novas Ciências.';
+  render();
+  try {
+    await apiRequest('/nfe/automacao/revogar', {
+      method: 'POST',
+      body: { clienteId, estabelecimentoId, ambiente }
+    });
+    state.nfeAutomationMessage = 'Autorização revogada. Nenhuma nova Ciência automática será enviada para este escopo.';
+    await refreshApiData();
+  } catch (error) {
+    state.nfeAutomationMessage = `Não foi possível revogar a autorização: ${toErrorMessage(error)}`;
+  } finally {
+    state.nfeAutomationBusy = false;
+    render();
   }
 }
 
@@ -17290,17 +17480,80 @@ async function submitNfeDominioImportForm(form) {
 }
 
 function buildNfeRunReport(response) {
+  const sefazDiagnostics = Array.isArray(response?.sefazDiagnostics) ? response.sefazDiagnostics : [];
+  const schemaTotals = sefazDiagnostics.reduce((counts, diagnostic) => {
+    Object.entries(diagnostic?.schemaCounts || {}).forEach(([schema, count]) => {
+      counts[schema] = (counts[schema] || 0) + Number(count || 0);
+    });
+    return counts;
+  }, {});
+  const documentsReceived = sefazDiagnostics.reduce((sum, item) => sum + Number(item?.documentsReceived || 0), 0);
+  const summaries = Object.entries(schemaTotals).filter(([schema]) => /resNFe/i.test(schema)).reduce((sum, [, count]) => sum + count, 0);
+  const fullXmls = Object.entries(schemaTotals).filter(([schema]) => /(?:procNFe|NFe_v)/i.test(schema)).reduce((sum, [, count]) => sum + count, 0);
   return {
     executedAt: new Date().toISOString(),
     processed: Number(response?.processed || 0),
     documentsSaved: Number(response?.documentsSaved || 0),
+    documentsNew: Number(response?.documentsNew ?? sefazDiagnostics.reduce((sum, item) => sum + Number(item?.documentsNew || 0), 0)),
+    documentsUpdated: Number(response?.documentsUpdated ?? sefazDiagnostics.reduce((sum, item) => sum + Number(item?.documentsUpdated || 0), 0)),
+    documentsDuplicates: Number(response?.documentsDuplicates ?? sefazDiagnostics.reduce((sum, item) => sum + Number(item?.documentsDuplicates || 0), 0)),
     failures: Number(response?.failures || 0),
     cpfDiagnostics: response?.cpfDiagnostics || null,
-    sefazDiagnostics: Array.isArray(response?.sefazDiagnostics) ? response.sefazDiagnostics : [],
+    sefazDiagnostics,
+    requestReal: sefazDiagnostics.some((item) => item?.clientMode === 'real' && item?.httpStatus != null),
+    requestUnconfirmed: sefazDiagnostics.some((item) => item?.clientMode === 'real' && item?.httpStatus == null && item?.failureStage === 'before_response'),
+    documentsReceived,
+    summaries,
+    fullXmls,
+    schemaTotals,
     importSummary: normalizeDominioImportSummary(response?.importSummary),
     executionDetails: Array.isArray(response?.executionDetails) ? response.executionDetails : [],
     failureDetails: Array.isArray(response?.failureDetails) ? response.failureDetails : []
   };
+}
+
+function updateNfeManualRunStatus(response, error = null) {
+  const report = response ? buildNfeRunReport(response) : null;
+  const startedAt = state.nfeManualRunStatus?.startedAt || new Date().toISOString();
+  if (error) {
+    state.nfeManualRunStatus = {
+      status: 'erro', label: 'Consulta com erro', message: `A consulta não foi concluída: ${toErrorMessage(error)}`,
+      startedAt, finishedAt: new Date().toISOString(), report
+    };
+    return;
+  }
+  if (!report) return;
+  const failureRows = Array.isArray(response?.executionDetails) ? response.executionDetails : [];
+  const hasInternalBlock = failureRows.some((row) => /pausad|cooldown|bloqueio|restri[cç][aã]o|nenhuma nova solicitacao|nao foi enviada/i.test(String(row?.mensagem || '')));
+  const hasNewOrUpdated = report.documentsNew + report.documentsUpdated > 0;
+  let status = 'nenhum';
+  let label = 'Nenhum documento novo';
+  let message = report.requestReal
+    ? 'A SEFAZ respondeu à consulta e nenhum novo XML ou resumo foi importado.'
+    : 'A execução terminou sem confirmação de uma requisição real à SEFAZ.';
+  if (report.failures > 0 && (report.documentsReceived > 0 || hasNewOrUpdated)) {
+    status = 'parcial'; label = 'Consulta parcialmente concluída';
+    message = 'Alguns documentos foram processados, mas também houve falha. Consulte os detalhes técnicos abaixo.';
+  } else if (report.failures > 0) {
+    status = 'erro'; label = 'Consulta não concluída';
+    message = 'A execução encontrou falha antes de concluir o processamento. Consulte o retorno e a etapa abaixo.';
+  } else if (!report.requestReal && hasInternalBlock) {
+    status = 'bloqueada'; label = 'Consulta não enviada por bloqueio interno';
+    message = 'O NotaSync interrompeu a consulta antes de enviar uma nova requisição. Aguarde a liberação indicada no controle.';
+  } else if (!report.requestReal && report.requestUnconfirmed) {
+    status = 'incerta'; label = 'Sem resposta confirmada';
+    message = 'A preparação da requisição começou, mas não há resposta HTTP confirmada. O sistema não registrou sucesso.';
+  } else if (hasNewOrUpdated) {
+    status = 'novos'; label = 'Novos documentos encontrados';
+    message = 'A consulta terminou e documentos novos ou atualizados foram armazenados.';
+  } else if (report.requestReal && report.documentsReceived === 0 && report.sefazDiagnostics.some((item) => item.cStat === '137')) {
+    status = 'nenhum'; label = 'Nenhum documento novo';
+    message = 'A SEFAZ retornou cStat 137, sem novos documentos para distribuir.';
+  } else if (!report.requestReal && Number(response?.documentsSaved || 0) > 0) {
+    status = 'novos'; label = 'Importação concluída pela origem configurada';
+    message = 'Documentos foram armazenados por uma origem diferente da consulta SEFAZ.';
+  }
+  state.nfeManualRunStatus = { status, label, message, startedAt, finishedAt: new Date().toISOString(), report };
 }
 
 function renderNfeSefazDiagnostics(diagnostics) {
@@ -17329,6 +17582,7 @@ function renderNfeSefazDiagnostics(diagnostics) {
         <div>ultNSU ${escapeHtml(diagnostic.ultNsu || '-')} · maxNSU ${escapeHtml(diagnostic.maxNsu || '-')}</div>
         <div>docZip recebidos ${escapeHtml(String(diagnostic.documentsReceived ?? 0))} · descompactados ${escapeHtml(String(diagnostic.documentsDecoded ?? 0))} · descartados no adapter ${escapeHtml(String(diagnostic.docZipDiscarded ?? 0))} · schemas ${schemaCounts}</div>
         <div>Filtrados ${escapeHtml(String(diagnostic.documentsFiltered ?? 0))} · tentados ${escapeHtml(String(diagnostic.documentsAttempted ?? 0))} · processados ${escapeHtml(String(diagnostic.documentsProcessed ?? 0))} · falhas ${escapeHtml(String(diagnostic.documentsFailed ?? 0))} · nao tentados ${escapeHtml(String(diagnostic.documentsNotAttempted ?? 0))}</div>
+        <div>Novos ${escapeHtml(String(diagnostic.documentsNew ?? 0))} · atualizados ${escapeHtml(String(diagnostic.documentsUpdated ?? 0))} · duplicados ${escapeHtml(String(diagnostic.documentsDuplicates ?? 0))}</div>
         ${diagnostic.failureStage ? `<div>Etapa da falha: ${escapeHtml(failureStageLabels[diagnostic.failureStage] || diagnostic.failureStage)}</div>` : ''}
       </div>`;
     }).join('')}
@@ -23825,6 +24079,17 @@ function resolveFiscalStatus(status, dataCancelamento, cancelamentoEvento) {
   return mapFiscalStatusCode(status);
 }
 
+function resolveNfeDocumentFiscalStatus(status, document, dataCancelamento, cancelamentoEvento) {
+  const isSummary = Boolean(document?.resumoDisponivel) || String(document?.schemaDoc || '').startsWith('resNFe');
+  const code = String(status ?? '').trim();
+  if (isSummary) {
+    if (code === '1') return 'Autorizada (resumo)';
+    if (code === '2') return 'Denegada (resumo)';
+    if (code === '3') return 'Cancelada (resumo)';
+  }
+  return resolveFiscalStatus(status, dataCancelamento, cancelamentoEvento);
+}
+
 function resolveNfseFiscalStatus(status, dataCancelamento, cancelamentoEvento) {
   const normalized = normalizeSearchText(status);
   if (!dataCancelamento && !cancelamentoEvento && normalized === '102') {
@@ -24058,7 +24323,7 @@ function buildNfeDocumentsFromApi(nfeDocs, clients) {
       const destinatarioCnpj = normalizeDigits(doc.cnpjDestinatario || '');
       const contraparteNome = tipo === 'Emitida' ? doc.razaoSocialDestinatario : doc.razaoSocialEmitente;
       const contraparteCnpj = tipo === 'Emitida' ? destinatarioCnpj : emitenteCnpj;
-      const statusFiscal = resolveFiscalStatus(doc.status, dataCancelamento, cancelamentoEvento);
+      const statusFiscal = resolveNfeDocumentFiscalStatus(doc.status, doc, dataCancelamento, cancelamentoEvento);
 
       return {
         id: `nfe-${doc.id}`,
@@ -26240,8 +26505,8 @@ function formatManifestacaoType(tipoEvento) {
 function formatManifestacaoStatus(status) {
   const labels = {
     xml_completo_disponivel: 'XML completo disponível.',
-    aguardando_disponibilizacao: 'Manifestação aceita; faça uma consulta manual por chave para verificar se o XML completo foi liberado.',
-    resumo_disponivel: 'Apenas o resumo está armazenado. Nenhum evento será enviado automaticamente.',
+    aguardando_disponibilizacao: 'Manifestacao aceita; o XML pode ser consultado manualmente ou recuperado automaticamente se habilitado.',
+    resumo_disponivel: 'Apenas o resumo esta armazenado. Ciencia automatica depende de autorizacao ativa para este estabelecimento.',
     sem_xml: 'Nenhum arquivo XML armazenado.'
   };
   return labels[String(status || '')] || 'Status de disponibilidade não informado.';

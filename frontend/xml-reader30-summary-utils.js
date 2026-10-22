@@ -43,6 +43,14 @@ function shouldIncludeDocumentValueInSum(item) {
   }
 
   const normalizedStatus = normalizeSearchText(item.statusFiscal || item.statusLabel || item.status || '');
+  const isNfeSummary = Boolean(item.resumoDisponivel) || String(item.schemaDoc || '').startsWith('resNFe');
+  if (isNfeSummary) {
+    // resNFe uses cSitNFe 1/2/3; only 1 is an active, authorized note.
+    if (normalizedStatus === '2' || normalizedStatus === '3') {
+      return false;
+    }
+    return normalizedStatus === '1' || normalizedStatus === '100' || normalizedStatus.includes('autoriz');
+  }
   return normalizedStatus.includes('autoriz');
 }
 

@@ -1,5 +1,6 @@
 import { BadRequestException, ConflictException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { NfeAmbiente, Prisma } from '@prisma/client';
+import { randomUUID } from 'node:crypto';
 import { LocalStorageService } from '../storage/storage.service';
 import { PrismaService } from '../../prisma/prisma.service';
 import {
@@ -10,6 +11,7 @@ import {
   NfeManifestacaoTipo
 } from '../../integrations/nfe-distribuicao/nfe-manifestacao.types';
 import { RegistrarNfeManifestacaoDto } from './dto/registrar-manifestacao.dto';
+import { NfeAutomacaoQueryDto, RevogarAutomacaoNfeDto, UpdateAutomacaoNfeDto } from './dto/update-automacao-nfe.dto';
 
 const SCIENCE_CODE = NFE_MANIFESTACAO_EVENT_CODES.ciencia_operacao;
 const FINAL_CODES = new Set([
@@ -19,18 +21,496 @@ const FINAL_CODES = new Set([
 ]);
 const TERMINAL_ACCEPTED_STATUSES = new Set(['registrada', 'registrada_sem_vinculo']);
 const INDETERMINATE_STATUSES = new Set(['enviando', 'resultado_indeterminado']);
+export const NFE_AUTOMATION_TERM_VERSION = '2026-10-v1';
+const RECOVERY_STATUSES = ['aguardando_ciencia', 'aguardando_evento_distribuicao', 'aguardando_xml', 'aguardando_sefaz'] as const;
+
+type AutomaticRecoveryPreparation =
+  | { canQuery: false; status: string }
+  | {
+      canQuery: true;
+      status: 'aguardando_xml';
+      clienteId: string;
+      estabelecimentoId: string;
+      ambiente: NfeAmbiente;
+      chaveAcesso: string;
+    };
 
 type ManifestationStatus = 'registrada' | 'registrada_sem_vinculo' | 'rejeitada' | 'falha_local' | 'resultado_indeterminado' | 'enviando';
 
 @Injectable()
 export class NfeManifestacaoService {
   private readonly logger = new Logger(NfeManifestacaoService.name);
+  private readonly recoveryRetryMs = 6 * 60 * 60 * 1000;
+  private readonly recoveryLeaseMs = 20 * 60 * 1000;
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly storage: LocalStorageService,
     @Inject(NFE_MANIFESTACAO_CLIENT) private readonly manifestacaoClient: NfeManifestacaoClient
   ) {}
+
+  async listAutomationSettings(query: NfeAutomacaoQueryDto) {
+    const where = {
+      clienteId: query.clienteId,
+      ...(query.estabelecimentoId ? { estabelecimentoId: query.estabelecimentoId } : {})
+    };
+    const [controls, settings, recoveries] = await Promise.all([
+      this.prisma.nfeSyncControle.findMany({
+        where,
+        orderBy: [{ estabelecimentoId: 'asc' }, { ambiente: 'asc' }],
+        select: { id: true, clienteId: true, estabelecimentoId: true, cnpjConsulta: true, ambiente: true, status: true }
+      }),
+      this.prisma.nfeAutomacaoConfiguracao.findMany({ where, include: { usuarioAutorizou: { select: { id: true, nome: true, username: true } } } }),
+      this.prisma.nfeXmlRecuperacao.findMany({ where, select: { estabelecimentoId: true, ambiente: true, status: true } })
+    ]);
+    const settingsByScope = new Map(settings.map((item) => [`${item.estabelecimentoId}|${item.ambiente}`, item]));
+    const pendingByScope = new Map<string, Record<string, number>>();
+    for (const row of recoveries) {
+      const key = `${row.estabelecimentoId}|${row.ambiente}`;
+      const counts = pendingByScope.get(key) ?? {};
+      counts[row.status] = (counts[row.status] || 0) + 1;
+      pendingByScope.set(key, counts);
+    }
+    const seen = new Set<string>();
+    return controls.flatMap((control) => {
+      const key = `${control.estabelecimentoId}|${control.ambiente}`;
+      if (seen.has(key)) return [];
+      seen.add(key);
+      const setting = settingsByScope.get(key);
+      return [{
+        controlId: control.id,
+        clienteId: control.clienteId,
+        estabelecimentoId: control.estabelecimentoId,
+        ambiente: control.ambiente,
+        actorType: this.onlyDigits(control.cnpjConsulta).length === 11 ? 'CPF' : 'CNPJ',
+        cienciaAutomatica: setting?.cienciaAutomatica ?? false,
+        recuperacaoXmlAutomatica: setting?.recuperacaoXmlAutomatica ?? false,
+        autorizacaoAtiva: setting?.autorizacaoAtiva ?? false,
+        autorizadaEm: setting?.autorizadaEm ?? null,
+        versaoTermo: setting?.versaoTermo ?? null,
+        autorizadaPor: setting?.usuarioAutorizou?.nome || setting?.usuarioAutorizou?.username || null,
+        revogadaEm: setting?.revogadaEm ?? null,
+        pendencias: pendingByScope.get(key) ?? {}
+      }];
+    });
+  }
+
+  async updateAutomationSettings(dto: UpdateAutomacaoNfeDto, usuarioId?: string) {
+    const establishment = await this.prisma.clienteEstabelecimento.findFirst({
+      where: { id: dto.estabelecimentoId, clienteId: dto.clienteId, ativo: true },
+      select: { id: true, clienteId: true, cnpj: true }
+    });
+    if (!establishment) throw new NotFoundException('Estabelecimento nao encontrado para o cliente informado.');
+    const actor = this.onlyDigits(establishment.cnpj);
+    if (actor.length !== 11 && actor.length !== 14) {
+      throw new BadRequestException('O estabelecimento precisa ter um CPF ou CNPJ valido para habilitar a automacao de NF-e.');
+    }
+    if (dto.cienciaAutomatica && (dto.confirmacaoExpressa !== true || dto.versaoTermo !== NFE_AUTOMATION_TERM_VERSION)) {
+      throw new BadRequestException(`A autorizacao expressa e a aceitacao do termo ${NFE_AUTOMATION_TERM_VERSION} sao obrigatorias para ativar a Ciencia automatica.`);
+    }
+
+    const where = {
+      clienteId_estabelecimentoId_ambiente: {
+        clienteId: dto.clienteId,
+        estabelecimentoId: dto.estabelecimentoId,
+        ambiente: dto.ambiente
+      }
+    };
+    const previous = await this.prisma.nfeAutomacaoConfiguracao.findUnique({ where });
+    const now = new Date();
+    const grantsAuthorization = dto.cienciaAutomatica === true;
+    const revokesAuthorization = Boolean(previous?.autorizacaoAtiva && !grantsAuthorization);
+    const action = grantsAuthorization && !previous?.autorizacaoAtiva
+      ? 'autorizacao_concedida'
+      : revokesAuthorization
+        ? 'autorizacao_revogada'
+        : previous ? 'configuracao_atualizada' : 'configuracao_criada';
+    const config = await this.prisma.$transaction(async (tx) => {
+      const saved = await tx.nfeAutomacaoConfiguracao.upsert({
+        where,
+        create: {
+          clienteId: dto.clienteId,
+          estabelecimentoId: dto.estabelecimentoId,
+          ambiente: dto.ambiente,
+          cienciaAutomatica: dto.cienciaAutomatica,
+          recuperacaoXmlAutomatica: dto.recuperacaoXmlAutomatica,
+          autorizacaoAtiva: grantsAuthorization,
+          usuarioAutorizouId: grantsAuthorization ? usuarioId : undefined,
+          autorizadaEm: grantsAuthorization ? now : undefined,
+          versaoTermo: grantsAuthorization ? NFE_AUTOMATION_TERM_VERSION : undefined
+        },
+        update: {
+          cienciaAutomatica: dto.cienciaAutomatica,
+          recuperacaoXmlAutomatica: dto.recuperacaoXmlAutomatica,
+          ...(grantsAuthorization ? {
+            autorizacaoAtiva: true,
+            usuarioAutorizouId: usuarioId,
+            autorizadaEm: now,
+            versaoTermo: NFE_AUTOMATION_TERM_VERSION,
+            revogadaPorId: null,
+            revogadaEm: null
+          } : {}),
+          ...(revokesAuthorization ? {
+            autorizacaoAtiva: false,
+            revogadaPorId: usuarioId,
+            revogadaEm: now
+          } : {})
+        }
+      });
+      await tx.nfeAutomacaoAuditoria.create({
+        data: {
+          clienteId: dto.clienteId,
+          estabelecimentoId: dto.estabelecimentoId,
+          configuracaoId: saved.id,
+          usuarioId,
+          acao: action,
+          cienciaAutomatica: saved.cienciaAutomatica,
+          recuperacaoXml: saved.recuperacaoXmlAutomatica,
+          autorizacaoAtiva: saved.autorizacaoAtiva,
+          versaoTermo: grantsAuthorization ? NFE_AUTOMATION_TERM_VERSION : saved.versaoTermo
+        }
+      });
+      return saved;
+    });
+    if (config.cienciaAutomatica || config.recuperacaoXmlAutomatica) {
+      await this.enqueueExistingSummaries(config);
+    }
+    if (config.recuperacaoXmlAutomatica) {
+      await this.prisma.nfeXmlRecuperacao.updateMany({
+        where: { configuracaoId: config.id, status: 'ciencia_registrada' },
+        data: { status: 'aguardando_xml', proximaTentativaEm: now, cStat: null, xMotivo: null }
+      });
+    }
+    if (config.autorizacaoAtiva && config.cienciaAutomatica) {
+      await this.prisma.nfeXmlRecuperacao.updateMany({
+        where: { configuracaoId: config.id, status: 'autorizacao_revogada' },
+        data: { status: 'aguardando_ciencia', proximaTentativaEm: now, cStat: null, xMotivo: null }
+      });
+    }
+    return this.toPublicAutomationConfig(config);
+  }
+
+  async revokeAutomationAuthorization(dto: RevogarAutomacaoNfeDto, usuarioId?: string) {
+    const where = {
+      clienteId_estabelecimentoId_ambiente: {
+        clienteId: dto.clienteId,
+        estabelecimentoId: dto.estabelecimentoId,
+        ambiente: dto.ambiente
+      }
+    };
+    const previous = await this.prisma.nfeAutomacaoConfiguracao.findUnique({ where });
+    if (!previous) throw new NotFoundException('Nao existe autorizacao de automacao para revogar neste estabelecimento e ambiente.');
+    const config = await this.prisma.$transaction(async (tx) => {
+      const saved = await tx.nfeAutomacaoConfiguracao.update({
+        where,
+        data: { cienciaAutomatica: false, autorizacaoAtiva: false, revogadaPorId: usuarioId, revogadaEm: new Date() }
+      });
+      await tx.nfeAutomacaoAuditoria.create({
+        data: {
+          clienteId: dto.clienteId,
+          estabelecimentoId: dto.estabelecimentoId,
+          configuracaoId: saved.id,
+          usuarioId,
+          acao: 'autorizacao_revogada',
+          cienciaAutomatica: false,
+          recuperacaoXml: saved.recuperacaoXmlAutomatica,
+          autorizacaoAtiva: false,
+          versaoTermo: saved.versaoTermo
+        }
+      });
+      return saved;
+    });
+    return this.toPublicAutomationConfig(config);
+  }
+
+  async listAutomaticRecoveryItems(query: NfeAutomacaoQueryDto) {
+    const rows = await this.prisma.nfeXmlRecuperacao.findMany({
+      where: {
+        clienteId: query.clienteId,
+        ...(query.estabelecimentoId ? { estabelecimentoId: query.estabelecimentoId } : {}),
+        ...(query.status ? { status: query.status } : {})
+      },
+      orderBy: [{ proximaTentativaEm: 'asc' }, { updatedAt: 'desc' }],
+      take: 200,
+      include: { nfeDocumento: { select: { id: true, numeroNfe: true, dataEmissao: true, schemaDoc: true, resumoDisponivel: true, xmlCompletoDisponivel: true } } }
+    });
+    const queued = rows.map((item) => ({
+      id: item.id,
+      documentoId: item.nfeDocumentoId,
+      clienteId: item.clienteId,
+      estabelecimentoId: item.estabelecimentoId,
+      ambiente: item.ambiente,
+      status: item.status,
+      tentativas: item.tentativas,
+      proximaTentativaEm: item.proximaTentativaEm,
+      ultimaTentativaEm: item.ultimaTentativaEm,
+      cStat: item.cStat,
+      xMotivo: this.sanitizeSefazText(item.xMotivo),
+      numeroNfe: item.nfeDocumento.numeroNfe,
+      dataEmissao: item.nfeDocumento.dataEmissao,
+      schemaDoc: item.nfeDocumento.schemaDoc,
+      resumoDisponivel: item.nfeDocumento.resumoDisponivel,
+      xmlCompletoDisponivel: item.nfeDocumento.xmlCompletoDisponivel
+    }));
+    const unqueuedSummaries = !query.status || query.status === 'aguardando_ciencia'
+      ? await this.prisma.nfeDocumento.findMany({
+      where: {
+        clienteId: query.clienteId,
+        ...(query.estabelecimentoId ? { estabelecimentoId: query.estabelecimentoId } : {}),
+        modelo: '55',
+        tipoRelacao: 'recebida',
+        resumoDisponivel: true,
+        xmlCompletoDisponivel: false,
+        xmlRecuperacao: null
+      },
+      orderBy: [{ dataEmissao: 'asc' }, { createdAt: 'asc' }],
+      take: Math.max(0, 200 - queued.length),
+      select: {
+        id: true, clienteId: true, estabelecimentoId: true, ambiente: true, numeroNfe: true,
+        dataEmissao: true, schemaDoc: true, resumoDisponivel: true, xmlCompletoDisponivel: true
+      }
+      })
+      : [];
+    return [
+      ...queued,
+      ...unqueuedSummaries.map((document) => ({
+        id: `resumo-${document.id}`,
+        documentoId: document.id,
+        clienteId: document.clienteId,
+        estabelecimentoId: document.estabelecimentoId,
+        ambiente: document.ambiente,
+        status: 'aguardando_ciencia',
+        tentativas: 0,
+        proximaTentativaEm: null,
+        ultimaTentativaEm: null,
+        cStat: null,
+        xMotivo: null,
+        numeroNfe: document.numeroNfe,
+        dataEmissao: document.dataEmissao,
+        schemaDoc: document.schemaDoc,
+        resumoDisponivel: document.resumoDisponivel,
+        xmlCompletoDisponivel: document.xmlCompletoDisponivel
+      }))
+    ];
+  }
+
+  async listAutomationManifestations(query: NfeAutomacaoQueryDto) {
+    const rows = await this.prisma.nfeManifestacao.findMany({
+      where: { clienteId: query.clienteId, ...(query.estabelecimentoId ? { estabelecimentoId: query.estabelecimentoId } : {}) },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      select: {
+        id: true, nfeDocumentoId: true, estabelecimentoId: true, ambiente: true, tipoEvento: true,
+        status: true, cStat: true, xMotivo: true, nProt: true, enviadoEm: true, processadoEm: true, createdAt: true,
+        nfeDocumento: { select: { numeroNfe: true, dataEmissao: true } }
+      }
+    });
+    return rows.map((item) => ({ ...item, xMotivo: this.sanitizeSefazText(item.xMotivo) }));
+  }
+
+  async listAutomationAudit(query: NfeAutomacaoQueryDto) {
+    return this.prisma.nfeAutomacaoAuditoria.findMany({
+      where: { clienteId: query.clienteId, ...(query.estabelecimentoId ? { estabelecimentoId: query.estabelecimentoId } : {}) },
+      orderBy: { createdAt: 'desc' },
+      take: 200,
+      select: {
+        id: true, estabelecimentoId: true, configuracaoId: true, usuarioId: true, acao: true,
+        cienciaAutomatica: true, recuperacaoXml: true, autorizacaoAtiva: true, versaoTermo: true, createdAt: true
+      }
+    });
+  }
+
+  async observePersistedDocument(documentId: string) {
+    const document = await this.prisma.nfeDocumento.findFirst({
+      where: { id: documentId },
+      select: {
+        id: true, clienteId: true, estabelecimentoId: true, ambiente: true, modelo: true, tipoRelacao: true,
+        resumoDisponivel: true, xmlCompletoDisponivel: true
+      }
+    });
+    if (!document) return;
+    if (document.xmlCompletoDisponivel) {
+      await this.prisma.nfeXmlRecuperacao.updateMany({
+        where: { nfeDocumentoId: document.id },
+        data: { status: 'xml_disponivel', cStat: null, xMotivo: null, resultadoConsulta: 'xml_completo', proximaTentativaEm: null, leaseId: null, leaseAte: null }
+      });
+      return;
+    }
+    if (document.modelo !== '55' || document.tipoRelacao !== 'recebida' || !document.resumoDisponivel) return;
+    const config = await this.prisma.nfeAutomacaoConfiguracao.findUnique({
+      where: { clienteId_estabelecimentoId_ambiente: { clienteId: document.clienteId, estabelecimentoId: document.estabelecimentoId, ambiente: document.ambiente } }
+    });
+    if (!config || (!config.cienciaAutomatica && !config.recuperacaoXmlAutomatica)) return;
+    await this.prisma.nfeXmlRecuperacao.createMany({
+      data: [{
+        nfeDocumentoId: document.id,
+        clienteId: document.clienteId,
+        estabelecimentoId: document.estabelecimentoId,
+        configuracaoId: config.id,
+        ambiente: document.ambiente,
+        status: 'aguardando_ciencia'
+      }],
+      skipDuplicates: true
+    });
+  }
+
+  async claimDueRecoveryTasks(limit = 3) {
+    const now = new Date();
+    const rows = await this.prisma.nfeXmlRecuperacao.findMany({
+      where: {
+        status: { in: [...RECOVERY_STATUSES] },
+        AND: [
+          { OR: [{ proximaTentativaEm: null }, { proximaTentativaEm: { lte: now } }] },
+          { OR: [{ leaseAte: null }, { leaseAte: { lt: now } }] },
+          { OR: [
+            { status: 'aguardando_ciencia', configuracao: { autorizacaoAtiva: true, cienciaAutomatica: true } },
+            { status: 'aguardando_evento_distribuicao', configuracao: { autorizacaoAtiva: true, cienciaAutomatica: true } },
+            { status: 'aguardando_xml', configuracao: { recuperacaoXmlAutomatica: true } },
+            { status: 'aguardando_sefaz', configuracao: { recuperacaoXmlAutomatica: true } }
+          ] }
+        ]
+      },
+      orderBy: [{ proximaTentativaEm: 'asc' }, { createdAt: 'asc' }],
+      take: Math.max(1, Math.min(limit, 3))
+    });
+    const claimed = [];
+    for (const row of rows) {
+      const leaseId = randomUUID();
+      const leaseAte = new Date(now.getTime() + this.recoveryLeaseMs);
+      const result = await this.prisma.nfeXmlRecuperacao.updateMany({
+        where: { id: row.id, OR: [{ leaseAte: null }, { leaseAte: { lt: now } }] },
+        data: { leaseId, leaseAte, ultimaTentativaEm: now, tentativas: { increment: 1 } }
+      });
+      if (result.count === 1) claimed.push({ id: row.id, leaseId });
+    }
+    return claimed;
+  }
+
+  async prepareAutomaticRecovery(taskId: string, leaseId: string): Promise<AutomaticRecoveryPreparation> {
+    const task = await this.prisma.nfeXmlRecuperacao.findFirst({
+      where: { id: taskId, leaseId },
+      include: { configuracao: true, nfeDocumento: { include: { estabelecimento: { select: { id: true, clienteId: true, cnpj: true, ativo: true } } } } }
+    });
+    if (!task) return { canQuery: false, status: 'lease_expirada' };
+    const document = task.nfeDocumento;
+    if (document.xmlCompletoDisponivel) {
+      await this.updateRecoveryTask(taskId, leaseId, { status: 'xml_disponivel', resultadoConsulta: 'xml_completo', proximaTentativaEm: null });
+      return { canQuery: false, status: 'xml_disponivel' };
+    }
+    if (document.tipoRelacao !== 'recebida' || !document.resumoDisponivel) {
+      return { canQuery: false, status: 'configuracao_desativada' };
+    }
+    if (!document.estabelecimento.ativo || document.estabelecimento.clienteId !== document.clienteId) {
+      await this.updateRecoveryTask(taskId, leaseId, { status: 'erro_processamento', resultadoConsulta: 'estabelecimento_fora_do_escopo', proximaTentativaEm: null });
+      return { canQuery: false, status: 'erro_processamento' };
+    }
+
+    const attempts = await this.prisma.nfeManifestacao.findMany({ where: { nfeDocumentoId: document.id }, orderBy: { createdAt: 'asc' } });
+    const importedEvents = await this.loadImportedManifestations(document.id);
+    if ([...attempts, ...importedEvents].some((item) => INDETERMINATE_STATUSES.has(item.status))) {
+      await this.updateRecoveryTask(taskId, leaseId, { status: 'resultado_indeterminado', resultadoConsulta: 'manifestacao_indeterminada', proximaTentativaEm: null });
+      return { canQuery: false, status: 'resultado_indeterminado' };
+    }
+    const acceptedScience = [...attempts, ...importedEvents].some((item) => item.tipoEvento === SCIENCE_CODE && item.status === 'registrada');
+    const acceptedConclusive = [...attempts, ...importedEvents].some((item) => FINAL_CODES.has(item.tipoEvento) && TERMINAL_ACCEPTED_STATUSES.has(item.status));
+    const scienceWithoutLink = [...attempts, ...importedEvents].some((item) => item.tipoEvento === SCIENCE_CODE && item.status === 'registrada_sem_vinculo');
+    if (scienceWithoutLink && !acceptedConclusive) {
+      await this.updateRecoveryTask(taskId, leaseId, {
+        status: 'aguardando_evento_distribuicao',
+        resultadoConsulta: 'ciencia_sem_vinculo',
+        proximaTentativaEm: new Date(Date.now() + this.recoveryRetryMs)
+      });
+      return { canQuery: false, status: 'aguardando_evento_distribuicao' };
+    }
+    if (!acceptedScience && !acceptedConclusive) {
+      if (!task.configuracao.autorizacaoAtiva || !task.configuracao.cienciaAutomatica) {
+        await this.updateRecoveryTask(taskId, leaseId, { status: 'aguardando_ciencia', resultadoConsulta: 'autorizacao_ciencia_ausente', proximaTentativaEm: null });
+        return { canQuery: false, status: 'aguardando_ciencia' };
+      }
+      const result = await this.registerAutomaticScience(document, task.configuracao.usuarioAutorizouId, task.configuracao.autorizadaEm);
+      if (result.status !== 'registrada') {
+        const status = result.status === 'resultado_indeterminado'
+          ? 'resultado_indeterminado'
+          : result.status === 'registrada_sem_vinculo'
+            ? 'aguardando_evento_distribuicao'
+            : result.status === 'falha_local' && /certificado/i.test(result.xMotivo || '')
+              ? 'certificado_pendente'
+              : result.status === 'falha_local' && /prazo oficial de 10 dias/i.test(result.xMotivo || '')
+                ? 'ciencia_fora_prazo'
+                : result.status === 'falha_local' && /cSitNFe 1/i.test(result.xMotivo || '')
+                  ? 'resumo_nao_autorizado'
+                : result.status === 'falha_local' && /autorizacao.*(?:revogada|inativa|desativada)/i.test(result.xMotivo || '')
+                  ? 'autorizacao_revogada'
+                : 'manifestacao_rejeitada';
+        await this.updateRecoveryTask(taskId, leaseId, {
+          status,
+          cStat: result.cStat,
+          xMotivo: result.xMotivo,
+          resultadoConsulta: result.status,
+          proximaTentativaEm: status === 'aguardando_evento_distribuicao' ? new Date(Date.now() + this.recoveryRetryMs) : null
+        });
+        return { canQuery: false, status };
+      }
+    }
+    if (!task.configuracao.recuperacaoXmlAutomatica) {
+      await this.updateRecoveryTask(taskId, leaseId, { status: 'ciencia_registrada', resultadoConsulta: 'xml_automatico_desativado', proximaTentativaEm: null });
+      return { canQuery: false, status: 'ciencia_registrada' };
+    }
+    return {
+      canQuery: true,
+      status: 'aguardando_xml',
+      clienteId: document.clienteId,
+      estabelecimentoId: document.estabelecimentoId,
+      ambiente: document.ambiente,
+      chaveAcesso: document.chaveAcesso
+    };
+  }
+
+  async recordAutomaticRecoveryResult(taskId: string, leaseId: string, result: {
+    status: 'xml_disponivel' | 'aguardando_xml' | 'aguardando_sefaz' | 'erro_processamento';
+    cStat?: string | null;
+    xMotivo?: string | null;
+    resultadoConsulta: string;
+    retryAfterMs?: number | null;
+  }) {
+    const nextAttempt = result.retryAfterMs == null ? null : new Date(Date.now() + result.retryAfterMs);
+    await this.updateRecoveryTask(taskId, leaseId, {
+      status: result.status,
+      cStat: result.cStat ?? null,
+      xMotivo: this.sanitizeSefazText(result.xMotivo),
+      resultadoConsulta: result.resultadoConsulta,
+      proximaTentativaEm: nextAttempt,
+      leaseId: null,
+      leaseAte: null
+    });
+  }
+
+  async releaseRecoveryTask(taskId: string, leaseId: string) {
+    await this.prisma.nfeXmlRecuperacao.updateMany({ where: { id: taskId, leaseId }, data: { leaseId: null, leaseAte: null } });
+  }
+
+  async logAutomaticRecoveryDiagnostic(params: {
+    ambiente: NfeAmbiente;
+    actorType: 'CPF' | 'CNPJ';
+    httpStatus: number | null;
+    cStat: string | null;
+    xMotivo: string | null;
+    documentsReceived: number;
+    schemas: string[];
+    result: string;
+  }) {
+    this.logger.log(JSON.stringify({
+      tipoConsulta: 'consChNFe_automatica',
+      ambiente: params.ambiente,
+      actorType: params.actorType,
+      httpStatus: params.httpStatus,
+      cStat: params.cStat,
+      xMotivo: this.sanitizeSefazText(params.xMotivo),
+      documentosRecebidos: params.documentsReceived,
+      schemas: params.schemas,
+      resultado: params.result
+    }));
+  }
 
   async getHistory(documentId: string, clienteId: string) {
     const document = await this.getDocumentOrThrow(documentId, clienteId);
@@ -74,6 +554,10 @@ export class NfeManifestacaoService {
     const mergedHistory = [...appHistory, ...officialEvents]
       .sort((a, b) => new Date(a.processadoEm || a.createdAt || 0).getTime() - new Date(b.processadoEm || b.createdAt || 0).getTime());
     const hasAcceptedManifestation = mergedHistory.some((item) => item.status === 'registrada');
+    const hasAcceptedScience = mergedHistory.some((item) => item.tipoEvento === SCIENCE_CODE && item.status === 'registrada');
+    const hasAcceptedFinal = mergedHistory.some((item) => FINAL_CODES.has(item.tipoEvento) && item.status === 'registrada');
+    const authorizedAt = document.dataAutorizacao ?? document.dataEmissao;
+    const conclusiveDeadline = authorizedAt ? new Date(authorizedAt.getTime() + 90 * 24 * 60 * 60 * 1000) : null;
     const status = document.xmlCompletoDisponivel
       ? 'xml_completo_disponivel'
       : hasAcceptedManifestation
@@ -89,6 +573,8 @@ export class NfeManifestacaoService {
       tipoRelacao: document.tipoRelacao,
       resumoDisponivel: document.resumoDisponivel,
       xmlCompletoDisponivel: document.xmlCompletoDisponivel,
+      manifestacaoConclusivaPendente: hasAcceptedScience && !hasAcceptedFinal && Boolean(conclusiveDeadline),
+      prazoManifestacaoConclusiva: hasAcceptedScience && !hasAcceptedFinal ? conclusiveDeadline : null,
       historico: mergedHistory.map((item) => ({ ...item, xMotivo: this.sanitizeSefazText(item.xMotivo) }))
     };
   }
@@ -218,6 +704,9 @@ export class NfeManifestacaoService {
           processadoEm: new Date()
         }
       });
+      if (accepted && (code === SCIENCE_CODE || FINAL_CODES.has(code))) {
+        await this.scheduleXmlRecovery(document.id);
+      }
       this.logSafeResult(dto.tipo, document.ambiente, response.statusCode, response.cStat, response.eventCStat, status, response.eventXMotivo ?? response.xMotivo);
       return this.toPublicResult(updated);
     } catch (error) {
@@ -236,6 +725,204 @@ export class NfeManifestacaoService {
       this.logSafeResult(dto.tipo, document.ambiente, null, null, null, status, message);
       return this.toPublicResult(updated);
     }
+  }
+
+  private async registerAutomaticScience(
+    source: Awaited<ReturnType<NfeManifestacaoService['getDocumentOrThrow']>>,
+    authorizedById: string | null,
+    authorizedAt: Date | null
+  ): Promise<{ status: string; cStat: string | null; xMotivo: string | null }> {
+    if (process.env.NFE_DISTRIBUICAO_CLIENT_MODE !== 'real') {
+      return { status: 'falha_local', cStat: null, xMotivo: 'O cliente real da SEFAZ nao esta ativo.' };
+    }
+    const document = await this.getDocumentOrThrow(source.id, source.clienteId);
+    try {
+      this.assertManifestationEligible(document);
+    } catch (error) {
+      return { status: 'falha_local', cStat: null, xMotivo: this.toSafeErrorMessage(error) };
+    }
+    const actor = this.onlyDigits(document.estabelecimento.cnpj);
+    const certificate = await this.findCertificate(document.clienteId, document.estabelecimentoId, actor);
+    if (!certificate || !(await this.storage.hasObject(certificate.arquivoCriptografadoPath))) {
+      return { status: 'falha_local', cStat: null, xMotivo: 'Nao existe certificado digital ativo, valido e vinculado a identidade do estabelecimento.' };
+    }
+    try {
+      this.assertScienceDeadline(document.dataAutorizacao ?? document.dataEmissao);
+    } catch (error) {
+      return { status: 'falha_local', cStat: null, xMotivo: this.toSafeErrorMessage(error) };
+    }
+    const priorEvents = await this.loadImportedManifestations(document.id);
+    const priorAttempts = await this.prisma.nfeManifestacao.findMany({ where: { nfeDocumentoId: document.id }, orderBy: { createdAt: 'asc' } });
+    if ([...priorEvents, ...priorAttempts].some((item) => INDETERMINATE_STATUSES.has(item.status))) {
+      return { status: 'resultado_indeterminado', cStat: null, xMotivo: 'Existe uma manifestacao anterior com resultado nao confirmado; a automacao nao repetiu o evento.' };
+    }
+    if ([...priorEvents, ...priorAttempts].some((item) => FINAL_CODES.has(item.tipoEvento) && TERMINAL_ACCEPTED_STATUSES.has(item.status))) {
+      return { status: 'falha_local', cStat: null, xMotivo: 'Ja existe manifestacao conclusiva; a Ciencia automatica nao foi enviada.' };
+    }
+    const priorScience = [...priorEvents, ...priorAttempts].find((item) => item.tipoEvento === SCIENCE_CODE);
+    if (priorScience) {
+      if (priorScience.status === 'registrada') return { status: 'registrada', cStat: priorScience.cStat, xMotivo: priorScience.xMotivo };
+      if (priorScience.status === 'registrada_sem_vinculo') return { status: 'registrada_sem_vinculo', cStat: priorScience.cStat, xMotivo: priorScience.xMotivo };
+      if (priorScience.status !== 'falha_local' && priorScience.status !== 'rejeitada') {
+        return { status: priorScience.status, cStat: priorScience.cStat ?? null, xMotivo: priorScience.xMotivo ?? null };
+      }
+      return { status: 'rejeitada', cStat: priorScience.cStat ?? null, xMotivo: priorScience.xMotivo ?? 'Uma tentativa anterior de Ciencia nao foi aceita; a automacao nao repetiu o evento.' };
+    }
+
+    const currentAuthorization = await this.prisma.nfeAutomacaoConfiguracao.findUnique({
+      where: {
+        clienteId_estabelecimentoId_ambiente: {
+          clienteId: document.clienteId,
+          estabelecimentoId: document.estabelecimentoId,
+          ambiente: document.ambiente
+        }
+      },
+      select: { cienciaAutomatica: true, autorizacaoAtiva: true }
+    });
+    if (!currentAuthorization?.cienciaAutomatica || !currentAuthorization.autorizacaoAtiva) {
+      return { status: 'falha_local', cStat: null, xMotivo: 'A autorizacao da automacao foi revogada ou desativada antes do envio.' };
+    }
+
+    const requestedAt = new Date();
+    let attempt;
+    try {
+      attempt = await this.prisma.nfeManifestacao.create({
+        data: {
+          nfeDocumentoId: document.id,
+          clienteId: document.clienteId,
+          estabelecimentoId: document.estabelecimentoId,
+          certificadoId: certificate.id,
+          usuarioId: authorizedById || undefined,
+          requestId: randomUUID(),
+          tipoEvento: SCIENCE_CODE,
+          nSeqEvento: 1,
+          ambiente: document.ambiente,
+          status: 'enviando',
+          justificativa: null,
+          autorizacaoExpressaEm: authorizedAt ?? requestedAt,
+          enviadoEm: requestedAt
+        }
+      });
+    } catch (error) {
+      if (this.isUniqueConstraintError(error)) {
+        const previous = await this.prisma.nfeManifestacao.findMany({ where: { nfeDocumentoId: document.id, tipoEvento: SCIENCE_CODE }, orderBy: { createdAt: 'desc' } });
+        const latest = previous[0];
+        return { status: latest?.status ?? 'resultado_indeterminado', cStat: latest?.cStat ?? null, xMotivo: this.sanitizeSefazText(latest?.xMotivo) };
+      }
+      throw error;
+    }
+    try {
+      const response = await this.manifestacaoClient.sendManifestacao({
+        cnpjConsulta: actor,
+        chaveAcesso: document.chaveAcesso,
+        tipo: 'ciencia_operacao',
+        sequencia: 1,
+        ambiente: document.ambiente,
+        certificateId: certificate.id
+      });
+      const accepted = response.statusCode === 200 && response.cStat === '128' && ['135', '136'].includes(response.eventCStat || '');
+      const status = accepted ? response.eventCStat === '135' ? 'registrada' : 'registrada_sem_vinculo' : 'rejeitada';
+      const updated = await this.prisma.nfeManifestacao.update({
+        where: { id: attempt.id },
+        data: {
+          status,
+          cStat: response.eventCStat ?? response.cStat,
+          xMotivo: this.sanitizeSefazText(response.eventXMotivo ?? response.xMotivo),
+          nProt: response.nProt,
+          processadoEm: new Date()
+        }
+      });
+      this.logSafeResult('ciencia_operacao', document.ambiente, response.statusCode, response.cStat, response.eventCStat, status, response.eventXMotivo ?? response.xMotivo);
+      if (status === 'registrada') await this.scheduleXmlRecovery(document.id);
+      return { status, cStat: updated.cStat, xMotivo: this.sanitizeSefazText(updated.xMotivo) };
+    } catch (error) {
+      const status = error instanceof NfeManifestacaoClientError && !error.requestMayHaveBeenSent ? 'falha_local' : 'resultado_indeterminado';
+      const safeMessage = this.toSafeErrorMessage(error);
+      const updated = await this.prisma.nfeManifestacao.update({
+        where: { id: attempt.id },
+        data: { status, xMotivo: safeMessage, processadoEm: new Date() }
+      });
+      this.logSafeResult('ciencia_operacao', document.ambiente, null, null, null, status, safeMessage);
+      return { status, cStat: updated.cStat, xMotivo: safeMessage };
+    }
+  }
+
+  private assertScienceDeadline(authorizedAt?: Date | null): void {
+    if (!authorizedAt || Number.isNaN(authorizedAt.getTime())) {
+      throw new BadRequestException('Nao foi possivel validar o prazo oficial de 10 dias da Ciencia sem a data de autorizacao da NF-e.');
+    }
+    if (Date.now() > authorizedAt.getTime() + 10 * 24 * 60 * 60 * 1000) {
+      throw new BadRequestException('O prazo oficial de 10 dias para Ciencia da Emissao foi excedido.');
+    }
+  }
+
+  private async enqueueExistingSummaries(config: {
+    id: string; clienteId: string; estabelecimentoId: string; ambiente: NfeAmbiente;
+  }): Promise<void> {
+    let cursor: string | undefined;
+    while (true) {
+      const documents = await this.prisma.nfeDocumento.findMany({
+        where: {
+          clienteId: config.clienteId,
+          estabelecimentoId: config.estabelecimentoId,
+          ambiente: config.ambiente,
+          modelo: '55',
+          tipoRelacao: 'recebida',
+          resumoDisponivel: true,
+          xmlCompletoDisponivel: false,
+          xmlRecuperacao: null
+        },
+        orderBy: { id: 'asc' },
+        take: 500,
+        ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}),
+        select: { id: true }
+      });
+      if (documents.length === 0) break;
+      await this.prisma.nfeXmlRecuperacao.createMany({
+        data: documents.map((document) => ({
+          nfeDocumentoId: document.id,
+          clienteId: config.clienteId,
+          estabelecimentoId: config.estabelecimentoId,
+          configuracaoId: config.id,
+          ambiente: config.ambiente,
+          status: 'aguardando_ciencia'
+        })),
+        skipDuplicates: true
+      });
+      if (documents.length < 500) break;
+      cursor = documents[documents.length - 1].id;
+    }
+  }
+
+  private toPublicAutomationConfig(config: {
+    clienteId: string; estabelecimentoId: string; ambiente: NfeAmbiente; cienciaAutomatica: boolean;
+    recuperacaoXmlAutomatica: boolean; autorizacaoAtiva: boolean; autorizadaEm: Date | null;
+    versaoTermo: string | null; revogadaEm: Date | null;
+  }) {
+    return {
+      clienteId: config.clienteId,
+      estabelecimentoId: config.estabelecimentoId,
+      ambiente: config.ambiente,
+      cienciaAutomatica: config.cienciaAutomatica,
+      recuperacaoXmlAutomatica: config.recuperacaoXmlAutomatica,
+      autorizacaoAtiva: config.autorizacaoAtiva,
+      autorizadaEm: config.autorizadaEm,
+      versaoTermo: config.versaoTermo,
+      revogadaEm: config.revogadaEm
+    };
+  }
+
+  private async updateRecoveryTask(id: string, leaseId: string, data: Prisma.NfeXmlRecuperacaoUpdateManyMutationInput) {
+    await this.prisma.nfeXmlRecuperacao.updateMany({ where: { id, leaseId }, data });
+  }
+
+  private async scheduleXmlRecovery(documentId: string) {
+    const task = await this.prisma.nfeXmlRecuperacao.findUnique({ where: { nfeDocumentoId: documentId }, include: { configuracao: true } });
+    if (!task || !task.configuracao.recuperacaoXmlAutomatica || task.status === 'xml_disponivel') return;
+    await this.prisma.nfeXmlRecuperacao.update({
+      where: { id: task.id },
+      data: { status: 'aguardando_xml', resultadoConsulta: 'manifestacao_registrada', proximaTentativaEm: new Date(), cStat: null, xMotivo: null }
+    });
   }
 
   private async getDocumentOrThrow(documentId: string, clienteId: string) {
@@ -260,6 +947,10 @@ export class NfeManifestacaoService {
     }
     if (!document.resumoDisponivel || document.xmlCompletoDisponivel) {
       throw new BadRequestException('Manifestacao disponivel somente quando existe resumo sem XML completo.');
+    }
+    const summaryStatus = String(document.status || '').trim();
+    if (summaryStatus !== '1' && !/autorizad/i.test(summaryStatus)) {
+      throw new BadRequestException('Ciencia automatica permitida somente para resNFe com cSitNFe 1 (uso autorizado).');
     }
     if (!document.estabelecimento.ativo || document.estabelecimento.clienteId !== document.clienteId) {
       throw new BadRequestException('Estabelecimento inativo ou fora do escopo do cliente.');

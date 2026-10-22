@@ -31,6 +31,7 @@ import { StartNfeSyncDto } from './dto/start-sync.dto';
 import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
 import { UpdateMonofasicoAliquotasDto } from './dto/update-monofasico-aliquotas.dto';
 import { RegistrarNfeManifestacaoDto } from './dto/registrar-manifestacao.dto';
+import { NfeAutomacaoQueryDto, RevogarAutomacaoNfeDto, UpdateAutomacaoNfeDto } from './dto/update-automacao-nfe.dto';
 import { NfeService } from './nfe.service';
 import { NfeManifestacaoService } from './nfe-manifestacao.service';
 import { AuthenticatedRequest } from '../auth/auth.types';
@@ -58,6 +59,9 @@ const sefazDiagnosticsSchema: SchemaObject = {
       documentsFiltered: { type: 'integer' },
       documentsAttempted: { type: 'integer' },
       documentsProcessed: { type: 'integer' },
+      documentsNew: { type: 'integer' },
+      documentsUpdated: { type: 'integer' },
+      documentsDuplicates: { type: 'integer' },
       documentsFailed: { type: 'integer' },
       documentsNotAttempted: { type: 'integer' },
       processingResult: { type: 'string', enum: ['concluido', 'sem_documentos', 'aguardando_sefaz', 'falha'] },
@@ -75,6 +79,9 @@ const nfeSyncRunResponseSchema: SchemaObject = {
   properties: {
     processed: { type: 'integer' },
     documentsSaved: { type: 'integer' },
+    documentsNew: { type: 'integer' },
+    documentsUpdated: { type: 'integer' },
+    documentsDuplicates: { type: 'integer' },
     failures: { type: 'integer' },
     sefazDiagnostics: sefazDiagnosticsSchema
   }
@@ -129,7 +136,7 @@ export class NfeController {
   @Roles('admin')
   @ApiOperation({
     summary: 'Registra uma manifestação do destinatário após autorização expressa do usuário.',
-    description: 'Aceita CPF e CNPJ com certificado cujo titular corresponda exatamente ao estabelecimento. Não envia eventos automaticamente. Ciência é opcional e não conclusiva; eventos conclusivos exigem operação compatível e respeitam o prazo vigente de 90 dias da autorização. Não use Confirmação apenas para obter XML.'
+    description: 'Aceita CPF e CNPJ com certificado cujo titular corresponda exatamente ao estabelecimento. A rota manual exige autorizacao expressa e nao envia eventos automaticamente; Ciencia automatica so funciona com autorizacao ativa por estabelecimento. Eventos conclusivos exigem operacao compativel e respeitam o prazo vigente de 90 dias da autorizacao. Nao use Confirmacao apenas para obter XML.'
   })
   @ApiOkResponse({ schema: { type: 'object', properties: {
     id: { type: 'string' }, tipoEvento: { type: 'string' }, nSeqEvento: { type: 'integer' },
@@ -144,6 +151,63 @@ export class NfeController {
     @Req() request: AuthenticatedRequest
   ) {
     return this.nfeManifestacaoService.registrar(id, dto, request.authUser?.userId);
+  }
+
+  @Get('automacao/configuracoes')
+  @Roles('admin')
+  @ApiOkResponse({ schema: { type: 'array', items: { type: 'object', additionalProperties: true } } })
+  @ApiOperation({ summary: 'Lista as configurações da obtenção automática de XML por estabelecimento e ambiente.' })
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  getAutomacaoConfiguracoes(@Query() query: NfeAutomacaoQueryDto) {
+    return this.nfeManifestacaoService.listAutomationSettings(query);
+  }
+
+  @Put('automacao/configuracoes')
+  @Roles('admin')
+  @ApiOkResponse({ schema: { type: 'object', additionalProperties: true } })
+  @ApiOperation({
+    summary: 'Atualiza a obtenção automática de XML para um estabelecimento.',
+    description: `A Ciência é desligada por padrão. Ativá-la exige confirmação expressa do usuário administrador e o termo ${'2026-10-v1'}; a autorização vale somente para o estabelecimento e ambiente indicados. A recuperação XML respeita os bloqueios oficiais e não registra manifestações conclusivas.`
+  })
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  updateAutomacaoConfiguracoes(@Body() dto: UpdateAutomacaoNfeDto, @Req() request: AuthenticatedRequest) {
+    return this.nfeManifestacaoService.updateAutomationSettings(dto, request.authUser?.userId);
+  }
+
+  @Post('automacao/revogar')
+  @Roles('admin')
+  @ApiOkResponse({ schema: { type: 'object', additionalProperties: true } })
+  @ApiOperation({ summary: 'Revoga a autorização para novas Ciências automáticas neste estabelecimento e ambiente.' })
+  @TenantScope({ source: 'body', key: 'clienteId', required: true })
+  revokeAutomacao(@Body() dto: RevogarAutomacaoNfeDto, @Req() request: AuthenticatedRequest) {
+    return this.nfeManifestacaoService.revokeAutomationAuthorization(dto, request.authUser?.userId);
+  }
+
+  @Get('automacao/pendencias')
+  @Roles('admin')
+  @ApiOkResponse({ schema: { type: 'array', items: { type: 'object', additionalProperties: true } } })
+  @ApiOperation({ summary: 'Lista resumos, Ciências e recuperações XML pendentes no escopo do cliente.' })
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  getAutomacaoPendencias(@Query() query: NfeAutomacaoQueryDto) {
+    return this.nfeManifestacaoService.listAutomaticRecoveryItems(query);
+  }
+
+  @Get('automacao/manifestacoes')
+  @Roles('admin')
+  @ApiOkResponse({ schema: { type: 'array', items: { type: 'object', additionalProperties: true } } })
+  @ApiOperation({ summary: 'Lista as manifestações de NF-e no escopo do cliente.' })
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  getAutomacaoManifestacoes(@Query() query: NfeAutomacaoQueryDto) {
+    return this.nfeManifestacaoService.listAutomationManifestations(query);
+  }
+
+  @Get('automacao/auditoria')
+  @Roles('admin')
+  @ApiOkResponse({ schema: { type: 'array', items: { type: 'object', additionalProperties: true } } })
+  @ApiOperation({ summary: 'Lista o histórico de ativações, alterações e revogações da automação.' })
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  getAutomacaoAuditoria(@Query() query: NfeAutomacaoQueryDto) {
+    return this.nfeManifestacaoService.listAutomationAudit(query);
   }
 
   @Get('cst-060-analysis')

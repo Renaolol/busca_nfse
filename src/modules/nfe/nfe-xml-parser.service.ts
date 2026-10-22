@@ -337,7 +337,7 @@ export class NfeXmlParserService {
     return (
       this.extractNestedAny(xml, ['protNFe'], ['dhRecbto', 'dhAut']) ??
       this.extractNestedAny(xml, ['infProt'], ['dhRecbto', 'dhAut']) ??
-      this.extract(xml, ['dhAut'])
+      this.extract(xml, ['dhRecbto', 'dhAut'])
     );
   }
 

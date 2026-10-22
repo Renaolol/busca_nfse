@@ -136,6 +136,21 @@ describe('NfeXmlParserService', () => {
     });
   });
 
+  it('usa dhRecbto do resumo resNFe como data de autorizacao para validar prazo de Ciencia', () => {
+    const parsed = service.parse(`<?xml version="1.0" encoding="UTF-8"?>
+<resNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01">
+  <chNFe>35260612345678000199550010000001231000001231</chNFe>
+  <CNPJ>12345678000199</CNPJ>
+  <xNome>Fornecedor Resumo</xNome>
+  <dhEmi>2026-06-29T10:00:00-03:00</dhEmi>
+  <dhRecbto>2026-06-29T10:02:00-03:00</dhRecbto>
+  <vNF>88.15</vNF>
+  <cSitNFe>1</cSitNFe>
+</resNFe>`);
+
+    expect(parsed.dataAutorizacao?.toISOString()).toBe('2026-06-29T13:02:00.000Z');
+  });
+
   it('parseia CPF do emitente no resumo resNFe e preserva zeros a esquerda', () => {
     const parsed = service.parse(`<?xml version="1.0" encoding="UTF-8"?>
 <resNFe xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01">

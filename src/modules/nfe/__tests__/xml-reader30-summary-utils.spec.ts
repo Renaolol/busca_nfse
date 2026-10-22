@@ -33,6 +33,27 @@ describe('xml-reader30-summary-utils', () => {
     expect(shouldIncludeDocumentValueInSum(item)).toBe(true);
   });
 
+  it('inclui resNFe autorizada e exclui resumos denegados ou cancelados', () => {
+    expect(shouldIncludeDocumentValueInSum({
+      resumoDisponivel: true,
+      schemaDoc: 'resNFe_v1.01.xsd',
+      statusFiscal: 'Autorizada (resumo)',
+      valor: '88.15'
+    })).toBe(true);
+    expect(shouldIncludeDocumentValueInSum({
+      resumoDisponivel: true,
+      schemaDoc: 'resNFe_v1.01.xsd',
+      statusFiscal: 'Denegada (resumo)',
+      valor: '88.15'
+    })).toBe(false);
+    expect(shouldIncludeDocumentValueInSum({
+      resumoDisponivel: true,
+      schemaDoc: 'resNFe_v1.01.xsd',
+      statusFiscal: 'Cancelada (resumo)',
+      valor: '88.15'
+    })).toBe(false);
+  });
+
   it('nao exclui CT-e autorizado por cancelamento de CT-e complementar no resumo de eventos', () => {
     const item = {
       statusFiscal: 'Autorizada',

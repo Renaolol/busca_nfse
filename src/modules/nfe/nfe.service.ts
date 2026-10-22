@@ -49,6 +49,7 @@ import { StartNfeSyncDto } from './dto/start-sync.dto';
 import { UpdateNfeSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
 import { MonofasicoAliquotaPeriodoDto, UpdateMonofasicoAliquotasDto } from './dto/update-monofasico-aliquotas.dto';
 import { NfeXmlParserService, ParsedCst060Item, ParsedDfeEvento, ParsedNfe } from './nfe-xml-parser.service';
+import { NfeManifestacaoService } from './nfe-manifestacao.service';
 
 type NfeNightlySweepConfigFile = {
   enabled?: boolean;
@@ -133,6 +134,9 @@ type SefazDfeRunDiagnostic = {
   documentsFiltered: number;
   documentsAttempted: number;
   documentsProcessed: number;
+  documentsNew: number;
+  documentsUpdated: number;
+  documentsDuplicates: number;
   documentsFailed: number;
   documentsNotAttempted: number;
   processingResult: 'concluido' | 'sem_documentos' | 'aguardando_sefaz' | 'falha';
@@ -165,11 +169,18 @@ type NfeSyncRunFailureDetail = {
 type NfeSyncRunResult = {
   processed: number;
   documentsSaved: number;
+  documentsNew?: number;
+  documentsUpdated?: number;
+  documentsDuplicates?: number;
   failures: number;
   executionDetails: NfeSyncRunFailureDetail[];
   failureDetails: NfeSyncRunFailureDetail[];
   cpfDiagnostics?: SefazCpfHistoricalDiagnostics;
   sefazDiagnostics?: SefazDfeRunDiagnostic[];
+};
+
+type NfePersistedDocument = Prisma.NfeDocumentoGetPayload<Record<string, never>> & {
+  persistenceAction?: 'novo' | 'atualizado' | 'duplicado';
 };
 
 type NfeSyncActivationResult = {
@@ -248,13 +259,17 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(NfeService.name);
   private autoSyncTimer: NodeJS.Timeout | null = null;
   private nightlySweepTimer: NodeJS.Timeout | null = null;
+  private automaticXmlRecoveryTimer: NodeJS.Timeout | null = null;
   private autoSyncRunning = false;
   private nightlySweepRunning = false;
+  private automaticXmlRecoveryRunning = false;
   private lastNightlySweepExecutionKey: string | null = null;
   private readonly executedNightlySweepKeys = new Set<string>();
   private readonly autoSyncEnabled = process.env.NFE_SYNC_AUTO_RUN_ENABLED !== 'false';
   private readonly autoSyncIntervalMs = this.parsePositiveNumberEnv('NFE_SYNC_AUTO_RUN_INTERVAL_MS', 5 * 60 * 1000);
   private readonly autoSyncStartupDelayMs = this.parsePositiveNumberEnv('NFE_SYNC_AUTO_RUN_STARTUP_DELAY_MS', 15000);
+  private readonly automaticXmlRecoveryEnabled = process.env.NFE_XML_AUTO_RECOVERY_ENABLED !== 'false';
+  private readonly automaticXmlRecoveryIntervalMs = this.parsePositiveNumberEnv('NFE_XML_AUTO_RECOVERY_INTERVAL_MS', 10 * 60 * 1000);
   private nightlySweepEnabled = process.env.NFE_SYNC_NIGHTLY_SWEEP_ENABLED !== 'false';
   private readonly nightlySweepCheckIntervalMs = this.parsePositiveNumberEnv('NFE_SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS', 60000);
   private readonly nightlySweepHour = this.parseBoundedIntegerEnv('NFE_SYNC_NIGHTLY_SWEEP_HOUR', 23, 0, 23);
@@ -277,7 +292,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     @Inject(DANFE_PDF_GENERATOR) private readonly danfePdfGenerator: DanfePdfGenerator,
     @Inject(forwardRef(() => CteService)) private readonly cteService: CteService,
     @Inject(NFE_DISTRIBUICAO_CLIENT) private readonly distribuicaoClient: NfeDistribuicaoClient,
-    @Inject(DOMINIO_NFE_XML_SOURCE) private readonly dominioXmlSource: DominioNfeXmlSource
+    @Inject(DOMINIO_NFE_XML_SOURCE) private readonly dominioXmlSource: DominioNfeXmlSource,
+    private readonly nfeManifestacaoService: NfeManifestacaoService
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -302,6 +318,16 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.refreshNightlySweepTimer();
+    if (this.automaticXmlRecoveryEnabled) {
+      this.automaticXmlRecoveryTimer = setInterval(() => {
+        void this.runAutomaticXmlRecoveryCycle();
+      }, this.automaticXmlRecoveryIntervalMs);
+      this.automaticXmlRecoveryTimer.unref?.();
+      const recoveryStartupTimer = setTimeout(() => {
+        void this.runAutomaticXmlRecoveryCycle();
+      }, 30000);
+      recoveryStartupTimer.unref?.();
+    }
   }
 
   onModuleDestroy(): void {
@@ -313,6 +339,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     if (this.nightlySweepTimer) {
       clearInterval(this.nightlySweepTimer);
       this.nightlySweepTimer = null;
+    }
+    if (this.automaticXmlRecoveryTimer) {
+      clearInterval(this.automaticXmlRecoveryTimer);
+      this.automaticXmlRecoveryTimer = null;
     }
   }
 
@@ -1733,6 +1763,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       Object.assign(diagnostic, this.createSefazDfeRunDiagnostic(control, result), { method, clientMode: 'real' });
       diagnostic.documentsAttempted = 0;
       diagnostic.documentsProcessed = 0;
+      diagnostic.documentsNew = 0;
+      diagnostic.documentsUpdated = 0;
+      diagnostic.documentsDuplicates = 0;
       diagnostic.documentsFailed = 0;
       diagnostic.documentsNotAttempted = result.documents.length;
 
@@ -1744,7 +1777,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         diagnostic.documentsAttempted += 1;
         diagnostic.documentsNotAttempted = Math.max(0, result.documents.length - diagnostic.documentsAttempted);
         try {
-          await this.persistDocument({
+          const persisted = await this.persistDocument({
             clienteId: control.clienteId,
             estabelecimentoId: control.estabelecimentoId,
             ambiente: control.ambiente,
@@ -1753,6 +1786,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             origem: NfeDocumentoOrigem.distribuicao_nsu
           });
           diagnostic.documentsProcessed += 1;
+          this.incrementPersistenceDiagnostic(diagnostic, persisted.persistenceAction);
         } catch {
           persistenceFailure = true;
           diagnostic.documentsFailed += 1;
@@ -3918,7 +3952,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             );
           }
           isPersistingDocument = true;
-          await this.persistDocument({
+          const persisted = await this.persistDocument({
             clienteId: control.clienteId,
             estabelecimentoId: control.estabelecimentoId,
             ambiente: control.ambiente,
@@ -3930,6 +3964,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           documentsSaved += 1;
           if (sefazDiagnostic) {
             sefazDiagnostic.documentsProcessed += 1;
+            this.incrementPersistenceDiagnostic(sefazDiagnostic, persisted.persistenceAction);
           }
           if (document.nsu && document.nsu > highestDocumentNsu) {
             highestDocumentNsu = document.nsu;
@@ -4022,6 +4057,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return {
       processed: controls.length,
       documentsSaved,
+      documentsNew: sefazDiagnostics.reduce((sum, diagnostic) => sum + diagnostic.documentsNew, 0),
+      documentsUpdated: sefazDiagnostics.reduce((sum, diagnostic) => sum + diagnostic.documentsUpdated, 0),
+      documentsDuplicates: sefazDiagnostics.reduce((sum, diagnostic) => sum + diagnostic.documentsDuplicates, 0),
       failures,
       executionDetails,
       failureDetails,
@@ -4054,6 +4092,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       documentsFiltered: 0,
       documentsAttempted: 0,
       documentsProcessed: 0,
+      documentsNew: 0,
+      documentsUpdated: 0,
+      documentsDuplicates: 0,
       documentsFailed: 0,
       documentsNotAttempted: result.documents.length,
       processingResult: result.documentExtraction?.discardedCount
@@ -4097,11 +4138,23 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       documentsFiltered: 0,
       documentsAttempted: 0,
       documentsProcessed: 0,
+      documentsNew: 0,
+      documentsUpdated: 0,
+      documentsDuplicates: 0,
       documentsFailed: 0,
       documentsNotAttempted: 0,
       processingResult: 'falha',
       failureStage: 'before_response'
     };
+  }
+
+  private incrementPersistenceDiagnostic(
+    diagnostic: SefazDfeRunDiagnostic,
+    action?: 'novo' | 'atualizado' | 'duplicado'
+  ): void {
+    if (action === 'novo') diagnostic.documentsNew += 1;
+    else if (action === 'atualizado') diagnostic.documentsUpdated += 1;
+    else if (action === 'duplicado') diagnostic.documentsDuplicates += 1;
   }
 
   private countSefazDocumentSchemas(documents: NfeDistribuicaoDocument[]): Record<string, number> {
@@ -4238,7 +4291,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     document: NfeDistribuicaoDocument;
     origem: NfeDocumentoOrigem;
     tipoRelacaoForcada?: NfeTipoRelacao;
-  }) {
+  }): Promise<NfePersistedDocument> {
     const classifiedXml = this.parser.classify(params.document.xml);
     if (classifiedXml.contentType === 'evento') {
       return this.persistEventDocument(params);
@@ -4333,7 +4386,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       origem: params.origem
     };
 
-    return this.prisma.nfeDocumento.upsert({
+    const persisted = await this.prisma.nfeDocumento.upsert({
       where: {
         ambiente_chaveAcesso: {
           ambiente: effectiveAmbiente,
@@ -4343,6 +4396,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       update: updateData,
       create: createData
     });
+    await this.nfeManifestacaoService.observePersistedDocument(persisted.id);
+    const previousHash = isFull ? existing?.hashXmlCompleto : existing?.hashResumo;
+    const persistenceAction: NonNullable<NfePersistedDocument['persistenceAction']> = !existing ? 'novo' : previousHash === hash ? 'duplicado' : 'atualizado';
+    return Object.assign(persisted, { persistenceAction });
   }
 
   private async persistEventDocument(params: {
@@ -4399,6 +4456,8 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         hashXml: hash
       }
     });
+
+    await this.nfeManifestacaoService.observePersistedDocument(documento.id);
 
     return documento;
   }
@@ -4504,6 +4563,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     requestedChave?: string;
   }) {
     let documentosPersistidos = 0;
+    let documentosNovos = 0;
+    let documentosAtualizados = 0;
+    let documentosDuplicados = 0;
     const documentos = params.result.documents.map((document) => ({
       nsu: document.nsu?.toString(),
       schema: document.schema,
@@ -4512,7 +4574,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
 
     if (params.persistir) {
       for (const document of params.result.documents) {
-        await this.persistDocument({
+        const persisted = await this.persistDocument({
           clienteId: params.clienteId,
           estabelecimentoId: params.estabelecimentoId,
           ambiente: params.ambiente,
@@ -4521,6 +4583,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           origem: NfeDocumentoOrigem.distribuicao_nsu
         });
         documentosPersistidos += 1;
+        if (persisted.persistenceAction === 'novo') documentosNovos += 1;
+        else if (persisted.persistenceAction === 'atualizado') documentosAtualizados += 1;
+        else if (persisted.persistenceAction === 'duplicado') documentosDuplicados += 1;
       }
     }
 
@@ -4535,6 +4600,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       persistido: params.persistir,
       documentosEncontrados: params.result.documents.length,
       documentosPersistidos,
+      documentosNovos,
+      documentosAtualizados,
+      documentosDuplicados,
       documentos
     };
   }
@@ -5142,6 +5210,112 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn(`Falha na execucao automatica de NF-e: ${this.toErrorMessage(error)}`);
     } finally {
       this.autoSyncRunning = false;
+    }
+  }
+
+  private async runAutomaticXmlRecoveryCycle(): Promise<void> {
+    if (this.automaticXmlRecoveryRunning || process.env.NFE_DISTRIBUICAO_CLIENT_MODE !== 'real') {
+      return;
+    }
+    this.automaticXmlRecoveryRunning = true;
+    try {
+      const tasks = await this.nfeManifestacaoService.claimDueRecoveryTasks(3);
+      for (const task of tasks) {
+        let resultRecorded = false;
+        try {
+          const prepared = await this.nfeManifestacaoService.prepareAutomaticRecovery(task.id, task.leaseId);
+          if (!prepared.canQuery) continue;
+          const query = await this.consultarChave({
+            clienteId: prepared.clienteId,
+            estabelecimentoId: prepared.estabelecimentoId,
+            chaveAcesso: prepared.chaveAcesso,
+            ambiente: prepared.ambiente,
+            persistir: true
+          });
+          const schemas = query.documentos.map((document) => document.schema || 'sem_schema');
+          const schemaCounts = schemas.reduce<Record<string, number>>((counts, schema) => {
+            counts[schema] = (counts[schema] || 0) + 1;
+            return counts;
+          }, {});
+          const hasFullXml = schemas.some((schema) => schema.startsWith('procNFe') || schema.startsWith('NFe_v'));
+          const httpStatus = Number(query.statusCode);
+          const cStat = String(query.cStat || '').trim() || null;
+          const isOfficialCooldown = cStat === '656';
+          const hasResponse = Number.isFinite(httpStatus);
+          const available = httpStatus === 200 && cStat === '138' && hasFullXml;
+          const noDocumentYet = httpStatus === 200 && ['137', '138'].includes(cStat || '') && !hasFullXml;
+          const resultStatus = available
+            ? 'xml_disponivel'
+            : isOfficialCooldown
+              ? 'aguardando_sefaz'
+              : noDocumentYet
+                ? 'aguardando_xml'
+                : 'erro_processamento';
+          const resultLabel = available
+            ? 'xml_completo_recebido'
+            : isOfficialCooldown
+              ? 'bloqueio_oficial_656'
+              : noDocumentYet
+                ? cStat === '137' ? 'xml_ainda_indisponivel' : 'resumo_ainda_indisponivel_como_xml_completo'
+                : 'retorno_ou_processamento_invalido';
+          await this.nfeManifestacaoService.logAutomaticRecoveryDiagnostic({
+            ambiente: prepared.ambiente,
+            actorType: this.isCpf((await this.getEstablishmentOrThrow(prepared.estabelecimentoId, prepared.clienteId)).cnpj) ? 'CPF' : 'CNPJ',
+            httpStatus: Number.isFinite(httpStatus) ? httpStatus : null,
+            cStat,
+            xMotivo: query.xMotivo || null,
+            documentsReceived: Number(query.documentosEncontrados || 0),
+            schemas,
+            result: resultLabel
+          });
+          await this.nfeManifestacaoService.recordAutomaticRecoveryResult(task.id, task.leaseId, {
+            status: resultStatus,
+            cStat,
+            xMotivo: query.xMotivo || null,
+            resultadoConsulta: resultLabel,
+            retryAfterMs: available ? null : isOfficialCooldown ? 60 * 60 * 1000 : noDocumentYet || !hasResponse ? 6 * 60 * 60 * 1000 : null
+          });
+          resultRecorded = true;
+          this.logger.log(JSON.stringify({
+            tipoConsulta: 'consChNFe_automatica',
+            taskId: task.id,
+            ambiente: prepared.ambiente,
+            httpStatus: Number.isFinite(httpStatus) ? httpStatus : null,
+            cStat,
+            documentosRecebidos: Number(query.documentosEncontrados || 0),
+            documentosProcessados: Number(query.documentosPersistidos || 0),
+            schemaCounts,
+            resultado: resultLabel
+          }));
+        } catch (error) {
+          const message = this.toErrorMessage(error);
+          const isSefazWait = /bloqueio|cooldown|restri[cç][aã]o oficial|limite oficial|consulta SEFAZ esta pausada|nenhuma consulta foi enviada/i.test(message);
+          const safeMessage = this.sanitizeSefazDiagnosticText(message) ?? 'Falha ao consultar disponibilidade do XML.';
+          await this.nfeManifestacaoService.recordAutomaticRecoveryResult(task.id, task.leaseId, {
+            status: isSefazWait ? 'aguardando_sefaz' : 'erro_processamento',
+            cStat: null,
+            xMotivo: safeMessage,
+            resultadoConsulta: isSefazWait ? 'consulta_nao_enviada_por_limite' : 'erro_comunicacao_ou_processamento',
+            retryAfterMs: isSefazWait ? 60 * 60 * 1000 : 6 * 60 * 60 * 1000
+          });
+          resultRecorded = true;
+          this.logger.warn(JSON.stringify({
+            tipoConsulta: 'consChNFe_automatica',
+            taskId: task.id,
+            requisicaoReal: false,
+            resultado: isSefazWait ? 'aguardando_liberacao' : 'erro',
+            motivo: safeMessage
+          }));
+        } finally {
+          if (!resultRecorded) {
+            await this.nfeManifestacaoService.releaseRecoveryTask(task.id, task.leaseId);
+          }
+        }
+      }
+    } catch (error) {
+      this.logger.warn(`Falha ao processar a fila automática de recuperação de XML: ${this.toErrorMessage(error)}`);
+    } finally {
+      this.automaticXmlRecoveryRunning = false;
     }
   }
 

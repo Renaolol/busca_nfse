@@ -129,6 +129,9 @@ model Cliente {
   eventosAcesso          EventoAcesso[]
   conferenciasDocumentos DocumentoConferencia[]
   nfeManifestacoes       NfeManifestacao[]
+  nfeAutomacaoConfiguracoes NfeAutomacaoConfiguracao[]
+  nfeAutomacaoAuditorias NfeAutomacaoAuditoria[]
+  nfeXmlRecuperacoes    NfeXmlRecuperacao[]
 
   @@map("clientes")
 }
@@ -158,6 +161,9 @@ model ClienteEstabelecimento {
   nfceScSyncControles NfceScSyncControle[]
   nfeDocumentos       NfeDocumento[]
   nfeManifestacoes    NfeManifestacao[]
+  nfeAutomacaoConfiguracoes NfeAutomacaoConfiguracao[]
+  nfeAutomacaoAuditorias NfeAutomacaoAuditoria[]
+  nfeXmlRecuperacoes NfeXmlRecuperacao[]
 
   @@unique([clienteId, cnpj], map: "cliente_estabelecimentos_cliente_id_cnpj_key")
   @@map("cliente_estabelecimentos")
@@ -455,6 +461,7 @@ model NfeDocumento {
   estabelecimento ClienteEstabelecimento @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
   eventos         NfeEvento[]
   manifestacoes   NfeManifestacao[]
+  xmlRecuperacao  NfeXmlRecuperacao?
 
   @@unique([ambiente, chaveAcesso], map: "nfe_documentos_ambiente_chave_acesso_key")
   @@unique([clienteId, ambiente, nsu], map: "nfe_documentos_cliente_id_ambiente_nsu_key")
@@ -492,6 +499,85 @@ model NfeManifestacao {
   @@index([nfeDocumentoId, createdAt], map: "nfe_manifestacoes_documento_created_idx")
   @@index([clienteId, estabelecimentoId, createdAt], map: "nfe_manifestacoes_scope_created_idx")
   @@map("nfe_manifestacoes")
+}
+
+model NfeAutomacaoConfiguracao {
+  id                       String      @id @default(uuid()) @db.Uuid
+  clienteId                String      @map("cliente_id") @db.Uuid
+  estabelecimentoId        String      @map("estabelecimento_id") @db.Uuid
+  ambiente                 NfeAmbiente
+  cienciaAutomatica        Boolean     @default(false) @map("ciencia_automatica")
+  recuperacaoXmlAutomatica Boolean     @default(false) @map("recuperacao_xml_automatica")
+  autorizacaoAtiva         Boolean     @default(false) @map("autorizacao_ativa")
+  usuarioAutorizouId       String?     @map("usuario_autorizou_id") @db.Uuid
+  autorizadaEm             DateTime?   @map("autorizada_em")
+  versaoTermo              String?     @map("versao_termo") @db.VarChar(40)
+  revogadaPorId            String?     @map("revogada_por_id") @db.Uuid
+  revogadaEm               DateTime?   @map("revogada_em")
+  createdAt                DateTime    @default(now()) @map("created_at")
+  updatedAt                DateTime    @updatedAt @map("updated_at")
+
+  cliente         Cliente                @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  estabelecimento ClienteEstabelecimento @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
+  usuarioAutorizou Usuario?              @relation("NfeAutomationAuthorizedBy", fields: [usuarioAutorizouId], references: [id], onDelete: SetNull)
+  revogadaPor     Usuario?               @relation("NfeAutomationRevokedBy", fields: [revogadaPorId], references: [id], onDelete: SetNull)
+  auditorias      NfeAutomacaoAuditoria[]
+  recuperacoes    NfeXmlRecuperacao[]
+
+  @@unique([clienteId, estabelecimentoId, ambiente], map: "nfe_automacao_config_cliente_estab_ambiente_key")
+  @@index([clienteId, autorizacaoAtiva, cienciaAutomatica], map: "nfe_automacao_config_ativa_idx")
+  @@map("nfe_automacao_configuracoes")
+}
+
+model NfeAutomacaoAuditoria {
+  id                  String      @id @default(uuid()) @db.Uuid
+  clienteId           String      @map("cliente_id") @db.Uuid
+  estabelecimentoId   String      @map("estabelecimento_id") @db.Uuid
+  configuracaoId      String      @map("configuracao_id") @db.Uuid
+  usuarioId           String?     @map("usuario_id") @db.Uuid
+  acao                String      @db.VarChar(30)
+  cienciaAutomatica   Boolean     @map("ciencia_automatica")
+  recuperacaoXml      Boolean     @map("recuperacao_xml")
+  autorizacaoAtiva    Boolean     @map("autorizacao_ativa")
+  versaoTermo         String?     @map("versao_termo") @db.VarChar(40)
+  createdAt           DateTime    @default(now()) @map("created_at")
+
+  cliente         Cliente                 @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  estabelecimento ClienteEstabelecimento  @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
+  configuracao    NfeAutomacaoConfiguracao @relation(fields: [configuracaoId], references: [id], onDelete: Cascade)
+  usuario         Usuario?                @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+
+  @@index([clienteId, estabelecimentoId, createdAt], map: "nfe_automacao_auditoria_scope_created_idx")
+  @@map("nfe_automacao_auditorias")
+}
+
+model NfeXmlRecuperacao {
+  id                String      @id @default(uuid()) @db.Uuid
+  nfeDocumentoId    String      @unique @map("nfe_documento_id") @db.Uuid
+  clienteId         String      @map("cliente_id") @db.Uuid
+  estabelecimentoId String      @map("estabelecimento_id") @db.Uuid
+  configuracaoId    String      @map("configuracao_id") @db.Uuid
+  ambiente          NfeAmbiente
+  status            String      @default("aguardando_ciencia") @db.VarChar(40)
+  tentativas        Int         @default(0)
+  proximaTentativaEm DateTime?  @map("proxima_tentativa_em")
+  ultimaTentativaEm DateTime?   @map("ultima_tentativa_em")
+  leaseId           String?     @map("lease_id") @db.Uuid
+  leaseAte          DateTime?   @map("lease_ate")
+  cStat             String?     @map("c_stat") @db.VarChar(3)
+  xMotivo           String?     @map("x_motivo") @db.VarChar(255)
+  resultadoConsulta String?     @map("resultado_consulta") @db.VarChar(40)
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  cliente         Cliente                 @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  estabelecimento ClienteEstabelecimento  @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
+  configuracao    NfeAutomacaoConfiguracao @relation(fields: [configuracaoId], references: [id], onDelete: Cascade)
+  nfeDocumento    NfeDocumento             @relation(fields: [nfeDocumentoId], references: [id], onDelete: Cascade)
+
+  @@index([clienteId, estabelecimentoId, status, proximaTentativaEm], map: "nfe_xml_recuperacao_pendentes_idx")
+  @@index([leaseAte], map: "nfe_xml_recuperacao_lease_idx")
+  @@map("nfe_xml_recuperacoes")
 }
 
 model NfeEvento {
@@ -561,6 +647,9 @@ model Usuario {
   auditorias                 AuditoriaUsuario[]
   conferenciasDocumentos     DocumentoConferencia[]
   nfeManifestacoes           NfeManifestacao[]
+  nfeAutomacaoAutorizacoes    NfeAutomacaoConfiguracao[] @relation("NfeAutomationAuthorizedBy")
+  nfeAutomacaoRevogacoes      NfeAutomacaoConfiguracao[] @relation("NfeAutomationRevokedBy")
+  nfeAutomacaoAuditorias      NfeAutomacaoAuditoria[]
   simplesNacionalImportacoes SimplesNacionalImportacao[]
 
   @@index([clienteId, ativo], map: "usuarios_cliente_id_ativo_idx")
