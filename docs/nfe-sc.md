@@ -15,7 +15,7 @@ O requisitante precisa ser contabilista e estar vinculado ao CPF/CNPJ consultado
 ## Configuracao segura
 
 - O modo padrao e mock. Use `NFE_SC_CLIENT_MODE=mock` para desenvolvimento/testes; o cliente real so e selecionado fora de `NODE_ENV=test` quando a variavel for exatamente `real`.
-- A pagina `Buscas NF-e` oferece a busca manual SEF/SC de modelo 55. No modo mock, a interface informa que nao houve acesso a SEF/SC e nao usa o certificado escolhido.
+- A pagina `Buscas NF-e` nao exibe o painel de busca SEF/SC. A configuracao e o acionamento manual seguem disponiveis pelos endpoints administrativos descritos abaixo. No modo mock, nenhuma consulta e enviada a SEF/SC e nenhum certificado real e usado.
 - Configure pelo endpoint administrativo somente depois de confirmar, fora do NotaSync, que o titular do A1 contabilista tem vinculo com o produtor na SEF/SC. O servico retorna `8002` se a autorizacao nao estiver reconhecida.
 - A configuracao aceita somente estabelecimento com CPF valido e certificado A1 ativo, nao vencido e vinculado ao cliente/estabelecimento. Trocar certificado preserva o cursor. O filtro `indAtor` fica imutavel depois do primeiro NSU para evitar pular documentos.
 - A integracao nao envia manifestacao do destinatario e nao consulta certificado real durante a configuracao. O XML do certificado e a senha continuam usando o storage criptografado existente.

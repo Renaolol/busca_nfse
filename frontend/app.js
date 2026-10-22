@@ -38,7 +38,6 @@ const AUTH_STORAGE_KEY = 'gcont:auth:v1';
 const THEME_STORAGE_KEY = 'gcont:theme:v1';
 const RESOLVED_ALERTS_STORAGE_KEY = 'gcont:resolved-alerts:v1';
 const activeNfceScMonitors = new Set();
-const activeNfeScManualMonitors = new Set();
 const COMPARE_SPED_HISTORY_STORAGE_KEY = 'gcont:compare-sped-history:v1';
 const COMPARE_SPED_HISTORY_LIMIT = 10;
 const SIMPLES_NACIONAL_PAGE_SIZE = 50;
@@ -390,12 +389,6 @@ const state = {
   nfeEventsSyncRunning: false,
   cteEventsSyncRunning: false,
   nfeSyncControls: [],
-  nfeScControls: [],
-  nfeScDocuments: [],
-  nfeScClientMode: 'unknown',
-  nfeScManualMessage: '',
-  nfeScManualBusy: false,
-  nfeScManualSelectedProducerKey: '',
   nfceScControls: [],
   nfceScDocuments: [],
   nfceScStoredDocuments: [],
@@ -426,7 +419,6 @@ const state = {
     filters: false,
     simplified: true,
     technical: false,
-    nfeScManual: true
   },
   nfeSearch: {
     hasSearched: false,
@@ -922,9 +914,6 @@ async function hydrateFromApi(options = {}) {
     monofasicoAliquotasConfig,
     nfceScControlsByClient,
     nfceScDocumentsByClient,
-    nfeScControlsByClient,
-    nfeScDocumentsByClient,
-    nfeScStatus
   ] = await Promise.all([
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/estabelecimentos`, []),
     fetchJsonByClientId(clientIds, (clientId) => `/clientes/${clientId}/certificados`, []),
@@ -949,9 +938,6 @@ async function hydrateFromApi(options = {}) {
     apiRequest('/nfe/xml-reader30/aliquotas-monofasico').catch(() => null),
     fetchJsonByClientId(clientIds, (clientId) => `/nfce-sc/controles?clienteId=${encodeURIComponent(clientId)}`, []),
     fetchJsonByClientId(clientIds, (clientId) => `/nfce-sc/documentos?clienteId=${encodeURIComponent(clientId)}`, []),
-    fetchJsonByClientId(clientIds, (clientId) => `/nfe-sc/controles?clienteId=${encodeURIComponent(clientId)}`, []),
-    fetchJsonByClientId(clientIds, (clientId) => `/nfe-sc/documentos?clienteId=${encodeURIComponent(clientId)}&page=1&pageSize=100`, { items: [] }),
-    apiRequest('/nfe-sc/status').catch(() => ({ clientMode: 'unknown' }))
   ]);
 
   const nfseDocsPage = normalizePaginatedResponse(nfseDocs);
@@ -973,10 +959,6 @@ async function hydrateFromApi(options = {}) {
   const nfeDocuments = buildNfeDocumentsFromApi(nfeDocsPage.items, clients);
   const nfceScDocumentRows = Object.values(nfceScDocumentsByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
   const nfceScDocuments = buildNfeDocumentsFromApi(nfceScDocumentRows, clients);
-  const nfeScControls = Object.values(nfeScControlsByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
-  const nfeScDocuments = Object.entries(nfeScDocumentsByClient || {}).flatMap(([clienteId, response]) =>
-    (Array.isArray(response?.items) ? response.items : []).map((row) => ({ ...row, clienteId }))
-  );
   const cteDocuments = buildCteDocumentsFromApi(cteDocsPage.items, clients);
   const nfeSyncControls = buildNfeSyncControlsFromApi(nfeSyncByClient, clients, establishmentsByClient);
   const nfceScControls = Object.values(nfceScControlsByClient || {}).flatMap((rows) => Array.isArray(rows) ? rows : []);
@@ -994,9 +976,6 @@ async function hydrateFromApi(options = {}) {
   state.nfceScDocuments = nfceScDocuments;
   state.cteDocuments = cteDocuments;
   state.nfeSyncControls = nfeSyncControls;
-  state.nfeScControls = nfeScControls;
-  state.nfeScDocuments = nfeScDocuments;
-  state.nfeScClientMode = ['mock', 'real'].includes(nfeScStatus?.clientMode) ? nfeScStatus.clientMode : 'unknown';
   state.nfceScControls = nfceScControls;
   state.nfeDashboardStats = nfeDashboardStats;
   state.cteDashboardStats = cteDashboardStats;
@@ -2606,11 +2585,6 @@ function onDocumentSubmit(event) {
       void submitNfeSefazDiagnosticRunForm(target);
       return;
     }
-    case 'nfeScManualSearchForm': {
-      event.preventDefault();
-      void submitNfeScManualSearchForm(target);
-      return;
-    }
     case 'nfceScConfigureForm': {
       event.preventDefault();
       void submitNfceScConfigureForm(target);
@@ -2819,11 +2793,6 @@ function onDocumentChange(event) {
   }
   if (action === 'nfe-sefaz-diagnostic-control') {
     updateSefazDiagnosticCertificateOptions(String(target.value || ''));
-    return;
-  }
-  if (action === 'nfe-sc-manual-producer') {
-    state.nfeScManualSelectedProducerKey = String(target.value || '');
-    render();
     return;
   }
   if (action === 'nfce-sc-client-select' || action === 'nfce-sc-establishment-select') {
@@ -4892,215 +4861,6 @@ async function monitorNfceScControl(controlId, clienteId) {
   }
 }
 
-function getNfeScManualProducers() {
-  const producers = [];
-  for (const client of getNfeEligibleClients()) {
-    const establishments = state.establishmentsByClient?.[client.id];
-    for (const establishment of Array.isArray(establishments) ? establishments : []) {
-      const cpf = normalizeDigits(establishment?.cnpj || '');
-      if (establishment?.ativo === false || cpf.length !== 11) continue;
-      producers.push({
-        key: `${client.id}|${establishment.id}`,
-        clientId: client.id,
-        cliente: client.razaoSocial || 'Cliente',
-        estabelecimentoId: establishment.id,
-        estabelecimento: establishment.razaoSocial || establishment.municipioNome || 'Estabelecimento',
-        cpf
-      });
-    }
-  }
-  return producers.sort((left, right) =>
-    `${left.cliente} ${left.estabelecimento}`.localeCompare(`${right.cliente} ${right.estabelecimento}`, 'pt-BR')
-  );
-}
-
-function getNfeScManualCertificates(producer) {
-  if (!producer) return [];
-  return (state.certificates || []).filter((certificate) => {
-    if (
-      !certificate.ativo ||
-      certificate.tipo !== 'A1' ||
-      ['Vencido', 'Arquivo ausente'].includes(certificate.status) ||
-      certificate.arquivoDisponivel === false
-    ) return false;
-    return (!certificate.clientId || certificate.clientId === producer.clientId) &&
-      (!certificate.estabelecimentoId || certificate.estabelecimentoId === producer.estabelecimentoId);
-  });
-}
-
-function renderNfeScManualCertificateOptions(producerKey, producers = getNfeScManualProducers()) {
-  const producer = producers.find((item) => item.key === producerKey);
-  const certificates = getNfeScManualCertificates(producer);
-  return [
-    `<option value="">${producer ? (certificates.length ? 'Selecione o certificado A1' : 'Nenhum certificado A1 disponivel neste escopo') : 'Selecione primeiro o produtor'}</option>`,
-    ...certificates.map((certificate) => {
-      const scope = certificate.clientId ? 'vinculado ao cliente' : 'compartilhado';
-      return `<option value="${escapeHtml(certificate.id)}">${escapeHtml(`${certificate.apelido || 'Certificado'} · ${scope}`)}</option>`;
-    })
-  ].join('');
-}
-
-function renderNfeScManualPanel() {
-  const producers = getNfeScManualProducers();
-  const selectedProducer = producers.find((item) => item.key === state.nfeScManualSelectedProducerKey) || producers[0] || null;
-  const certificates = getNfeScManualCertificates(selectedProducer);
-  const modeNotice = state.nfeScClientMode === 'real'
-    ? '<div class="table-state" role="status">Modo real configurado. A consulta sera enviada somente apos confirmacao do vinculo de autorizacao do contabilista na SEF/SC.</div>'
-    : state.nfeScClientMode === 'mock'
-      ? '<div class="table-state" role="status">Modo mock ativo: nenhuma consulta e enviada a SEF/SC e nenhum certificado real e usado. Para uma consulta oficial, configure o cliente real no servidor e confirme o vinculo do contabilista na SEF/SC.</div>'
-      : '<div class="table-state error" role="status">Nao foi possivel confirmar o modo do servico SEF/SC. Atualize a pagina antes de iniciar a busca.</div>';  const selectedControl = selectedProducer
-    ? state.nfeScControls.find((control) => control.estabelecimentoId === selectedProducer.estabelecimentoId && control.clienteId === selectedProducer.clientId)
-    : null;
-  const relatedDocuments = selectedProducer
-    ? state.nfeScDocuments.filter((item) => item.clienteId === selectedProducer.clientId && item.documento?.estabelecimentoId === selectedProducer.estabelecimentoId)
-    : [];
-  const documentRows = relatedDocuments.slice(0, 100).map((item) => {
-    const document = item.document || {};
-    const schema = String(item.schemaDoc || '');
-    const availability = /^resnfe/i.test(schema)
-      ? 'Resumo pendente'
-      : document.xmlCompletoDisponivel
-        ? 'XML completo'
-        : /procEventoNFe/i.test(schema)
-          ? 'Evento NF-e'
-          : 'Documento sem XML completo';
-    return `<tr><td>${escapeHtml(item.nsu || '—')}</td><td>${escapeHtml(document.numeroNfe || '—')}</td><td>${escapeHtml(schema || 'schema desconhecido')}</td><td>${availability}</td><td>${escapeHtml(document.dataEmissao ? formatDateTime(document.dataEmissao) : '—')}</td></tr>`;
-  }).join('');
-  const selectedKey = selectedProducer?.key || '';
-  const nextAllowedAt = selectedControl?.proximaExecucao ? Date.parse(selectedControl.proximaExecucao) : 0;
-  const isRateLimited = Number.isFinite(nextAllowedAt) && nextAllowedAt > Date.now();
-  const isAdmin = state.auth.user?.role === 'admin';
-  return `<div style="display:grid;gap:14px;">
-    ${modeNotice}
-    ${!isAdmin ? '<div class="table-state error">A busca manual SEF/SC está disponível somente para administradores.</div>' : ''}
-    ${state.nfeScManualMessage ? `<div class="table-state ${state.nfeScManualBusy ? 'loading' : ''}" role="status" aria-live="polite">${escapeHtml(state.nfeScManualMessage)}</div>` : ''}
-    <form id="nfeScManualSearchForm" class="form-grid">
-      <label class="field" style="grid-column:span 2;">Produtor rural (CPF)
-        <select name="producerKey" data-action="nfe-sc-manual-producer" required>${[
-          ...(!producers.length ? ['<option value="">Nenhum estabelecimento com CPF cadastrado</option>'] : []),
-          ...producers.map((producer) => `<option value="${escapeHtml(producer.key)}" ${producer.key === selectedKey ? 'selected' : ''}>${escapeHtml(`${producer.cliente} · ${producer.estabelecimento} · CPF ${formatCpfCnpj(producer.cpf)}`)}</option>`)
-        ].join('')}</select>
-      </label>
-      <label class="field" style="grid-column:span 2;">Certificado A1 do contabilista
-        <select name="certificadoId" required ${certificates.length ? '' : 'disabled'}>${renderNfeScManualCertificateOptions(selectedKey, producers)}</select>
-      </label>
-      <label class="field">Papel do contribuinte na NF-e
-        <select name="indAtor">${renderOptions([1, 2, 3, 9], '3', { 1: 'Emitente', 2: 'Destinatario', 3: 'Emitente ou destinatario', 9: 'Emitente e destinatario' })}</select>
-      </label>
-      <label class="field-inline" style="grid-column:span 3;"><input type="checkbox" name="autorizacaoContabilistaConfirmada" value="true" required /><span>Confirmo que o vínculo do titular deste certificado A1 com o produtor foi verificado e autorizado pela SEF/SC.</span></label>
-      <p class="card-subtitle" style="grid-column:span 3;margin:0;">A consulta avança pelo cursor NSU independente da distribuição nacional. O certificado pode ter titular diferente do produtor; a SEF/SC valida o vínculo cadastral em cada consulta. Esta busca não registra Ciência nem manifesta automaticamente a operação.</p>
-      <div class="stack-actions" style="grid-column:span 3;justify-content:flex-start;">
-        <button class="btn primary" type="submit" ${!isAdmin || state.nfeScClientMode === 'unknown' || !producers.length || !certificates.length || state.nfeScManualBusy || isRateLimited ? 'disabled' : ''}>${state.nfeScManualBusy ? 'Consultando SEF/SC…' : isRateLimited ? 'Aguardar intervalo SEF/SC' : 'Buscar NF-e modelo 55'}</button>
-      </div>
-    </form>
-    ${selectedControl ? `<div class="card" style="padding:12px;"><div class="progress-meta"><strong>Estado da busca manual</strong>${statusBadge(selectedControl.status || 'ativo', toneFromNfeSyncStatus(selectedControl.status))}</div><p class="card-subtitle" style="margin:8px 0 0;">NSU salvo: ${escapeHtml(String(selectedControl.ultimoNsuConsultado || '0'))} · ${escapeHtml(selectedControl.ultimaMensagem || 'Sem consulta registrada')}${selectedControl.proximaExecucao ? ` · Próxima consulta permitida: ${escapeHtml(formatDateTime(selectedControl.proximaExecucao))}` : ''}</p></div>` : ''}
-    <div class="card" style="padding:0;overflow:auto;">
-      <div style="padding:12px 14px;"><strong>Documentos recebidos da SEF/SC</strong><span class="row-sub">${relatedDocuments.length} documento(s) neste estabelecimento. Resumos permanecem identificados como pendentes e não contam como XML completo.</span></div>
-      <table><thead><tr><th>NSU SEF/SC</th><th>Número</th><th>Tipo recebido</th><th>Disponibilidade</th><th>Emissão</th></tr></thead><tbody>
-        ${documentRows || '<tr><td colspan="5" class="row-sub">Nenhum documento da SEF/SC foi importado para este produtor ainda.</td></tr>'}
-      </tbody></table>
-    </div>
-    <p class="card-subtitle" style="margin:0;">Ocultar ou separar um resNFe na tela não faz a SEF/SC ou o Ambiente Nacional entregar o XML completo. A disponibilidade depende do serviço e da autorização aplicável ao contribuinte.</p>
-  </div>`;
-}
-
-async function refreshNfeScClientData(clienteId) {
-  const [controls, documents] = await Promise.all([
-    apiRequest(`/nfe-sc/controles?clienteId=${encodeURIComponent(clienteId)}`, { cache: false }),
-    apiRequest(`/nfe-sc/documentos?clienteId=${encodeURIComponent(clienteId)}&page=1&pageSize=100`, { cache: false })
-  ]);
-  state.nfeScControls = [
-    ...state.nfeScControls.filter((control) => control.clienteId !== clienteId),
-    ...(Array.isArray(controls) ? controls : [])
-  ];
-  state.nfeScDocuments = [
-    ...state.nfeScDocuments.filter((item) => item.clienteId !== clienteId),
-    ...(Array.isArray(documents?.items) ? documents.items.map((item) => ({ ...item, clienteId })) : [])
-  ];
-}
-
-async function monitorNfeScManualControl(controlId, clienteId) {
-  if (!controlId || !clienteId || activeNfeScManualMonitors.has(controlId)) return;
-  activeNfeScManualMonitors.add(controlId);
-  try {
-    while (true) {
-      await new Promise((resolve) => setTimeout(resolve, 1200));
-      await refreshNfeScClientData(clienteId);
-      const control = state.nfeScControls.find((item) => item.id === controlId);
-      if (!control || control.status !== 'processando') {
-        state.nfeScManualBusy = false;
-        state.nfeScManualMessage = control?.ultimaMensagem || 'Consulta SEF/SC concluída.';
-        render();
-        if (control?.status === 'ativo' && Number(control.totalDocumentosBaixados || 0) > 0) {
-          pushToast('Busca SEF/SC concluída; documentos recebidos estão listados abaixo.', 'success');
-        } else if (control?.status === 'ativo') {
-          pushToast('Consulta SEF/SC concluída sem documentos novos.', 'info');
-        } else if (control) {
-          pushToast(control.ultimaMensagem || 'A consulta SEF/SC terminou com erro.', 'error');
-        }
-        return;
-      }
-      state.nfeScManualMessage = control.ultimaMensagem || 'Consulta SEF/SC em processamento…';
-      render();
-    }
-  } catch (error) {
-    state.nfeScManualBusy = false;
-    state.nfeScManualMessage = `Não foi possível acompanhar a consulta SEF/SC: ${toErrorMessage(error)}`;
-    render();
-  } finally {
-    activeNfeScManualMonitors.delete(controlId);
-  }
-}
-
-async function submitNfeScManualSearchForm(form) {
-  if (state.nfeScManualBusy) return;
-  if (!['mock', 'real'].includes(state.nfeScClientMode)) {
-    state.nfeScManualMessage = 'Nao foi possivel confirmar o modo do servico SEF/SC. Atualize a pagina antes de iniciar a busca.';
-    render();
-    return;
-  }
-  const data = new FormData(form);
-  const [clienteId, estabelecimentoId] = String(data.get('producerKey') || '').split('|');
-  const certificadoId = String(data.get('certificadoId') || '').trim();
-  if (!clienteId || !estabelecimentoId || !certificadoId || data.get('autorizacaoContabilistaConfirmada') !== 'true') {
-    state.nfeScManualMessage = 'Selecione o produtor, o certificado A1 e confirme o vínculo autorizado na SEF/SC.';
-    render();
-    return;
-  }
-
-  state.nfeScManualBusy = true;
-  state.nfeScManualMessage = state.nfeScClientMode === 'real'
-    ? 'Configurando a consulta manual da SEF/SC…'
-    : 'Executando a simulação local; nenhuma requisição será enviada à SEF/SC.';
-  render();
-  try {
-    const control = await apiRequest('/nfe-sc/controles', {
-      method: 'POST',
-      body: {
-        clienteId,
-        estabelecimentoId,
-        certificadoId,
-        ambiente: 'producao',
-        indAtor: Number(data.get('indAtor') || 3),
-        autorizacaoContabilistaConfirmada: true
-      }
-    });
-    state.nfeScManualMessage = state.nfeScClientMode === 'real'
-      ? 'Consulta enviada à SEF/SC; aguardando retorno.'
-      : 'Consulta de teste iniciada. O modo mock não acessa a SEF/SC nem usa o certificado selecionado.';
-    render();
-    await apiRequest(`/nfe-sc/controles/${encodeURIComponent(control.id)}/rodar-agora`, {
-      method: 'POST',
-      body: { clienteId }
-    });
-    await monitorNfeScManualControl(control.id, clienteId);
-  } catch (error) {
-    state.nfeScManualBusy = false;
-    state.nfeScManualMessage = `A busca manual SEF/SC não foi concluída: ${toErrorMessage(error)}`;
-    render();
-  }
-}
-
 function getNfeSefazCpfProducerCertificates(producer) {
   if (!producer) {
     return [];
@@ -6017,14 +5777,6 @@ function renderNfeSyncPage() {
         ${statCard('file', 'NF-e no banco', String(nfeStats.totalNfe), `${nfeStats.xmlsCompletos} XML(s) completos`, 'info')}
       </section>
 
-
-      ${renderCollapsibleCard({
-        sectionKey: 'nfeScManual',
-        title: 'Busca manual NF-e modelo 55 · SEF/SC',
-        subtitle: 'Consulta estadual separada, com cursor NSU próprio para produtor rural CPF.',
-        contentHtml: renderNfeScManualPanel(),
-        defaultOpen: true
-      })}
 
       ${renderNfeManualRunStatusCard()}
 
