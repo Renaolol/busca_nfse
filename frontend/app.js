@@ -5540,10 +5540,15 @@ function nfeAutomationStatusLabel(status) {
 }
 
 function renderNfeAutomationPanel() {
-  const rows = Array.isArray(state.nfeAutomationSettings) ? state.nfeAutomationSettings : [];
-  const pending = Array.isArray(state.nfeAutomationPending) ? state.nfeAutomationPending : [];
-  const manifests = Array.isArray(state.nfeAutomationManifestations) ? state.nfeAutomationManifestations : [];
-  const audit = Array.isArray(state.nfeAutomationAudit) ? state.nfeAutomationAudit : [];
+  const allRows = Array.isArray(state.nfeAutomationSettings) ? state.nfeAutomationSettings : [];
+  const rows = allRows.filter((row) => String(row.actorType || '').toUpperCase() === 'CPF');
+  const cpfEstablishmentIds = new Set(rows.map((row) => row.estabelecimentoId));
+  const pending = (Array.isArray(state.nfeAutomationPending) ? state.nfeAutomationPending : [])
+    .filter((item) => cpfEstablishmentIds.has(item.estabelecimentoId));
+  const manifests = (Array.isArray(state.nfeAutomationManifestations) ? state.nfeAutomationManifestations : [])
+    .filter((item) => cpfEstablishmentIds.has(item.estabelecimentoId));
+  const audit = (Array.isArray(state.nfeAutomationAudit) ? state.nfeAutomationAudit : [])
+    .filter((item) => cpfEstablishmentIds.has(item.estabelecimentoId));
   const pendingRows = pending.filter((item) => item.status !== 'xml_disponivel').slice(0, 100);
   return `<div style="display:grid; gap:14px;">
     ${state.nfeAutomationMessage ? `<div class="table-state ${state.nfeAutomationBusy ? 'loading' : ''}" role="status" aria-live="polite">${escapeHtml(state.nfeAutomationMessage)}</div>` : ''}
@@ -5569,7 +5574,7 @@ function renderNfeAutomationPanel() {
         </div>
         <p class="row-sub" style="margin:8px 0 0;">Autorização registrada: ${escapeHtml(row.autorizadaEm ? formatDateTime(row.autorizadaEm) : 'não concedida')}${row.autorizadaPor ? ` por ${escapeHtml(row.autorizadaPor)}` : ''} · Termo ${escapeHtml(row.versaoTermo || '—')} · Alterações auditadas: ${settingAudit} · Manifestações registradas: ${manifests.filter((item) => item.estabelecimentoId === row.estabelecimentoId).length}</p>
       </form>`;
-    }).join('') : `<div class="table-state">Nenhum controle NF-e ativo encontrado para configurar. Ative a sincronização do estabelecimento CPF/CNPJ primeiro.</div>`}
+    }).join('') : `<div class="table-state">Nenhum controle NF-e ativo de CPF encontrado para configurar. Ative a sincronização do produtor rural primeiro.</div>`}
     <div class="card" style="padding:0; overflow:auto;">
       <div style="padding:12px 14px;"><strong>Documentos aguardando Ciência ou XML completo</strong><span class="row-sub">${pendingRows.length} item(ns) nesta lista${pending.length > pendingRows.length ? ` · ${pending.length - pendingRows.length} XML(s) já disponíveis` : ''}.</span></div>
       <table><thead><tr><th>Estabelecimento</th><th>NF-e</th><th>Ambiente</th><th>Status</th><th>Próxima tentativa</th><th>SEFAZ</th><th></th></tr></thead><tbody>
