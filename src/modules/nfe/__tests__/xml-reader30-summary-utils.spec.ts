@@ -1,9 +1,17 @@
 import {
   isXmlReader30DocumentCancelled,
+  isXmlReader30NfeModel,
   shouldIncludeDocumentValueInSum
 } from '../../../../frontend/xml-reader30-summary-utils.js';
 
 describe('xml-reader30-summary-utils', () => {
+  it('mantem somente documentos modelo 55 no leitor de NF-e', () => {
+    expect(isXmlReader30NfeModel({ modelo: '55' })).toBe(true);
+    expect(isXmlReader30NfeModel({ modelo: 65 })).toBe(false);
+    expect(isXmlReader30NfeModel({ modelo: '65' })).toBe(false);
+    expect(isXmlReader30NfeModel({})).toBe(false);
+  });
+
   it('exclui NF-e cancelada da soma mesmo quando o status parece autorizado', () => {
     const item = {
       statusFiscal: 'Autorizada',

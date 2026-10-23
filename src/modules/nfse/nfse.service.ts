@@ -647,6 +647,12 @@ export class NfseService {
     const { source, tipoRegistro, produtoPadrao, incluirEstoque, acumuladores, contaFornecedorByCnpj, contaServicoByCodigo, contas } = params;
     const data = source.exportData;
     const valorServico = this.roundTo2(data.valorServico ?? 0);
+    const valorDescontoIncondicionado = this.roundTo2(Math.max(data.valorDescontoIncondicionado ?? 0, 0));
+    const valorDescontoTotal = this.roundTo2(
+      Math.max(data.valorDescontoTotal ?? valorDescontoIncondicionado + (data.valorDescontoCondicionado ?? 0), 0)
+    );
+    const valorServicoAposDesconto = this.roundTo2(Math.max(valorServico - valorDescontoTotal, 0));
+    const baseCalculoServico = this.roundTo2(Math.max(valorServico - valorDescontoIncondicionado, 0));
     const valorLiquido = this.roundTo2(data.valorLiquidoNfse ?? 0);
     const valorIss = this.roundTo2(data.valorIss ?? 0);
     const valorIssRetidoReal = this.roundTo2(Math.max(data.valorIssRetidoReal ?? 0, 0));
@@ -656,7 +662,7 @@ export class NfseService {
     const valorPisRetido = this.roundTo2(data.pisRetido ? data.valorPis ?? 0 : 0);
     const valorCofinsRetido = this.roundTo2(data.cofinsRetido ? data.valorCofins ?? 0 : 0);
     const valorCrf = this.roundTo2(valorCsll + valorPisRetido + valorCofinsRetido);
-    const aliquotaIss = this.calculateDominioAliquota(valorIss, valorServico);
+    const aliquotaIss = this.calculateDominioAliquota(valorIss, baseCalculoServico);
     const aliquotaIssDestaque = (data.aliquotaIssInformada ?? 0) > 0 ? this.roundTo2(data.aliquotaIssInformada ?? 0) : aliquotaIss;
     const numeroNfse = String(data.numeroNfse || source.documento.numeroNfse || '').trim();
     const dataEmissao = this.formatDominioDate(data.dataEmissao ?? source.documento.dataEmissao ?? null);
@@ -686,7 +692,7 @@ export class NfseService {
     const linhas: string[] = [];
 
     if (tipoRegistro === 'Entrada') {
-      linhas.push(this.createDominioRegistro1000(prestadorCnpj, numeroNfse, dataEmissao, valorServico, valorLiquido, prestadorUf, acumulador, classEfd, codEfd));
+      linhas.push(this.createDominioRegistro1000(prestadorCnpj, numeroNfse, dataEmissao, valorServicoAposDesconto, prestadorUf, acumulador, classEfd, codEfd));
     } else {
       const cnpjClienteServico = destinatarioCnpj || tomadorCnpj || prestadorCnpj;
       const cfps = this.resolveDominioCfopsServico(data);
@@ -697,6 +703,7 @@ export class NfseService {
           dataEmissao,
           valorServico,
           valorLiquido,
+          valorDescontoTotal,
           prestadorUf,
           acumulador,
           classEfd,
@@ -707,28 +714,29 @@ export class NfseService {
     }
 
     if (valorCrf > 0) {
-      linhas.push(this.createDominioRegistroImposto(tipoRegistro, valorServico, this.calculateDominioAliquota(valorCrf, valorServico), valorCrf, '25', ''));
+      linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoServico, this.calculateDominioAliquota(valorCrf, baseCalculoServico), valorCrf, '25', ''));
     }
     if (valorIrrf > 0) {
-      linhas.push(this.createDominioRegistroImposto(tipoRegistro, valorServico, this.calculateDominioAliquota(valorIrrf, valorServico), valorIrrf, '16', ''));
+      linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoServico, this.calculateDominioAliquota(valorIrrf, baseCalculoServico), valorIrrf, '16', ''));
     }
     if (valorInss > 0) {
-      linhas.push(this.createDominioRegistroImposto(tipoRegistro, valorServico, this.calculateDominioAliquota(valorInss, valorServico), valorInss, '26', '2631'));
+      linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoServico, this.calculateDominioAliquota(valorInss, baseCalculoServico), valorInss, '26', '2631'));
     }
 
     const geraIssDestaque = valorIss > 0 && (tipoRegistro === 'Servico' || (tipoRegistro === 'Entrada' && data.retencaoIss === 'Retido'));
     if (geraIssDestaque) {
-      linhas.push(this.createDominioRegistroImposto(tipoRegistro, valorServico, aliquotaIssDestaque, valorIss, '3', ''));
+      linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoServico, aliquotaIssDestaque, valorIss, '3', ''));
     }
     if (data.retencaoIss === 'Retido') {
-      linhas.push(this.createDominioRegistroImposto(tipoRegistro, valorServico, aliquotaIss, valorIss, '18', ''));
+      linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoServico, aliquotaIss, valorIss, '18', ''));
     }
 
     if (tipoRegistro === 'Entrada') {
       if (incluirEstoque) {
         linhas.push(
           this.createDominioRegistro1030(
-            valorServico,
+            valorServicoAposDesconto,
+            baseCalculoServico,
             dataEmissao,
             aliquotaIss,
             valorIss,
@@ -740,15 +748,15 @@ export class NfseService {
       }
       const totalRetencoesLancto = this.roundTo2(valorCrf + valorIrrf + valorInss + valorIssRetidoReal);
       if (totalRetencoesLancto === 0) {
-        linhas.push(this.createDominioRegistro1300(dataEmissao, contaDebitoEntrada, contaFornecedor, valorServico, numeroNfse, nomeDescricao, ''));
+        linhas.push(this.createDominioRegistro1300(dataEmissao, contaDebitoEntrada, contaFornecedor, valorServicoAposDesconto, numeroNfse, nomeDescricao, ''));
       } else {
-        linhas.push(this.createDominioRegistro1300(dataEmissao, contaDebitoEntrada, '0', valorServico, numeroNfse, nomeDescricao, ''));
+        linhas.push(this.createDominioRegistro1300(dataEmissao, contaDebitoEntrada, '0', valorServicoAposDesconto, numeroNfse, nomeDescricao, ''));
         linhas.push(
           this.createDominioRegistro1300(
             dataEmissao,
             '0',
             contaFornecedor,
-            this.roundTo2(Math.max(valorServico - totalRetencoesLancto, 0)),
+            this.roundTo2(Math.max(valorServicoAposDesconto - totalRetencoesLancto, 0)),
             numeroNfse,
             nomeDescricao,
             ''
@@ -770,8 +778,8 @@ export class NfseService {
       linhas.push(
         this.createDominioRegistro1500({
           vencimento: dataEmissao,
-          valor: valorServico,
-          aliquotaCrf: this.calculateDominioAliquota(valorCrf, valorServico),
+          valor: valorServicoAposDesconto,
+          aliquotaCrf: this.calculateDominioAliquota(valorCrf, baseCalculoServico),
           valorCrf,
           valorIrrf,
           valorIssRetido: valorIssRetidoReal,
@@ -787,7 +795,9 @@ export class NfseService {
 
     const totalRetencoesLancto = this.roundTo2(valorIrrf + valorPisRetido + valorCofinsRetido + valorCsll);
     if (incluirEstoque) {
-      linhas.push(this.createDominioRegistro3030(valorServico, dataEmissao, aliquotaIss, valorIss, valorIssRetidoReal, produtoPadrao));
+      linhas.push(
+        this.createDominioRegistro3030(valorServico, baseCalculoServico, dataEmissao, aliquotaIss, valorIss, valorIssRetidoReal, produtoPadrao)
+      );
     }
     linhas.push(this.createDominioRegistro3300(dataEmissao, '0', '412', valorServico, numeroNfse, nomeDescricao, ''));
 
@@ -812,7 +822,7 @@ export class NfseService {
       this.createDominioRegistro3500({
         vencimento: dataEmissao,
         valor: valorServico,
-        aliquotaCrf: this.calculateDominioAliquota(valorCrf, valorServico),
+        aliquotaCrf: this.calculateDominioAliquota(valorCrf, baseCalculoServico),
         valorCrf,
         valorIrrf,
         valorIssRetido: valorIssRetidoReal,
@@ -938,15 +948,14 @@ export class NfseService {
     cnpj: string,
     numeroDocumento: string,
     dataEmissao: string,
-    valorServico: number,
-    _valorContabil: number,
+    valorContabil: number,
     estadoEmitente: string,
     acumulador: string,
     classEfd: string,
     codEfd: string
   ): string {
     const cfop = estadoEmitente === 'SC' ? '1933' : '2933';
-    return `|1000|39|${cnpj}||${acumulador}|${cfop}||${numeroDocumento}|U||${dataEmissao}|${dataEmissao}|${this.formatDominioNumber(valorServico)}|||S|||||||||||||||||||||||${this.formatDominioNumber(valorServico)}|0|||||||||||||||||||||||||||||||||||||||||||||||||||${codEfd}|${classEfd}|||||||`;
+    return `|1000|39|${cnpj}||${acumulador}|${cfop}||${numeroDocumento}|U||${dataEmissao}|${dataEmissao}|${this.formatDominioNumber(valorContabil)}|||S|||||||||||||||||||||||${this.formatDominioNumber(valorContabil)}|0|||||||||||||||||||||||||||||||||||||||||||||||||||${codEfd}|${classEfd}|||||||`;
   }
 
   private createDominioRegistro3000(
@@ -955,6 +964,7 @@ export class NfseService {
     dataEmissao: string,
     valorServico: number,
     valorContabil: number,
+    valorDesconto: number,
     estadoEmitente: string,
     acumulador: string,
     classEfd: string,
@@ -991,7 +1001,7 @@ export class NfseService {
       classEfd,
       codEfd,
       this.formatDominioNumber(valorServico),
-      '',
+      valorDesconto > 0 ? this.formatDominioNumber(valorDesconto) : '',
       '',
       ''
     ];
@@ -1017,6 +1027,7 @@ export class NfseService {
 
   private createDominioRegistro1030(
     valorUnitario: number,
+    valorBaseCalculo: number,
     dataEmissao: string,
     aliquota: number,
     valorIss: number,
@@ -1036,7 +1047,7 @@ export class NfseService {
       11: this.formatDominioNumber(valorUnitario),
       14: this.formatDominioNumber(valorIssRetido),
       27: this.formatDominioNumber(valorUnitario),
-      31: this.formatDominioNumber(valorUnitario),
+      31: this.formatDominioNumber(valorBaseCalculo),
       32: this.formatDominioNumber(aliquota),
       33: this.formatDominioNumber(valorIss),
       34: cfop
@@ -1045,6 +1056,7 @@ export class NfseService {
 
   private createDominioRegistro3030(
     valorUnitario: number,
+    valorBaseCalculo: number,
     dataEmissao: string,
     aliquota: number,
     valorIss: number,
@@ -1059,7 +1071,7 @@ export class NfseService {
       5: this.formatDominioNumber(valorUnitario),
       7: this.formatDominioNumber(valorUnitario),
       8: '00',
-      9: this.formatDominioNumber(valorUnitario),
+      9: this.formatDominioNumber(valorBaseCalculo),
       10: this.formatDominioNumber(aliquota),
       11: this.formatDominioNumber(valorIss),
       14: this.formatDominioNumber(valorIssRetido)

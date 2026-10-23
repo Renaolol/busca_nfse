@@ -174,6 +174,9 @@ export interface NfseDominioExportData {
   destinatarioMunicipio?: string | null;
   destinatarioUf?: string | null;
   valorServico?: number;
+  valorDescontoIncondicionado?: number;
+  valorDescontoCondicionado?: number;
+  valorDescontoTotal?: number;
   valorLiquidoNfse?: number;
   valorTotalRetencoes?: number;
   valorIss?: number;
@@ -427,6 +430,9 @@ export class NfseDanfseService {
       destinatarioMunicipio: destinatario.municipio,
       destinatarioUf: destinatario.uf,
       valorServico,
+      valorDescontoIncondicionado: this.toNumber(leitura.valorDescontoIncondicionado),
+      valorDescontoCondicionado: this.toNumber(leitura.valorDescontoCondicionado),
+      valorDescontoTotal: this.toNumber(leitura.valorDescontoTotal),
       valorLiquidoNfse: this.toNumber(extracted.valorLiquidoNfse),
       valorTotalRetencoes: this.toNumber(extracted.valorTotalRetencoes),
       valorIss,

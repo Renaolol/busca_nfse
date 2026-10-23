@@ -27,8 +27,12 @@ export type XmlReader30NfeLineItem = {
   vICMSMonoRetRaw: string;
   baseCalculoIcms: string;
   baseCalculoIcmsRaw: string;
+  baseCalculoInter: string;
+  baseCalculoInterRaw: string;
   aliquotaIcms: string;
   aliquotaIcmsRaw: string;
+  aliquotaInter: string;
+  aliquotaInterRaw: string;
   valorIcms: string;
   valorIcmsRaw: string;
 };

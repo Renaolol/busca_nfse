@@ -1,8 +1,15 @@
 import { extractCteServiceSummary, extractNfeLineItems, extractNfeTotalIpiValue } from './xml-reader30-nfe-parser.js';
 import {
   isXmlReader30DocumentCancelled,
+  isXmlReader30NfeModel,
   shouldIncludeDocumentValueInSum
 } from './xml-reader30-summary-utils.js';
+import {
+  isXmlReader30DifalIcms4,
+  resolveXmlReader30DifalBase,
+  resolveXmlReader30DifalIcms4Amount,
+  resolveXmlReader30DifalRate
+} from './xml-reader30-difal-utils.js';
 import {
   computeXmlReader30MonofasicValues,
 } from './xml-reader30-monofasic-utils.js';
@@ -7651,7 +7658,7 @@ function renderXmlReader30DifalSection() {
         </label>
         <div class="compare-upload-hint compare-span-4">
           <span class="compare-upload-dot"></span>
-          <span>Considera apenas as NF-e recebidas (compras) da empresa no periodo. Calculado apenas para os itens com ICMS a 4% (Resolucao Senado 13/2012): DIFAL = (Base de calculo ICMS - ICMS interestadual) regrossada pela aliquota interna informada, menos o ICMS interestadual. Demais itens (incluindo o monofasico) nao entram nessa soma.</span>
+          <span>Considera apenas as NF-e recebidas (compras) da empresa no periodo. A aliquota de 4% e conferida no XML, priorizando pICMSInter e usando pICMS como alternativa. Para esses itens: DIFAL = (Base de calculo ICMS - ICMS interestadual) regrossada pela aliquota interna informada, menos o ICMS interestadual. Demais itens (incluindo o monofasico) nao entram nessa soma.</span>
         </div>
         <div class="stack-actions compare-actions compare-span-4">
           <button class="btn primary" type="submit" ${hasClients ? '' : 'disabled'}>Calcular DIFAL</button>
@@ -8028,6 +8035,7 @@ const DIFAL_NOTES_COLUMNS = [
   { label: 'CST', className: 'xml-reader30-icms-code', value: (row) => row.cstCsosn || '-' },
   { label: 'BC ICMS', className: 'xml-reader30-icms-number', value: (row) => row.baseCalculoIcms || '-' },
   { label: 'ICMS (%)', className: 'xml-reader30-icms-number', value: (row) => row.aliquotaIcms || '-' },
+  { label: 'Aliq. DIFAL XML (%)', className: 'xml-reader30-icms-number', value: (row) => row.aliquotaDifal || '-' },
   { label: 'Valor ICMS', className: 'xml-reader30-icms-number', value: (row) => row.valorIcms || '-' },
   { label: 'BC Mono', className: 'xml-reader30-icms-number', value: (row) => row.qBCMonoRet || '-' },
   { label: 'Aliq NF', className: 'xml-reader30-icms-number', value: (row) => row.adRemICMSRet || '-' },
@@ -9419,8 +9427,12 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
         cfop: '0',
         baseCalculoIcms: '0',
         baseCalculoIcmsRaw: '0',
+        baseCalculoInter: '0',
+        baseCalculoInterRaw: '0',
         aliquotaIcms: '0',
         aliquotaIcmsRaw: '0',
+        aliquotaInter: '0',
+        aliquotaInterRaw: '0',
         valorIcms: '0',
         valorIcmsRaw: '0',
         qBCMonoRet: '0',
@@ -9460,8 +9472,12 @@ function buildXmlReader30NfeItemRows(row, options = {}) {
     cfop: item.cfop || '0',
     baseCalculoIcms: item.baseCalculoIcms || '0',
     baseCalculoIcmsRaw: item.baseCalculoIcmsRaw || '0',
+    baseCalculoInter: item.baseCalculoInter || '0',
+    baseCalculoInterRaw: item.baseCalculoInterRaw || '0',
     aliquotaIcms: item.aliquotaIcms || '0',
     aliquotaIcmsRaw: item.aliquotaIcmsRaw || '0',
+    aliquotaInter: item.aliquotaInter || '0',
+    aliquotaInterRaw: item.aliquotaInterRaw || '0',
     valorIcms: item.valorIcms || '0',
     valorIcmsRaw: item.valorIcmsRaw || '0',
     qBCMonoRet: item.qBCMonoRet || '0',
@@ -9965,17 +9981,18 @@ function computeDifalReaderTotals(itemRows, aliquotaInterna, totalNotas) {
   const decoratedRows = rows.map((row) => {
     const isCancelada = isXmlReader30DocumentCancelled(row?.raw || row);
     const valorIcms = toNumber(row?.valorIcmsRaw);
-    const aliquotaIcms = toNumber(row?.aliquotaIcmsRaw);
-    const baseCalculo = toNumber(row?.baseCalculoIcmsRaw);
-    const isIcms4 = Math.abs(aliquotaIcms - 4) < 0.005;
-    const difalRaw = isIcms4 ? computeDifalPorDentro(baseCalculo, aliquotaIcms, aliquotaInterna) : 0;
+    const aliquotaDifal = resolveXmlReader30DifalRate(row);
+    const baseCalculo = resolveXmlReader30DifalBase(row);
+    const isIcms4 = isXmlReader30DifalIcms4(row);
+    const difalRaw = isIcms4 ? computeDifalPorDentro(baseCalculo, aliquotaDifal, aliquotaInterna) : 0;
+    const valorIcms4 = isIcms4 ? resolveXmlReader30DifalIcms4Amount(row) : 0;
 
     if (!isCancelada) {
       totalMonofasico += toNumber(row?.valorCorretoRaw ?? row?.valorCorreto ?? row?.vICMSMonoRetRaw ?? row?.vICMSMonoRet ?? 0);
       totalIcmsProprio += valorIcms;
 
       if (isIcms4) {
-        totalIcms4 += valorIcms;
+        totalIcms4 += valorIcms4;
       }
 
       totalDifal += difalRaw;
@@ -9987,6 +10004,7 @@ function computeDifalReaderTotals(itemRows, aliquotaInterna, totalNotas) {
       isIcms4,
       statusLabel: isCancelada ? 'Cancelada' : 'Ativa',
       difalRaw,
+      aliquotaDifal: aliquotaDifal > 0 ? formatXmlReader30DecimalValue(aliquotaDifal) : '-',
       difalLabel: isIcms4 ? formatCurrency(difalRaw) : '-'
     };
   });
@@ -10370,8 +10388,11 @@ async function fetchXmlReader30NfeSource(filters) {
     SEARCH_PAGE_SIZE,
     true
   );
+  query.set('modelo', '55');
   const payload = normalizePaginatedResponse(await apiRequest(`/nfe?${query.toString()}`));
-  const docs = buildNfeDocumentsFromApi(payload.items, state.clients).filter((doc) => doc.xmlCompletoDisponivel);
+  const docs = buildNfeDocumentsFromApi(payload.items, state.clients).filter(
+    (doc) => isXmlReader30NfeModel(doc) && doc.xmlCompletoDisponivel
+  );
   await enrichXmlReader30DocumentsWithContent('nfe', docs);
   state.nfeDocuments = mergeNfeDocumentsById(state.nfeDocuments, docs);
   const rows = docs.map((doc) => mapXmlReader30Item('nfe', doc)).filter((row) => matchesDateRange(row.dataEmissao, filters.emissaoInicio, filters.emissaoFim));
@@ -10381,6 +10402,7 @@ async function fetchXmlReader30NfeSource(filters) {
 function buildXmlReader30NfeSourceFromState(clienteId, emissaoInicio, emissaoFim, tipo = 'Todos') {
   return (Array.isArray(state.nfeDocuments) ? state.nfeDocuments : [])
     .filter((doc) => doc.clientId === clienteId)
+    .filter(isXmlReader30NfeModel)
     .filter((doc) => tipo === 'Todos' || doc.tipo === tipo)
     .filter((doc) => doc.xmlCompletoDisponivel)
     .map((doc) => mapXmlReader30Item('nfe', doc))

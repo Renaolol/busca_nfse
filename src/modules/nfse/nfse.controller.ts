@@ -90,7 +90,7 @@ export class NfseController {
   @ApiOperation({
     summary: 'Exporta o TXT fiscal de NFS-e para o LeitorXML',
     description:
-      'Gera os registros de Entrada ou Servico no Leiaute Dominio Separador. CFOP fica nos campos 6 do registro 1000 e 34 do 1030; CFPS fica no campo 21 do registro 3000.'
+      'Gera os registros de Entrada ou Servico no Leiaute Dominio Separador. CFOP fica nos campos 6 do registro 1000 e 34 do 1030; CFPS fica no campo 21 do registro 3000. Descontos de NFS-e tomada sao deduzidos do valor contabil e a base do ISS considera o desconto incondicionado; em Servico, o desconto fica no campo 30 do registro 3000.'
   })
   @ApiOkResponse({ type: DownloadDocumentDto, description: 'Arquivo TXT do LeitorXML retornado em Base64.' })
   @TenantScope({ source: 'body', key: 'clienteId', injectWhenMissing: true })

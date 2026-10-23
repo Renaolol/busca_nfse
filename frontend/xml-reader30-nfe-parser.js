@@ -150,6 +150,7 @@ function extractNfeLineItemTaxValues(detNode, prodNode) {
   const ipiNode = findXmlElementsByLocalName(impostoNode, 'IPI')[0] || null;
   const valorIpi = getXmlText(ipiNode, 'vIPI') || '0';
   const icmsNode = findXmlElementsByLocalName(impostoNode, 'ICMS')[0] || null;
+  const icmsUFDestNode = findXmlElementsByLocalName(impostoNode, 'ICMSUFDest')[0] || null;
   const icmsGroupNode = icmsNode
     ? Array.from(icmsNode.children || []).find((node) => node && node.nodeType === 1) || null
     : null;
@@ -161,7 +162,9 @@ function extractNfeLineItemTaxValues(detNode, prodNode) {
   const adRemICMSRet = getFirstXmlText(icmsSourceNodes, ['adRemICMSRet']) || '0';
   const vICMSMonoRet = getFirstXmlText(icmsSourceNodes, ['vICMSMonoRet']) || '0';
   const baseCalculoIcms = getFirstXmlText(icmsSourceNodes, ['vBC', 'vBCST', 'vBCSTRet', 'vBCEfet', 'vBCUFDest']) || '0';
+  const baseCalculoInter = getXmlText(icmsUFDestNode, 'vBCUFDest') || '0';
   const aliquotaIcms = getFirstXmlText(icmsSourceNodes, ['pICMS', 'pST', 'pICMSST', 'pICMSInter', 'pICMSInterPart', 'pICMSEfet']) || '0';
+  const aliquotaInter = getXmlText(icmsUFDestNode, 'pICMSInter') || '0';
   const valorIcms = getFirstXmlText(icmsSourceNodes, ['vICMS', 'vICMSST', 'vICMSDif', 'vICMSDeson', 'vICMSEfet']) || '0';
 
   return {
@@ -179,8 +182,12 @@ function extractNfeLineItemTaxValues(detNode, prodNode) {
     vICMSMonoRetRaw: vICMSMonoRet || '0',
     baseCalculoIcms: formatXmlReader30DecimalValue(baseCalculoIcms),
     baseCalculoIcmsRaw: baseCalculoIcms || '0',
+    baseCalculoInter: formatXmlReader30DecimalValue(baseCalculoInter),
+    baseCalculoInterRaw: baseCalculoInter,
     aliquotaIcms: formatXmlReader30DecimalValue(aliquotaIcms),
     aliquotaIcmsRaw: aliquotaIcms || '0',
+    aliquotaInter: formatXmlReader30DecimalValue(aliquotaInter),
+    aliquotaInterRaw: aliquotaInter,
     valorIcms: formatXmlReader30DecimalValue(valorIcms),
     valorIcmsRaw: valorIcms || '0'
   };

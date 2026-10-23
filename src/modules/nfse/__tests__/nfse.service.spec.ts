@@ -2229,6 +2229,90 @@ describe('NfseService', () => {
     expect(content).toContain(`|1500|${dataEmissaoFormatada}|180,00|2,22|4,00|3,00|9,00|2,00||1,00|1,50|1,50||333|`);
   });
 
+  it('exporta NFS-e tomada com desconto no valor contabil da entrada', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-mw-agro-274',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000027426071005552016',
+        numeroNfse: '274',
+        dataEmissao: new Date('2026-07-10T00:00:00.000Z'),
+        cnpjPrestador: '06960810000176',
+        razaoSocialPrestador: 'MW Agro',
+        cnpjTomador: '11111111000111',
+        razaoSocialTomador: 'Cliente de Teste',
+        xmlPath: 'nfse/producao/06960810000176/2026/07/xml/doc-mw-agro-274.xml',
+        createdAt: new Date('2026-07-10T00:00:00.000Z'),
+        updatedAt: new Date('2026-07-10T00:00:00.000Z')
+      }
+    ]);
+    storage.getObject.mockResolvedValueOnce(
+      Buffer.from(`<?xml version="1.0" encoding="utf-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+  <DPS><infDPS>
+    <dhEmi>2026-07-10T00:00:00-03:00</dhEmi>
+    <prest><CNPJ>06960810000176</CNPJ><xNome>MW Agro</xNome></prest>
+    <toma><CNPJ>11111111000111</CNPJ><xNome>Cliente de Teste</xNome></toma>
+    <valores>
+      <vServPrest><vServ>250.00</vServ></vServPrest>
+      <vDescCondIncond><vDescIncond>40.00</vDescIncond><vDescCond>10.00</vDescCond></vDescCondIncond>
+    </valores>
+  </infDPS></DPS>
+  <infNFSe Id="NFS42110092206960810000176000000000027426071005552016">
+    <nNFSe>274</nNFSe>
+    <valores><vLiq>200.00</vLiq><vISSQN>0.00</vISSQN></valores>
+  </infNFSe>
+</NFSe>`, 'utf8')
+    );
+
+    const result = await service.exportarLeituraFiscalDominio({
+      clienteId: 'cliente-1',
+      all: true,
+      codigoEmpresa: 10105,
+      tipoRegistro: 'Entrada',
+      contas: 'Padrao',
+      produtoPadrao: '557'
+    });
+
+    const content = Buffer.from(result.contentBase64, 'base64').toString('utf8');
+    const registroEntrada = content.split('\n').find((line) => line.startsWith('|1000|'));
+    const camposEntrada = registroEntrada?.split('|').slice(1, -1) ?? [];
+    expect(camposEntrada[12]).toBe('200,00'); // Campo 13: valor contabil apos descontos.
+    expect(content).toContain('|1030|557|1|200,00|');
+    const registroItemEntrada = content.split('\n').find((line) => line.startsWith('|1030|'));
+    expect(registroItemEntrada?.split('|')[31]).toBe('210,00'); // Campo 31: base do ISS apos desconto incondicionado.
+    expect(content).toContain('|1300|09/07/2026|467|506|200,00|| NFS-E N 274 MW Agro|||');
+    const registroParcela = content.split('\n').find((line) => line.startsWith('|1500|'));
+    expect(registroParcela?.split('|')[3]).toBe('200,00');
+  });
+
+  it('mapeia o desconto do registro de Servico no campo 30 do layout Dominio', () => {
+    const dominioRegistroBuilder = service as unknown as {
+      createDominioRegistro3000(
+        cnpj: string,
+        numeroDocumento: string,
+        dataEmissao: string,
+        valorServico: number,
+        valorContabil: number,
+        valorDesconto: number,
+        estadoEmitente: string,
+        acumulador: string,
+        classEfd: string,
+        codEfd: string,
+        cfps: string
+      ): string;
+    };
+    const registro = dominioRegistroBuilder.createDominioRegistro3000(
+      '11111111000111', '274', '09/07/2026', 250, 200, 50, 'SC', '900', '', '', '9102'
+    );
+    const campos = registro.split('|').slice(1, -1);
+
+    expect(campos[28]).toBe('250,00'); // Campo 29: valor dos servicos.
+    expect(campos[29]).toBe('50,00'); // Campo 30: desconto.
+  });
+
   it('ignora NFS-e cancelada na exportacao da leitura fiscal para a Dominio', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
       {

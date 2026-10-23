@@ -7,6 +7,26 @@ function extractSingleItem(xml: string) {
 }
 
 describe('xml-reader30-nfe-parser', () => {
+  it('le a aliquota interestadual pICMSInter do grupo ICMSUFDest', () => {
+    const item = extractSingleItem(`
+      <NFe>
+        <infNFe>
+          <det nItem="1">
+            <prod><xProd>Produto importado</xProd><vProd>1000.00</vProd></prod>
+            <imposto>
+              <ICMS><ICMS00><CST>00</CST><vBC>1000.00</vBC><pICMS>18.0000</pICMS><vICMS>180.00</vICMS></ICMS00></ICMS>
+              <ICMSUFDest><vBCUFDest>950.00</vBCUFDest><pICMSInter>4.0000</pICMSInter></ICMSUFDest>
+            </imposto>
+          </det>
+        </infNFe>
+      </NFe>
+    `);
+
+    expect(item.aliquotaIcmsRaw).toBe('18.0000');
+    expect(item.aliquotaInterRaw).toBe('4.0000');
+    expect(item.baseCalculoInterRaw).toBe('950.00');
+  });
+
   it('mantem BC ICMS zerado quando ICMS60 nao possui campos de valor', () => {
     const item = extractSingleItem(`
       <?xml version="1.0" encoding="UTF-8"?>

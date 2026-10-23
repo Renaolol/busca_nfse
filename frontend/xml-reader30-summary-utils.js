@@ -37,6 +37,10 @@ function isXmlReader30DocumentCancelled(item) {
   return normalizedStatus.includes('cancel');
 }
 
+function isXmlReader30NfeModel(document) {
+  return String(document?.modelo || '') === '55';
+}
+
 function shouldIncludeDocumentValueInSum(item) {
   if (!item || isXmlReader30DocumentCancelled(item)) {
     return false;
@@ -56,5 +60,6 @@ function shouldIncludeDocumentValueInSum(item) {
 
 export {
   isXmlReader30DocumentCancelled,
+  isXmlReader30NfeModel,
   shouldIncludeDocumentValueInSum
 };
