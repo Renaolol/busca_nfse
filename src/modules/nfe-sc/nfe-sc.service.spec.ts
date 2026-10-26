@@ -5,7 +5,34 @@ import { NfeScService } from './nfe-sc.service';
 const validCpf = '52998224725';
 
 describe('NfeScService', () => {
-  afterEach(() => jest.clearAllMocks());
+  afterEach(() => {
+    jest.clearAllMocks();
+    delete process.env.NFE_SC_AUTO_RUN_ENABLED;
+  });
+
+  it('queues only explicitly configured active controls when automatic polling is enabled', async () => {
+    process.env.NFE_SC_AUTO_RUN_ENABLED = 'true';
+    const prisma = {
+      nfeScSyncControle: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'control-due', clienteId: 'cliente-1' }])
+      }
+    } as any;
+    const service = new NfeScService(prisma, {} as any, {} as any);
+    const run = jest.spyOn(service, 'run').mockResolvedValue({} as any);
+
+    await (service as any).startDueConfiguredControls();
+
+    expect(prisma.nfeScSyncControle.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        status: { in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api] },
+        OR: expect.arrayContaining([
+          { proximaExecucao: null },
+          { proximaExecucao: { lte: expect.any(Date) } }
+        ])
+      })
+    }));
+    expect(run).toHaveBeenCalledWith('cliente-1', 'control-due');
+  });
 
   it('exige confirmacao administrativa do vinculo contabilista antes de configurar', async () => {
     const prisma = {} as any;

@@ -746,9 +746,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         where,
         orderBy: [{ dataEmissao: 'desc' }, { createdAt: 'desc' }],
         ...(query.all ? {} : { skip, take: pageSize })
-      })
+      }, query.clienteId)
     ]);
-    const { items, duplicatesRemoved } = this.deduplicateDocumentosForList(rawItems);
+    const tenantItems = query.clienteId
+      ? rawItems.map((item) => this.toTenantDocument(item, query.clienteId!))
+      : rawItems;
+    const { items, duplicatesRemoved } = this.deduplicateDocumentosForList(tenantItems);
     if (duplicatesRemoved > 0) {
       this.logger.warn(`Listagem de NF-e ocultou ${duplicatesRemoved} duplicata(s) legada(s) por ambiente + chave_acesso.`);
     }
@@ -769,8 +772,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   async analyzeCst060(query: QueryCst060AnalysisDto): Promise<Cst060AnalysisResponseDto> {
     const documents = await this.prisma.nfeDocumento.findMany({
       where: {
-        clienteId: query.clienteId,
-        tipoRelacao: 'recebida',
+        OR: [
+          { clienteId: query.clienteId, tipoRelacao: 'recebida' },
+          { vinculos: { some: { clienteId: query.clienteId, tipoRelacao: 'recebida' } } }
+        ],
         dataEmissao: { gte: new Date(`${query.dataInicial}T00:00:00.000Z`), lte: new Date(`${query.dataFinal}T23:59:59.999Z`) },
         xmlCompletoPath: { not: null }
       },
@@ -897,7 +902,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       NOT: this.getCteSchemaDocFilters()
     };
     if (query.clienteId) {
-      where.clienteId = query.clienteId;
+      where.OR = [
+        { clienteId: query.clienteId },
+        { vinculos: { some: { clienteId: query.clienteId } } }
+      ];
     }
 
     const xmlCompletoWhere: Prisma.NfeDocumentoWhereInput = {
@@ -919,6 +927,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         _count: { _all: true }
       })
     ]);
+
+    if (query.clienteId) {
+      return {
+        totalNfe,
+        xmlsCompletos,
+        byClient: [{ clienteId: query.clienteId, totalNfe, xmlsCompletos }]
+      };
+    }
 
     const byClient = new Map<string, { clienteId: string; totalNfe: number; xmlsCompletos: number }>();
 
@@ -953,17 +969,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   async findOne(id: string, clienteId: string) {
-    const found = await this.findUniqueDocumentoWithEventos({
-      where: { id }
-    });
+    const found = await this.findUniqueDocumentoWithEventos({ where: { id } }, clienteId);
     if (!found) {
       throw new NotFoundException('NF-e nao encontrada');
     }
-    this.assertClientScope(found.clienteId, clienteId);
     if (found.modelo === '57' || this.isCteSchemaDoc(found.schemaDoc)) {
       throw new NotFoundException('NF-e nao encontrada');
     }
-    return found;
+    return this.toTenantDocument(found, clienteId);
   }
 
   async sincronizarEventos(dto: SincronizarNfeEventosDto) {
@@ -1031,9 +1044,14 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         id: {
           in: uniqueIds
         },
-        ...(dto.clienteId ? { clienteId: dto.clienteId } : {})
+        ...(dto.clienteId ? {
+          OR: [
+            { clienteId: dto.clienteId },
+            { vinculos: { some: { clienteId: dto.clienteId } } }
+          ]
+        } : {})
       }
-    });
+    }, dto.clienteId);
 
     if (docs.length === 0) {
       throw new NotFoundException('Nenhuma NF-e encontrada para os IDs informados');
@@ -2200,6 +2218,16 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         break;
       }
 
+      const extraction = result.documentExtraction;
+      if (cStat === '138' && extraction && (
+        extraction.discardedCount > 0 || extraction.docZipCount !== result.documents.length || extraction.docZipCount === 0
+      )) {
+        stoppedOnError = true;
+        const message = `Extracao SEFAZ incompleta no NSU historico ${requestedNsu.toString()}: ${extraction.discardedCount} docZip descartado(s); cursor preservado.`;
+        failureDetails.push({ ...executionDetail, status: 'falha', mensagem: message });
+        break;
+      }
+
       let persistFailed = false;
       if (cStat === '138') {
         documentosRetornados += result.documents.length;
@@ -2291,10 +2319,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           ? ' A pausa da distribuicao incremental por falta de avanco do NSU permanece vigente.'
           : '';
       await this.prisma.nfeSyncControle.updateMany({
-        where: {
-          cnpjConsulta: this.normalizeCnpj(control.cnpjConsulta),
-          ambiente
-        },
+        where: { id: control.id },
         data: {
           ultimaExecucao: preserveIncrementalCooldown ? control.ultimaExecucao : new Date(),
           ultimaMensagem: `Recuperacao historica da SEFAZ concluida para ${params.dataEmissaoInicio} a ${params.dataEmissaoFim}. ${reachedOldestAvailableNsu ? 'O NSU consultado atingiu o limite de disponibilidade de 90 dias. ' : ''}O cursor normal ${control.ultimoNsuConsultado.toString()} foi preservado.${incrementalCooldownNote}`
@@ -3968,6 +3993,31 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
+        const extraction = result.documentExtraction;
+        const extractionIncomplete = Boolean(extraction && (
+          extraction.discardedCount > 0 || extraction.docZipCount !== result.documents.length || extraction.docZipCount === 0
+        ));
+        if (extractionIncomplete) {
+          const message = `Extracao SEFAZ incompleta: ${extraction!.discardedCount} docZip descartado(s); cursor NSU preservado.`;
+          if (sefazDiagnostic) {
+            sefazDiagnostic.failureStage = 'docZip_decode';
+            sefazDiagnostic.documentsFailed = extraction!.discardedCount;
+          }
+          await this.prisma.nfeSyncControle.update({
+            where: { id: control.id },
+            data: { status: NfeSyncStatus.erro_api, ultimaExecucao: new Date(), ultimaMensagem: message }
+          });
+          const failureDetail: NfeSyncRunFailureDetail = {
+            kind: 'controle', status: 'falha', clientId: control.clienteId,
+            estabelecimentoId: control.estabelecimentoId, ambiente: control.ambiente,
+            cnpjConsulta: control.cnpjConsulta, mensagem: message
+          };
+          failures += 1;
+          executionDetails.push(failureDetail);
+          failureDetails.push(failureDetail);
+          continue;
+        }
+
         let highestDocumentNsu = control.ultimoNsuDistribuido;
         for (const document of result.documents) {
           if (sefazDiagnostic) {
@@ -4356,16 +4406,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const status = this.resolveDocumentoStatus(parsed.status, existing?.eventos);
 
     const updateData: Prisma.NfeDocumentoUncheckedUpdateInput = {
-      clienteId: params.clienteId,
-      estabelecimentoId: params.estabelecimentoId,
-      nsu: params.document.nsu,
       numeroNfe: parsed.numeroNfe,
       serie: parsed.serie,
       modelo: parsed.modelo ?? '55',
       dataEmissao: parsed.dataEmissao,
       dataAutorizacao: parsed.dataAutorizacao,
       status,
-      tipoRelacao,
       schemaDoc: params.document.schema || parsed.schemaDoc,
       cnpjEmitente:
         parsed.cnpjEmitente ?? (tipoRelacao === NfeTipoRelacao.emitida ? cnpjConsulta : existing?.cnpjEmitente),
@@ -4428,7 +4474,15 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       update: updateData,
       create: createData
     });
-    await this.nfeManifestacaoService.observePersistedDocument(persisted.id);
+    await this.upsertNfeDocumentoVinculo({
+      nfeDocumentoId: persisted.id,
+      clienteId: params.clienteId,
+      estabelecimentoId: params.estabelecimentoId,
+      tipoRelacao,
+      nsu: params.document.nsu,
+      origem: params.origem
+    });
+    await this.nfeManifestacaoService.observePersistedDocument(persisted.id, params.clienteId, params.estabelecimentoId);
     const previousHash = isFull ? existing?.hashXmlCompleto : existing?.hashResumo;
     const persistenceAction: NonNullable<NfePersistedDocument['persistenceAction']> = !existing ? 'novo' : previousHash === hash ? 'duplicado' : 'atualizado';
     return Object.assign(persisted, { persistenceAction });
@@ -4460,6 +4514,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       estabelecimentoId: params.estabelecimentoId,
       ambiente: effectiveAmbiente,
       cnpjConsulta: params.cnpjConsulta,
+      nsu: params.document.nsu,
       parsedEvent,
       origem: params.origem
     });
@@ -4490,7 +4545,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       }
     });
 
-    await this.nfeManifestacaoService.observePersistedDocument(documento.id);
+    await this.nfeManifestacaoService.observePersistedDocument(documento.id, params.clienteId, params.estabelecimentoId);
 
     return documento;
   }
@@ -4500,6 +4555,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     estabelecimentoId: string;
     ambiente: NfeAmbiente;
     cnpjConsulta?: string;
+    nsu?: bigint;
     parsedEvent: ParsedDfeEvento;
     origem: NfeDocumentoOrigem;
   }) {
@@ -4522,7 +4578,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const schemaDoc = existing?.schemaDoc ?? params.parsedEvent.schemaDoc;
     const modelo = existing?.modelo ?? (isCte ? '57' : '55');
 
-    return this.prisma.nfeDocumento.upsert({
+    const persisted = await this.prisma.nfeDocumento.upsert({
       where: {
         ambiente_chaveAcesso: {
           ambiente: params.ambiente,
@@ -4530,13 +4586,10 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
         }
       },
       update: {
-        clienteId: params.clienteId,
-        estabelecimentoId: params.estabelecimentoId,
         modelo,
         status,
         schemaDoc,
         origem: params.origem,
-        tipoRelacao,
         ...(params.parsedEvent.isCancelamento
           ? { dataAutorizacao: existing?.dataAutorizacao, updatedAt: new Date() }
           : { updatedAt: new Date() })
@@ -4554,6 +4607,47 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
           !isCte && tipoRelacao === NfeTipoRelacao.emitida ? cnpjConsulta : undefined,
         cnpjDestinatario:
           !isCte && tipoRelacao === NfeTipoRelacao.recebida ? cnpjConsulta : undefined,
+        origem: params.origem
+      }
+    });
+    await this.upsertNfeDocumentoVinculo({
+      nfeDocumentoId: persisted.id,
+      clienteId: params.clienteId,
+      estabelecimentoId: params.estabelecimentoId,
+      tipoRelacao,
+      nsu: params.nsu,
+      origem: params.origem
+    });
+    return persisted;
+  }
+
+  private async upsertNfeDocumentoVinculo(params: {
+    nfeDocumentoId: string;
+    clienteId: string;
+    estabelecimentoId: string;
+    tipoRelacao?: NfeTipoRelacao | null;
+    nsu?: bigint;
+    origem: NfeDocumentoOrigem;
+  }): Promise<void> {
+    await this.prisma.nfeDocumentoVinculo.upsert({
+      where: {
+        nfeDocumentoId_clienteId_estabelecimentoId: {
+          nfeDocumentoId: params.nfeDocumentoId,
+          clienteId: params.clienteId,
+          estabelecimentoId: params.estabelecimentoId
+        }
+      },
+      create: {
+        nfeDocumentoId: params.nfeDocumentoId,
+        clienteId: params.clienteId,
+        estabelecimentoId: params.estabelecimentoId,
+        tipoRelacao: params.tipoRelacao ?? null,
+        nsu: params.nsu ?? null,
+        origem: params.origem
+      },
+      update: {
+        ...(params.tipoRelacao ? { tipoRelacao: params.tipoRelacao } : {}),
+        ...(params.nsu != null ? { nsu: params.nsu } : {}),
         origem: params.origem
       }
     });
@@ -4650,7 +4744,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const andConditions = this.getAndConditions(where);
 
     if (query.clienteId) {
-      andConditions.push({ clienteId: query.clienteId });
+    andConditions.push({
+      OR: [
+        { clienteId: query.clienteId },
+        { vinculos: { some: { clienteId: query.clienteId } } }
+      ]
+    });
     }
 
     const cnpjEmitente = this.normalizeCnpj(query.cnpjEmitente);
@@ -4758,7 +4857,12 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
             AND: []
           };
     const andConditions = this.getAndConditions(where);
-    andConditions.push({ clienteId: params.clienteId });
+    andConditions.push({
+      OR: [
+        { clienteId: params.clienteId },
+        { vinculos: { some: { clienteId: params.clienteId } } }
+      ]
+    });
 
     if (params.documentoIds?.length) {
       andConditions.push({ id: { in: params.documentoIds } });
@@ -4771,21 +4875,28 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return where;
   }
 
-  private nfeDocumentoInclude(): Prisma.NfeDocumentoInclude {
+  private nfeDocumentoInclude(clienteId?: string): Prisma.NfeDocumentoInclude {
     return {
       eventos: {
         orderBy: [{ dataEvento: 'desc' }, { createdAt: 'desc' }]
-      }
+      },
+      ...(clienteId ? {
+        vinculos: {
+          where: { clienteId },
+          include: { estabelecimento: { select: { id: true, clienteId: true, cnpj: true, ativo: true } } }
+        }
+      } : {})
     };
   }
 
   private async findManyDocumentosWithEventos(
-    args: Omit<Prisma.NfeDocumentoFindManyArgs, 'include'>
+    args: Omit<Prisma.NfeDocumentoFindManyArgs, 'include'>,
+    clienteId?: string
   ): Promise<Array<Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })>> {
     try {
       return await this.prisma.nfeDocumento.findMany({
         ...args,
-        include: this.nfeDocumentoInclude()
+        include: this.nfeDocumentoInclude(clienteId)
       });
     } catch (error) {
       if (!this.isEventosSchemaUnavailable(error)) {
@@ -4793,7 +4904,17 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       }
 
       this.logger.warn('Tabela nfe_eventos indisponivel; retornando NF-e sem eventos vinculados. Aplique a migration pendente.');
-      const documentos = await this.prisma.nfeDocumento.findMany(args);
+      const documentos = await this.prisma.nfeDocumento.findMany({
+        ...args,
+        ...(clienteId ? {
+          include: {
+            vinculos: {
+              where: { clienteId },
+              include: { estabelecimento: { select: { id: true, clienteId: true, cnpj: true, ativo: true } } }
+            }
+          }
+        } : {})
+      });
       return documentos.map((documento) => ({
         ...documento,
         eventos: []
@@ -4847,12 +4968,13 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async findUniqueDocumentoWithEventos(
-    args: Omit<Prisma.NfeDocumentoFindUniqueArgs, 'include'>
+    args: Omit<Prisma.NfeDocumentoFindUniqueArgs, 'include'>,
+    clienteId?: string
   ): Promise<(Prisma.NfeDocumentoGetPayload<{ include: { eventos: true } }> | (Prisma.NfeDocumentoGetPayload<Record<string, never>> & { eventos: [] })) | null> {
     try {
       return await this.prisma.nfeDocumento.findUnique({
         ...args,
-        include: this.nfeDocumentoInclude()
+        include: this.nfeDocumentoInclude(clienteId)
       });
     } catch (error) {
       if (!this.isEventosSchemaUnavailable(error)) {
@@ -4860,7 +4982,17 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       }
 
       this.logger.warn('Tabela nfe_eventos indisponivel; retornando detalhe de NF-e sem eventos vinculados. Aplique a migration pendente.');
-      const documento = await this.prisma.nfeDocumento.findUnique(args);
+      const documento = await this.prisma.nfeDocumento.findUnique({
+        ...args,
+        ...(clienteId ? {
+          include: {
+            vinculos: {
+              where: { clienteId },
+              include: { estabelecimento: { select: { id: true, clienteId: true, cnpj: true, ativo: true } } }
+            }
+          }
+        } : {})
+      });
       return documento ? { ...documento, eventos: [] } : null;
     }
   }
@@ -5236,6 +5368,9 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       if (await this.resumeDueSefazCpfHistoricalBackfills()) {
         return;
       }
+      await this.runAutomaticXmlRecoveryCycle().catch(() => {
+        this.logger.warn('Falha ao executar a fila automatica de recuperacao de XML de NF-e.');
+      });
       if (this.isDominioChaveSyncSource()) {
         await this.runNowInternal({ limitControles: 50, onlyCpf: true });
       } else {
@@ -5245,6 +5380,84 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       this.logger.warn('Falha na execucao automatica de NF-e.');
     } finally {
       this.autoSyncRunning = false;
+    }
+  }
+
+  private async runAutomaticXmlRecoveryCycle(): Promise<void> {
+    if (process.env.NODE_ENV === 'test') return;
+    const tasks = await this.nfeManifestacaoService.claimDueRecoveryTasks(3);
+    for (const task of tasks) {
+      let resultRecorded = false;
+      try {
+        const preparation = await this.nfeManifestacaoService.prepareAutomaticRecovery(task.id, task.leaseId);
+        if (!preparation.canQuery) continue;
+
+        let queryResult: Awaited<ReturnType<NfeService['consultarChave']>> | null = null;
+        try {
+          queryResult = await this.consultarChave({
+            clienteId: preparation.clienteId,
+            estabelecimentoId: preparation.estabelecimentoId,
+            ambiente: preparation.ambiente,
+            chaveAcesso: preparation.chaveAcesso,
+            persistir: true
+          });
+          const persisted = await this.prisma.nfeDocumento.findUnique({
+            where: {
+              ambiente_chaveAcesso: {
+                ambiente: preparation.ambiente,
+                chaveAcesso: preparation.chaveAcesso
+              }
+            },
+            select: { xmlCompletoDisponivel: true }
+          });
+          const xmlAvailable = persisted?.xmlCompletoDisponivel === true;
+          const blocked = queryResult.cStat === '656';
+          const retryAfterMs = xmlAvailable ? null : blocked ? 60 * 60 * 1000 : 6 * 60 * 60 * 1000;
+          const recoveryStatus = xmlAvailable ? 'xml_disponivel' : blocked ? 'aguardando_sefaz' : 'aguardando_xml';
+          await this.nfeManifestacaoService.recordAutomaticRecoveryResult(task.id, task.leaseId, {
+            status: recoveryStatus,
+            cStat: queryResult.cStat,
+            xMotivo: queryResult.xMotivo,
+            resultadoConsulta: xmlAvailable ? 'xml_completo' : queryResult.cStat || 'consulta_sem_xml_completo',
+            retryAfterMs
+          });
+          resultRecorded = true;
+          await this.nfeManifestacaoService.logAutomaticRecoveryDiagnostic({
+            ambiente: preparation.ambiente,
+            actorType: preparation.actorType,
+            httpStatus: queryResult.statusCode,
+            cStat: queryResult.cStat ?? null,
+            xMotivo: queryResult.xMotivo ?? null,
+            documentsReceived: queryResult.documentosEncontrados,
+            schemas: [...new Set(queryResult.documentos.map((document) => document.schema).filter(Boolean))],
+            result: recoveryStatus
+          });
+        } catch {
+          await this.nfeManifestacaoService.recordAutomaticRecoveryResult(task.id, task.leaseId, {
+            status: 'aguardando_sefaz',
+            resultadoConsulta: 'falha_consulta_ou_processamento',
+            xMotivo: 'A consulta ou persistencia do XML falhou; o cursor e os documentos ja persistidos foram preservados.',
+            retryAfterMs: 6 * 60 * 60 * 1000
+          });
+          resultRecorded = true;
+          await this.nfeManifestacaoService.logAutomaticRecoveryDiagnostic({
+            ambiente: preparation.ambiente,
+            actorType: preparation.actorType,
+            httpStatus: queryResult?.statusCode ?? null,
+            cStat: queryResult?.cStat ?? null,
+            xMotivo: queryResult?.xMotivo ?? 'Falha local na consulta ou persistencia.',
+            documentsReceived: queryResult?.documentosEncontrados ?? 0,
+            schemas: queryResult ? [...new Set(queryResult.documentos.map((document) => document.schema).filter(Boolean))] : [],
+            result: 'aguardando_sefaz'
+          });
+        }
+      } catch {
+        this.logger.warn(`Tarefa automatica de recuperacao NF-e ${task.id} foi liberada sem alterar o NSU.`);
+      } finally {
+        if (!resultRecorded) {
+          await this.nfeManifestacaoService.releaseRecoveryTask(task.id, task.leaseId).catch(() => undefined);
+        }
+      }
     }
   }
 
@@ -6079,10 +6292,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const now = new Date();
     const storedMessage = `${message} ${marker}`;
     await this.prisma.nfeSyncControle.updateMany({
-      where: {
-        cnpjConsulta: this.normalizeCnpj(control.cnpjConsulta),
-        ambiente: control.ambiente
-      },
+      where: { id: control.id },
       data: {
         ...(pauseForHour ? { ultimaExecucao: now } : {}),
         ultimaMensagem: storedMessage
@@ -6110,10 +6320,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
       : `cStat ${cStat} - ${reason || (cStat === '137' ? 'Sem novos documentos' : 'Consumo indevido')}. ${this.describeSefazDfeCooldown(cooldownUntil)}`;
     const message = `${baseMessage}${progressMarker ? ` ${progressMarker}` : ''}`;
     await this.prisma.nfeSyncControle.updateMany({
-      where: {
-        cnpjConsulta: this.normalizeCnpj(control.cnpjConsulta),
-        ambiente: control.ambiente
-      },
+      where: { id: control.id },
       data: {
         ultimaExecucao: now,
         ultimaMensagem: message
@@ -6245,10 +6452,24 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     return digits.length >= 2 ? digits.slice(0, 2) : undefined;
   }
 
-  private assertClientScope(documentClientId: string, clienteId: string): void {
-    if (documentClientId !== clienteId) {
+  private toTenantDocument<T extends { clienteId: string; estabelecimentoId: string }>(document: T, clienteId: string): T {
+    const withLinks = document as T & { vinculos?: Array<Record<string, any>> };
+    const link = withLinks.vinculos?.find((item) => item.clienteId === clienteId);
+    if (!link && document.clienteId !== clienteId) {
       throw new NotFoundException('NF-e nao encontrada para o cliente informado');
     }
+    const base = { ...withLinks } as Record<string, any>;
+    delete base.vinculos;
+    if (!link) return base as T;
+    return {
+      ...base,
+      clienteId: link.clienteId,
+      estabelecimentoId: link.estabelecimentoId,
+      tipoRelacao: link.tipoRelacao ?? (document as any).tipoRelacao,
+      nsu: link.nsu ?? (document as any).nsu,
+      origem: link.origem ?? (document as any).origem,
+      estabelecimento: link.estabelecimento ?? (document as any).estabelecimento
+    } as unknown as T;
   }
 
   private getSyncSourceMode(): NfeSyncSourceMode {

@@ -17,13 +17,13 @@ import { RealNfeDistribuicaoClient } from './real-nfe-distribuicao.client';
       useFactory: (
         fakeClient: FakeNfeDistribuicaoClient,
         realClient: RealNfeDistribuicaoClient
-      ) => (process.env.NFE_DISTRIBUICAO_CLIENT_MODE === 'real' ? realClient : fakeClient),
+      ) => (process.env.NODE_ENV !== 'test' && process.env.NFE_DISTRIBUICAO_CLIENT_MODE === 'real' ? realClient : fakeClient),
       inject: [FakeNfeDistribuicaoClient, RealNfeDistribuicaoClient]
     },
     {
       provide: NFE_MANIFESTACAO_CLIENT,
       useFactory: (fakeClient: FakeNfeManifestacaoClient, realClient: RealNfeDistribuicaoClient) =>
-        process.env.NFE_DISTRIBUICAO_CLIENT_MODE === 'real' ? realClient : fakeClient,
+        process.env.NODE_ENV !== 'test' && process.env.NFE_DISTRIBUICAO_CLIENT_MODE === 'real' ? realClient : fakeClient,
       inject: [FakeNfeManifestacaoClient, RealNfeDistribuicaoClient]
     }
   ],

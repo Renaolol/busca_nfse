@@ -18,6 +18,7 @@ O requisitante precisa ser contabilista e estar vinculado ao CPF/CNPJ consultado
 - A pagina `Buscas NF-e` nao exibe o painel de busca SEF/SC. A configuracao e o acionamento manual seguem disponiveis pelos endpoints administrativos descritos abaixo. No modo mock, nenhuma consulta e enviada a SEF/SC e nenhum certificado real e usado.
 - Configure pelo endpoint administrativo somente depois de confirmar, fora do NotaSync, que o titular do A1 contabilista tem vinculo com o produtor na SEF/SC. O servico retorna `8002` se a autorizacao nao estiver reconhecida.
 - A configuracao aceita somente estabelecimento com CPF valido e certificado A1 ativo, nao vencido e vinculado ao cliente/estabelecimento. Trocar certificado preserva o cursor. O filtro `indAtor` fica imutavel depois do primeiro NSU para evitar pular documentos.
+- O agendamento automatico e opt-in: mantenha `NFE_SC_AUTO_RUN_ENABLED=false` (padrao) para execucao manual; com `true`, somente controles criados e confirmados por administrador, ativos e vencidos entram na fila. Controles pausados ficam fora. O consumidor conserva leases, cursor independente, espera configurada e limites de requisicoes por processo.
 - A integracao nao envia manifestacao do destinatario e nao consulta certificado real durante a configuracao. O XML do certificado e a senha continuam usando o storage criptografado existente.
 - Logs nao registram CPF/CNPJ, certificado, chave, XML ou resposta SOAP. Mensagens de status redigem identificadores que possam aparecer em `xMotivo`.
 

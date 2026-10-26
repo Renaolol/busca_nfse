@@ -123,6 +123,7 @@ model Cliente {
   nfceScSyncControles       NfceScSyncControle[]
   nfeScSyncControles        NfeScSyncControle[]
   nfeDocumentos             NfeDocumento[]
+  nfeDocumentoVinculos      NfeDocumentoVinculo[]
   syncLogs                  NfseSyncLog[]
   auditorias                AuditoriaUsuario[]
   alertResolutions          AlertResolution[]
@@ -163,6 +164,7 @@ model ClienteEstabelecimento {
   nfceScSyncControles       NfceScSyncControle[]
   nfeScSyncControles        NfeScSyncControle[]
   nfeDocumentos             NfeDocumento[]
+  nfeDocumentoVinculos      NfeDocumentoVinculo[]
   nfeManifestacoes          NfeManifestacao[]
   nfeAutomacaoConfiguracoes NfeAutomacaoConfiguracao[]
   nfeAutomacaoAuditorias    NfeAutomacaoAuditoria[]
@@ -508,16 +510,38 @@ model NfeDocumento {
   createdAt               DateTime            @default(now()) @map("created_at")
   updatedAt               DateTime            @updatedAt @map("updated_at")
 
-  cliente            Cliente                     @relation(fields: [clienteId], references: [id], onDelete: Cascade)
-  estabelecimento    ClienteEstabelecimento      @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
+  cliente            Cliente                     @relation(fields: [clienteId], references: [id], onDelete: Restrict)
+  estabelecimento    ClienteEstabelecimento      @relation(fields: [estabelecimentoId], references: [id], onDelete: Restrict)
   eventos            NfeEvento[]
+  vinculos           NfeDocumentoVinculo[]
   manifestacoes      NfeManifestacao[]
-  xmlRecuperacao     NfeXmlRecuperacao?
+  xmlRecuperacoes    NfeXmlRecuperacao[]
   sefScDistribuicoes NfeScDocumentoDistribuido[]
 
   @@unique([ambiente, chaveAcesso], map: "nfe_documentos_ambiente_chave_acesso_key")
   @@unique([clienteId, ambiente, nsu], map: "nfe_documentos_cliente_id_ambiente_nsu_key")
   @@map("nfe_documentos")
+}
+
+// Mantem o escopo e a relacao fiscal de cada cliente sem duplicar a NF-e global.
+model NfeDocumentoVinculo {
+  id                String              @id @default(uuid()) @db.Uuid
+  nfeDocumentoId    String              @map("nfe_documento_id") @db.Uuid
+  clienteId         String              @map("cliente_id") @db.Uuid
+  estabelecimentoId String              @map("estabelecimento_id") @db.Uuid
+  tipoRelacao       NfeTipoRelacao?     @map("tipo_relacao")
+  nsu               BigInt?
+  origem            NfeDocumentoOrigem?
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  documento       NfeDocumento           @relation(fields: [nfeDocumentoId], references: [id], onDelete: Cascade)
+  cliente         Cliente                @relation(fields: [clienteId], references: [id], onDelete: Cascade)
+  estabelecimento ClienteEstabelecimento @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
+
+  @@unique([nfeDocumentoId, clienteId, estabelecimentoId], map: "nfe_documento_vinculos_documento_cliente_estabelecimento_key")
+  @@index([clienteId, estabelecimentoId], map: "nfe_documento_vinculos_cliente_estabelecimento_idx")
+  @@map("nfe_documento_vinculos")
 }
 
 model NfeManifestacao {
@@ -605,7 +629,7 @@ model NfeAutomacaoAuditoria {
 
 model NfeXmlRecuperacao {
   id                 String      @id @default(uuid()) @db.Uuid
-  nfeDocumentoId     String      @unique @map("nfe_documento_id") @db.Uuid
+  nfeDocumentoId     String      @map("nfe_documento_id") @db.Uuid
   clienteId          String      @map("cliente_id") @db.Uuid
   estabelecimentoId  String      @map("estabelecimento_id") @db.Uuid
   configuracaoId     String      @map("configuracao_id") @db.Uuid
@@ -627,6 +651,7 @@ model NfeXmlRecuperacao {
   configuracao    NfeAutomacaoConfiguracao @relation(fields: [configuracaoId], references: [id], onDelete: Cascade)
   nfeDocumento    NfeDocumento             @relation(fields: [nfeDocumentoId], references: [id], onDelete: Cascade)
 
+  @@unique([nfeDocumentoId, clienteId, estabelecimentoId], map: "nfe_xml_recuperacoes_documento_cliente_estabelecimento_key")
   @@index([clienteId, estabelecimentoId, status, proximaTentativaEm], map: "nfe_xml_recuperacao_pendentes_idx")
   @@index([leaseAte], map: "nfe_xml_recuperacao_lease_idx")
   @@map("nfe_xml_recuperacoes")

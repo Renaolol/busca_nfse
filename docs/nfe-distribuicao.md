@@ -112,9 +112,11 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 
 ## Manifestações e disponibilidade do XML
 
-A tela de NF-e não exibe painel, histórico nem ações de manifestação ou consulta pontual de XML. O worker de recuperação automática de XML foi removido. Os endpoints administrativos de manifestação permanecem disponíveis para chamadas explícitas da API e não são acionados pela busca manual SEF/SC.
+A tela de NF-e não exibe painel, histórico nem ações de manifestação ou consulta pontual de XML. O worker de recuperação por chave usa a fila existente somente quando a sincronização automática está habilitada; ele processa resumos após manifestação aceita e respeita a autorização expressa registrada para Ciência da Operação. Sem essa autorização, o resumo fica pendente e nenhum evento é enviado. A recuperação faz `consChNFe` sem alterar o cursor nacional e grava estado, tentativas e diagnóstico sanitizado. A busca SEF/SC não chama esse worker.
 
-A listagem normal `XMLs NF-e` mostra somente documentos com XML completo. Resumos `resNFe` ficam identificados como pendentes e podem ser consultados pela opção explícita de resumos; não são contados como XML completo nem transformados em XML fiscal. A interface não consegue fazer a SEFAZ fornecer um XML que o serviço não liberou: a obtenção continua sujeita ao serviço e à autorização aplicáveis.
+Para habilitar Ciência automática, um administrador precisa ativar a configuração explícita por estabelecimento e ambiente, confirmar a aceitação do termo vigente e registrar o usuário autorizador. A recuperação automática de XML pode ser habilitada separadamente. Revogar a autorização impede novos envios. `NFE_SYNC_AUTO_RUN_ENABLED=false` desliga o ciclo automático nacional e sua fila de recuperação.
+
+A listagem normal `XMLs NF-e` mostra somente documentos com XML completo. Resumos `resNFe` e eventos `resEvento` ficam classificados separadamente; resumo de evento é associado ao documento e nunca tratado como NF-e completa. Resumos `resNFe` podem ser consultados pela opção explícita de resumos; não são contados como XML completo nem transformados em XML fiscal. A interface não consegue fazer a SEFAZ fornecer um XML que o serviço não liberou: a obtenção continua sujeita ao serviço e à autorização aplicáveis.
 ## Operacao recomendada
 
 - A distribuicao DF-e deve ter um consumidor coordenado por interessado (CPF/CNPJ) e ambiente.
@@ -122,9 +124,13 @@ A listagem normal `XMLs NF-e` mostra somente documentos com XML completo. Resumo
 - Para esses casos, desabilite a NF-e do cliente no proprio cadastro (`nfe_habilitado=false`) e mantenha apenas um consumidor ativo para aquele interessado.
 - O painel `Buscas NF-e` mostra somente clientes habilitados para NF-e; a tela `Clientes` e o ponto de controle dessa flag.
 
+## Escopo por cliente e deduplicacao
+
+O registro fiscal continua unico por `ambiente + chave_acesso`. `nfe_documento_vinculos` registra os clientes e estabelecimentos que receberam a mesma NF-e, com papel (`emitida`/`recebida`), origem e NSU de cada distribuicao. Listagens, detalhe, XML, downloads, analises e manifestacoes verificam esse vinculo antes de devolver dados; o papel apresentado e o do cliente consultado. A migration `20261026120000_add_nfe_document_tenant_links` cria os vinculos e backfilla os documentos existentes.
+
 ## Interface manual e resumos
 
-A tela `Buscas NF-e` mantém os painéis de rotina, filtros, status, controles e consultas manuais existentes. Foram removidos da interface o painel separado de busca SEF/SC, os controles de automação de Ciência/recuperação de XML e a lista de documentos pendentes mostrados nesses controles. A integração SEF/SC permanece disponível pelos endpoints administrativos documentados em [docs/nfe-sc.md](nfe-sc.md). O worker de recuperação automática está desligado; não há envio automático de manifestação nem consulta automática de XML completo. Os dados e registros já persistidos permanecem no banco.
+A tela `Buscas NF-e` mantém os painéis de rotina, filtros, status, controles e consultas manuais existentes. Foram removidos da interface o painel separado de busca SEF/SC, os controles de automação de Ciência/recuperação de XML e a lista de documentos pendentes mostrados nesses controles. A integração SEF/SC permanece disponível pelos endpoints administrativos documentados em [docs/nfe-sc.md](nfe-sc.md); seu agendamento fica desligado até `NFE_SC_AUTO_RUN_ENABLED=true`. A fila nacional de recuperação só executa com a sincronização automática habilitada e usa autorizações explicitamente registradas. Os dados e registros já persistidos permanecem no banco.
 
 A busca SEF/SC usa um cursor próprio, exige confirmação administrativa de que o vínculo do contabilista foi verificado na SEF/SC e depende da autorização que a SEF/SC valida em cada chamada. No modo padrão `mock`, nenhuma requisição real é enviada e nenhum certificado real é usado. Consulte [docs/nfe-sc.md](nfe-sc.md) para configuração e regras oficiais.
 

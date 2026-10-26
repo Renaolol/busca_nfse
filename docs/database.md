@@ -11,6 +11,7 @@ O schema inicial usa Prisma + PostgreSQL com as tabelas:
 - `nfse_sync_logs`
 - `nfe_sync_controle`
 - `nfe_documentos`
+- `nfe_documento_vinculos`
 - `auditoria_usuario`
 - `simples_nacional_importacoes`
 - `simples_nacional_empresas`
@@ -18,6 +19,9 @@ O schema inicial usa Prisma + PostgreSQL com as tabelas:
 Regras principais:
 
 - Deduplicacao por `UNIQUE (ambiente, chave_acesso)` em documentos.
+- NF-e permanece deduplicada globalmente por ambiente/chave; `nfe_documento_vinculos` guarda cliente, estabelecimento, papel fiscal, origem e NSU de cada escopo. A migration `20261026120000_add_nfe_document_tenant_links` backfilla os documentos existentes para preservar o acesso atual.
+- Tarefas de recuperação de XML são isoladas por cliente/estabelecimento; a migration `20261026140000_scope_nfe_xml_recovery_by_tenant` substitui a unicidade global por documento pela unicidade no escopo do cliente.
+- A migration `20261026160000_protect_shared_nfe_documents` impede que a exclusão do cliente ou estabelecimento primário apague uma NF-e global que pode estar vinculada a outros clientes.
 - Controle NSU por contexto (`cliente/cnpj/ambiente`) com `UNIQUE (cliente_id, cnpj_consulta, ambiente)` em `nfse_sync_controle`.
 - Controle NSU independente para NF-e em `nfe_sync_controle`.
 - Controle NSU proprio da distribuicao SEF/SC em `nfce_sc_sync_controle`; essa sequencia nao compartilha NSU com a distribuicao nacional.

@@ -56,6 +56,8 @@ describe('NfeManifestacaoService', () => {
   const automaticRecoveryTask = (documentOverrides: Record<string, any> = {}) => ({
     id: 'task-1',
     leaseId: 'lease-1',
+    clienteId: 'cliente-1',
+    estabelecimentoId: 'estab-1',
     configuracao: {
       cienciaAutomatica: true, recuperacaoXmlAutomatica: true, autorizacaoAtiva: true,
       usuarioAutorizouId: 'user-1', autorizadaEm: new Date(),
@@ -357,7 +359,13 @@ describe('NfeManifestacaoService', () => {
 
     expect(result).toEqual([expect.objectContaining({ documentoId: 'doc-1', status: 'aguardando_ciencia', resumoDisponivel: true })]);
     expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: expect.objectContaining({ clienteId: 'cliente-1', tipoRelacao: 'recebida', xmlRecuperacao: null })
+      where: expect.objectContaining({
+        OR: expect.arrayContaining([
+          expect.objectContaining({ clienteId: 'cliente-1', tipoRelacao: 'recebida' }),
+          expect.objectContaining({ vinculos: expect.objectContaining({ some: expect.objectContaining({ clienteId: 'cliente-1', tipoRelacao: 'recebida' }) }) })
+        ]),
+        xmlRecuperacoes: { none: { clienteId: 'cliente-1' } }
+      })
     }));
   });
 

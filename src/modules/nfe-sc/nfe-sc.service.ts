@@ -21,6 +21,7 @@ export class NfeScService implements OnModuleInit, OnModuleDestroy {
   private static readonly REQUEST_START_GAP_MS = 125;
   private static readonly MAX_CONCURRENT_REQUESTS = 8;
   private static readonly RECOVERY_INTERVAL_MS = 30 * 1000;
+  private readonly automaticPollingEnabled = process.env.NFE_SC_AUTO_RUN_ENABLED === 'true';
   private readonly logger = new Logger(NfeScService.name);
   private readonly runningControls = new Set<string>();
   private requestStartQueue: Promise<void> = Promise.resolve();
@@ -40,8 +41,17 @@ export class NfeScService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit(): void {
-    this.recoveryTimer = setInterval(() => void this.resumeExpiredExecutions(), NfeScService.RECOVERY_INTERVAL_MS);
+    this.recoveryTimer = setInterval(() => {
+      void this.resumeExpiredExecutions().catch(() => this.logger.warn('Falha ao recuperar execucoes SEF/SC expiradas.'));
+      if (this.automaticPollingEnabled) {
+        void this.startDueConfiguredControls().catch(() => this.logger.warn('Falha ao iniciar controles SEF/SC configurados.'));
+      }
+    }, NfeScService.RECOVERY_INTERVAL_MS);
     this.recoveryTimer.unref?.();
+    if (this.automaticPollingEnabled) {
+      void this.startDueConfiguredControls().catch(() => this.logger.warn('Falha ao iniciar controles SEF/SC configurados.'));
+      this.logger.log('Agendamento SEF/SC habilitado para controles explicitamente configurados e ativos.');
+    }
   }
 
   onModuleDestroy(): void {
@@ -93,6 +103,7 @@ export class NfeScService implements OnModuleInit, OnModuleDestroy {
           nsu: true,
           schemaDoc: true,
           createdAt: true,
+          controle: { select: { estabelecimentoId: true } },
           documento: {
             select: {
               id: true,
@@ -115,6 +126,10 @@ export class NfeScService implements OnModuleInit, OnModuleDestroy {
     return {
       items: rows.map((row) => ({
         ...row,
+        documento: {
+          ...row.documento,
+          estabelecimentoId: row.controle?.estabelecimentoId ?? row.documento.estabelecimentoId
+        },
         nsu: row.nsu.toString(),
         origem: 'sef_sc_nfe' as const
       })),
@@ -250,7 +265,10 @@ export class NfeScService implements OnModuleInit, OnModuleDestroy {
         id,
         clienteId,
         status: { not: NfeSyncStatus.processando },
-        OR: [{ proximaExecucao: null }, { proximaExecucao: { lte: now } }]
+        OR: [
+          { status: NfeSyncStatus.ativo, proximaExecucao: null },
+          { proximaExecucao: { lte: now } }
+        ]
       },
       data: {
         status: NfeSyncStatus.processando,
@@ -401,6 +419,26 @@ export class NfeScService implements OnModuleInit, OnModuleDestroy {
     });
     for (const control of expired) {
       if (control.proximaExecucao) this.startBackgroundExecution(control.id, control.proximaExecucao);
+    }
+  }
+
+  private async startDueConfiguredControls(): Promise<void> {
+    const now = new Date();
+    const controls = await this.prisma.nfeScSyncControle.findMany({
+      where: {
+        status: { in: [NfeSyncStatus.ativo, NfeSyncStatus.erro_api] },
+        OR: [{ proximaExecucao: null }, { proximaExecucao: { lte: now } }]
+      },
+      orderBy: [{ proximaExecucao: 'asc' }, { updatedAt: 'asc' }],
+      take: 20,
+      select: { id: true, clienteId: true }
+    });
+    for (const control of controls) {
+      try {
+        await this.run(control.clienteId, control.id);
+      } catch {
+        this.logger.warn(`Agendamento SEF/SC nao iniciou o controle ${control.id}; cursor e configuracao foram preservados.`);
+      }
     }
   }
 

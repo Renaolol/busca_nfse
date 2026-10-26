@@ -43,6 +43,7 @@ type AutomaticRecoveryPreparation =
       status: 'aguardando_xml';
       clienteId: string;
       estabelecimentoId: string;
+      actorType: 'CPF' | 'CNPJ';
       ambiente: NfeAmbiente;
       chaveAcesso: string;
     };
@@ -282,29 +283,46 @@ export class NfeManifestacaoService {
     const unqueuedSummaries = !query.status || query.status === 'aguardando_ciencia'
       ? await this.prisma.nfeDocumento.findMany({
       where: {
-        clienteId: query.clienteId,
-        ...(query.estabelecimentoId ? { estabelecimentoId: query.estabelecimentoId } : {}),
+        OR: [
+          {
+            clienteId: query.clienteId,
+            ...(query.estabelecimentoId ? { estabelecimentoId: query.estabelecimentoId } : {}),
+            tipoRelacao: 'recebida'
+          },
+          {
+            vinculos: { some: {
+              clienteId: query.clienteId,
+              ...(query.estabelecimentoId ? { estabelecimentoId: query.estabelecimentoId } : {}),
+              tipoRelacao: 'recebida'
+            } }
+          }
+        ],
         modelo: '55',
-        tipoRelacao: 'recebida',
         resumoDisponivel: true,
         xmlCompletoDisponivel: false,
-        xmlRecuperacao: null
+        xmlRecuperacoes: { none: { clienteId: query.clienteId, ...(query.estabelecimentoId ? { estabelecimentoId: query.estabelecimentoId } : {}) } }
       },
       orderBy: [{ dataEmissao: 'asc' }, { createdAt: 'asc' }],
       take: Math.max(0, 200 - queued.length),
       select: {
         id: true, clienteId: true, estabelecimentoId: true, ambiente: true, numeroNfe: true,
-        dataEmissao: true, schemaDoc: true, resumoDisponivel: true, xmlCompletoDisponivel: true
+        dataEmissao: true, schemaDoc: true, resumoDisponivel: true, xmlCompletoDisponivel: true,
+        vinculos: {
+          where: { clienteId: query.clienteId, ...(query.estabelecimentoId ? { estabelecimentoId: query.estabelecimentoId } : {}) },
+          select: { clienteId: true, estabelecimentoId: true, tipoRelacao: true }
+        }
       }
       })
       : [];
     return [
       ...queued,
-      ...unqueuedSummaries.map((document) => ({
+      ...unqueuedSummaries.map((document) => {
+        const link = (document as typeof document & { vinculos?: Array<any> }).vinculos?.[0];
+        return {
         id: `resumo-${document.id}`,
         documentoId: document.id,
-        clienteId: document.clienteId,
-        estabelecimentoId: document.estabelecimentoId,
+        clienteId: link?.clienteId ?? document.clienteId,
+        estabelecimentoId: link?.estabelecimentoId ?? document.estabelecimentoId,
         ambiente: document.ambiente,
         status: 'aguardando_ciencia',
         tentativas: 0,
@@ -317,7 +335,8 @@ export class NfeManifestacaoService {
         schemaDoc: document.schemaDoc,
         resumoDisponivel: document.resumoDisponivel,
         xmlCompletoDisponivel: document.xmlCompletoDisponivel
-      }))
+        };
+      })
     ];
   }
 
@@ -347,15 +366,35 @@ export class NfeManifestacaoService {
     });
   }
 
-  async observePersistedDocument(documentId: string) {
+  async observePersistedDocument(documentId: string, clienteId?: string, estabelecimentoId?: string) {
     const document = await this.prisma.nfeDocumento.findFirst({
-      where: { id: documentId },
+      where: {
+        id: documentId,
+        ...(clienteId ? {
+          OR: [
+            { clienteId },
+            { vinculos: { some: { clienteId, ...(estabelecimentoId ? { estabelecimentoId } : {}) } } }
+          ]
+        } : {})
+      },
       select: {
         id: true, clienteId: true, estabelecimentoId: true, ambiente: true, modelo: true, tipoRelacao: true,
-        resumoDisponivel: true, xmlCompletoDisponivel: true
+        resumoDisponivel: true, xmlCompletoDisponivel: true,
+        ...(clienteId ? {
+          vinculos: {
+            where: { clienteId, ...(estabelecimentoId ? { estabelecimentoId } : {}) },
+            select: { clienteId: true, estabelecimentoId: true, tipoRelacao: true }
+          }
+        } : {})
       }
     });
     if (!document) return;
+    const link = (document as typeof document & { vinculos?: Array<{ clienteId: string; estabelecimentoId: string; tipoRelacao: string | null }> }).vinculos?.[0];
+    if (link) {
+      document.clienteId = link.clienteId;
+      document.estabelecimentoId = link.estabelecimentoId;
+      document.tipoRelacao = link.tipoRelacao as typeof document.tipoRelacao;
+    }
     if (document.xmlCompletoDisponivel) {
       await this.prisma.nfeXmlRecuperacao.updateMany({
         where: { nfeDocumentoId: document.id },
@@ -422,10 +461,36 @@ export class NfeManifestacaoService {
   async prepareAutomaticRecovery(taskId: string, leaseId: string): Promise<AutomaticRecoveryPreparation> {
     const task = await this.prisma.nfeXmlRecuperacao.findFirst({
       where: { id: taskId, leaseId },
-      include: { configuracao: true, nfeDocumento: { include: { estabelecimento: { select: { id: true, clienteId: true, cnpj: true, ativo: true } } } } }
+      include: {
+        configuracao: true,
+        nfeDocumento: {
+          include: {
+            estabelecimento: { select: { id: true, clienteId: true, cnpj: true, ativo: true } },
+            vinculos: { include: { estabelecimento: { select: { id: true, clienteId: true, cnpj: true, ativo: true } } } }
+          }
+        }
+      }
     });
     if (!task) return { canQuery: false, status: 'lease_expirada' };
-    const document = task.nfeDocumento;
+    const storedDocument = task.nfeDocumento as typeof task.nfeDocumento & { vinculos?: Array<any> };
+    const taskClienteId = task.clienteId ?? task.configuracao.clienteId ?? storedDocument.clienteId;
+    const taskEstabelecimentoId = task.estabelecimentoId ?? task.configuracao.estabelecimentoId ?? storedDocument.estabelecimentoId;
+    const scopedLink = storedDocument.vinculos?.find((item) =>
+      item.clienteId === taskClienteId && item.estabelecimentoId === taskEstabelecimentoId
+    );
+    if (!scopedLink && storedDocument.clienteId !== taskClienteId) {
+      await this.updateRecoveryTask(taskId, leaseId, {
+        status: 'erro_processamento', resultadoConsulta: 'vinculo_cliente_ausente', proximaTentativaEm: null
+      });
+      return { canQuery: false, status: 'erro_processamento' };
+    }
+    const document = scopedLink ? {
+      ...storedDocument,
+      clienteId: scopedLink.clienteId,
+      estabelecimentoId: scopedLink.estabelecimentoId,
+      tipoRelacao: scopedLink.tipoRelacao ?? storedDocument.tipoRelacao,
+      estabelecimento: scopedLink.estabelecimento
+    } : storedDocument;
     if (document.xmlCompletoDisponivel) {
       await this.updateRecoveryTask(taskId, leaseId, { status: 'xml_disponivel', resultadoConsulta: 'xml_completo', proximaTentativaEm: null });
       return { canQuery: false, status: 'xml_disponivel' };
@@ -505,6 +570,7 @@ export class NfeManifestacaoService {
       status: 'aguardando_xml',
       clienteId: document.clienteId,
       estabelecimentoId: document.estabelecimentoId,
+      actorType: this.onlyDigits(document.estabelecimento.cnpj).length === 11 ? 'CPF' : 'CNPJ',
       ambiente: document.ambiente,
       chaveAcesso: document.chaveAcesso
     };
@@ -749,7 +815,7 @@ export class NfeManifestacaoService {
         }
       });
       if (accepted && (code === SCIENCE_CODE || FINAL_CODES.has(code))) {
-        await this.scheduleXmlRecovery(document.id);
+        await this.scheduleXmlRecovery(document.id, document.clienteId, document.estabelecimentoId);
       }
       this.logSafeResult(dto.tipo, document.ambiente, response.statusCode, response.cStat, response.eventCStat, status, response.eventXMotivo ?? response.xMotivo);
       return this.toPublicResult(updated);
@@ -881,7 +947,7 @@ export class NfeManifestacaoService {
         }
       });
       this.logSafeResult('ciencia_operacao', document.ambiente, response.statusCode, response.cStat, response.eventCStat, status, response.eventXMotivo ?? response.xMotivo);
-      if (status === 'registrada') await this.scheduleXmlRecovery(document.id);
+      if (status === 'registrada') await this.scheduleXmlRecovery(document.id, document.clienteId, document.estabelecimentoId);
       return { status, cStat: updated.cStat, xMotivo: this.sanitizeSefazText(updated.xMotivo) };
     } catch (error) {
       const status = error instanceof NfeManifestacaoClientError && !error.requestMayHaveBeenSent ? 'falha_local' : 'resultado_indeterminado';
@@ -915,14 +981,25 @@ export class NfeManifestacaoService {
     while (true) {
       const documents = await this.prisma.nfeDocumento.findMany({
         where: {
-          clienteId: config.clienteId,
-          estabelecimentoId: config.estabelecimentoId,
+          OR: [
+            {
+              clienteId: config.clienteId,
+              estabelecimentoId: config.estabelecimentoId,
+              tipoRelacao: 'recebida'
+            },
+            {
+              vinculos: { some: {
+                clienteId: config.clienteId,
+                estabelecimentoId: config.estabelecimentoId,
+                tipoRelacao: 'recebida'
+              } }
+            }
+          ],
           ambiente: config.ambiente,
           modelo: '55',
-          tipoRelacao: 'recebida',
           resumoDisponivel: true,
           xmlCompletoDisponivel: false,
-          xmlRecuperacao: null
+          xmlRecuperacoes: { none: { clienteId: config.clienteId, estabelecimentoId: config.estabelecimentoId } }
         },
         orderBy: { id: 'asc' },
         take: 500,
@@ -972,9 +1049,15 @@ export class NfeManifestacaoService {
     await this.prisma.nfeXmlRecuperacao.updateMany({ where: { id, leaseId }, data });
   }
 
-  private async scheduleXmlRecovery(documentId: string) {
-    const task = await this.prisma.nfeXmlRecuperacao.findUnique({ where: { nfeDocumentoId: documentId }, include: { configuracao: true } });
-    if (!task || !task.configuracao.recuperacaoXmlAutomatica || task.status === 'xml_disponivel') return;
+  private async scheduleXmlRecovery(documentId: string, clienteId: string, estabelecimentoId: string) {
+    const task = await this.prisma.nfeXmlRecuperacao.findFirst({
+      where: { nfeDocumentoId: documentId, clienteId, estabelecimentoId },
+      include: { configuracao: true }
+    });
+    if (
+      !task || task.clienteId !== clienteId || task.estabelecimentoId !== estabelecimentoId ||
+      !task.configuracao.recuperacaoXmlAutomatica || task.status === 'xml_disponivel'
+    ) return;
     await this.prisma.nfeXmlRecuperacao.update({
       where: { id: task.id },
       data: { status: 'aguardando_xml', resultadoConsulta: 'manifestacao_registrada', proximaTentativaEm: new Date(), cStat: null, xMotivo: null }
@@ -983,15 +1066,36 @@ export class NfeManifestacaoService {
 
   private async getDocumentOrThrow(documentId: string, clienteId: string) {
     const document = await this.prisma.nfeDocumento.findFirst({
-      where: { id: documentId, clienteId },
+      where: {
+        id: documentId,
+        OR: [
+          { clienteId },
+          { vinculos: { some: { clienteId } } }
+        ]
+      },
       include: {
-        estabelecimento: { select: { id: true, clienteId: true, cnpj: true, ativo: true } }
+        estabelecimento: { select: { id: true, clienteId: true, cnpj: true, ativo: true } },
+        vinculos: {
+          where: { clienteId },
+          include: { estabelecimento: { select: { id: true, clienteId: true, cnpj: true, ativo: true } } }
+        }
       }
     });
     if (!document) {
       throw new NotFoundException('NF-e nao encontrada.');
     }
-    return document;
+    const scoped = (document as typeof document & { vinculos?: Array<any> }).vinculos?.[0];
+    if (!scoped && document.clienteId !== clienteId) throw new NotFoundException('NF-e nao encontrada.');
+    const base = { ...(document as any) };
+    delete base.vinculos;
+    if (!scoped) return base;
+    return {
+      ...base,
+      clienteId: scoped.clienteId,
+      estabelecimentoId: scoped.estabelecimentoId,
+      tipoRelacao: scoped.tipoRelacao ?? document.tipoRelacao,
+      estabelecimento: scoped.estabelecimento
+    };
   }
 
   private assertManifestationEligible(document: Awaited<ReturnType<NfeManifestacaoService['getDocumentOrThrow']>>): void {

@@ -137,6 +137,14 @@ export class NfeXmlParserService {
       };
     }
 
+    if (/<(?:\w+:)?resEvento\b/i.test(xml)) {
+      return {
+        documentType: 'nfe',
+        schemaDoc: 'resEvento_v1.01',
+        contentType: 'evento'
+      };
+    }
+
     if (/<(?:\w+:)?resCTe\b/i.test(xml)) {
       return {
         documentType: 'cte',
@@ -196,6 +204,9 @@ export class NfeXmlParserService {
     if (classification.contentType === 'evento') {
       throw new Error('XML de evento informado no fluxo de NF-e');
     }
+    if (classification.documentType !== 'nfe' || !['resumo', 'completo'].includes(classification.contentType || '')) {
+      throw new Error('XML desconhecido ou sem schema reconhecido para NF-e');
+    }
 
     const inspected = this.inspect(xml);
     const chaveAcesso = inspected.chaveAcesso;
@@ -249,6 +260,7 @@ export class NfeXmlParserService {
       throw new Error('XML informado nao corresponde a um evento de NF-e/CT-e');
     }
 
+    const summaryEvent = /<(?:\w+:)?resEvento\b/i.test(xml);
     const chaveAcesso = this.extractEventAccessKey(xml);
     if (!chaveAcesso) {
       throw new Error('Nao foi possivel localizar chave de acesso no XML do evento');
@@ -267,7 +279,7 @@ export class NfeXmlParserService {
       dataEvento: this.parseDate(this.extract(xml, ['dhEvento', 'dhRegEvento', 'dhProc'])),
       descricao,
       cnpjAutor: this.normalizeCnpj(this.extract(xml, ['CNPJ', 'CPF'])),
-      idEvento: this.extractAttribute(xml, 'infEvento', 'Id'),
+      idEvento: this.extractAttribute(xml, summaryEvent ? 'resEvento' : 'infEvento', 'Id'),
       numeroSequencial: this.extract(xml, ['nSeqEvento']),
       schemaDoc: classification.schemaDoc,
       isCancelamento: this.isCancelamentoEvento(tipoEvento, descricao)
@@ -296,6 +308,9 @@ export class NfeXmlParserService {
   }
 
   private detectNfeEventSchemaDoc(xml: string): string {
+    if (/<(?:\w+:)?resEvento\b/i.test(xml)) {
+      return 'resEvento_v1.01';
+    }
     if (/<(?:\w+:)?procEventoNFe\b/i.test(xml) || /<(?:\w+:)?procEvento\b/i.test(xml)) {
       return 'procEventoNFe_v1.00';
     }

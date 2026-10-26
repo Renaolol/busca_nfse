@@ -289,5 +289,35 @@ describe('NfeXmlParserService', () => {
       isCancelamento: true
     });
   });
+
+  it('classifica resEvento como resumo de evento de NF-e', () => {
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<resEvento xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01">
+  <cOrgao>35</cOrgao><CNPJ>12345678000199</CNPJ>
+  <chNFe>35260612345678000199550010000001231000001231</chNFe>
+  <dhEvento>2026-07-13T14:10:00-03:00</dhEvento><tpEvento>110111</tpEvento>
+  <nSeqEvento>1</nSeqEvento><xEvento>Cancelamento</xEvento>
+  <dhRegEvento>2026-07-13T14:11:00-03:00</dhRegEvento><nProt>135260000000001</nProt>
+</resEvento>`;
+
+    expect(service.classify(xml)).toEqual({
+      documentType: 'nfe', schemaDoc: 'resEvento_v1.01', contentType: 'evento'
+    });
+    expect(service.parseEvento(xml)).toMatchObject({
+      documentType: 'nfe',
+      chaveAcesso: '35260612345678000199550010000001231000001231',
+      tipoEvento: '110111',
+      descricao: 'Cancelamento',
+      cnpjAutor: '12345678000199',
+      numeroSequencial: '1',
+      schemaDoc: 'resEvento_v1.01',
+      isCancelamento: true
+    });
+  });
+
+  it('rejeita XML desconhecido mesmo que contenha uma chave de acesso', () => {
+    expect(() => service.parse('<retorno><chNFe>35260612345678000199550010000001231000001231</chNFe></retorno>'))
+      .toThrow('XML desconhecido ou sem schema reconhecido para NF-e');
+  });
 });
 

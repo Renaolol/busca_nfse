@@ -32,6 +32,7 @@ describe('NfeService', () => {
       findUnique: jest.fn(),
       upsert: jest.fn()
     },
+    nfeDocumentoVinculo: { upsert: jest.fn() },
     nfeEvento: {
       upsert: jest.fn()
     },
@@ -149,6 +150,7 @@ describe('NfeService', () => {
       ...args.create
     }));
     prisma.nfeEvento.upsert.mockResolvedValue({});
+    prisma.nfeDocumentoVinculo.upsert.mockResolvedValue({});
     prisma.nfeSyncControle.findFirst.mockResolvedValue(null);
     prisma.nfeSyncControle.findMany.mockResolvedValue([]);
     prisma.nfeSyncControle.create.mockResolvedValue({});
@@ -270,7 +272,10 @@ describe('NfeService', () => {
 
     expect(prisma.nfeDocumento.count).toHaveBeenCalledWith({
       where: expect.objectContaining({
-        AND: expect.arrayContaining([{ clienteId: 'cliente-1' }, { modelo: '55' }])
+        AND: expect.arrayContaining([
+          { OR: [{ clienteId: 'cliente-1' }, { vinculos: { some: { clienteId: 'cliente-1' } } }] },
+          { modelo: '55' }
+        ])
       })
     });
     expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
@@ -295,7 +300,10 @@ describe('NfeService', () => {
     await service.findAll({ clienteId: 'cliente-1' });
     expect(prisma.nfeDocumento.count).toHaveBeenLastCalledWith({
       where: expect.objectContaining({
-        AND: expect.arrayContaining([{ clienteId: 'cliente-1' }, { xmlCompletoDisponivel: true }])
+        AND: expect.arrayContaining([
+          { OR: [{ clienteId: 'cliente-1' }, { vinculos: { some: { clienteId: 'cliente-1' } } }] },
+          { xmlCompletoDisponivel: true }
+        ])
       })
     });
 
@@ -303,7 +311,7 @@ describe('NfeService', () => {
     expect(prisma.nfeDocumento.count).toHaveBeenLastCalledWith({
       where: expect.objectContaining({
         AND: expect.arrayContaining([
-          { clienteId: 'cliente-1' },
+          { OR: [{ clienteId: 'cliente-1' }, { vinculos: { some: { clienteId: 'cliente-1' } } }] },
           { xmlCompletoDisponivel: false },
           { resumoDisponivel: true }
         ])
@@ -2193,7 +2201,7 @@ describe('NfeService', () => {
       })
     }));
     expect(prisma.nfeSyncControle.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
-      where: { cnpjConsulta: '01861020970', ambiente: NfeAmbiente.producao },
+      where: { id: 'ctrl-jair' },
       data: expect.objectContaining({
         ultimaMensagem: expect.stringContaining('O cursor normal 2 foi preservado')
       })
@@ -2281,6 +2289,144 @@ describe('NfeService', () => {
       documentosImportados: 1
     });
     expect(result.failures).toBe(0);
+  });
+
+  it('mantem a NF-e global e grava o vinculo e papel do segundo cliente', async () => {
+    const key = '35260612345678000199550010000001231000001231';
+    prisma.nfeDocumento.findUnique.mockResolvedValueOnce({
+      id: 'doc-shared',
+      clienteId: 'cliente-emissor',
+      estabelecimentoId: 'estab-emissor',
+      ambiente: NfeAmbiente.producao,
+      chaveAcesso: key,
+      tipoRelacao: NfeTipoRelacao.emitida,
+      hashXmlCompleto: 'old-hash',
+      eventos: []
+    });
+    prisma.nfeDocumento.upsert.mockResolvedValueOnce({ id: 'doc-shared' });
+
+    await (service as any).persistDocument({
+      clienteId: 'cliente-destinatario',
+      estabelecimentoId: 'estab-destinatario',
+      ambiente: NfeAmbiente.producao,
+      cnpjConsulta: '99888777000166',
+      document: {
+        nsu: 77n,
+        schema: 'procNFe_v4.00',
+        chaveAcesso: key,
+        xml: `<nfeProc xmlns="http://www.portalfiscal.inf.br/nfe"><NFe><infNFe Id="NFe${key}"><ide><mod>55</mod><tpAmb>1</tpAmb><serie>1</serie><nNF>123</nNF></ide><emit><CNPJ>12345678000199</CNPJ></emit><dest><CNPJ>99888777000166</CNPJ></dest></infNFe></NFe></nfeProc>`
+      },
+      origem: 'distribuicao_nsu'
+    });
+
+    const documentUpsert = prisma.nfeDocumento.upsert.mock.calls.at(-1)?.[0];
+    expect(documentUpsert?.update).not.toHaveProperty('clienteId');
+    expect(documentUpsert?.update).not.toHaveProperty('estabelecimentoId');
+    expect(documentUpsert?.update).not.toHaveProperty('tipoRelacao');
+    expect(documentUpsert?.update).not.toHaveProperty('nsu');
+    expect(prisma.nfeDocumentoVinculo.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      where: { nfeDocumentoId_clienteId_estabelecimentoId: {
+        nfeDocumentoId: 'doc-shared', clienteId: 'cliente-destinatario', estabelecimentoId: 'estab-destinatario'
+      } },
+      create: expect.objectContaining({
+        clienteId: 'cliente-destinatario',
+        estabelecimentoId: 'estab-destinatario',
+        tipoRelacao: NfeTipoRelacao.recebida,
+        nsu: 77n
+      })
+    }));
+  });
+
+  it('devolve a relacao correta ao cliente vinculado e oculta a titularidade primaria', async () => {
+    prisma.nfeDocumento.findUnique.mockResolvedValueOnce({
+      id: 'doc-shared',
+      clienteId: 'cliente-emissor',
+      estabelecimentoId: 'estab-emissor',
+      tipoRelacao: NfeTipoRelacao.emitida,
+      modelo: '55',
+      schemaDoc: 'procNFe_v4.00',
+      vinculos: [{
+        clienteId: 'cliente-destinatario',
+        estabelecimentoId: 'estab-destinatario',
+        tipoRelacao: NfeTipoRelacao.recebida,
+        nsu: 77n,
+        origem: 'distribuicao_nsu',
+        estabelecimento: { id: 'estab-destinatario', clienteId: 'cliente-destinatario', cnpj: '99888777000166', ativo: true }
+      }],
+      eventos: []
+    } as never);
+
+    const result = await service.findOne('doc-shared', 'cliente-destinatario');
+
+    expect(result).toMatchObject({
+      clienteId: 'cliente-destinatario',
+      estabelecimentoId: 'estab-destinatario',
+      tipoRelacao: NfeTipoRelacao.recebida,
+      nsu: 77n
+    });
+    expect(result).not.toHaveProperty('vinculos');
+  });
+
+  it('nao devolve um documento a um cliente sem vinculo', async () => {
+    prisma.nfeDocumento.findUnique.mockResolvedValueOnce({
+      id: 'doc-private', clienteId: 'cliente-emissor', estabelecimentoId: 'estab-emissor',
+      modelo: '55', schemaDoc: 'procNFe_v4.00', eventos: [], vinculos: []
+    } as never);
+
+    await expect(service.findOne('doc-private', 'cliente-nao-vinculado'))
+      .rejects.toThrow('NF-e nao encontrada para o cliente informado');
+  });
+
+  it('processa a recuperacao automatica por chave e grava diagnostico sem enviar manifestacao no proprio ciclo', async () => {
+    const originalNodeEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    nfeManifestacaoService.claimDueRecoveryTasks.mockResolvedValueOnce([{ id: 'recovery-1', leaseId: 'lease-1' }]);
+    nfeManifestacaoService.prepareAutomaticRecovery.mockResolvedValueOnce({
+      canQuery: true,
+      status: 'aguardando_xml',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      actorType: 'CNPJ',
+      ambiente: NfeAmbiente.producao,
+      chaveAcesso: '35260612345678000199550010000001231000001231'
+    });
+    const consulta = jest.spyOn(service, 'consultarChave').mockResolvedValueOnce({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documento localizado',
+      requestedNsu: undefined,
+      requestedChave: '35260612345678000199550010000001231000001231',
+      ultNsu: '0',
+      maxNsu: '0',
+      persistido: true,
+      documentosEncontrados: 1,
+      documentosPersistidos: 1,
+      documentosNovos: 1,
+      documentosAtualizados: 0,
+      documentosDuplicados: 0,
+      documentos: [{ nsu: undefined, schema: 'nfeProc_v4.00', chaveAcesso: '35260612345678000199550010000001231000001231' }]
+    });
+    prisma.nfeDocumento.findUnique.mockResolvedValueOnce({ xmlCompletoDisponivel: true });
+
+    try {
+      await (service as any).runAutomaticXmlRecoveryCycle();
+    } finally {
+      if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = originalNodeEnv;
+    }
+
+    expect(consulta).toHaveBeenCalledWith(expect.objectContaining({
+      clienteId: 'cliente-1', estabelecimentoId: 'estab-1',
+      ambiente: NfeAmbiente.producao,
+      chaveAcesso: '35260612345678000199550010000001231000001231',
+      persistir: true
+    }));
+    expect(nfeManifestacaoService.recordAutomaticRecoveryResult).toHaveBeenCalledWith('recovery-1', 'lease-1', expect.objectContaining({
+      status: 'xml_disponivel', resultadoConsulta: 'xml_completo'
+    }));
+    expect(nfeManifestacaoService.logAutomaticRecoveryDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
+      actorType: 'CNPJ', result: 'xml_disponivel', documentsReceived: 1
+    }));
   });
 
   it('retoma automaticamente uma recuperacao CPF pendente pelo agendador', async () => {
@@ -2485,7 +2631,7 @@ describe('NfeService', () => {
       expect.objectContaining({ nsu: 16n, certificateId: 'cert-jair' })
     );
     expect(prisma.nfeSyncControle.updateMany).toHaveBeenLastCalledWith(expect.objectContaining({
-      where: { cnpjConsulta: control.cnpjConsulta, ambiente: control.ambiente },
+      where: { id: control.id },
       data: expect.objectContaining({
         ultimaExecucao: expect.any(Date),
         ultimaMensagem: expect.stringContaining('SEFAZ_CPF_BACKFILL|15|30|2026-09-01|2026-09-30')
@@ -2616,7 +2762,7 @@ describe('NfeService', () => {
 
     expect(distribuicaoClient.distribuirPorNsu).toHaveBeenCalledTimes(1);
     expect(prisma.nfeSyncControle.updateMany).toHaveBeenCalledWith(expect.objectContaining({
-      where: { cnpjConsulta: control.cnpjConsulta, ambiente: control.ambiente },
+      where: { id: control.id },
       data: expect.objectContaining({
         ultimaExecucao: expect.any(Date),
         ultimaMensagem: expect.stringContaining(`cStat ${cStat}`)
@@ -3617,6 +3763,44 @@ describe('NfeService', () => {
     });
   });
 
+  it('preserva o cursor nacional quando um ou mais docZip nao puderam ser extraidos', async () => {
+    prisma.nfeSyncControle.findMany.mockResolvedValue([{
+      id: 'ctrl-extraction',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      cnpjConsulta: '12345678000199',
+      ambiente: NfeAmbiente.producao,
+      ultimoNsuConsultado: 10n,
+      ultimoNsuDistribuido: 9n,
+      maxNsu: 10n,
+      status: NfeSyncStatus.ativo
+    }]);
+    (distribuicaoClient.distribuirPorNsu as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      cStat: '138',
+      xMotivo: 'Documentos localizados',
+      ultNsu: 15n,
+      maxNsu: 20n,
+      documents: [],
+      documentExtraction: { docZipCount: 2, discardedCount: 2, schemaCounts: {} },
+      rawResponse: { mock: true }
+    });
+
+    const result = await service.runNowGlobal();
+
+    expect(prisma.nfeDocumento.upsert).not.toHaveBeenCalled();
+    expect(prisma.nfeSyncControle.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'ctrl-extraction' },
+      data: expect.objectContaining({ status: NfeSyncStatus.erro_api })
+    }));
+    const cursorUpdates = prisma.nfeSyncControle.update.mock.calls
+      .map(([args]) => args.data)
+      .filter((data) => Object.prototype.hasOwnProperty.call(data, 'ultimoNsuConsultado'));
+    expect(cursorUpdates).toHaveLength(0);
+    expect(result).toMatchObject({ failures: 1, documentsSaved: 0 });
+    expect(result.sefazDiagnostics?.[0]).toMatchObject({ failureStage: 'docZip_decode', docZipDiscarded: 2 });
+  });
+
   it('retorna detalhes das falhas de importacao via Dominio para o painel', async () => {
     process.env.NFE_SYNC_SOURCE_MODE = 'dominio';
     prisma.nfeSyncControle.findMany.mockResolvedValue([
@@ -3846,7 +4030,10 @@ describe('NfeService', () => {
     expect(prisma.nfeDocumento.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
-          AND: expect.arrayContaining([{ clienteId: 'cliente-1' }, { cnpjDestinatario: '12345678000199' }])
+          AND: expect.arrayContaining([
+            { OR: [{ clienteId: 'cliente-1' }, { vinculos: { some: { clienteId: 'cliente-1' } } }] },
+            { cnpjDestinatario: '12345678000199' }
+          ])
         })
       })
     );
@@ -4283,7 +4470,7 @@ describe('NfeService', () => {
             expect.objectContaining({
               OR: expect.arrayContaining([expect.objectContaining({ modelo: '57' })])
             }),
-            { clienteId: 'cliente-1' },
+            { OR: [{ clienteId: 'cliente-1' }, { vinculos: { some: { clienteId: 'cliente-1' } } }] },
             { id: { in: ['doc-cte-1'] } }
           ])
         })
@@ -4696,8 +4883,8 @@ describe('NfeService', () => {
       .rejects.toBeInstanceOf(BadRequestException);
   });
 
-  it('does not expose the automatic XML recovery worker', () => {
+  it('runs XML recovery inside the existing automatic cycle without a separate timer', () => {
     expect((service as any).automaticXmlRecoveryTimer).toBeUndefined();
-    expect((service as any).runAutomaticXmlRecoveryCycle).toBeUndefined();
+    expect((service as any).runAutomaticXmlRecoveryCycle).toBeDefined();
   });
 });

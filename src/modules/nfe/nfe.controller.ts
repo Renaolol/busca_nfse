@@ -167,7 +167,7 @@ export class NfeController {
   @ApiOkResponse({ schema: { type: 'object', additionalProperties: true } })
   @ApiOperation({
     summary: 'Atualiza a obtenção automática de XML para um estabelecimento.',
-    description: `A Ciência é desligada por padrão. Ativá-la exige confirmação expressa do usuário administrador e o termo ${'2026-10-v1'}; a autorização vale somente para o estabelecimento e ambiente indicados. A recuperação XML respeita os bloqueios oficiais e não registra manifestações conclusivas.`
+    description: `A Ciência é desligada por padrão. Ativá-la exige confirmação expressa do usuário administrador e o termo ${'2026-10-v1'}; a autorização vale somente para o estabelecimento e ambiente indicados. Quando a sincronização automática está habilitada, o worker envia Ciência apenas com essa autorização registrada e consulta a chave depois da aceitação. A recuperação XML respeita os bloqueios oficiais, não altera o cursor NSU e não registra manifestações conclusivas.`
   })
   @TenantScope({ source: 'body', key: 'clienteId', required: true })
   updateAutomacaoConfiguracoes(@Body() dto: UpdateAutomacaoNfeDto, @Req() request: AuthenticatedRequest) {
@@ -188,7 +188,7 @@ export class NfeController {
   @ApiOkResponse({ schema: { type: 'array', items: { type: 'object', additionalProperties: true } } })
   @ApiOperation({
     summary: 'Lista resumos, Ciências e recuperações XML pendentes no escopo do cliente.',
-    description: 'Cada item inclui última tentativa, próxima tentativa, cStat/xMotivo e status detalhado. Estados de certificado distinguem ausência, inatividade, expiração, titular incompatível e arquivo/storage indisponível. Ciência aguardando autorização fica parada até consentimento expresso; estados de certificado elegíveis são reavaliados automaticamente após seis horas.'
+    description: 'Cada item inclui última tentativa, próxima tentativa, cStat/xMotivo e status detalhado para o cliente e estabelecimento vinculados ao documento. Estados de certificado distinguem ausência, inatividade, expiração, titular incompatível e arquivo/storage indisponível. Ciência aguardando autorização fica parada até consentimento expresso; estados de certificado elegíveis são reavaliados automaticamente após seis horas.'
   })
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   getAutomacaoPendencias(@Query() query: NfeAutomacaoQueryDto) {
