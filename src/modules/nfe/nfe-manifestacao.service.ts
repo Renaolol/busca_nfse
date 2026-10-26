@@ -8,6 +8,7 @@ import {
   NFE_MANIFESTACAO_EVENT_CODES,
   NfeManifestacaoClient,
   NfeManifestacaoClientError,
+  NfeManifestacaoResult,
   NfeManifestacaoTipo
 } from '../../integrations/nfe-distribuicao/nfe-manifestacao.types';
 import { RegistrarNfeManifestacaoDto } from './dto/registrar-manifestacao.dto';
@@ -347,11 +348,16 @@ export class NfeManifestacaoService {
       take: 200,
       select: {
         id: true, nfeDocumentoId: true, estabelecimentoId: true, ambiente: true, tipoEvento: true,
-        status: true, cStat: true, xMotivo: true, nProt: true, enviadoEm: true, processadoEm: true, createdAt: true,
+        certificadoId: true, cpfCnpjDestinatario: true, usuarioId: true, status: true, cStat: true, xMotivo: true, nProt: true,
+        cStatLote: true, xMotivoLote: true, httpStatus: true, enviadoEm: true, processadoEm: true, createdAt: true,
         nfeDocumento: { select: { numeroNfe: true, dataEmissao: true } }
       }
     });
-    return rows.map((item) => ({ ...item, xMotivo: this.sanitizeSefazText(item.xMotivo) }));
+    return rows.map((item) => ({
+      ...item,
+      xMotivo: this.sanitizeSefazText(item.xMotivo),
+      xMotivoLote: this.sanitizeSefazText(item.xMotivoLote)
+    }));
   }
 
   async listAutomationAudit(query: NfeAutomacaoQueryDto) {
@@ -436,7 +442,7 @@ export class NfeManifestacaoService {
             { status: 'aguardando_ciencia', configuracao: { autorizacaoAtiva: true, cienciaAutomatica: true } },
             { status: 'ciencia_aguardando_envio', configuracao: { autorizacaoAtiva: true, cienciaAutomatica: true } },
             { status: { in: [...CERTIFICATE_RECOVERY_STATUSES] }, configuracao: { autorizacaoAtiva: true, cienciaAutomatica: true } },
-            { status: 'aguardando_evento_distribuicao', configuracao: { autorizacaoAtiva: true, cienciaAutomatica: true } },
+            { status: 'aguardando_evento_distribuicao', configuracao: { recuperacaoXmlAutomatica: true } },
             { status: 'aguardando_xml', configuracao: { recuperacaoXmlAutomatica: true } },
             { status: 'aguardando_sefaz', configuracao: { recuperacaoXmlAutomatica: true } }
           ] }
@@ -512,7 +518,7 @@ export class NfeManifestacaoService {
     const acceptedScience = [...attempts, ...importedEvents].some((item) => item.tipoEvento === SCIENCE_CODE && item.status === 'registrada');
     const acceptedConclusive = [...attempts, ...importedEvents].some((item) => FINAL_CODES.has(item.tipoEvento) && TERMINAL_ACCEPTED_STATUSES.has(item.status));
     const scienceWithoutLink = [...attempts, ...importedEvents].some((item) => item.tipoEvento === SCIENCE_CODE && item.status === 'registrada_sem_vinculo');
-    if (scienceWithoutLink && !acceptedConclusive) {
+    if (scienceWithoutLink && !acceptedScience && !acceptedConclusive) {
       await this.updateRecoveryTask(taskId, leaseId, {
         status: 'aguardando_evento_distribuicao',
         resultadoConsulta: 'ciencia_sem_vinculo',
@@ -632,10 +638,16 @@ export class NfeManifestacaoService {
         tipoEvento: true,
         nSeqEvento: true,
         ambiente: true,
+        certificadoId: true,
+        cpfCnpjDestinatario: true,
+        usuarioId: true,
         status: true,
         cStat: true,
         xMotivo: true,
         nProt: true,
+        cStatLote: true,
+        xMotivoLote: true,
+        httpStatus: true,
         justificativa: true,
         autorizacaoExpressaEm: true,
         enviadoEm: true,
@@ -678,6 +690,9 @@ export class NfeManifestacaoService {
 
     return {
       documentoId: document.id,
+      clienteId: document.clienteId,
+      estabelecimentoId: document.estabelecimentoId,
+      chaveAcesso: document.chaveAcesso,
       status,
       modelo: document.modelo,
       tipoRelacao: document.tipoRelacao,
@@ -686,6 +701,68 @@ export class NfeManifestacaoService {
       manifestacaoConclusivaPendente: hasAcceptedScience && !hasAcceptedFinal && Boolean(conclusiveDeadline),
       prazoManifestacaoConclusiva: hasAcceptedScience && !hasAcceptedFinal ? conclusiveDeadline : null,
       historico: mergedHistory.map((item) => ({ ...item, xMotivo: this.sanitizeSefazText(item.xMotivo) }))
+    };
+  }
+
+  async reconcileImportedManifestations(documentId: string, clienteId: string) {
+    const document = await this.getDocumentOrThrow(documentId, clienteId);
+    const attempts = await this.prisma.nfeManifestacao.findMany({
+      where: { nfeDocumentoId: document.id, clienteId: document.clienteId, status: 'resultado_indeterminado' },
+      orderBy: { createdAt: 'asc' }
+    });
+    const importedEvents = await this.loadImportedManifestations(document.id);
+    const reconciled: Array<{ tipoEvento: string; status: string; cStat: string | null; nProt: string | null }> = [];
+
+    for (const attempt of attempts) {
+      const officialEvent = importedEvents.find((event) =>
+        event.tipoEvento === attempt.tipoEvento &&
+        ['registrada', 'registrada_sem_vinculo'].includes(event.status) &&
+        (event.nSeqEvento === attempt.nSeqEvento || (event.nSeqEvento == null && attempt.tipoEvento === SCIENCE_CODE))
+      );
+      if (!officialEvent) continue;
+
+      const status = officialEvent.status as 'registrada' | 'registrada_sem_vinculo';
+      await this.prisma.nfeManifestacao.update({
+        where: { id: attempt.id },
+        data: {
+          status,
+          cStat: officialEvent.cStat,
+          xMotivo: this.sanitizeSefazText(officialEvent.xMotivo),
+          nProt: officialEvent.nProt,
+          processadoEm: officialEvent.dataEvento ?? new Date()
+        }
+      });
+      const recoveryStatus = status === 'registrada' ? 'aguardando_xml' : 'aguardando_evento_distribuicao';
+      await this.prisma.nfeXmlRecuperacao.updateMany({
+        where: {
+          nfeDocumentoId: document.id,
+          clienteId: document.clienteId,
+          estabelecimentoId: document.estabelecimentoId,
+          status: 'resultado_indeterminado'
+        },
+        data: {
+          status: recoveryStatus,
+          cStat: officialEvent.cStat,
+          xMotivo: this.sanitizeSefazText(officialEvent.xMotivo),
+          resultadoConsulta: 'ciencia_reconciliada',
+          proximaTentativaEm: status === 'registrada' ? new Date() : new Date(Date.now() + this.recoveryRetryMs),
+          leaseId: null,
+          leaseAte: null
+        }
+      });
+      reconciled.push({ tipoEvento: attempt.tipoEvento, status, cStat: officialEvent.cStat, nProt: officialEvent.nProt });
+    }
+
+    return {
+      documentoId: document.id,
+      tentativasReconciliadas: reconciled.length,
+      eventos: reconciled,
+      xmlCompletoDisponivel: document.xmlCompletoDisponivel,
+      proximaAcao: reconciled.some((item) => item.cStat === '135')
+        ? 'A Ciência foi confirmada na distribuição; aguarde a consulta agendada do XML por chave.'
+        : reconciled.some((item) => item.cStat === '136')
+          ? 'O evento foi confirmado sem vínculo; aguarde sua distribuição e consulte novamente os eventos.'
+          : 'Nenhum evento correspondente foi encontrado na distribuição. Confira o portal oficial antes de autorizar qualquer reenvio.'
     };
   }
 
@@ -790,6 +867,7 @@ export class NfeManifestacaoService {
           clienteId: document.clienteId,
           estabelecimentoId: document.estabelecimentoId,
           certificadoId: certificate.id,
+          cpfCnpjDestinatario: actor,
           usuarioId: usuarioId || undefined,
           requestId: dto.requestId,
           tipoEvento: code,
@@ -808,8 +886,9 @@ export class NfeManifestacaoService {
       throw error;
     }
 
+    let response: NfeManifestacaoResult;
     try {
-      const response = await this.manifestacaoClient.sendManifestacao({
+      response = await this.manifestacaoClient.sendManifestacao({
         cnpjConsulta: actor,
         chaveAcesso: document.chaveAcesso,
         tipo: dto.tipo,
@@ -818,41 +897,85 @@ export class NfeManifestacaoService {
         ambiente: document.ambiente,
         certificateId: certificate.id
       });
-      const accepted = response.statusCode === 200 && response.cStat === '128' && ['135', '136'].includes(response.eventCStat || '');
-      const status: ManifestationStatus = accepted
-        ? response.eventCStat === '135' ? 'registrada' : 'registrada_sem_vinculo'
-        : 'rejeitada';
-      const updated = await this.prisma.nfeManifestacao.update({
-        where: { id: attempt.id },
-        data: {
-          status,
-          cStat: response.eventCStat ?? response.cStat,
-          xMotivo: this.sanitizeSefazText(response.eventXMotivo ?? response.xMotivo),
-          nProt: response.nProt,
-          processadoEm: new Date()
-        }
-      });
-      if (accepted && (code === SCIENCE_CODE || FINAL_CODES.has(code))) {
-        await this.scheduleXmlRecovery(document.id, document.clienteId, document.estabelecimentoId);
-      }
-      this.logSafeResult(dto.tipo, document.ambiente, response.statusCode, response.cStat, response.eventCStat, status, response.eventXMotivo ?? response.xMotivo);
-      return this.toPublicResult(updated);
     } catch (error) {
       const message = this.toSafeErrorMessage(error);
       const status: ManifestationStatus = error instanceof NfeManifestacaoClientError && !error.requestMayHaveBeenSent
         ? 'falha_local'
         : 'resultado_indeterminado';
+      const clientError = error instanceof NfeManifestacaoClientError ? error : null;
+      const artifacts = await this.persistManifestationArtifacts(
+        attempt.id,
+        clientError?.signedEventXml,
+        clientError?.responseXml
+      );
       const updated = await this.prisma.nfeManifestacao.update({
         where: { id: attempt.id },
         data: {
           status,
-          xMotivo: message,
+          xMotivo: artifacts.error ? `${message} Artefatos fiscais nao puderam ser arquivados.` : message,
+          xmlEventoAssinadoPath: artifacts.xmlEventoAssinadoPath,
+          xmlRetornoPath: artifacts.xmlRetornoPath,
           processadoEm: new Date()
         }
       });
       this.logSafeResult(dto.tipo, document.ambiente, null, null, null, status, message);
-      return this.toPublicResult(updated);
+      return { ...this.toPublicResult(updated), artefatosSalvos: !artifacts.error };
     }
+
+    const accepted = response.statusCode === 200 && response.cStat === '128' && ['135', '136'].includes(response.eventCStat || '');
+    const duplicateNeedsReconciliation = response.eventCStat === '573';
+    const status: ManifestationStatus = duplicateNeedsReconciliation
+      ? 'resultado_indeterminado'
+      : accepted
+        ? response.eventCStat === '135' ? 'registrada' : 'registrada_sem_vinculo'
+        : 'rejeitada';
+    const artifacts = await this.persistManifestationArtifacts(attempt.id, response.signedEventXml, response.responseXml);
+    const eventReason = this.sanitizeSefazText(response.eventXMotivo ?? response.xMotivo);
+    const updated = await this.prisma.nfeManifestacao.update({
+      where: { id: attempt.id },
+      data: {
+        status,
+        cStat: response.eventCStat ?? response.cStat,
+        xMotivo: artifacts.error
+          ? `${eventReason ?? 'Retorno recebido da SEFAZ.'} Artefatos fiscais nao puderam ser arquivados.`
+          : eventReason,
+        nProt: response.nProt,
+        cStatLote: response.cStat,
+        xMotivoLote: this.sanitizeSefazText(response.xMotivo),
+        httpStatus: response.statusCode,
+        xmlEventoAssinadoPath: artifacts.xmlEventoAssinadoPath,
+        xmlRetornoPath: artifacts.xmlRetornoPath,
+        processadoEm: new Date()
+      }
+    });
+
+    let recuperacao: {
+      status: string;
+      proximaTentativaEm: Date | null;
+      xmlCompletoDisponivel: boolean;
+      proximaAcao: string;
+    } | null = null;
+    if (dto.tipo === 'ciencia_operacao' && (accepted || duplicateNeedsReconciliation)) {
+      try {
+        recuperacao = await this.scheduleManualScienceRecovery(document, response.eventCStat, eventReason);
+      } catch {
+        recuperacao = {
+          status: 'falha_ao_enfileirar',
+          proximaTentativaEm: null,
+          xmlCompletoDisponivel: document.xmlCompletoDisponivel,
+          proximaAcao: 'O evento foi registrado no historico. A fila de recuperacao nao foi atualizada; verifique as pendencias administrativas antes de repetir qualquer envio.'
+        };
+      }
+    } else if (accepted && FINAL_CODES.has(code)) {
+      await this.scheduleXmlRecovery(document.id, document.clienteId, document.estabelecimentoId);
+    }
+
+    this.logSafeResult(dto.tipo, document.ambiente, response.statusCode, response.cStat, response.eventCStat, status, response.eventXMotivo ?? response.xMotivo);
+    return {
+      ...this.toPublicResult(updated),
+      artefatosSalvos: !artifacts.error,
+      ...(recuperacao ? { recuperacao } : {})
+    };
   }
 
   private async registerAutomaticScience(
@@ -1082,6 +1205,128 @@ export class NfeManifestacaoService {
     });
   }
 
+  private async persistManifestationArtifacts(
+    attemptId: string,
+    signedEventXml?: string | null,
+    responseXml?: string | null
+  ): Promise<{ xmlEventoAssinadoPath: string | null; xmlRetornoPath: string | null; error: boolean }> {
+    const baseKey = `nfe/manifestacoes/${attemptId}`;
+    let xmlEventoAssinadoPath: string | null = null;
+    let xmlRetornoPath: string | null = null;
+    let error = false;
+
+    if (signedEventXml) {
+      try {
+        xmlEventoAssinadoPath = await this.storage.putObject(`${baseKey}/evento-assinado.xml`, signedEventXml);
+      } catch {
+        error = true;
+      }
+    }
+    if (responseXml) {
+      try {
+        xmlRetornoPath = await this.storage.putObject(`${baseKey}/retorno-soap.xml`, responseXml);
+      } catch {
+        error = true;
+      }
+    }
+
+    return { xmlEventoAssinadoPath, xmlRetornoPath, error };
+  }
+
+  private async scheduleManualScienceRecovery(
+    document: Awaited<ReturnType<NfeManifestacaoService['getDocumentOrThrow']>>,
+    eventCStat: string | null,
+    eventReason: string | null
+  ): Promise<{
+    status: string;
+    proximaTentativaEm: Date | null;
+    xmlCompletoDisponivel: boolean;
+    proximaAcao: string;
+  }> {
+    const config = await this.prisma.nfeAutomacaoConfiguracao.upsert({
+      where: {
+        clienteId_estabelecimentoId_ambiente: {
+          clienteId: document.clienteId,
+          estabelecimentoId: document.estabelecimentoId,
+          ambiente: document.ambiente
+        }
+      },
+      create: {
+        clienteId: document.clienteId,
+        estabelecimentoId: document.estabelecimentoId,
+        ambiente: document.ambiente,
+        cienciaAutomatica: false,
+        recuperacaoXmlAutomatica: true,
+        autorizacaoAtiva: false
+      },
+      update: { recuperacaoXmlAutomatica: true }
+    });
+
+    const now = new Date();
+    const status = eventCStat === '135'
+      ? 'aguardando_xml'
+      : eventCStat === '136'
+        ? 'aguardando_evento_distribuicao'
+        : 'resultado_indeterminado';
+    const proximaTentativaEm = eventCStat === '135'
+      ? now
+      : eventCStat === '136'
+        ? new Date(now.getTime() + this.recoveryRetryMs)
+        : null;
+    const xMotivo = status === 'resultado_indeterminado'
+      ? 'A SEFAZ retornou duplicidade (573). Consulte os eventos oficiais e confirme se a Ciência foi registrada antes de autorizar qualquer novo envio.'
+      : this.sanitizeSefazText(eventReason) ?? (status === 'aguardando_xml'
+        ? 'Ciência registrada e vinculada; aguardando consulta do XML completo por chave.'
+        : 'Ciência registrada sem vínculo; aguardando a distribuição do evento antes da consulta do XML.');
+
+    await this.prisma.nfeXmlRecuperacao.createMany({
+      data: [{
+        nfeDocumentoId: document.id,
+        clienteId: document.clienteId,
+        estabelecimentoId: document.estabelecimentoId,
+        configuracaoId: config.id,
+        ambiente: document.ambiente,
+        status,
+        proximaTentativaEm,
+        cStat: eventCStat,
+        xMotivo
+      }],
+      skipDuplicates: true
+    });
+    await this.prisma.nfeXmlRecuperacao.updateMany({
+      where: { nfeDocumentoId: document.id, clienteId: document.clienteId, estabelecimentoId: document.estabelecimentoId },
+      data: {
+        configuracaoId: config.id,
+        status,
+        proximaTentativaEm,
+        cStat: eventCStat,
+        xMotivo,
+        resultadoConsulta: eventCStat === '135'
+          ? 'ciencia_registrada'
+          : eventCStat === '136'
+            ? 'ciencia_sem_vinculo'
+            : 'ciencia_duplicada_reconciliar',
+        leaseId: null,
+        leaseAte: null
+      }
+    });
+
+    const proximaAcao = eventCStat === '135'
+      ? process.env.NFE_SYNC_AUTO_RUN_ENABLED === 'false'
+        ? 'A fila foi criada, mas a rotina automática de NF-e está desligada; solicite uma consulta manual por chave ou reative a rotina para obter o XML.'
+        : 'Aguardar a consulta agendada por chave. Se a SEFAZ continuar retornando o resumo, a pendência será reagendada.'
+      : eventCStat === '136'
+        ? 'Aguardar a distribuição do evento e conferir os eventos da NF-e; a consulta do XML só começa quando houver vínculo.'
+        : 'Consultar os eventos oficiais desta NF-e para reconciliar a duplicidade. Reenvie somente se o evento não constar e houver nova autorização expressa.';
+
+    return {
+      status,
+      proximaTentativaEm,
+      xmlCompletoDisponivel: document.xmlCompletoDisponivel,
+      proximaAcao
+    };
+  }
+
   private async getDocumentOrThrow(documentId: string, clienteId: string) {
     const document = await this.prisma.nfeDocumento.findFirst({
       where: {
@@ -1212,6 +1457,7 @@ export class NfeManifestacaoService {
     nSeqEvento: number | null;
     cStat: string | null;
     xMotivo: string | null;
+    nProt: string | null;
     status: string;
   }>> {
     const rows = await this.prisma.nfeEvento.findMany({
@@ -1243,6 +1489,7 @@ export class NfeManifestacaoService {
         nSeqEvento: response?.nSeqEvento ?? null,
         cStat: response?.cStat ?? null,
         xMotivo: response?.xMotivo ?? row.descricao,
+        nProt: response?.nProt ?? null,
         status
       };
     }));
@@ -1299,6 +1546,12 @@ export class NfeManifestacaoService {
     cStat: string | null;
     xMotivo: string | null;
     nProt: string | null;
+    certificadoId?: string | null;
+    cpfCnpjDestinatario?: string | null;
+    usuarioId?: string | null;
+    cStatLote?: string | null;
+    xMotivoLote?: string | null;
+    httpStatus?: number | null;
     autorizacaoExpressaEm: Date;
     enviadoEm: Date | null;
     processadoEm: Date | null;
@@ -1311,6 +1564,12 @@ export class NfeManifestacaoService {
       cStat: item.cStat,
       xMotivo: this.sanitizeSefazText(item.xMotivo),
       nProt: item.nProt,
+      certificadoId: item.certificadoId ?? null,
+      cpfCnpjDestinatario: item.cpfCnpjDestinatario ?? null,
+      usuarioId: item.usuarioId ?? null,
+      cStatLote: item.cStatLote ?? null,
+      xMotivoLote: this.sanitizeSefazText(item.xMotivoLote),
+      httpStatus: item.httpStatus ?? null,
       autorizacaoExpressaEm: item.autorizacaoExpressaEm,
       enviadoEm: item.enviadoEm,
       processadoEm: item.processadoEm

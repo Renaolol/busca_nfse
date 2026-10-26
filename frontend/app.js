@@ -1356,7 +1356,8 @@ function onDocumentClick(event) {
       if (
         ((state.modal?.kind === 'events-sync-report' || state.modal?.kind === 'dominio-import-report') && state.modal.running) ||
         (state.modal?.kind === 'events-sync-companies' && state.modal.submitting) ||
-        (state.modal?.kind === 'nfe-retry-indeterminate-science' && state.modal.submitting)
+        (state.modal?.kind === 'nfe-retry-indeterminate-science' && state.modal.submitting) ||
+        (state.modal?.kind === 'nfe-send-science' && state.modal.submitting)
       ) {
         return;
       }
@@ -1707,6 +1708,36 @@ function onDocumentClick(event) {
         numeroNfe: actionNode.getAttribute('data-numero-nfe') || '',
         dataEmissao: actionNode.getAttribute('data-data-emissao') || '',
         ambiente: actionNode.getAttribute('data-ambiente') || '',
+        submitting: false
+      });
+      return;
+    }
+    case 'nfe-science-open': {
+      const nfeId = actionNode.getAttribute('data-nfe-id') || '';
+      const doc = findNfeById(nfeId);
+      if (!doc || !canSendNfeScience(doc)) {
+        pushToast('A Ciência manual exige uma NF-e modelo 55 recebida, ainda em resumo, no escopo de um administrador.', 'error');
+        return;
+      }
+      openModal({ kind: 'nfe-send-science', nfeId, submitting: false, result: null });
+      return;
+    }
+    case 'nfe-science-reconcile': {
+      const nfeId = actionNode.getAttribute('data-nfe-id') || '';
+      if (nfeId) void reconcileNfeScienceEvents(nfeId);
+      return;
+    }
+    case 'nfe-science-retry': {
+      const nfeId = actionNode.getAttribute('data-nfe-id') || '';
+      const doc = findNfeById(nfeId);
+      if (!doc?.apiNfeId || !doc.clientId) return;
+      openModal({
+        kind: 'nfe-retry-indeterminate-science',
+        documentId: doc.apiNfeId,
+        clientId: doc.clientId,
+        numeroNfe: doc.numeroNfe || '',
+        dataEmissao: doc.dataEmissao || '',
+        ambiente: doc.ambiente || '',
         submitting: false
       });
       return;
@@ -2521,7 +2552,8 @@ function onDocumentClick(event) {
           state.modal?.kind === 'dominio-import-report'
         ) &&
           state.modal.running) ||
-        (state.modal?.kind === 'events-sync-companies' && state.modal.submitting)
+        (state.modal?.kind === 'events-sync-companies' && state.modal.submitting) ||
+        (state.modal?.kind === 'nfe-send-science' && state.modal.submitting)
       ) {
         return;
       }
@@ -2629,6 +2661,11 @@ function onDocumentSubmit(event) {
     case 'nfeRetryIndeterminateScienceForm': {
       event.preventDefault();
       void submitNfeRetryIndeterminateScienceForm(target);
+      return;
+    }
+    case 'nfeSendScienceForm': {
+      event.preventDefault();
+      void submitNfeScienceForm(target);
       return;
     }
     case 'nfeSefazDiagnosticStartForm': {
@@ -6182,6 +6219,92 @@ async function submitNfeRetryIndeterminateScienceForm(form) {
   }
 }
 
+async function submitNfeScienceForm(form) {
+  const formData = new FormData(form);
+  const nfeId = String(formData.get('nfeId') || '').trim();
+  const doc = findNfeById(nfeId);
+  if (!doc || !canSendNfeScience(doc)) {
+    pushToast('Esta NF-e não está elegível para envio manual de Ciência no escopo atual.', 'error');
+    return;
+  }
+  if (!formData.has('confirmacaoExpressa')) {
+    pushToast('Marque a autorização expressa para a NF-e selecionada.', 'error');
+    return;
+  }
+
+  const requestId = createUuidV4();
+  if (!requestId) {
+    pushToast('Não foi possível preparar uma autorização única para esta tentativa.', 'error');
+    return;
+  }
+
+  state.modal = { ...state.modal, submitting: true };
+  render();
+  try {
+    const result = await apiRequest(`/nfe/${encodeURIComponent(doc.apiNfeId)}/manifestacoes`, {
+      method: 'POST',
+      body: {
+        clienteId: doc.clientId,
+        requestId,
+        tipo: 'ciencia_operacao',
+        confirmacaoExpressa: true
+      }
+    });
+    state.modal = { ...state.modal, submitting: false, result };
+    render();
+
+    if (result?.status === 'registrada') {
+      pushToast(`Ciência registrada (${result.cStat || 'sem cStat'}). A recuperação do XML foi enfileirada.`, 'success');
+    } else if (result?.status === 'registrada_sem_vinculo') {
+      pushToast('A Ciência foi registrada sem vínculo à NF-e; a fila aguardará a distribuição do evento.', 'info');
+    } else if (result?.cStat === '573') {
+      pushToast('A SEFAZ retornou duplicidade 573. Consulte os eventos oficiais antes de qualquer novo envio.', 'info');
+    } else {
+      pushToast(`A Ciência não foi confirmada: ${result?.cStat || result?.status || 'consulte o motivo no resultado'}.`, 'error');
+    }
+  } catch (error) {
+    state.modal = { ...state.modal, submitting: false };
+    render();
+    pushToast(`Falha ao enviar Ciência: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function reconcileNfeScienceEvents(nfeId) {
+  const doc = findNfeById(nfeId);
+  if (!doc || !canSyncNfeEvents(doc)) {
+    pushToast('Esta NF-e nao possui dados suficientes para reconciliar eventos oficiais.', 'error');
+    return;
+  }
+  if (state.nfeEventsSyncRunning) {
+    pushToast('A sincronizacao de eventos de NF-e ja esta em andamento.', 'info');
+    return;
+  }
+
+  const scienceModal = state.modal?.kind === 'nfe-send-science' && state.modal.nfeId === nfeId
+    ? { ...state.modal }
+    : null;
+  try {
+    await syncEventsForNfe(nfeId);
+    const query = new URLSearchParams({ clienteId: doc.clientId });
+    const result = await apiRequest(`/nfe/${encodeURIComponent(doc.apiNfeId)}/manifestacoes/reconciliar?${query.toString()}`, { method: 'POST' });
+    if (scienceModal) {
+      state.modal = { ...scienceModal, result: { ...scienceModal.result, reconciliacao: result } };
+      render();
+    }
+    if (Number(result?.tentativasReconciliadas || 0) > 0) {
+      pushToast(`Reconciliação concluída: ${result.tentativasReconciliadas} tentativa(s) atualizada(s). ${result.proximaAcao || ''}`, 'success');
+    } else {
+      pushToast(result?.proximaAcao || 'Nenhum evento correspondente foi localizado na distribuição.', 'info');
+    }
+  } catch (error) {
+    if (scienceModal) {
+      state.modal = scienceModal;
+      render();
+    }
+    pushToast(`Falha ao consultar e reconciliar os eventos oficiais: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
 async function revokeNfeAutomationAuthorization({ clientId, estabelecimentoId, ambiente }) {
   try {
     await apiRequest('/nfe/automacao/revogar', {
@@ -6552,6 +6675,7 @@ function renderNfeDocumentsTableCard(docs) {
                   const nfeMenuId = `nfe:${doc.id}`;
                   const nfeMenuItems = [
                     { label: 'Visualizar detalhes', action: 'nfe-details', attrs: { 'nfe-id': doc.id } },
+                    canSendNfeScience(doc) ? { label: 'Enviar Ciência da Operação', action: 'nfe-science-open', attrs: { 'nfe-id': doc.id } } : null,
                     { label: 'Buscar eventos', action: 'nfe-sync-events', attrs: { 'nfe-id': doc.id }, disabled: Boolean(syncDisabledRow) },
                     { label: 'Ver XML', action: 'nfe-view', attrs: { 'nfe-id': doc.id } },
                     doc.xmlCompletoDisponivel ? { label: 'Baixar DANFE', action: 'nfe-download-danfe', attrs: { 'nfe-id': doc.id } } : null,
@@ -12447,6 +12571,8 @@ function renderModal() {
       `;
     case 'nfe-retry-indeterminate-science':
       return renderNfeRetryIndeterminateScienceModal();
+    case 'nfe-send-science':
+      return renderNfeScienceModal();
     case 'xml-edit-value':
       return renderXmlManualValueModal();
     case 'recover-past-nsus':
@@ -12542,7 +12668,7 @@ function renderNfeRetryIndeterminateScienceModal() {
           <input type="hidden" name="documentId" value="${escapeHtml(modal.documentId)}" />
           <input type="hidden" name="clientId" value="${escapeHtml(modal.clientId)}" />
           <div class="modal-body">
-            <p>O envio anterior ficou indeterminado. A correção do SOAP precisa estar publicada e o backend reiniciado antes desta tentativa.</p>
+            <p>O envio anterior ficou indeterminado. Primeiro sincronize os eventos oficiais e confira também o portal da SEFAZ.</p>
             <p>Reenvie somente depois de conferir no portal ou na distribuição de eventos da SEFAZ que não há Ciência registrada para esta nota.</p>
             <label class="field field-inline" style="margin-top:14px;">
               <input name="eventoAusenteConfirmado" type="checkbox" required />
@@ -12557,6 +12683,76 @@ function renderNfeRetryIndeterminateScienceModal() {
           <div class="modal-footer">
             <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Cancelar</button>
             <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Enviando...' : 'Enviar nova Ciência'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
+}
+
+function renderNfeScienceModal() {
+  const modal = state.modal;
+  if (modal?.kind !== 'nfe-send-science') return '';
+  const doc = findNfeById(modal.nfeId);
+  if (!doc) return '';
+  const submitting = Boolean(modal.submitting);
+  const result = modal.result || null;
+  const recovery = result?.recuperacao || null;
+  const reconciliation = result?.reconciliacao || null;
+  const resultHtml = result
+    ? `
+      <section style="margin-top:16px;padding:14px;border:1px solid var(--line);border-radius:10px;background:var(--surface-alt);">
+        <h4 class="card-title" style="margin-top:0;">Resultado do envio</h4>
+        <div class="form-grid two">
+          ${detailItem('Evento', result.status || '-')}
+          ${detailItem('cStat do evento', result.cStat || '-')}
+          ${detailItem('Retorno do evento', result.xMotivo || '-')}
+          ${detailItem('cStat do lote', result.cStatLote || '-')}
+          ${detailItem('Retorno do lote', result.xMotivoLote || '-')}
+          ${detailItem('Protocolo', result.nProt || 'Ainda não disponível')}
+          ${detailItem('Recuperação', recovery?.status || 'Não enfileirada')}
+          ${detailItem('XML completo', (recovery?.xmlCompletoDisponivel ?? doc.xmlCompletoDisponivel) ? 'Disponível' : 'Ainda indisponível')}
+          ${detailItem('Artefatos fiscais', result.artefatosSalvos === false ? 'Falha ao arquivar XML assinado/retorno' : 'Arquivados')}
+          ${reconciliation ? detailItem('Reconciliação oficial', `${reconciliation.tentativasReconciliadas || 0} tentativa(s) atualizada(s)`) : ''}
+        </div>
+        ${recovery?.proximaAcao ? `<p class="card-subtitle" style="margin:12px 0 0;"><strong>Próxima ação:</strong> ${escapeHtml(recovery.proximaAcao)}</p>` : ''}
+        ${reconciliation?.proximaAcao ? `<p class="card-subtitle" style="margin:12px 0 0;"><strong>Reconciliação:</strong> ${escapeHtml(reconciliation.proximaAcao)}</p>` : ''}
+        ${result.cStat === '573'
+          ? `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;"><button class="btn secondary" type="button" data-action="nfe-science-reconcile" data-nfe-id="${escapeHtml(doc.id)}" ${state.nfeEventsSyncRunning ? 'disabled' : ''}>Consultar eventos oficiais</button>${reconciliation && Number(reconciliation.tentativasReconciliadas || 0) === 0 ? `<button class="btn secondary" type="button" data-action="nfe-science-retry" data-nfe-id="${escapeHtml(doc.id)}">Autorizar reenvio após conferir a SEFAZ</button>` : ''}</div>`
+          : ''}
+      </section>
+    `
+    : '';
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Enviar Ciência da Operação</h3>
+          <p class="modal-subtitle">NF-e ${escapeHtml(doc.numeroNfe || 'sem número identificado')} · ${escapeHtml(doc.cliente)} · ${escapeHtml(mapNfeAmbienteLabel(doc.ambiente))}</p>
+        </div>
+        <form id="nfeSendScienceForm">
+          <input type="hidden" name="nfeId" value="${escapeHtml(doc.id)}" />
+          <div class="modal-body">
+            <div class="form-grid two">
+              ${detailItem('Chave de acesso', doc.chaveAcesso)}
+              ${detailItem('Emitente', doc.contraparteNome || doc.emitenteNome || '-')}
+              ${detailItem('Data de emissão', formatDateTime(doc.dataEmissao))}
+              ${detailItem('Arquivo atual', 'Somente resumo resNFe')}
+            </div>
+            <p style="margin:16px 0 8px;">A Ciência registra que o destinatário tomou conhecimento da existência da NF-e. Ela <strong>não confirma o recebimento da mercadoria</strong>.</p>
+            <p class="card-subtitle">Após o registro vinculado, o NotaSync enfileira uma consulta por chave. A SEFAZ pode continuar disponibilizando apenas o resumo. O evento é fiscal e não pode ser desfeito; a manifestação conclusiva adequada continua pendente no prazo vigente.</p>
+            ${!result ? `
+              <label class="field field-inline" style="margin-top:14px;">
+                <input name="confirmacaoExpressa" type="checkbox" required ${submitting ? 'disabled' : ''} />
+                Autorizo expressamente o envio da Ciência para esta NF-e selecionada.
+              </label>
+            ` : ''}
+            ${resultHtml}
+          </div>
+          <div class="modal-footer">
+            <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>${result ? 'Fechar' : 'Cancelar'}</button>
+            ${!result ? `<button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Enviando...' : 'Autorizar e enviar Ciência'}</button>` : ''}
           </div>
         </form>
       </div>
@@ -26163,6 +26359,20 @@ function canSyncNfeEvents(doc) {
       doc?.apiNfeId &&
       doc?.clientId &&
       normalizeDigits(doc?.chaveAcesso || '').length > 0
+  );
+}
+
+function canSendNfeScience(doc) {
+  return Boolean(
+    state.dataSource === 'api' &&
+      state.auth.user?.role === 'admin' &&
+      doc?.apiNfeId &&
+      doc?.clientId &&
+      doc?.modelo === '55' &&
+      doc?.tipo === 'Recebida' &&
+      doc?.resumoDisponivel &&
+      !doc?.xmlCompletoDisponivel &&
+      normalizeDigits(doc?.chaveAcesso || '').length === 44
   );
 }
 

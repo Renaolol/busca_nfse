@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { Certificado, NfeAmbiente } from '@prisma/client';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import type { IncomingHttpHeaders } from 'node:http';
 import { request as httpsRequest } from 'node:https';
@@ -8,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
 import { SignedXml } from 'xml-crypto';
+import * as libxmljs from 'libxmljs2';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocalStorageService } from '../../modules/storage/storage.service';
 import { CryptoService } from '../../modules/shared/crypto.service';
@@ -47,6 +49,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeMani
   private static readonly MANIFESTACAO_SOAP_NAMESPACE = 'http://www.portalfiscal.inf.br/nfe/wsdl/NFeRecepcaoEvento4';
   private static readonly XML_NAMESPACE = 'http://www.portalfiscal.inf.br/nfe';
   private static readonly AN_CUF = '91';
+  private static manifestationSchema: libxmljs.Document | null = null;
   private static readonly LAYOUT_VERSION = process.env.NFE_DISTRIBUICAO_LAYOUT_VERSION?.trim() || '1.01';
   private static readonly ENVELOPE_PROFILES: SoapEnvelopeProfile[] = [
     {
@@ -169,7 +172,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeMani
     certificateId: string;
   }): Promise<NfeManifestacaoResult> {
     let pem: PemCredentials;
-    let eventXml: string;
+    let eventXml: string | undefined;
     let url: URL;
     try {
       const certificate = await this.loadCertificate(params.certificateId);
@@ -181,9 +184,10 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeMani
     try {
       const unsignedEvent = this.buildManifestacaoEventXml(params);
       eventXml = this.signManifestacaoEvent(unsignedEvent, pem.key, pem.cert);
+      this.validateManifestacaoEventXml(eventXml);
       url = this.buildManifestacaoUrl(params.ambiente);
     } catch (error) {
-      throw new NfeManifestacaoClientError(this.toErrorMessage(error), false, 'event_signing');
+      throw new NfeManifestacaoClientError(this.toErrorMessage(error), false, 'event_signing', eventXml);
     }
     const operation = 'nfeRecepcaoEvento';
     let response: { statusCode: number; headers: IncomingHttpHeaders; body: string };
@@ -198,22 +202,30 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeMani
         RealNfeDistribuicaoClient.MANIFESTACAO_SOAP_NAMESPACE
       );
     } catch (error) {
-      throw new NfeManifestacaoClientError(this.toErrorMessage(error), true, 'communication');
+      throw new NfeManifestacaoClientError(this.toErrorMessage(error), true, 'communication', eventXml);
     }
     let parsed: Omit<NfeManifestacaoResult, 'statusCode'>;
     try {
       parsed = this.parseManifestacaoResponse(response.body);
     } catch (error) {
-      throw new NfeManifestacaoClientError(this.toErrorMessage(error), true, 'response');
+      throw new NfeManifestacaoClientError(this.toErrorMessage(error), true, 'response', eventXml, response.body);
     }
 
     if (!parsed.cStat) {
-      throw new NfeManifestacaoClientError(`Resposta SOAP de manifestacao sem cStat (HTTP ${response.statusCode}).`, true, 'response');
+      throw new NfeManifestacaoClientError(
+        `Resposta SOAP de manifestacao sem cStat (HTTP ${response.statusCode}).`,
+        true,
+        'response',
+        eventXml,
+        response.body
+      );
     }
 
     return {
       statusCode: response.statusCode,
-      ...parsed
+      ...parsed,
+      signedEventXml: eventXml,
+      responseXml: response.body
     };
   }
 
@@ -337,8 +349,8 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeMani
     const digits = String(params.cnpjConsulta || '').replace(/\D/g, '');
     const actorTag = digits.length === 11 ? 'CPF' : 'CNPJ';
     const tpAmb = params.ambiente === NfeAmbiente.producao ? '1' : '2';
-    const id = `ID${tipoEvento}${params.chaveAcesso}${params.sequencia}`;
-    const dhEvento = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+    const id = `ID${tipoEvento}${params.chaveAcesso}${String(params.sequencia).padStart(2, '0')}`;
+    const dhEvento = this.formatEventDateWithOffset(new Date());
     const justificativa = params.tipo === 'operacao_nao_realizada' && params.justificativa
       ? `<xJust>${this.escapeXml(params.justificativa)}</xJust>`
       : '';
@@ -394,6 +406,51 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeMani
       location: { reference: "//*[local-name(.)='infEvento']", action: 'after' }
     });
     return signature.getSignedXml();
+  }
+
+  private validateManifestacaoEventXml(xml: string): void {
+    const eventDocument = libxmljs.parseXml(xml, { nonet: true, noent: false, dtdload: false });
+    const schema = this.getManifestacaoSchema();
+    if (eventDocument.validate(schema)) return;
+
+    const details = eventDocument.validationErrors
+      .slice(0, 3)
+      .map((validationError) => validationError.message)
+      .join(' ');
+    throw new Error(`XML de manifestacao invalido no schema oficial envConfRecebto_v1.00.xsd. ${details}`.trim());
+  }
+
+  private getManifestacaoSchema(): libxmljs.Document {
+    if (RealNfeDistribuicaoClient.manifestationSchema) {
+      return RealNfeDistribuicaoClient.manifestationSchema;
+    }
+
+    const schemaPath = join(__dirname, 'schemas', 'envConfRecebto_v1.00.xsd');
+    const schemaXml = readFileSync(schemaPath, 'utf8');
+    RealNfeDistribuicaoClient.manifestationSchema = libxmljs.parseXml(schemaXml, {
+      baseUrl: schemaPath,
+      nonet: true,
+      noent: false,
+      dtdload: false
+    });
+    return RealNfeDistribuicaoClient.manifestationSchema;
+  }
+
+  private formatEventDateWithOffset(date: Date): string {
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'America/Sao_Paulo',
+      timeZoneName: 'longOffset',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hourCycle: 'h23'
+    }).formatToParts(date);
+    const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? '';
+    const offset = value('timeZoneName').replace(/^GMT/, '') || '-03:00';
+    return `${value('year')}-${value('month')}-${value('day')}T${value('hour')}:${value('minute')}:${value('second')}${offset}`;
   }
 
   private getManifestacaoDescricao(tipo: NfeManifestacaoTipo): string {

@@ -559,6 +559,12 @@ model NfeManifestacao {
   cStat                 String?     @map("c_stat") @db.VarChar(3)
   xMotivo               String?     @map("x_motivo") @db.Text
   nProt                 String?     @map("n_prot") @db.VarChar(15)
+  cpfCnpjDestinatario   String?     @map("cpf_cnpj_destinatario") @db.VarChar(14)
+  cStatLote             String?     @map("c_stat_lote") @db.VarChar(3)
+  xMotivoLote           String?     @map("x_motivo_lote") @db.Text
+  httpStatus            Int?        @map("http_status")
+  xmlEventoAssinadoPath String?     @map("xml_evento_assinado_path") @db.Text
+  xmlRetornoPath        String?     @map("xml_retorno_path") @db.Text
   justificativa         String?     @db.VarChar(255)
   autorizacaoExpressaEm DateTime    @map("autorizacao_expressa_em")
   enviadoEm             DateTime?   @map("enviado_em")

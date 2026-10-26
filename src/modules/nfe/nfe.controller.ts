@@ -122,26 +122,60 @@ export class NfeController {
   @ApiOperation({ summary: 'Lista o histórico de manifestações registradas pelo NotaSync para uma NF-e.' })
   @ApiOkResponse({ schema: { type: 'object', properties: {
     documentoId: { type: 'string' },
+    clienteId: { type: 'string' },
+    estabelecimentoId: { type: 'string' },
+    chaveAcesso: { type: 'string' },
+    modelo: { type: 'string' },
+    tipoRelacao: { type: 'string' },
     status: { type: 'string', enum: ['xml_completo_disponivel', 'aguardando_disponibilizacao', 'resumo_disponivel', 'sem_xml'] },
     resumoDisponivel: { type: 'boolean' },
     xmlCompletoDisponivel: { type: 'boolean' },
-    historico: { type: 'array', items: { type: 'object' } }
+    manifestacaoConclusivaPendente: { type: 'boolean' },
+    prazoManifestacaoConclusiva: { type: 'string', format: 'date-time', nullable: true },
+    historico: { type: 'array', items: { type: 'object', properties: {
+      id: { type: 'string' }, tipoEvento: { type: 'string' }, nSeqEvento: { type: 'integer' }, ambiente: { type: 'string' },
+      certificadoId: { type: 'string', nullable: true }, cpfCnpjDestinatario: { type: 'string', nullable: true }, usuarioId: { type: 'string', nullable: true },
+      status: { type: 'string' }, cStat: { type: 'string', nullable: true }, xMotivo: { type: 'string', nullable: true }, nProt: { type: 'string', nullable: true },
+      cStatLote: { type: 'string', nullable: true }, xMotivoLote: { type: 'string', nullable: true }, httpStatus: { type: 'integer', nullable: true },
+      justificativa: { type: 'string', nullable: true }, autorizacaoExpressaEm: { type: 'string', format: 'date-time', nullable: true },
+      enviadoEm: { type: 'string', format: 'date-time', nullable: true }, processadoEm: { type: 'string', format: 'date-time', nullable: true },
+      createdAt: { type: 'string', format: 'date-time' }, origem: { type: 'string', enum: ['notasync', 'distribuicao'] }
+    } } }
   } } })
   @TenantScope({ source: 'query', key: 'clienteId', required: true })
   getManifestacoes(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
     return this.nfeManifestacaoService.getHistory(id, query.clienteId);
   }
 
+  @Post(':id/manifestacoes/reconciliar')
+  @Roles('admin')
+  @ApiOperation({ summary: 'Reconcilia tentativas indeterminadas com eventos NF-e já importados da distribuição oficial.' })
+  @ApiOkResponse({ schema: { type: 'object', properties: {
+    documentoId: { type: 'string' }, tentativasReconciliadas: { type: 'integer' }, eventos: { type: 'array', items: { type: 'object' } },
+    xmlCompletoDisponivel: { type: 'boolean' }, proximaAcao: { type: 'string' }
+  } } })
+  @TenantScope({ source: 'query', key: 'clienteId', required: true })
+  reconciliarManifestacoes(@Param('id') id: string, @Query() query: ClienteScopeQueryDto) {
+    return this.nfeManifestacaoService.reconcileImportedManifestations(id, query.clienteId);
+  }
+
   @Post(':id/manifestacoes')
   @Roles('admin')
   @ApiOperation({
     summary: 'Registra uma manifestação do destinatário após autorização expressa do usuário.',
-    description: 'Aceita CPF e CNPJ com certificado cujo titular corresponda exatamente ao estabelecimento. A rota manual exige autorizacao expressa e nao envia eventos automaticamente; Ciencia automatica so funciona com autorizacao ativa por estabelecimento. Para repetir Ciencia com resultado indeterminado, e obrigatoria a confirmacao expressa de que o evento nao consta na SEFAZ; tentativas ainda em andamento e outros tipos de evento continuam bloqueados. Eventos conclusivos exigem operacao compativel e respeitam o prazo vigente de 90 dias da autorizacao. Nao use Confirmacao apenas para obter XML.'
+    description: 'Aceita CPF e CNPJ com certificado cujo titular corresponda exatamente ao estabelecimento. A rota manual exige autorizacao expressa para a NF-e selecionada. O retorno 573 fica indeterminado e exige sincronizar os eventos oficiais antes de qualquer novo envio. O XML assinado e o SOAP de retorno sao arquivados. Eventos conclusivos respeitam o prazo vigente de 90 dias da autorizacao. Nao use Confirmacao apenas para obter XML.'
   })
   @ApiOkResponse({ schema: { type: 'object', properties: {
     id: { type: 'string' }, tipoEvento: { type: 'string' }, nSeqEvento: { type: 'integer' },
     status: { type: 'string', enum: ['registrada', 'registrada_sem_vinculo', 'rejeitada', 'falha_local', 'resultado_indeterminado', 'enviando'] },
     cStat: { type: 'string', nullable: true }, xMotivo: { type: 'string', nullable: true }, nProt: { type: 'string', nullable: true },
+    cStatLote: { type: 'string', nullable: true }, xMotivoLote: { type: 'string', nullable: true }, httpStatus: { type: 'integer', nullable: true },
+    certificadoId: { type: 'string', nullable: true }, cpfCnpjDestinatario: { type: 'string', nullable: true }, usuarioId: { type: 'string', nullable: true },
+    artefatosSalvos: { type: 'boolean' },
+    recuperacao: { type: 'object', nullable: true, properties: {
+      status: { type: 'string' }, proximaTentativaEm: { type: 'string', format: 'date-time', nullable: true },
+      xmlCompletoDisponivel: { type: 'boolean' }, proximaAcao: { type: 'string' }
+    } },
     autorizacaoExpressaEm: { type: 'string', format: 'date-time' }, processadoEm: { type: 'string', format: 'date-time', nullable: true }
   } } })
   @TenantScope({ source: 'body', key: 'clienteId', required: true })

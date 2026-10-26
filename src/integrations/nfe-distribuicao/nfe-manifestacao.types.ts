@@ -20,6 +20,8 @@ export interface NfeManifestacaoResult {
   eventCStat: string | null;
   eventXMotivo: string | null;
   nProt: string | null;
+  signedEventXml?: string;
+  responseXml?: string;
 }
 
 export interface NfeManifestacaoClient {
@@ -38,7 +40,9 @@ export class NfeManifestacaoClientError extends Error {
   constructor(
     message: string,
     readonly requestMayHaveBeenSent: boolean,
-    readonly failureStage?: 'certificate' | 'event_signing' | 'communication' | 'response'
+    readonly failureStage?: 'certificate' | 'event_signing' | 'communication' | 'response',
+    readonly signedEventXml?: string,
+    readonly responseXml?: string
   ) {
     super(message);
     this.name = 'NfeManifestacaoClientError';

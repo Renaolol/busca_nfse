@@ -37,7 +37,7 @@ describe('NfeManifestacaoService', () => {
     nfeXmlRecuperacao: { findMany: jest.fn(), findFirst: jest.fn(), findUnique: jest.fn(), createMany: jest.fn(), updateMany: jest.fn(), update: jest.fn() }
   };
   (prisma as any).$transaction = jest.fn((work: (transaction: typeof prisma) => unknown) => work(prisma));
-  const storage = { hasObject: jest.fn(), getObject: jest.fn() };
+  const storage = { hasObject: jest.fn(), getObject: jest.fn(), putObject: jest.fn() };
   const client: NfeManifestacaoClient = { sendManifestacao: jest.fn() };
   const service = new NfeManifestacaoService(
     prisma as unknown as PrismaService,
@@ -106,6 +106,7 @@ describe('NfeManifestacaoService', () => {
       arquivoCriptografadoPath: 'certificados/cliente-1/cert-1.bin'
     }]);
     storage.hasObject.mockResolvedValue(true);
+    storage.putObject.mockImplementation(async (path: string) => path);
     let saved: Record<string, unknown> = {};
     prisma.nfeManifestacao.create.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => {
       saved = { id: 'manifest-1', ...data };
@@ -121,7 +122,9 @@ describe('NfeManifestacaoService', () => {
       xMotivo: 'Lote de evento processado',
       eventCStat: '135',
       eventXMotivo: 'Evento registrado e vinculado a NF-e',
-      nProt: '142260000000001'
+      nProt: '142260000000001',
+      signedEventXml: '<evento-assinado />',
+      responseXml: '<soap-retorno />'
     });
   });
 
@@ -192,8 +195,65 @@ describe('NfeManifestacaoService', () => {
       certificateId: 'cert-1'
     }));
     expect(result).toMatchObject({ status: 'registrada', cStat: '135', nProt: '142260000000001' });
+    expect(result).toMatchObject({ artefatosSalvos: true, recuperacao: { status: 'aguardando_xml', xmlCompletoDisponivel: false } });
+    expect(prisma.nfeManifestacao.update).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({
+        cStat: '135', cStatLote: '128', httpStatus: 200,
+        xmlEventoAssinadoPath: 'nfe/manifestacoes/manifest-1/evento-assinado.xml',
+        xmlRetornoPath: 'nfe/manifestacoes/manifest-1/retorno-soap.xml'
+      })
+    }));
+    expect(prisma.nfeAutomacaoConfiguracao.upsert).toHaveBeenCalledWith(expect.objectContaining({
+      create: expect.objectContaining({ cienciaAutomatica: false, recuperacaoXmlAutomatica: true })
+    }));
+    expect(prisma.nfeXmlRecuperacao.createMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: [expect.objectContaining({ nfeDocumentoId: 'doc-1', clienteId: 'cliente-1', estabelecimentoId: 'estab-1', status: 'aguardando_xml' })],
+      skipDuplicates: true
+    }));
+    expect(storage.putObject).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(logger.mock.calls)).not.toContain('01861020970');
     expect(JSON.stringify(logger.mock.calls)).not.toContain(validAccessKey);
+  });
+
+  it('reconciles an indeterminate 573 from the official event and releases XML recovery', async () => {
+    prisma.nfeManifestacao.findMany.mockResolvedValueOnce([{
+      id: 'manifest-indeterminate', tipoEvento: '210210', nSeqEvento: 1, status: 'resultado_indeterminado'
+    }]);
+    prisma.nfeEvento.findMany.mockResolvedValueOnce([{
+      id: 'event-official', tipoEvento: '210210', dataEvento: new Date(), descricao: 'Ciência da Operação',
+      xmlPath: 'events/event-official.xml', createdAt: new Date()
+    }]);
+    storage.getObject.mockResolvedValueOnce(Buffer.from(
+      '<procEventoNFe><retEvento><infEvento><tpEvento>210210</tpEvento><nSeqEvento>1</nSeqEvento><cStat>135</cStat><xMotivo>Evento registrado e vinculado</xMotivo><nProt>142260000000111</nProt></infEvento></retEvento></procEventoNFe>'
+    ));
+
+    const result = await service.reconcileImportedManifestations('doc-1', 'cliente-1');
+
+    expect(result).toMatchObject({
+      tentativasReconciliadas: 1,
+      eventos: [{ tipoEvento: '210210', status: 'registrada', cStat: '135', nProt: '142260000000111' }]
+    });
+    expect(prisma.nfeManifestacao.update).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'manifest-indeterminate' },
+      data: expect.objectContaining({ status: 'registrada', cStat: '135', nProt: '142260000000111' })
+    }));
+    expect(prisma.nfeXmlRecuperacao.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({ nfeDocumentoId: 'doc-1', clienteId: 'cliente-1', status: 'resultado_indeterminado' }),
+      data: expect.objectContaining({ status: 'aguardando_xml', resultadoConsulta: 'ciencia_reconciliada' })
+    }));
+  });
+
+  it('keeps an indeterminate event blocked when official distribution has no matching event', async () => {
+    prisma.nfeManifestacao.findMany.mockResolvedValueOnce([{
+      id: 'manifest-indeterminate', tipoEvento: '210210', nSeqEvento: 1, status: 'resultado_indeterminado'
+    }]);
+    prisma.nfeEvento.findMany.mockResolvedValueOnce([]);
+
+    const result = await service.reconcileImportedManifestations('doc-1', 'cliente-1');
+
+    expect(result.tentativasReconciliadas).toBe(0);
+    expect(prisma.nfeManifestacao.update).not.toHaveBeenCalled();
+    expect(prisma.nfeXmlRecuperacao.updateMany).not.toHaveBeenCalled();
   });
 
   it('aceita certificado de CNPJ que corresponda exatamente ao estabelecimento', async () => {
@@ -223,14 +283,29 @@ describe('NfeManifestacaoService', () => {
     expect(result).toMatchObject({ status: 'registrada_sem_vinculo', cStat: '136' });
   });
 
-  it('persiste rejeição SEFAZ real sem transformar em sucesso', async () => {
+  it('marca 573 como indeterminado e aguarda reconciliação sem reenviar automaticamente', async () => {
     (client.sendManifestacao as jest.Mock).mockResolvedValueOnce({
       statusCode: 200, cStat: '128', xMotivo: 'Lote processado', eventCStat: '573', eventXMotivo: 'Duplicidade de evento', nProt: null
     });
 
     const result = await service.registrar('doc-1', dto() as any);
 
-    expect(result).toMatchObject({ status: 'rejeitada', cStat: '573', xMotivo: 'Duplicidade de evento' });
+    expect(result).toMatchObject({ status: 'resultado_indeterminado', cStat: '573', xMotivo: 'Duplicidade de evento' });
+    expect(prisma.nfeXmlRecuperacao.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ status: 'resultado_indeterminado', resultadoConsulta: 'ciencia_duplicada_reconciliar', proximaTentativaEm: null })
+    }));
+    expect(client.sendManifestacao).toHaveBeenCalledTimes(1);
+  });
+
+  it('persists cStat 575 as an individual event rejection', async () => {
+    (client.sendManifestacao as jest.Mock).mockResolvedValueOnce({
+      statusCode: 200, cStat: '128', xMotivo: 'Lote processado', eventCStat: '575', eventXMotivo: 'Autor diferente do destinatário', nProt: null
+    });
+
+    const result = await service.registrar('doc-1', dto() as any);
+
+    expect(result).toMatchObject({ status: 'rejeitada', cStat: '575', xMotivo: 'Autor diferente do destinatário', cStatLote: '128' });
+    expect(prisma.nfeXmlRecuperacao.createMany).not.toHaveBeenCalled();
   });
 
   it('bloqueia quando o certificado não corresponde ao CPF do estabelecimento', async () => {
@@ -279,6 +354,16 @@ describe('NfeManifestacaoService', () => {
 
     await expect(service.registrar('doc-1', dto({ requestId: '8e6d31c8-8932-41d8-b33c-a9d9481f5840' }) as any)).rejects.toBeInstanceOf(ConflictException);
     expect(client.sendManifestacao).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not send Science again when an accepted event is already in the history', async () => {
+    prisma.nfeManifestacao.findMany.mockResolvedValueOnce([{
+      tipoEvento: '210210', status: 'registrada', nSeqEvento: 1
+    }]);
+
+    await expect(service.registrar('doc-1', dto({ requestId: 'ba6d31c8-8932-41d8-b33c-a9d9481f5840' }) as any))
+      .rejects.toBeInstanceOf(BadRequestException);
+    expect(client.sendManifestacao).not.toHaveBeenCalled();
   });
 
   it('permite novo envio manual de Ciência indeterminada somente com confirmação de ausência na SEFAZ', async () => {
@@ -439,6 +524,23 @@ describe('NfeManifestacaoService', () => {
     }));
   });
 
+  it('allows queued XML recovery after manual Science without enabling automatic Science', async () => {
+    prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce({
+      id: 'manual-task', leaseId: 'lease-1',
+      configuracao: {
+        cienciaAutomatica: false, recuperacaoXmlAutomatica: true, autorizacaoAtiva: false,
+        clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: NfeAmbiente.producao
+      },
+      nfeDocumento: { ...document, estabelecimento: { ...document.estabelecimento } }
+    });
+    prisma.nfeManifestacao.findMany.mockResolvedValueOnce([{ tipoEvento: '210210', status: 'registrada', nSeqEvento: 1 }]);
+
+    const result = await service.prepareAutomaticRecovery('manual-task', 'lease-1');
+
+    expect(result).toEqual(expect.objectContaining({ canQuery: true, status: 'aguardando_xml', chaveAcesso: validAccessKey }));
+    expect(client.sendManifestacao).not.toHaveBeenCalled();
+  });
+
   it.each(['2', '3', '9'])('does not send automatic Science when resNFe cSitNFe is %s', async (cSitNFe) => {
     prisma.nfeXmlRecuperacao.findFirst.mockResolvedValueOnce({
       id: 'task-1', leaseId: 'lease-1',
@@ -575,6 +677,23 @@ describe('NfeManifestacaoService', () => {
     expect(prisma.nfeXmlRecuperacao.findMany).toHaveBeenCalledWith(expect.objectContaining({
       where: expect.objectContaining({
         status: expect.objectContaining({ in: expect.arrayContaining(['certificado_nao_cadastrado', 'certificado_expirado']) })
+      })
+    }));
+  });
+
+  it('claims a persisted manual Science recovery task when the worker starts again', async () => {
+    prisma.nfeXmlRecuperacao.findMany.mockResolvedValueOnce([{ id: 'manual-task', status: 'aguardando_xml' }]);
+
+    const claimed = await service.claimDueRecoveryTasks(3);
+
+    expect(claimed).toEqual([{ id: 'manual-task', leaseId: expect.any(String) }]);
+    expect(prisma.nfeXmlRecuperacao.findMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: expect.objectContaining({
+        AND: expect.arrayContaining([
+          expect.objectContaining({ OR: expect.arrayContaining([
+            expect.objectContaining({ status: 'aguardando_xml', configuracao: { recuperacaoXmlAutomatica: true } })
+          ]) })
+        ])
       })
     }));
   });

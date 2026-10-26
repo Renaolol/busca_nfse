@@ -174,6 +174,7 @@ describe('RealNfeDistribuicaoClient', () => {
         ambiente: NfeAmbiente;
       }): string;
       signManifestacaoEvent(xml: string, privateKey: string, certificatePem: string): string;
+      validateManifestacaoEventXml(xml: string): void;
     };
     const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
@@ -196,8 +197,40 @@ describe('RealNfeDistribuicaoClient', () => {
     expect(verifier.checkSignature(signed)).toBe(true);
     expect(signed).toContain(`<CPF>01861020970</CPF>`);
     expect(signed).toContain(`<tpEvento>${NFE_MANIFESTACAO_EVENT_CODES.ciencia_operacao}</tpEvento>`);
-    expect(signed).toContain(`Id="ID${NFE_MANIFESTACAO_EVENT_CODES.ciencia_operacao}${params.chaveAcesso}1"`);
+    expect(signed).toContain(`Id="ID${NFE_MANIFESTACAO_EVENT_CODES.ciencia_operacao}${params.chaveAcesso}01"`);
+    expect(signed).toMatch(/<dhEvento>\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}<\/dhEvento>/);
     expect(signed).toContain('<Signature');
+  });
+
+  it.each([
+    ['CPF', '01861020970', '<CPF>01861020970</CPF>'],
+    ['CNPJ', '12345678000199', '<CNPJ>12345678000199</CNPJ>']
+  ])('validates the signed %s manifestation event against the official XSD', (_identityType, identity, identityElement) => {
+    const client = new RealNfeDistribuicaoClient({} as never, {} as never, {} as never) as unknown as {
+      buildManifestacaoEventXml(params: {
+        cnpjConsulta: string;
+        chaveAcesso: string;
+        tipo: 'ciencia_operacao';
+        sequencia: number;
+        ambiente: NfeAmbiente;
+      }): string;
+      signManifestacaoEvent(xml: string, privateKey: string, certificatePem: string): string;
+      validateManifestacaoEventXml(xml: string): void;
+    };
+    const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const certificatePem = '-----BEGIN CERTIFICATE-----\nAQID\n-----END CERTIFICATE-----';
+    const unsigned = client.buildManifestacaoEventXml({
+      cnpjConsulta: identity,
+      chaveAcesso: '4'.repeat(44),
+      tipo: 'ciencia_operacao',
+      sequencia: 1,
+      ambiente: NfeAmbiente.producao
+    });
+    const signed = client.signManifestacaoEvent(unsigned, privatePem, certificatePem);
+
+    expect(signed).toContain(identityElement);
+    expect(() => client.validateManifestacaoEventXml(signed)).not.toThrow();
   });
 
   it('identifies certificate-loading failures before any manifestation request is sent', async () => {
