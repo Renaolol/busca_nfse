@@ -396,6 +396,15 @@ const state = {
   nfeEventsSyncRunning: false,
   cteEventsSyncRunning: false,
   nfeSyncControls: [],
+  nfeAutomation: {
+    controlId: '',
+    settings: [],
+    pending: [],
+    loading: false,
+    loadedScopeKey: '',
+    requestId: 0,
+    error: ''
+  },
   nfceScControls: [],
   nfceScDocuments: [],
   nfceScStoredDocuments: [],
@@ -422,6 +431,7 @@ const state = {
     scheduler: true,
     failures: false,
     sefazDiagnostic: true,
+    nfeAutomation: false,
     manualImport: true,
     filters: false,
     simplified: true,
@@ -1672,6 +1682,19 @@ function onDocumentClick(event) {
       void refreshApiData();
       return;
     }
+    case 'nfe-automation-refresh': {
+      void loadNfeAutomationData();
+      return;
+    }
+    case 'nfe-automation-revoke': {
+      const clientId = actionNode.getAttribute('data-client-id') || '';
+      const estabelecimentoId = actionNode.getAttribute('data-establishment-id') || '';
+      const ambiente = actionNode.getAttribute('data-ambiente') || '';
+      if (clientId && estabelecimentoId && ambiente) {
+        void revokeNfeAutomationAuthorization({ clientId, estabelecimentoId, ambiente });
+      }
+      return;
+    }
     case 'nfe-enable-auto-search': {
       void enableNfeSearchForAllClients();
       return;
@@ -2582,6 +2605,11 @@ function onDocumentSubmit(event) {
       void submitNfeSefazCpfImportForm(target);
       return;
     }
+    case 'nfeAutomationSettingsForm': {
+      event.preventDefault();
+      void submitNfeAutomationSettingsForm(target);
+      return;
+    }
     case 'nfeSefazDiagnosticStartForm': {
       event.preventDefault();
       void submitNfeSefazDiagnosticStartForm(target);
@@ -2794,6 +2822,10 @@ function onDocumentChange(event) {
   }
 
   const action = target.getAttribute('data-action');
+  if (action === 'nfe-automation-control') {
+    void loadNfeAutomationData(String(target.value || ''));
+    return;
+  }
   if (action === 'nfe-sefaz-cpf-producer') {
     updateNfeSefazCpfCertificateOptions(String(target.value || ''));
     return;
@@ -5832,6 +5864,13 @@ function renderNfeSyncPage() {
         defaultOpen: true
       })}
       ${state.auth.user?.role === 'admin' ? renderCollapsibleCard({
+        sectionKey: 'nfeAutomation',
+        title: 'Resumos e recuperação de XML completo',
+        subtitle: 'Consulte resumos pendentes e configure a autorização por estabelecimento e ambiente.',
+        contentHtml: renderNfeAutomationPanel(),
+        defaultOpen: false
+      }) : ''}
+      ${state.auth.user?.role === 'admin' ? renderCollapsibleCard({
         sectionKey: 'sefazDiagnostic',
         title: 'Diagnostico manual SEFAZ',
         subtitle: 'Sessao temporaria restrita a administradores; pausa o ciclo automatico do controle selecionado e respeita bloqueios oficiais.',
@@ -5892,6 +5931,198 @@ function renderNfeSyncPage() {
     </section>
   `;
 }
+
+const NFE_AUTOMATION_TERM_VERSION = '2026-10-v1';
+
+function getNfeAutomationControls() {
+  const seen = new Set();
+  return state.nfeSyncControls
+    .filter((control) => {
+      if (!control.estabelecimentoId || !control.ambiente) return false;
+      const key = `${control.estabelecimentoId}|${control.ambiente}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .sort((a, b) => `${a.cliente}|${a.estabelecimento}|${a.ambiente}`.localeCompare(`${b.cliente}|${b.estabelecimento}|${b.ambiente}`));
+}
+
+function renderNfeAutomationPanel() {
+  const controls = getNfeAutomationControls();
+  const selectedControl = controls.find((control) => control.id === state.nfeAutomation.controlId) || null;
+  const scopeKey = selectedControl ? `${selectedControl.estabelecimentoId}|${selectedControl.ambiente}` : '';
+  const loaded = Boolean(scopeKey && state.nfeAutomation.loadedScopeKey === scopeKey);
+  const setting = loaded
+    ? state.nfeAutomation.settings.find((item) => item.estabelecimentoId === selectedControl.estabelecimentoId && item.ambiente === selectedControl.ambiente) || null
+    : null;
+  const pending = loaded
+    ? state.nfeAutomation.pending.filter((item) => item.estabelecimentoId === selectedControl.estabelecimentoId && item.ambiente === selectedControl.ambiente)
+    : [];
+  const controlOptions = controls.reduce((labels, control) => {
+    labels[control.id] = `${control.cliente} - ${control.estabelecimento} - ${formatCpfCnpj(control.cnpjConsulta)} - ${mapNfeAmbienteLabel(control.ambiente)}`;
+    return labels;
+  }, {});
+
+  let detailsHtml = '<p class="card-subtitle">Selecione um controle e carregue o estado para consultar resumos pendentes.</p>';
+  if (state.dataSource !== 'api') {
+    detailsHtml = '<p class="card-subtitle">Entre no ambiente conectado à API para consultar e alterar esta configuração.</p>';
+  } else if (!controls.length) {
+    detailsHtml = '<p class="card-subtitle">Nenhum controle de NF-e com estabelecimento e ambiente configurados foi encontrado.</p>';
+  } else if (state.nfeAutomation.loading) {
+    detailsHtml = '<div class="table-state">Carregando autorização e pendências...</div>';
+  } else if (state.nfeAutomation.error) {
+    detailsHtml = `<div class="table-state error">${escapeHtml(state.nfeAutomation.error)}</div>`;
+  } else if (loaded && selectedControl) {
+    const authorized = Boolean(setting?.autorizacaoAtiva && setting?.cienciaAutomatica);
+    const pendingRows = pending.length
+      ? pending.map((item) => `<tr>
+          <td>${escapeHtml(item.numeroNfe || '-')}</td>
+          <td>${escapeHtml(formatDateTime(item.dataEmissao))}</td>
+          <td>${statusBadge(item.status || 'Pendente', /falha|rejeitada|erro/i.test(item.status || '') ? 'danger' : 'warning')}</td>
+          <td>${escapeHtml(item.xMotivo || item.cStat || '-')}</td>
+          <td>${escapeHtml(String(item.tentativas ?? 0))}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="5"><div class="table-state">Nenhum resumo ou XML pendente neste estabelecimento e ambiente.</div></td></tr>';
+    detailsHtml = `
+      <div class="nfe-automation-scope">
+        <div>
+          <span class="row-title">${escapeHtml(selectedControl.cliente)} · ${escapeHtml(selectedControl.estabelecimento)}</span>
+          <span class="row-sub">${escapeHtml(formatCpfCnpj(selectedControl.cnpjConsulta))} · ${escapeHtml(mapNfeAmbienteLabel(selectedControl.ambiente))} · Rotina ${escapeHtml(selectedControl.status)}</span>
+        </div>
+        <div>${statusBadge(authorized ? 'Autorização ativa' : 'Ciência não autorizada', authorized ? 'success' : 'warning')}</div>
+      </div>
+      ${authorized ? `<p class="card-subtitle">Autorizada em ${escapeHtml(formatDateTime(setting.autorizadaEm))}${setting.autorizadaPor ? ` por ${escapeHtml(setting.autorizadaPor)}` : ''}. Termo ${escapeHtml(setting.versaoTermo || NFE_AUTOMATION_TERM_VERSION)}.</p>` : ''}
+      <form id="nfeAutomationSettingsForm" class="form-grid">
+        <input type="hidden" name="clienteId" value="${escapeHtml(selectedControl.clientId)}" />
+        <input type="hidden" name="estabelecimentoId" value="${escapeHtml(selectedControl.estabelecimentoId)}" />
+        <input type="hidden" name="ambiente" value="${escapeHtml(selectedControl.ambiente)}" />
+        <label class="field field-inline" style="grid-column:span 3;">
+          <input name="cienciaAutomatica" type="checkbox" ${setting?.cienciaAutomatica && setting?.autorizacaoAtiva ? 'checked' : ''} />
+          Enviar automaticamente o evento “Ciência da Operação”
+        </label>
+        <label class="field field-inline" style="grid-column:span 3;">
+          <input name="recuperacaoXmlAutomatica" type="checkbox" ${setting?.recuperacaoXmlAutomatica ? 'checked' : ''} />
+          Consultar por chave e salvar o XML após Ciência aceita
+        </label>
+        <label class="field field-inline" style="grid-column:span 3;">
+          <input name="confirmacaoExpressa" type="checkbox" />
+          Autorizo expressamente o envio automático de Ciência para este estabelecimento e ambiente.
+        </label>
+        <p class="card-subtitle" style="grid-column:span 3;margin:0;">A consulta do XML ocorre após Ciência aceita. Ciência envia um evento fiscal à SEFAZ e não pode ser desfeita depois do envio; o XML completo só será salvo se a SEFAZ o disponibilizar. A fila automática também depende da rotina NF-e estar habilitada.</p>
+        <div class="stack-actions" style="grid-column:span 3;justify-content:flex-start;align-items:flex-end;">
+          <button class="btn primary" type="submit">Salvar configuração</button>
+          <button class="btn secondary" type="button" data-action="nfe-automation-revoke" data-client-id="${escapeHtml(selectedControl.clientId)}" data-establishment-id="${escapeHtml(selectedControl.estabelecimentoId)}" data-ambiente="${escapeHtml(selectedControl.ambiente)}" ${authorized ? '' : 'disabled'}>Revogar autorização</button>
+          <button class="btn secondary" type="button" data-action="nfe-automation-refresh">Atualizar pendências</button>
+        </div>
+      </form>
+      <h4 class="card-title" style="margin-top:18px;">Resumos e recuperações (${pending.length})</h4>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Número NF-e</th><th>Emissão</th><th>Status</th><th>Detalhe da SEFAZ</th><th>Tentativas</th></tr></thead>
+        <tbody>${pendingRows}</tbody>
+      </table></div>
+    `;
+  }
+
+  return `
+    <div class="form-grid">
+      <label class="field" style="grid-column:span 2;">
+        Controle por estabelecimento e ambiente
+        <select name="nfeAutomationControl" data-action="nfe-automation-control">${renderOptions(
+          controls.map((control) => control.id),
+          state.nfeAutomation.controlId,
+          controlOptions,
+          'Selecione um controle'
+        )}</select>
+      </label>
+      <div class="stack-actions" style="align-items:flex-end;">
+        <button class="btn secondary" type="button" data-action="nfe-automation-refresh" ${selectedControl ? '' : 'disabled'}>Carregar / atualizar</button>
+      </div>
+    </div>
+    <div style="margin-top:14px;">${detailsHtml}</div>
+  `;
+}
+
+async function loadNfeAutomationData(controlId = state.nfeAutomation.controlId) {
+  const requestId = state.nfeAutomation.requestId + 1;
+  const control = getNfeAutomationControls().find((item) => item.id === controlId) || null;
+  if (!control) {
+    state.nfeAutomation = { ...state.nfeAutomation, controlId: '', settings: [], pending: [], loadedScopeKey: '', requestId, loading: false, error: '' };
+    renderPreservingScroll();
+    return;
+  }
+
+  const scopeKey = `${control.estabelecimentoId}|${control.ambiente}`;
+  state.nfeAutomation = { ...state.nfeAutomation, controlId: control.id, requestId, loading: true, error: '' };
+  renderPreservingScroll();
+
+  const baseQuery = `clienteId=${encodeURIComponent(control.clientId)}&estabelecimentoId=${encodeURIComponent(control.estabelecimentoId)}`;
+  try {
+    const [settings, pending] = await Promise.all([
+      apiRequest(`/nfe/automacao/configuracoes?${baseQuery}`, { cache: false }),
+      apiRequest(`/nfe/automacao/pendencias?${baseQuery}`, { cache: false })
+    ]);
+    if (state.nfeAutomation.requestId !== requestId) return;
+    state.nfeAutomation = {
+      ...state.nfeAutomation,
+      settings: Array.isArray(settings) ? settings : [],
+      pending: Array.isArray(pending) ? pending : [],
+      loading: false,
+      loadedScopeKey: scopeKey,
+      error: ''
+    };
+  } catch (error) {
+    if (state.nfeAutomation.requestId !== requestId) return;
+    state.nfeAutomation = {
+      ...state.nfeAutomation,
+      loading: false,
+      loadedScopeKey: '',
+      error: `Falha ao carregar as configurações e pendências: ${toErrorMessage(error)}`
+    };
+  }
+  renderPreservingScroll();
+}
+
+async function submitNfeAutomationSettingsForm(form) {
+  const formData = new FormData(form);
+  const cienciaAutomatica = formData.has('cienciaAutomatica');
+  const confirmacaoExpressa = formData.has('confirmacaoExpressa');
+  if (cienciaAutomatica && !confirmacaoExpressa) {
+    pushToast('Marque a autorização expressa antes de ativar o envio automático de Ciência.', 'error');
+    return;
+  }
+
+  const body = {
+    clienteId: String(formData.get('clienteId') || ''),
+    estabelecimentoId: String(formData.get('estabelecimentoId') || ''),
+    ambiente: String(formData.get('ambiente') || ''),
+    cienciaAutomatica,
+    recuperacaoXmlAutomatica: formData.has('recuperacaoXmlAutomatica'),
+    confirmacaoExpressa,
+    versaoTermo: NFE_AUTOMATION_TERM_VERSION
+  };
+
+  try {
+    await apiRequest('/nfe/automacao/configuracoes', { method: 'PUT', body });
+    pushToast(cienciaAutomatica ? 'Autorização registrada e configuração salva.' : 'Configuração salva; Ciência automática permanece desligada.', 'success');
+    await loadNfeAutomationData();
+  } catch (error) {
+    pushToast(`Falha ao salvar a configuração de recuperação: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function revokeNfeAutomationAuthorization({ clientId, estabelecimentoId, ambiente }) {
+  try {
+    await apiRequest('/nfe/automacao/revogar', {
+      method: 'POST',
+      body: { clienteId: clientId, estabelecimentoId, ambiente }
+    });
+    pushToast('Autorização revogada. Novos envios automáticos de Ciência foram bloqueados.', 'success');
+    await loadNfeAutomationData();
+  } catch (error) {
+    pushToast(`Falha ao revogar a autorização: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
 function renderNfeDocumentsPage() {
   const docs = getFilteredNfeDocuments();
   const canShowTable =
