@@ -78,6 +78,7 @@ Criar a base de captura de NF-e de compra e venda sem acoplar regras da SEFAZ ao
 - Para uma busca manual por CPF, o certificado precisa estar ativo e valido, ter titular exatamente igual ao CPF do produtor e estar vinculado ao mesmo cliente; se estiver vinculado a um estabelecimento, deve ser o estabelecimento do produtor. Um certificado de CNPJ diferente nao e oferecido para a consulta desse CPF.
 - `GET /nfe` aceita CPF ou CNPJ em `cnpjConsulta` para filtrar documentos emitidos ou recebidos pelo produtor.
 - A listagem normal de `GET /nfe` retorna somente `xmlCompletoDisponivel=true`; `somenteResumos=true` e a selecao explicita para ver `resNFe`, e `somenteXmlCompleto=false` inclui ambos. Resumo continua como pendente, nao conta como XML completo e pode ser complementado/substituido quando o XML integral chegar.
+- O atalho `Ver NF-e e resumos` na busca simplificada abre os documentos do cliente em todos os ambientes e inclui resumos para mostrar os itens que o controle NSU ja armazenou.
 - Ocultar resumos da listagem nao solicita nem libera o XML. O documento completo continua sujeito ao servico, ao papel do interessado, a manifestacao quando aplicavel, a janela de disponibilidade e a autorizacao SEFAZ.
 - O modulo `cte` implementa consulta manual por chave via `CteConsultaV4` e tentativa de captura de eventos retornados pelo autorizador.
 - As rotas manuais permitem testar o ambiente real e recuperar documentos pontuais sem depender do ciclo incremental.

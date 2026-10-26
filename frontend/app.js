@@ -29,9 +29,9 @@ const appRoot = document.getElementById('app');
 const modalRoot = document.getElementById('modalRoot');
 const drawerRoot = document.getElementById('drawerRoot');
 const toastRoot = document.getElementById('toastRoot');
-// Chamadas usuais da interface nao devem manter o primeiro acesso bloqueado
-// por ate 20 segundos quando a API estiver indisponivel.
-const API_TIMEOUT_MS = 3000;
+// Chamadas usuais podem levar alguns segundos quando ha carga no servidor.
+// Operacoes longas continuam definindo seu proprio timeout.
+const API_TIMEOUT_MS = 20000;
 const ALERTS_BACKGROUND_TIMEOUT_MS = 60000;
 const API_CACHE_TTL_MS = 30000;
 const INITIAL_LOADING_MIN_MS = 500;
@@ -5691,7 +5691,7 @@ function renderNfeSyncPage() {
             <th>Controles</th>
             <th>Ultima execucao</th>
             <th>${escapeHtml(clientCursorLabel)}</th>
-            <th>Documentos</th>
+            <th>NF-e e eventos</th>
             <th>Status</th>
             <th>Acoes</th>
           </tr>
@@ -5706,7 +5706,7 @@ function renderNfeSyncPage() {
                 const nfeSyncClientMenuItems = [
                   { label: clientEnableLabel, action: 'nfe-client-enable', attrs: { 'client-id': row.clientId } },
                   { label: 'Pausar', action: 'nfe-client-pause', attrs: { 'client-id': row.clientId } },
-                  { label: 'Ver XMLs', action: 'nfe-open-client-xmls', attrs: { 'client-id': row.clientId } }
+                  { label: 'Ver NF-e e resumos', action: 'nfe-open-client-xmls', attrs: { 'client-id': row.clientId } }
                 ];
                 return `<tr data-row-actions-menu-id="${escapeHtml(nfeSyncClientMenuId)}">
                   <td>${escapeHtml(row.cliente)}</td>
@@ -5741,7 +5741,7 @@ function renderNfeSyncPage() {
             <th>${escapeHtml(controlCursorLabel)}</th>
             <th>${escapeHtml(controlProgressLabel)}</th>
             <th>${escapeHtml(controlMaxLabel)}</th>
-            <th>Documentos</th>
+            <th>NF-e e eventos</th>
             <th>Ultima execucao</th>
             <th>Status</th>
             <th>Acoes</th>
@@ -18048,6 +18048,8 @@ async function openNfeDocumentsForClient(clientId) {
 
   resetNfeDocsSearch();
   state.filters.nfeDocs.cliente = clientId;
+  state.filters.nfeDocs.xmlCompleto = 'Todos (inclui resumos)';
+  state.filters.nfeDocs.ambiente = 'Todos';
   navigate('/xmls-nfe');
   render();
   await executeNfeDocsSearch();
