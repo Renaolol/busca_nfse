@@ -4879,10 +4879,41 @@ function getNfeSefazCpfProducerCertificates(producer) {
     const holder = normalizeDigits(certificate.cnpj || '');
     const sameCpf =
       holder === producer.cnpjConsulta &&
-      (!certificate.clientId || certificate.clientId === producer.clientId) &&
+      certificate.clientId === producer.clientId &&
       (!certificate.estabelecimentoId || certificate.estabelecimentoId === producer.estabelecimentoId);
     return sameCpf;
   });
+}
+
+function getNfeSefazCpfProducerCertificateHint(producer) {
+  if (!producer) {
+    return 'Selecione o produtor para verificar o certificado digital elegivel.';
+  }
+  if (getNfeSefazCpfProducerCertificates(producer).length) {
+    return `Certificado ativo e valido em nome do CPF ${formatCpfCnpj(producer.cnpjConsulta)} disponivel para consulta.`;
+  }
+
+  const clientCertificates = (state.certificates || []).filter(
+    (certificate) => certificate.clientId === producer.clientId
+  );
+  const matchingHolder = clientCertificates.filter(
+    (certificate) => normalizeDigits(certificate.cnpj || '') === producer.cnpjConsulta
+  );
+  if (matchingHolder.length) {
+    const matchingEstablishment = matchingHolder.some(
+      (certificate) => !certificate.estabelecimentoId || certificate.estabelecimentoId === producer.estabelecimentoId
+    );
+    if (!matchingEstablishment) {
+      return `O certificado de titular CPF ${formatCpfCnpj(producer.cnpjConsulta)} esta vinculado a outro estabelecimento. Vincule-o ao estabelecimento deste produtor.`;
+    }
+    return `O certificado de titular CPF ${formatCpfCnpj(producer.cnpjConsulta)} precisa estar ativo, valido e com o arquivo disponivel.`;
+  }
+
+  if (clientCertificates.length) {
+    return `Os certificados vinculados a este cliente nao tem titular igual ao CPF ${formatCpfCnpj(producer.cnpjConsulta)}. Cadastre ou vincule um certificado digital em nome desse CPF para consultar a SEFAZ.`;
+  }
+
+  return `Cadastre e vincule ao cliente um certificado digital ativo em nome do CPF ${formatCpfCnpj(producer.cnpjConsulta)} para consultar a SEFAZ.`;
 }
 
 function getNfeSefazCpfProducers(controls = state.nfeSyncControls) {
@@ -5449,9 +5480,14 @@ function updateNfeSefazCpfCertificateOptions(producerKey) {
     return;
   }
   const producers = getNfeSefazCpfProducers();
-  const certificates = getNfeSefazCpfProducerCertificates(producers.find((producer) => producer.controleId === producerKey));
+  const producer = producers.find((item) => item.controleId === producerKey);
+  const certificates = getNfeSefazCpfProducerCertificates(producer);
   certificateSelect.innerHTML = renderNfeSefazCpfCertificateOptions(producerKey, producers);
   certificateSelect.disabled = certificates.length === 0;
+  const certificateHint = form.querySelector('#nfeSefazCpfCertificateHint');
+  if (certificateHint) {
+    certificateHint.textContent = getNfeSefazCpfProducerCertificateHint(producer);
+  }
   const submitButton = form.querySelector('button[type="submit"]');
   if (submitButton) {
     submitButton.disabled = certificates.length === 0;
@@ -5615,6 +5651,7 @@ function renderNfeSyncPage() {
       <label class="field">
         Certificado digital do produtor
         <select name="certificadoId" required disabled>${renderNfeSefazCpfCertificateOptions('', eligibleCpfProducers)}</select>
+        <span id="nfeSefazCpfCertificateHint" class="row-sub" role="status" aria-live="polite">${escapeHtml(getNfeSefazCpfProducerCertificateHint(null))}</span>
       </label>
       <label class="field">
         Emissao inicial (consulta historica, ultimos 90 dias)
@@ -12972,8 +13009,8 @@ function renderCertificateFormModal() {
                 <input name="apelido" required value="${escapeHtml(apelidoValue)}" />
               </label>
               <label class="field">
-                CNPJ titular
-                <input name="cnpjTitular" maxlength="18" value="${escapeHtml(cnpjTitularValue)}" />
+                CPF/CNPJ titular
+                <input name="cnpjTitular" inputmode="numeric" maxlength="18" placeholder="11 digitos (CPF) ou 14 digitos (CNPJ)" value="${escapeHtml(cnpjTitularValue)}" />
               </label>
               <label class="field">
                 Tipo
@@ -16494,8 +16531,8 @@ async function submitCertificateForm(form) {
     return;
   }
 
-  if (cnpjTitular.length !== 14) {
-    pushToast('Informe um CNPJ titular com 14 digitos.', 'error');
+  if (![11, 14].includes(cnpjTitular.length)) {
+    pushToast('Informe um CPF titular com 11 digitos ou um CNPJ titular com 14 digitos.', 'error');
     return;
   }
 

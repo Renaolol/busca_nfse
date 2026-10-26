@@ -12,7 +12,8 @@
 - Servico de criptografia AES-256-GCM local.
 - Persistencia de binario criptografado em storage local (`storage/certificados/...`).
 - Validade, thumbprint, serial, issuer e subject sao extraidos automaticamente do `.pfx/.p12` no cadastro.
-- Edicao via `PATCH /certificados/:id` permite atualizar apelido, CNPJ titular, vinculo com cliente/estabelecimento, anotacoes e opcionalmente substituir arquivo/senha.
+- Titular do certificado pode ser informado com CPF (11 digitos) ou CNPJ (14 digitos); o campo da API permanece `cnpjTitular` por compatibilidade.
+- Edicao via `PATCH /certificados/:id` permite atualizar apelido, CPF/CNPJ titular, vinculo com cliente/estabelecimento, anotacoes e opcionalmente substituir arquivo/senha.
 - Quando a edicao envia novo arquivo, a senha e obrigatoria; arquivo e senha continuam sendo persistidos somente criptografados.
 - Quando a edicao envia apenas nova senha, a API valida a senha contra o PFX armazenado e atualiza metadados sem retornar segredo.
 - Certificados podem ser cadastrados vinculados a um cliente ou como avulsos para controle interno.
