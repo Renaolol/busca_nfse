@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliDecompressSync, gunzipSync, inflateSync } from 'node:zlib';
 import { SignedXml } from 'xml-crypto';
-import * as libxmljs from 'libxmljs2';
+import type * as libxmljs from 'libxmljs2';
 import { PrismaService } from '../../prisma/prisma.service';
 import { LocalStorageService } from '../../modules/storage/storage.service';
 import { CryptoService } from '../../modules/shared/crypto.service';
@@ -184,7 +184,7 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeMani
     try {
       const unsignedEvent = this.buildManifestacaoEventXml(params);
       eventXml = this.signManifestacaoEvent(unsignedEvent, pem.key, pem.cert);
-      this.validateManifestacaoEventXml(eventXml);
+      await this.validateManifestacaoEventXml(eventXml);
       url = this.buildManifestacaoUrl(params.ambiente);
     } catch (error) {
       throw new NfeManifestacaoClientError(this.toErrorMessage(error), false, 'event_signing', eventXml);
@@ -408,9 +408,10 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeMani
     return signature.getSignedXml();
   }
 
-  private validateManifestacaoEventXml(xml: string): void {
-    const eventDocument = libxmljs.parseXml(xml, { nonet: true, noent: false, dtdload: false });
-    const schema = this.getManifestacaoSchema();
+  private async validateManifestacaoEventXml(xml: string): Promise<void> {
+    const validator = await this.loadManifestacaoValidator();
+    const eventDocument = validator.parseXml(xml, { nonet: true, noent: false, dtdload: false });
+    const schema = this.getManifestacaoSchema(validator);
     if (eventDocument.validate(schema)) return;
 
     const details = eventDocument.validationErrors
@@ -420,14 +421,22 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeMani
     throw new Error(`XML de manifestacao invalido no schema oficial envConfRecebto_v1.00.xsd. ${details}`.trim());
   }
 
-  private getManifestacaoSchema(): libxmljs.Document {
+  private async loadManifestacaoValidator(): Promise<typeof import('libxmljs2')> {
+    try {
+      return await import('libxmljs2');
+    } catch {
+      throw new Error('Validador XSD NF-e indisponivel. Recompile libxmljs2 para a versao e arquitetura do Node deste servico; nenhum evento foi transmitido.');
+    }
+  }
+
+  private getManifestacaoSchema(validator: typeof import('libxmljs2')): libxmljs.Document {
     if (RealNfeDistribuicaoClient.manifestationSchema) {
       return RealNfeDistribuicaoClient.manifestationSchema;
     }
 
     const schemaPath = join(__dirname, 'schemas', 'envConfRecebto_v1.00.xsd');
     const schemaXml = readFileSync(schemaPath, 'utf8');
-    RealNfeDistribuicaoClient.manifestationSchema = libxmljs.parseXml(schemaXml, {
+    RealNfeDistribuicaoClient.manifestationSchema = validator.parseXml(schemaXml, {
       baseUrl: schemaPath,
       nonet: true,
       noent: false,

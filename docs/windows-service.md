@@ -93,7 +93,7 @@ C:\Users\Administrador\Documents\GitHub\busca_nfse\NotaSyncGCONT.exe
 No PowerShell como Administrador:
 
 ```powershell
-cd C:\Users\Administrador\Documents\GitHub\busca_nfse
+cd C:\Users\gcont\OneDrive\Documentos\GitHub\busca_nfse
 .\deploy\windows\install-notasync-service.ps1 -Port 3000 -SkipBuild
 ```
 
@@ -169,6 +169,26 @@ Logs:
 ```text
 logs\
 ```
+
+## Erro 1067: falha ao carregar `libxmljs2`
+
+Se `NotaSyncGCONT.err.log` mostrar `Could not locate the bindings file` e procurar por um caminho como `node-v137-win32-x64\xmljs.node`, o addon nativo de `libxmljs2` nao foi compilado para a versao e arquitetura do Node usadas pelo servico. O erro encerra o processo Node e o Windows apresenta o codigo 1067.
+
+A aplicacao carrega esse validador apenas ao preparar um evento de manifestacao. Assim, uma falha no addon nao impede o servico de iniciar; a manifestacao fica bloqueada com uma mensagem clara e nenhum evento e transmitido ate que o addon esteja disponivel.
+
+No servidor, pare o servico e reconstrua o addon na raiz do projeto usando o mesmo Node x64 configurado para o servico (por exemplo, Node 24.16.0):
+
+```powershell
+cd C:\Users\Administrador\Documents\GitHub\busca_nfse
+.\NotaSyncGCONT.exe stop
+node --version
+node -p "process.versions.modules"
+npm rebuild libxmljs2 --build-from-source
+node -e "require('libxmljs2')"
+.\NotaSyncGCONT.exe start
+```
+
+O teste `require` precisa terminar sem erro antes de iniciar o servico. Se a compilacao pedir ferramentas, instale Python e Visual Studio Build Tools com a carga de trabalho C++ e repita o rebuild. Confira tambem que `node --version` e `where.exe node` apontam para a mesma instalacao Node x64 que o WinSW usa.
 
 ## Remover o servico
 
