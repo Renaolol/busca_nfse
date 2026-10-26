@@ -281,6 +281,42 @@ describe('NfeManifestacaoService', () => {
     expect(client.sendManifestacao).toHaveBeenCalledTimes(1);
   });
 
+  it('permite novo envio manual de Ciência indeterminada somente com confirmação de ausência na SEFAZ', async () => {
+    prisma.nfeManifestacao.findMany.mockResolvedValueOnce([{
+      tipoEvento: '210210', status: 'resultado_indeterminado', nSeqEvento: 1
+    }]);
+
+    const result = await service.registrar('doc-1', dto({
+      requestId: '6e6d31c8-8932-41d8-b33c-a9d9481f5840',
+      reenvioResultadoIndeterminadoConfirmado: true
+    }) as any, 'user-1');
+
+    expect(client.sendManifestacao).toHaveBeenCalledTimes(1);
+    expect(prisma.nfeManifestacao.create).toHaveBeenCalledWith(expect.objectContaining({
+      data: expect.objectContaining({ tipoEvento: '210210', nSeqEvento: 1, usuarioId: 'user-1' })
+    }));
+    expect(result).toMatchObject({ status: 'registrada', cStat: '135' });
+  });
+
+  it('não permite usar confirmação de reenvio indeterminado quando não há Ciência indeterminada', async () => {
+    await expect(service.registrar('doc-1', dto({
+      reenvioResultadoIndeterminadoConfirmado: true
+    }) as any)).rejects.toBeInstanceOf(BadRequestException);
+    expect(client.sendManifestacao).not.toHaveBeenCalled();
+  });
+
+  it('mantém bloqueado qualquer envio de manifestação ainda em andamento mesmo com confirmação de reenvio', async () => {
+    prisma.nfeManifestacao.findMany.mockResolvedValueOnce([
+      { tipoEvento: '210210', status: 'resultado_indeterminado', nSeqEvento: 1 },
+      { tipoEvento: '210210', status: 'enviando', nSeqEvento: 1 }
+    ]);
+
+    await expect(service.registrar('doc-1', dto({
+      reenvioResultadoIndeterminadoConfirmado: true
+    }) as any)).rejects.toBeInstanceOf(ConflictException);
+    expect(client.sendManifestacao).not.toHaveBeenCalled();
+  });
+
   it('identifica falha local anterior ao envio e permite nova tentativa somente em ação manual', async () => {
     (client.sendManifestacao as jest.Mock).mockRejectedValueOnce(new NfeManifestacaoClientError('Falha ao preparar assinatura', false));
 

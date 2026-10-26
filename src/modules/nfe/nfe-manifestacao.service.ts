@@ -726,10 +726,28 @@ export class NfeManifestacaoService {
       orderBy: { createdAt: 'asc' }
     });
     const importedEvents = await this.loadImportedManifestations(document.id);
-    if (importedEvents.some((item) => item.status === 'resultado_indeterminado')) {
+    const retryIndeterminateScience = dto.reenvioResultadoIndeterminadoConfirmado === true;
+    if (retryIndeterminateScience && dto.tipo !== 'ciencia_operacao') {
+      throw new BadRequestException('A confirmacao de reenvio indeterminado so pode ser usada para Ciencia da Operacao.');
+    }
+    const indeterminateScienceExists = [
+      ...existingAttempts,
+      ...importedEvents
+    ].some((item) => item.tipoEvento === SCIENCE_CODE && item.status === 'resultado_indeterminado');
+    const indeterminateOtherEventExists = [
+      ...existingAttempts,
+      ...importedEvents
+    ].some((item) => item.tipoEvento !== SCIENCE_CODE && item.status === 'resultado_indeterminado');
+    if (retryIndeterminateScience && !indeterminateScienceExists) {
+      throw new BadRequestException('Nao existe tentativa de Ciencia com resultado indeterminado para confirmar o reenvio.');
+    }
+    if (indeterminateOtherEventExists) {
       throw new ConflictException('Existe evento de manifestação distribuído cujo resultado não pôde ser confirmado. Verifique-o no portal oficial antes de enviar outro evento.');
     }
-    this.assertNoManifestationInProgress(existingAttempts);
+    if (!retryIndeterminateScience && importedEvents.some((item) => item.status === 'resultado_indeterminado')) {
+      throw new ConflictException('Existe evento de manifestação distribuído cujo resultado não pôde ser confirmado. Verifique-o no portal oficial antes de enviar outro evento.');
+    }
+    this.assertNoManifestationInProgress(existingAttempts, retryIndeterminateScience);
 
     const acceptedAttempts = existingAttempts.filter((item) => TERMINAL_ACCEPTED_STATUSES.has(item.status));
     const acceptedImportedEvents = importedEvents.filter((item) => TERMINAL_ACCEPTED_STATUSES.has(item.status));
@@ -1251,8 +1269,14 @@ export class NfeManifestacaoService {
     };
   }
 
-  private assertNoManifestationInProgress(attempts: Array<{ tipoEvento: string; status: string }>): void {
-    if (attempts.some((item) => INDETERMINATE_STATUSES.has(item.status))) {
+  private assertNoManifestationInProgress(
+    attempts: Array<{ tipoEvento: string; status: string }>,
+    allowConfirmedIndeterminateScience = false
+  ): void {
+    if (attempts.some((item) =>
+      item.status === 'enviando' ||
+      (item.status === 'resultado_indeterminado' && !(allowConfirmedIndeterminateScience && item.tipoEvento === SCIENCE_CODE))
+    )) {
       throw new ConflictException('Existe envio de manifestação com resultado pendente. Consulte o historico oficial antes de tentar novamente.');
     }
   }

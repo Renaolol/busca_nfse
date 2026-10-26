@@ -26,6 +26,14 @@ export class RegistrarNfeManifestacaoDto {
   @IsBoolean()
   confirmacaoExpressa!: boolean;
 
+  @ApiPropertyOptional({
+    default: false,
+    description: 'Permite reenviar somente Ciência da Operação com resultado anterior indeterminado, após confirmar que o evento não consta na SEFAZ.'
+  })
+  @IsOptional()
+  @IsBoolean()
+  reenvioResultadoIndeterminadoConfirmado?: boolean;
+
   @ApiPropertyOptional({ default: false, description: 'Confirma que o usuário pretende retificar uma manifestação conclusiva anterior, se houver.' })
   @IsOptional()
   @IsBoolean()

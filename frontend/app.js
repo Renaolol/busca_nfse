@@ -1355,7 +1355,8 @@ function onDocumentClick(event) {
     case 'close-modal': {
       if (
         ((state.modal?.kind === 'events-sync-report' || state.modal?.kind === 'dominio-import-report') && state.modal.running) ||
-        (state.modal?.kind === 'events-sync-companies' && state.modal.submitting)
+        (state.modal?.kind === 'events-sync-companies' && state.modal.submitting) ||
+        (state.modal?.kind === 'nfe-retry-indeterminate-science' && state.modal.submitting)
       ) {
         return;
       }
@@ -1693,6 +1694,21 @@ function onDocumentClick(event) {
       if (clientId && estabelecimentoId && ambiente) {
         void revokeNfeAutomationAuthorization({ clientId, estabelecimentoId, ambiente });
       }
+      return;
+    }
+    case 'nfe-automation-retry-science': {
+      const documentId = actionNode.getAttribute('data-document-id') || '';
+      const clientId = actionNode.getAttribute('data-client-id') || '';
+      if (!documentId || !clientId) return;
+      openModal({
+        kind: 'nfe-retry-indeterminate-science',
+        documentId,
+        clientId,
+        numeroNfe: actionNode.getAttribute('data-numero-nfe') || '',
+        dataEmissao: actionNode.getAttribute('data-data-emissao') || '',
+        ambiente: actionNode.getAttribute('data-ambiente') || '',
+        submitting: false
+      });
       return;
     }
     case 'nfe-enable-auto-search': {
@@ -2608,6 +2624,11 @@ function onDocumentSubmit(event) {
     case 'nfeAutomationSettingsForm': {
       event.preventDefault();
       void submitNfeAutomationSettingsForm(target);
+      return;
+    }
+    case 'nfeRetryIndeterminateScienceForm': {
+      event.preventDefault();
+      void submitNfeRetryIndeterminateScienceForm(target);
       return;
     }
     case 'nfeSefazDiagnosticStartForm': {
@@ -5981,8 +6002,11 @@ function renderNfeAutomationPanel() {
           <td>${statusBadge(item.status || 'Pendente', /falha|rejeitada|erro/i.test(item.status || '') ? 'danger' : 'warning')}</td>
           <td>${escapeHtml(item.xMotivo || item.cStat || '-')}</td>
           <td>${escapeHtml(String(item.tentativas ?? 0))}</td>
+          <td>${item.status === 'resultado_indeterminado' && item.documentoId
+            ? `<button class="btn secondary" type="button" data-action="nfe-automation-retry-science" data-document-id="${escapeHtml(item.documentoId)}" data-client-id="${escapeHtml(item.clienteId)}" data-numero-nfe="${escapeHtml(item.numeroNfe || '')}" data-data-emissao="${escapeHtml(item.dataEmissao || '')}" data-ambiente="${escapeHtml(item.ambiente || '')}">Reenviar Ciência</button>`
+            : '-'}</td>
         </tr>`).join('')
-      : '<tr><td colspan="5"><div class="table-state">Nenhum resumo ou XML pendente neste estabelecimento e ambiente.</div></td></tr>';
+      : '<tr><td colspan="6"><div class="table-state">Nenhum resumo ou XML pendente neste estabelecimento e ambiente.</div></td></tr>';
     detailsHtml = `
       <div class="nfe-automation-scope">
         <div>
@@ -6017,7 +6041,7 @@ function renderNfeAutomationPanel() {
       </form>
       <h4 class="card-title" style="margin-top:18px;">Resumos e recuperações (${pending.length})</h4>
       <div class="table-wrap"><table>
-        <thead><tr><th>Número NF-e</th><th>Emissão</th><th>Status</th><th>Detalhe da SEFAZ</th><th>Tentativas</th></tr></thead>
+        <thead><tr><th>Número NF-e</th><th>Emissão</th><th>Status</th><th>Detalhe da SEFAZ</th><th>Tentativas</th><th>Ação</th></tr></thead>
         <tbody>${pendingRows}</tbody>
       </table></div>
     `;
@@ -6107,6 +6131,54 @@ async function submitNfeAutomationSettingsForm(form) {
     await loadNfeAutomationData();
   } catch (error) {
     pushToast(`Falha ao salvar a configuração de recuperação: ${toErrorMessage(error)}`, 'error');
+  }
+}
+
+async function submitNfeRetryIndeterminateScienceForm(form) {
+  const formData = new FormData(form);
+  if (!formData.has('eventoAusenteConfirmado') || !formData.has('confirmacaoExpressa')) {
+    pushToast('Confirme a ausência do evento na SEFAZ e autorize expressamente o novo envio.', 'error');
+    return;
+  }
+
+  const documentId = String(formData.get('documentId') || '').trim();
+  const clientId = String(formData.get('clientId') || '').trim();
+  const requestId = globalThis.crypto?.randomUUID?.();
+  if (!documentId || !clientId || !requestId) {
+    pushToast('Não foi possível preparar a solicitação segura para esta tentativa.', 'error');
+    return;
+  }
+
+  state.modal = { ...state.modal, submitting: true };
+  render();
+  try {
+    const result = await apiRequest(`/nfe/${encodeURIComponent(documentId)}/manifestacoes`, {
+      method: 'POST',
+      body: {
+        clienteId: clientId,
+        requestId,
+        tipo: 'ciencia_operacao',
+        confirmacaoExpressa: true,
+        reenvioResultadoIndeterminadoConfirmado: true
+      }
+    });
+    closeModal();
+    if (result?.status === 'registrada') {
+      pushToast('Ciência registrada. A recuperação automática tentará buscar o XML completo.', 'success');
+    } else if (result?.status === 'registrada_sem_vinculo') {
+      pushToast('A SEFAZ registrou a Ciência sem vincular a NF-e; aguarde a distribuição do evento antes da recuperação do XML.', 'info');
+    } else if (result?.status === 'resultado_indeterminado') {
+      pushToast('O resultado voltou a ficar indeterminado. Confira novamente na SEFAZ antes de qualquer novo envio.', 'error');
+    } else {
+      pushToast(`A SEFAZ não confirmou o registro da Ciência: ${result?.xMotivo || result?.status || 'consulte o detalhe da pendência'}.`, 'error');
+    }
+    await loadNfeAutomationData();
+  } catch (error) {
+    pushToast(`Falha ao tentar registrar Ciência: ${toErrorMessage(error)}`, 'error');
+    if (state.modal?.kind === 'nfe-retry-indeterminate-science') {
+      state.modal = { ...state.modal, submitting: false };
+      render();
+    }
   }
 }
 
@@ -12373,6 +12445,8 @@ function renderModal() {
           </div>
         </div>
       `;
+    case 'nfe-retry-indeterminate-science':
+      return renderNfeRetryIndeterminateScienceModal();
     case 'xml-edit-value':
       return renderXmlManualValueModal();
     case 'recover-past-nsus':
@@ -12451,6 +12525,43 @@ function renderModal() {
     default:
       return '';
   }
+}
+
+function renderNfeRetryIndeterminateScienceModal() {
+  const modal = state.modal;
+  if (modal?.kind !== 'nfe-retry-indeterminate-science') return '';
+  const submitting = Boolean(modal.submitting);
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="modal-header">
+          <h3 class="modal-title">Reenviar Ciência da Operação</h3>
+          <p class="modal-subtitle">NF-e ${escapeHtml(modal.numeroNfe || 'sem número identificado')} · ${escapeHtml(mapNfeAmbienteLabel(modal.ambiente))}</p>
+        </div>
+        <form id="nfeRetryIndeterminateScienceForm">
+          <input type="hidden" name="documentId" value="${escapeHtml(modal.documentId)}" />
+          <input type="hidden" name="clientId" value="${escapeHtml(modal.clientId)}" />
+          <div class="modal-body">
+            <p>O envio anterior ficou indeterminado. A correção do SOAP precisa estar publicada e o backend reiniciado antes desta tentativa.</p>
+            <p>Reenvie somente depois de conferir no portal ou na distribuição de eventos da SEFAZ que não há Ciência registrada para esta nota.</p>
+            <label class="field field-inline" style="margin-top:14px;">
+              <input name="eventoAusenteConfirmado" type="checkbox" required />
+              Confirmo que consultei a SEFAZ e não existe Ciência registrada para esta NF-e.
+            </label>
+            <label class="field field-inline" style="margin-top:10px;">
+              <input name="confirmacaoExpressa" type="checkbox" required />
+              Autorizo o envio agora de uma nova Ciência da Operação para esta NF-e.
+            </label>
+            <p class="card-subtitle" style="margin:10px 0 0;">Esta confirmação libera apenas esta tentativa. O envio gera um evento fiscal; se a informação consultada estiver desatualizada, a SEFAZ poderá identificar duplicidade.</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn secondary" type="button" data-action="close-modal" ${submitting ? 'disabled' : ''}>Cancelar</button>
+            <button class="btn primary" type="submit" ${submitting ? 'disabled' : ''}>${submitting ? 'Enviando...' : 'Enviar nova Ciência'}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  `;
 }
 
 function renderXmlManualValueModal() {

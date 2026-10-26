@@ -136,7 +136,7 @@ export class NfeController {
   @Roles('admin')
   @ApiOperation({
     summary: 'Registra uma manifestação do destinatário após autorização expressa do usuário.',
-    description: 'Aceita CPF e CNPJ com certificado cujo titular corresponda exatamente ao estabelecimento. A rota manual exige autorizacao expressa e nao envia eventos automaticamente; Ciencia automatica so funciona com autorizacao ativa por estabelecimento. Eventos conclusivos exigem operacao compativel e respeitam o prazo vigente de 90 dias da autorizacao. Nao use Confirmacao apenas para obter XML.'
+    description: 'Aceita CPF e CNPJ com certificado cujo titular corresponda exatamente ao estabelecimento. A rota manual exige autorizacao expressa e nao envia eventos automaticamente; Ciencia automatica so funciona com autorizacao ativa por estabelecimento. Para repetir Ciencia com resultado indeterminado, e obrigatoria a confirmacao expressa de que o evento nao consta na SEFAZ; tentativas ainda em andamento e outros tipos de evento continuam bloqueados. Eventos conclusivos exigem operacao compativel e respeitam o prazo vigente de 90 dias da autorizacao. Nao use Confirmacao apenas para obter XML.'
   })
   @ApiOkResponse({ schema: { type: 'object', properties: {
     id: { type: 'string' }, tipoEvento: { type: 'string' }, nSeqEvento: { type: 'integer' },
