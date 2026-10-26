@@ -344,7 +344,6 @@ export class RealNfeDistribuicaoClient implements NfeDistribuicaoClient, NfeMani
       : '';
 
     return [
-      '<?xml version="1.0" encoding="utf-8"?>',
       `<envEvento xmlns="${RealNfeDistribuicaoClient.XML_NAMESPACE}" versao="1.00">`,
       `<idLote>${Date.now()}</idLote>`,
       '<evento versao="1.00">',

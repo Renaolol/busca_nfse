@@ -57,6 +57,13 @@ npm run prisma:deploy
 
 - Se `prisma:deploy` falhar com erro de conexao no PostgreSQL, subir/verificar o banco antes de reiniciar a API.
 
+## Manifestacao de NF-e retorna `resultado_indeterminado`
+
+- `resultado_indeterminado` com HTTP 5xx e sem `cStat` significa que o endpoint nao devolveu uma resposta de evento confirmavel. O evento pode ou nao ter sido recebido; confira a distribuicao de eventos/portal oficial antes de qualquer reenvio.
+- Se varias chaves falharem com a mesma resposta, investigue primeiro o envelope SOAP compartilhado e as variaveis `NFE_MANIFESTACAO_URL_PRODUCAO` / `NFE_MANIFESTACAO_URL_HOMOLOGACAO`, em vez de tratar cada nota como erro isolado.
+- O XML do evento e enviado dentro de `nfeDadosMsg` como fragmento do SOAP e nao deve conter uma declaracao XML no inicio. A verificacao unitária garante esse formato sem fazer chamadas a SEFAZ.
+- Registros antigos em estado indeterminado nao sao repetidos automaticamente para evitar duplicidade. Corrigir o adapter nao reclassifica nem reenvia tentativas anteriores; reconcilie cada evento antes de uma nova tentativa.
+
 ## Download por chave retorna muitas falhas definitivas
 
 - Trate `Download por chave` como operacao manual/esporadica, nao como trilha principal de captura.

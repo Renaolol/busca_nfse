@@ -186,6 +186,8 @@ describe('RealNfeDistribuicaoClient', () => {
       ambiente: NfeAmbiente.producao
     };
     const unsigned = client.buildManifestacaoEventXml(params);
+    expect(unsigned).toMatch(/^<envEvento\b/);
+    expect(unsigned).not.toMatch(/^<\?xml\b/i);
     const signed = client.signManifestacaoEvent(unsigned, privatePem, publicPem);
     const verifier = new SignedXml({ publicCert: publicPem });
     const signatureXml = signed.match(/<(?:\w+:)?Signature\b[\s\S]*?<\/(?:\w+:)?Signature>/)?.[0];
