@@ -183,12 +183,16 @@ cd C:\Users\Administrador\Documents\GitHub\busca_nfse
 .\NotaSyncGCONT.exe stop
 node --version
 node -p "process.versions.modules"
-npm rebuild libxmljs2 --build-from-source
+npm install-scripts approve libxmljs2
+if ($LASTEXITCODE -ne 0) { throw "Falha ao aprovar o script de instalacao de libxmljs2; servico permanece parado." }
+npm rebuild libxmljs2 --foreground-scripts
+if ($LASTEXITCODE -ne 0) { throw "Falha ao reconstruir libxmljs2; servico permanece parado." }
 node -e "require('libxmljs2')"
+if ($LASTEXITCODE -ne 0) { throw "Addon ainda indisponivel; servico permanece parado." }
 .\NotaSyncGCONT.exe start
 ```
 
-O teste `require` precisa terminar sem erro antes de iniciar o servico. Se a compilacao pedir ferramentas, instale Python e Visual Studio Build Tools com a carga de trabalho C++ e repita o rebuild. Confira tambem que `node --version` e `where.exe node` apontam para a mesma instalacao Node x64 que o WinSW usa.
+`npm install-scripts approve libxmljs2` aprova apenas o script dessa dependencia e registra a aprovacao versionada em `package.json`; revise e mantenha essa mudanca para futuras instalacoes. O teste `require` precisa terminar sem erro antes de iniciar o servico. Se a compilacao pedir ferramentas, instale Python e Visual Studio Build Tools com a carga de trabalho C++ e repita o rebuild. Confira tambem que `node --version` e `where.exe node` apontam para a mesma instalacao Node x64 que o WinSW usa.
 
 ## Remover o servico
 

@@ -149,9 +149,10 @@ export class NfeController {
 
   @Post(':id/manifestacoes/reconciliar')
   @Roles('admin')
-  @ApiOperation({ summary: 'Reconcilia tentativas indeterminadas com eventos NF-e já importados da distribuição oficial.' })
+  @ApiOperation({ summary: 'Consulta e reconcilia tentativas de manifestação com eventos NF-e importados da distribuição oficial; converte envios interrompidos há mais de 10 minutos em resultado indeterminado.' })
   @ApiOkResponse({ schema: { type: 'object', properties: {
     documentoId: { type: 'string' }, tentativasReconciliadas: { type: 'integer' }, eventos: { type: 'array', items: { type: 'object' } },
+    cienciaIndeterminadaPendente: { type: 'boolean' },
     xmlCompletoDisponivel: { type: 'boolean' }, proximaAcao: { type: 'string' }
   } } })
   @TenantScope({ source: 'query', key: 'clienteId', required: true })

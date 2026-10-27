@@ -60,6 +60,7 @@ npm run prisma:deploy
 ## Manifestacao de NF-e retorna `resultado_indeterminado`
 
 - `resultado_indeterminado` com HTTP 5xx e sem `cStat` significa que o endpoint nao devolveu uma resposta de evento confirmavel. O evento pode ou nao ter sido recebido; confira a distribuicao de eventos/portal oficial antes de qualquer reenvio.
+- Se a tentativa permanecer como `enviando` por mais de 10 minutos, um administrador deve usar `Consultar e reconciliar Ciência` no menu da NF-e. A rotina marca o envio interrompido como indeterminado, consulta a distribuição oficial e só oferece o reenvio manual após essa consulta. A espera, sozinha, nao altera o registro.
 - Se varias chaves falharem com a mesma resposta, investigue primeiro o envelope SOAP compartilhado e as variaveis `NFE_MANIFESTACAO_URL_PRODUCAO` / `NFE_MANIFESTACAO_URL_HOMOLOGACAO`, em vez de tratar cada nota como erro isolado.
 - O XML do evento e enviado dentro de `nfeDadosMsg` como fragmento do SOAP e nao deve conter uma declaracao XML no inicio. A verificacao unitária garante esse formato sem fazer chamadas a SEFAZ.
 - Registros indeterminados nao sao repetidos automaticamente. Depois de corrigir e publicar o adapter, aplicar as migrations (`npm run prisma:deploy`) e confirmar na SEFAZ que a Ciência não foi registrada, um administrador pode usar `Reenviar Ciência` na linha do documento no painel `Resumos e recuperação de XML completo`. A ação pede confirmação por documento, mantém o histórico anterior e só libera tentativas de Ciência; outros eventos e envios ainda em andamento continuam bloqueados.

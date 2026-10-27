@@ -27,7 +27,7 @@ describe('NfeManifestacaoService', () => {
 
   const prisma = {
     nfeDocumento: { findFirst: jest.fn(), findMany: jest.fn() },
-    nfeManifestacao: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn() },
+    nfeManifestacao: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), updateMany: jest.fn() },
     nfeEvento: { findMany: jest.fn() },
     certificado: { findMany: jest.fn() },
     clienteEstabelecimento: { findFirst: jest.fn() },
@@ -76,6 +76,7 @@ describe('NfeManifestacaoService', () => {
     prisma.nfeDocumento.findFirst.mockResolvedValue({ ...document, estabelecimento: { ...document.estabelecimento }, eventos: [] });
     prisma.nfeManifestacao.findMany.mockResolvedValue([]);
     prisma.nfeManifestacao.findUnique.mockResolvedValue(null);
+    prisma.nfeManifestacao.updateMany.mockResolvedValue({ count: 1 });
     prisma.nfeEvento.findMany.mockResolvedValue([]);
     prisma.clienteEstabelecimento.findFirst.mockResolvedValue({ id: 'estab-1', clienteId: 'cliente-1', cnpj: '01861020970' });
     prisma.nfeSyncControle.findMany.mockResolvedValue([]);
@@ -254,6 +255,23 @@ describe('NfeManifestacaoService', () => {
     expect(result.tentativasReconciliadas).toBe(0);
     expect(prisma.nfeManifestacao.update).not.toHaveBeenCalled();
     expect(prisma.nfeXmlRecuperacao.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('recovers an abandoned sending attempt as indeterminate and allows a guarded retry after official sync', async () => {
+    const staleDate = new Date(Date.now() - 11 * 60 * 1000);
+    prisma.nfeManifestacao.findMany.mockResolvedValueOnce([{
+      id: 'manifest-stale', tipoEvento: '210210', nSeqEvento: 1, status: 'enviando',
+      enviadoEm: staleDate, createdAt: staleDate
+    }]);
+
+    const result = await service.reconcileImportedManifestations('doc-1', 'cliente-1');
+
+    expect(prisma.nfeManifestacao.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { id: 'manifest-stale', status: 'enviando' },
+      data: expect.objectContaining({ status: 'resultado_indeterminado' })
+    }));
+    expect(result).toMatchObject({ tentativasReconciliadas: 0, cienciaIndeterminadaPendente: true });
+    expect(result.proximaAcao).toMatch(/Confira o portal oficial/);
   });
 
   it('aceita certificado de CNPJ que corresponda exatamente ao estabelecimento', async () => {

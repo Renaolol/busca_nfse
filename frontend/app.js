@@ -6293,6 +6293,17 @@ async function reconcileNfeScienceEvents(nfeId) {
     }
     if (Number(result?.tentativasReconciliadas || 0) > 0) {
       pushToast(`Reconciliação concluída: ${result.tentativasReconciliadas} tentativa(s) atualizada(s). ${result.proximaAcao || ''}`, 'success');
+    } else if (result?.cienciaIndeterminadaPendente) {
+      pushToast(result.proximaAcao || 'Confira no portal oficial se a Ciência está ausente antes de autorizar novo envio.', 'info');
+      openModal({
+        kind: 'nfe-retry-indeterminate-science',
+        documentId: doc.apiNfeId,
+        clientId: doc.clientId,
+        numeroNfe: doc.numeroNfe || '',
+        dataEmissao: doc.dataEmissao || '',
+        ambiente: doc.ambiente || '',
+        submitting: false
+      });
     } else {
       pushToast(result?.proximaAcao || 'Nenhum evento correspondente foi localizado na distribuição.', 'info');
     }
@@ -6677,6 +6688,9 @@ function renderNfeDocumentsTableCard(docs) {
                     { label: 'Visualizar detalhes', action: 'nfe-details', attrs: { 'nfe-id': doc.id } },
                     canSendNfeScience(doc) ? { label: 'Enviar Ciência da Operação', action: 'nfe-science-open', attrs: { 'nfe-id': doc.id } } : null,
                     { label: 'Buscar eventos', action: 'nfe-sync-events', attrs: { 'nfe-id': doc.id }, disabled: Boolean(syncDisabledRow) },
+                    state.auth.user?.role === 'admin' && canSyncNfeEvents(doc)
+                      ? { label: 'Consultar e reconciliar Ciência', action: 'nfe-science-reconcile', attrs: { 'nfe-id': doc.id }, disabled: Boolean(syncDisabledRow) }
+                      : null,
                     { label: 'Ver XML', action: 'nfe-view', attrs: { 'nfe-id': doc.id } },
                     doc.xmlCompletoDisponivel ? { label: 'Baixar DANFE', action: 'nfe-download-danfe', attrs: { 'nfe-id': doc.id } } : null,
                     { label: 'Baixar XML', action: 'nfe-download', attrs: { 'nfe-id': doc.id } }

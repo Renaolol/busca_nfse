@@ -22,6 +22,7 @@ const FINAL_CODES = new Set([
 ]);
 const TERMINAL_ACCEPTED_STATUSES = new Set(['registrada', 'registrada_sem_vinculo']);
 const INDETERMINATE_STATUSES = new Set(['enviando', 'resultado_indeterminado']);
+const STALE_MANIFESTATION_ATTEMPT_MS = 10 * 60 * 1000;
 export const NFE_AUTOMATION_TERM_VERSION = '2026-10-v1';
 const CERTIFICATE_RECOVERY_STATUSES = [
   'certificado_pendente',
@@ -707,9 +708,24 @@ export class NfeManifestacaoService {
   async reconcileImportedManifestations(documentId: string, clienteId: string) {
     const document = await this.getDocumentOrThrow(documentId, clienteId);
     const attempts = await this.prisma.nfeManifestacao.findMany({
-      where: { nfeDocumentoId: document.id, clienteId: document.clienteId, status: 'resultado_indeterminado' },
+      where: { nfeDocumentoId: document.id, clienteId: document.clienteId, status: { in: ['resultado_indeterminado', 'enviando'] } },
       orderBy: { createdAt: 'asc' }
     });
+    const staleBefore = Date.now() - STALE_MANIFESTATION_ATTEMPT_MS;
+    for (const attempt of attempts) {
+      if (attempt.status !== 'enviando') continue;
+      const sentAt = attempt.enviadoEm ?? attempt.createdAt;
+      if (!sentAt || sentAt.getTime() > staleBefore) continue;
+      const staleUpdate = await this.prisma.nfeManifestacao.updateMany({
+        where: { id: attempt.id, status: 'enviando' },
+        data: {
+          status: 'resultado_indeterminado',
+          xMotivo: 'O processo foi interrompido antes de confirmar o retorno. Consulte os eventos oficiais antes de qualquer reenvio.',
+          processadoEm: new Date()
+        }
+      });
+      if (staleUpdate.count === 1) attempt.status = 'resultado_indeterminado';
+    }
     const importedEvents = await this.loadImportedManifestations(document.id);
     const reconciled: Array<{ tipoEvento: string; status: string; cStat: string | null; nProt: string | null }> = [];
 
@@ -732,6 +748,7 @@ export class NfeManifestacaoService {
           processadoEm: officialEvent.dataEvento ?? new Date()
         }
       });
+      attempt.status = status;
       const recoveryStatus = status === 'registrada' ? 'aguardando_xml' : 'aguardando_evento_distribuicao';
       await this.prisma.nfeXmlRecuperacao.updateMany({
         where: {
@@ -753,16 +770,23 @@ export class NfeManifestacaoService {
       reconciled.push({ tipoEvento: attempt.tipoEvento, status, cStat: officialEvent.cStat, nProt: officialEvent.nProt });
     }
 
+    const cienciaIndeterminadaPendente = attempts.some((item) =>
+      item.tipoEvento === SCIENCE_CODE && item.status === 'resultado_indeterminado'
+    ) && !importedEvents.some((item) => item.tipoEvento === SCIENCE_CODE);
+
     return {
       documentoId: document.id,
       tentativasReconciliadas: reconciled.length,
       eventos: reconciled,
+      cienciaIndeterminadaPendente,
       xmlCompletoDisponivel: document.xmlCompletoDisponivel,
       proximaAcao: reconciled.some((item) => item.cStat === '135')
         ? 'A Ciência foi confirmada na distribuição; aguarde a consulta agendada do XML por chave.'
         : reconciled.some((item) => item.cStat === '136')
           ? 'O evento foi confirmado sem vínculo; aguarde sua distribuição e consulte novamente os eventos.'
-          : 'Nenhum evento correspondente foi encontrado na distribuição. Confira o portal oficial antes de autorizar qualquer reenvio.'
+          : cienciaIndeterminadaPendente
+            ? 'Nenhum evento correspondente foi localizado. Confira o portal oficial; se a Ciência estiver ausente, autorize o reenvio manual nesta tela.'
+            : 'Nenhum evento correspondente foi encontrado na distribuição. Confira o portal oficial antes de autorizar qualquer reenvio.'
     };
   }
 
@@ -817,6 +841,9 @@ export class NfeManifestacaoService {
     ].some((item) => item.tipoEvento !== SCIENCE_CODE && item.status === 'resultado_indeterminado');
     if (retryIndeterminateScience && !indeterminateScienceExists) {
       throw new BadRequestException('Nao existe tentativa de Ciencia com resultado indeterminado para confirmar o reenvio.');
+    }
+    if (retryIndeterminateScience && importedEvents.some((item) => item.tipoEvento === SCIENCE_CODE)) {
+      throw new ConflictException('Existe evento de Ciência importado da distribuição oficial. Reconcilie esse evento antes de qualquer reenvio.');
     }
     if (indeterminateOtherEventExists) {
       throw new ConflictException('Existe evento de manifestação distribuído cujo resultado não pôde ser confirmado. Verifique-o no portal oficial antes de enviar outro evento.');
