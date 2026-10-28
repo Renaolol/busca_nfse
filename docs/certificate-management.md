@@ -17,6 +17,7 @@
 - Quando a edicao envia novo arquivo, a senha e obrigatoria; arquivo e senha continuam sendo persistidos somente criptografados.
 - Quando a edicao envia apenas nova senha, a API valida a senha contra o PFX armazenado e atualiza metadados sem retornar segredo.
 - Certificados podem ser cadastrados vinculados a um cliente ou como avulsos para controle interno.
+- Para buscas de NFS-e, um certificado ativo e valido vinculado ao estabelecimento tem prioridade; se nao existir, e usado o certificado ativo e valido vinculado ao cliente (sem estabelecimento especifico). Certificados vencidos nao bloqueiam o uso de um certificado valido no outro escopo.
 - Cada certificado possui `anotacoes` para registrar origem, renovacao, uso futuro ou pendencias operacionais.
 - Operacoes por ID de certificado vinculado exigem escopo por `clienteId` (query string, UUID valido).
 - Operacoes por ID de certificado avulso devem omitir `clienteId`.

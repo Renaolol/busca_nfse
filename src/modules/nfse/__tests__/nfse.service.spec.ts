@@ -3833,6 +3833,38 @@ describe('NfseService', () => {
     });
   });
 
+  it('usa certificado vinculado ao cliente ao sincronizar eventos do estabelecimento', async () => {
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce([
+      {
+        id: 'doc-evt-client-cert',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        ambiente: Ambiente.producao,
+        chaveAcesso: '42110092206960810000176000000000055526062205552016',
+        dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+        createdAt: new Date('2026-06-03T12:00:00.000Z')
+      }
+    ]);
+    prisma.certificado.findFirst.mockImplementation(({ where }) =>
+      where?.estabelecimentoId === null
+        ? Promise.resolve({ id: 'cert-cliente', validadeFim: new Date('2099-01-01T00:00:00.000Z') })
+        : Promise.resolve(null)
+    );
+    adnClient.getEventosByChave.mockResolvedValue({
+      statusCode: 200,
+      data: { eventos: [] }
+    });
+
+    const result = await service.sincronizarEventos({ clienteId: 'cliente-1', limit: 1 });
+
+    expect(adnClient.getEventosByChave).toHaveBeenCalledWith({
+      chaveAcesso: '42110092206960810000176000000000055526062205552016',
+      ambiente: 'producao',
+      certificateId: 'cert-cliente'
+    });
+    expect(result.detalhes[0]).toMatchObject({ status: 'sem_eventos' });
+  });
+
   it('trata retorno E2240 sem documentos no ADN como sem eventos', async () => {
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([
       {

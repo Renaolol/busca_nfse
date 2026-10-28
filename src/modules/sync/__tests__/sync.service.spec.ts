@@ -215,6 +215,36 @@ describe('SyncService', () => {
     });
   });
 
+  it('usa certificado ativo vinculado ao cliente quando o estabelecimento nao tem certificado proprio', async () => {
+    prisma.certificado.findFirst.mockImplementation(({ where }) => {
+      if (where?.estabelecimentoId === null) {
+        return Promise.resolve({
+          id: 'cert-cliente',
+          validadeFim: new Date(Date.now() + 24 * 60 * 60 * 1000)
+        });
+      }
+
+      return Promise.resolve(null);
+    });
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 10n,
+      hasDocument: false,
+      rawResponse: {},
+      statusCode: 404,
+      message: 'Sem documento para o NSU informado'
+    });
+
+    await service.testSingleNsu({
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      nsu: '10'
+    });
+
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledWith(
+      expect.objectContaining({ certificateId: 'cert-cliente' })
+    );
+  });
+
   it('retorna erro quando nao existe certificado ativo valido', async () => {
     prisma.certificado.findFirst.mockResolvedValue(null);
 
@@ -286,6 +316,14 @@ describe('SyncService', () => {
         ultimoNsuConsultado: 8n
       }
     ]);
+    prisma.certificado.findFirst.mockImplementation(({ where }) =>
+      where?.estabelecimentoId === null
+        ? Promise.resolve({
+            id: 'cert-cliente',
+            validadeFim: new Date(Date.now() + 24 * 60 * 60 * 1000)
+          })
+        : Promise.resolve(null)
+    );
 
     (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
       nsu: 9n,
@@ -296,6 +334,10 @@ describe('SyncService', () => {
     });
 
     await service.runNow();
+
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledWith(
+      expect.objectContaining({ certificateId: 'cert-cliente' })
+    );
 
     expect(prisma.nfseSyncControle.update).toHaveBeenCalledWith(
       expect.objectContaining({

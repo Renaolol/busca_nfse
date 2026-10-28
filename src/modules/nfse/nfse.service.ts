@@ -4639,24 +4639,48 @@ export class NfseService {
   }
 
   private async findUsableCertificate(clienteId: string, estabelecimentoId: string): Promise<{ id: string }> {
-    const certificate = await this.prisma.certificado.findFirst({
-      where: {
-        clienteId,
-        estabelecimentoId,
-        ativo: true
-      },
+    const now = new Date();
+    const validCertificateWhere = {
+      clienteId,
+      ativo: true,
+      OR: [{ validadeFim: null }, { validadeFim: { gt: now } }]
+    };
+    const select = { id: true, validadeFim: true };
+
+    const establishmentCertificate = await this.prisma.certificado.findFirst({
+      where: { ...validCertificateWhere, estabelecimentoId },
       orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        validadeFim: true
-      }
+      select
     });
+    const clientCertificate = establishmentCertificate
+      ? null
+      : await this.prisma.certificado.findFirst({
+          where: { ...validCertificateWhere, estabelecimentoId: null },
+          orderBy: { createdAt: 'desc' },
+          select
+        });
+    let certificate = establishmentCertificate ?? clientCertificate;
+
+    if (!certificate) {
+      const expiredEstablishmentCertificate = await this.prisma.certificado.findFirst({
+        where: { clienteId, estabelecimentoId, ativo: true, validadeFim: { lt: now } },
+        orderBy: { createdAt: 'desc' },
+        select
+      });
+      certificate =
+        expiredEstablishmentCertificate ??
+        (await this.prisma.certificado.findFirst({
+          where: { clienteId, estabelecimentoId: null, ativo: true, validadeFim: { lt: now } },
+          orderBy: { createdAt: 'desc' },
+          select
+        }));
+    }
 
     if (!certificate) {
       throw new BadRequestException('Nenhum certificado ativo para o estabelecimento');
     }
 
-    if (certificate.validadeFim && certificate.validadeFim.getTime() < Date.now()) {
+    if (certificate.validadeFim && certificate.validadeFim.getTime() < now.getTime()) {
       throw new BadRequestException('Certificado vencido');
     }
 

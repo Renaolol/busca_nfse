@@ -560,14 +560,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
-      const certificate = await this.prisma.certificado.findFirst({
-        where: {
-          clienteId: control.clienteId,
-          estabelecimentoId: control.estabelecimentoId,
-          ativo: true
-        },
-        orderBy: { createdAt: 'desc' }
-      });
+      const certificate = await this.findCertificateForEstablishment(control.clienteId, control.estabelecimentoId);
 
       if (!certificate) {
         await this.logSync(control.clienteId, control.id, null, control.ambiente, null, 'erro_certificado', 'Nenhum certificado ativo para o estabelecimento');
@@ -882,14 +875,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
-      const certificate = await this.prisma.certificado.findFirst({
-        where: {
-          clienteId: control.clienteId,
-          estabelecimentoId: control.estabelecimentoId,
-          ativo: true
-        },
-        orderBy: { createdAt: 'desc' }
-      });
+      const certificate = await this.findCertificateForEstablishment(control.clienteId, control.estabelecimentoId);
 
       if (!certificate || (certificate.validadeFim && certificate.validadeFim.getTime() < Date.now())) {
         const message = certificate ? 'Certificado vencido' : 'Nenhum certificado ativo para o estabelecimento';
@@ -1937,14 +1923,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async findUsableCertificate(clienteId: string, estabelecimentoId: string): Promise<Certificado> {
-    const certificate = await this.prisma.certificado.findFirst({
-      where: {
-        clienteId,
-        estabelecimentoId,
-        ativo: true
-      },
-      orderBy: { createdAt: 'desc' }
-    });
+    const certificate = await this.findCertificateForEstablishment(clienteId, estabelecimentoId);
 
     if (!certificate) {
       throw new BadRequestException('Nenhum certificado ativo para o estabelecimento');
@@ -1955,6 +1934,47 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     return certificate;
+  }
+
+  private async findCertificateForEstablishment(
+    clienteId: string,
+    estabelecimentoId: string
+  ): Promise<Certificado | null> {
+    const now = new Date();
+    const validCertificateWhere = {
+      clienteId,
+      ativo: true,
+      OR: [{ validadeFim: null }, { validadeFim: { gt: now } }]
+    };
+
+    const establishmentCertificate = await this.prisma.certificado.findFirst({
+      where: { ...validCertificateWhere, estabelecimentoId },
+      orderBy: { createdAt: 'desc' }
+    });
+    if (establishmentCertificate) {
+      return establishmentCertificate;
+    }
+
+    const clientCertificate = await this.prisma.certificado.findFirst({
+      where: { ...validCertificateWhere, estabelecimentoId: null },
+      orderBy: { createdAt: 'desc' }
+    });
+    if (clientCertificate) {
+      return clientCertificate;
+    }
+
+    const expiredEstablishmentCertificate = await this.prisma.certificado.findFirst({
+      where: { clienteId, estabelecimentoId, ativo: true, validadeFim: { lt: now } },
+      orderBy: { createdAt: 'desc' }
+    });
+    if (expiredEstablishmentCertificate) {
+      return expiredEstablishmentCertificate;
+    }
+
+    return this.prisma.certificado.findFirst({
+      where: { clienteId, estabelecimentoId: null, ativo: true, validadeFim: { lt: now } },
+      orderBy: { createdAt: 'desc' }
+    });
   }
 
   private parseNsu(value: string): bigint {
