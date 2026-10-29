@@ -226,6 +226,10 @@ model NfseSyncControle {
   cliente         Cliente                @relation(fields: [clienteId], references: [id], onDelete: Cascade)
   estabelecimento ClienteEstabelecimento @relation(fields: [estabelecimentoId], references: [id], onDelete: Cascade)
   syncLogs        NfseSyncLog[]
+  nsuRecuperacoes NfseNsuRecuperacao[]
+
+  recuperacaoNsuLeaseId    String?   @map("recuperacao_nsu_lease_id") @db.VarChar(36)
+  recuperacaoNsuLeaseAte   DateTime? @map("recuperacao_nsu_lease_ate")
 
   @@unique([clienteId, cnpjConsulta, ambiente], map: "nfse_sync_controle_cliente_id_cnpj_consulta_ambiente_key")
   @@map("nfse_sync_controle")
@@ -372,6 +376,28 @@ model NfseSyncLog {
   certificado  Certificado?      @relation(fields: [certificadoId], references: [id], onDelete: SetNull)
 
   @@map("nfse_sync_logs")
+  @@index([controleSyncId, nsuConsultado, createdAt], map: "nfse_sync_logs_controle_nsu_criado_idx")
+}
+
+model NfseNsuRecuperacao {
+  id              String   @id @default(uuid()) @db.Uuid
+  controleId      String   @map("controle_id") @db.Uuid
+  nsu             BigInt
+  status          String   @db.VarChar(24)
+  tentativas      Int      @default(0)
+  tipoDocumento   String?  @map("tipo_documento") @db.VarChar(16)
+  chaveAcesso     String?  @map("chave_acesso") @db.VarChar(100)
+  payloadPath     String?  @map("payload_path") @db.Text
+  ultimaMensagem  String?  @map("ultima_mensagem") @db.Text
+  ultimaTentativa DateTime? @map("ultima_tentativa")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  controle NfseSyncControle @relation(fields: [controleId], references: [id], onDelete: Cascade)
+
+  @@unique([controleId, nsu], map: "nfse_nsu_recuperacoes_controle_nsu_key")
+  @@index([controleId, status, nsu], map: "nfse_nsu_recuperacoes_controle_status_nsu_idx")
+  @@map("nfse_nsu_recuperacoes")
 }
 
 model NfeSyncControle {

@@ -13,7 +13,10 @@
 ## Operacao no painel
 
 - O menu `Busca API` dispara ciclos continuos de `POST /sync/rodar-agora` ate detectar fim da fila (status `sem_documento`).
-- O botao `Recuperar NSUs passados` permite selecionar um cliente especifico ou todos os clientes. Ele chama `POST /sync/reprocessar-nsus-passados` para varrer do NSU 1 ate o `ultimo_nsu_consultado`, pular documentos fiscais existentes e baixar apenas lacunas ainda ausentes no app.
+- O botao `Recuperar NSUs passados` permite selecionar um cliente especifico ou todos os clientes. Ele usa o cursor existente como limite e consulta somente NSUs sem resultado terminal registrado para aquele controle (`cliente/cnpj/ambiente`), incluindo falhas anteriores. Resultados conclusivos ficam em `nfse_nsu_recuperacoes`; XMLs baixados aguardando processamento ficam no storage para retomada local. O cursor incremental nao e alterado.
+- Cada controle tem uma reserva persistida com expiracao para impedir recuperacoes concorrentes. Se o processo ou servidor parar, outra execucao retoma falhas e processamentos incompletos, sem consultar novamente NSUs ja concluidos. Consultas ADN continuam seriais e passam pela fila global de requisicoes.
+- A integracao real usa `GET /contribuintes/DFe/{NSU}` (configuravel pelo prefixo `NFSE_ADN_PATH_PREFIX`, padrao `contribuintes`) com `cnpjConsulta` e `lote=true`, por mTLS com certificado do contexto consultado. O Manual de Contribuintes ADN v1.0 documenta `GET /DFe/{NSU}` para DF-e por NSU e `GET /NFSe/{ChaveAcesso}/Eventos` apenas para eventos vinculados a chave: [manual oficial do ADN](https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/manual-contribuintes-apis-adn-sistema-nacional-nfse.pdf).
+- O endpoint ADN por chave documentado retorna eventos, nao o XML principal da NFS-e. A recuperacao de NFS-e por chave existente no projeto usa o adapter separado do Emissor Publico; quando esse servico/ambiente nao disponibilizar a consulta, a recuperacao deve ser feita por NSU. A recuperacao por chave nao inicia uma varredura de NSUs silenciosa.
 - Os botoes `Pausar` e `Retomar` atuam no mesmo fluxo continuo e atualizam o estado dos controles do cliente.
 - A interface diferencia `Busca habilitada` (cliente elegivel para rotinas) de `Executando agora` (consulta em andamento no monitor).
 - O endpoint `GET /sync/scheduler-status` informa se o ciclo automatico e a busca noturna estao ligados, rodando, quais horarios noturnos estao ativos e qual a proxima execucao noturna.
@@ -48,7 +51,7 @@ Os jobs podem ser disparados manualmente pelos scripts `npm run job:*` para oper
 - Ao salvar documento via sync, o sistema tambem gera o DANFSE (`.pdf`) e persiste `danfse_path`.
 - Retorno sem documento definitivo (ex.: 404 sem lote): avanca NSU.
 - Erro temporario de API (ex.: 429, timeout, 5xx): **nao avanca NSU** e agenda nova tentativa.
-- Recuperacao de NSUs passados: nao altera `ultimo_nsu_consultado`; atualiza apenas contadores, logs e `ultimo_nsu_com_documento` quando encontra documento fiscal ausente.
+- Recuperacao de NSUs passados: nao altera `ultimo_nsu_consultado`; atualiza apenas contadores, logs, estado duravel por NSU e `ultimo_nsu_com_documento` quando encontra documento fiscal ausente. Respostas de evento continuam no mesmo fluxo de persistencia e deduplicacao.
 
 ## Modos de inicio de sync
 

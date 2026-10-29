@@ -12839,7 +12839,7 @@ function renderRecoverPastNsusModal() {
                 </select>
               </label>
               <p class="card-subtitle" style="grid-column: span 2; margin:0;">
-                A rotina varre NSUs ja consultados, pula notas que ja existem e consulta o ADN apenas para lacunas. A execucao pode demorar.
+                A rotina consulta somente NSUs sem resultado confirmado. O progresso fica salvo por CNPJ e ambiente; NSUs com falha ou interrompidos podem ser retomados.
               </p>
             </div>
           </div>
@@ -14178,6 +14178,9 @@ function renderPastNsuRecoveryReportModal() {
   const jaExistentes = Number(summary?.nsusIgnoradosComDocumento || 0) + Number(summary?.documentosIgnoradosExistentes || 0);
   const semDocumento = Number(summary?.semDocumento || 0);
   const falhas = Number(summary?.falhas || 0);
+  const foundNsuCount = rows.length || nsusAvaliados;
+  const resolvedNsuCount = rows.filter((row) => ['ja_baixado', 'baixado', 'sem_documento'].includes(String(row?.status || ''))).length;
+  const pendingNsuCount = rows.filter((row) => ['na_fila', 'consultando', 'erro'].includes(String(row?.status || ''))).length;
 
   return `
     <div class="overlay" data-action="overlay-close">
@@ -14194,7 +14197,9 @@ function renderPastNsuRecoveryReportModal() {
           }
           <div class="form-grid four" style="margin-bottom:18px;">
             ${detailItem('Controles processados', `${processedCount}${totalCount ? ` / ${totalCount}` : ''}`)}
-            ${detailItem('NSUs avaliados', String(nsusAvaliados))}
+            ${detailItem('NSUs encontrados', String(foundNsuCount))}
+            ${detailItem('NSUs resolvidos', String(resolvedNsuCount))}
+            ${detailItem('NSUs pendentes', String(pendingNsuCount))}
             ${detailItem('NSUs consultados', String(nsusConsultados))}
             ${
               executionMode === 'gap-audit'
@@ -18812,7 +18817,7 @@ async function runPastNsuRecovery(clientId = null) {
         rowMode: 'nsu',
         clientName: selectedClient?.razaoSocial || 'Cliente selecionado',
         totalCount: 0,
-        currentMessage: 'Preparando reprocessamento dos NSUs ja consultados...',
+        currentMessage: 'Identificando somente NSUs sem resultado confirmado...',
         summary: {
           controlesEncontrados: 0,
           controlesProcessados: 0,
@@ -18832,7 +18837,7 @@ async function runPastNsuRecovery(clientId = null) {
     startExecutionMonitor(
       'Recuperacao',
       selectedClient ? 1 : state.clients.length || 1,
-      'Reprocessando NSUs ja consultados. Notas existentes serao ignoradas...'
+      'Recuperando NSUs pendentes e retomando falhas anteriores...'
     );
     state.executionMonitor.currentClientName = selectedClient?.razaoSocial || 'Todos os controles';
     state.executionMonitor.updatedAt = new Date().toISOString();

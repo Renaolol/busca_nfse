@@ -34,6 +34,11 @@ describe('SyncService', () => {
       upsert: jest.fn(),
       updateMany: jest.fn()
     },
+    nfseNsuRecuperacao: {
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      upsert: jest.fn()
+    },
     nfseSyncLog: {
       create: jest.fn(),
       findMany: jest.fn()
@@ -48,7 +53,8 @@ describe('SyncService', () => {
     },
     nfseDocumentoVinculo: {
       findUnique: jest.fn(),
-      findFirst: jest.fn()
+      findFirst: jest.fn(),
+      findMany: jest.fn()
     },
     nfseEvento: {
       upsert: jest.fn(),
@@ -63,6 +69,7 @@ describe('SyncService', () => {
   const storage = {
     getObject: jest.fn(),
     putObject: jest.fn(),
+    deleteObject: jest.fn(),
     resolveKeyPath: jest.fn().mockReturnValue(schedulerConfigPath)
   };
 
@@ -150,6 +157,10 @@ describe('SyncService', () => {
     prisma.nfseSyncControle.upsert.mockResolvedValue({});
     prisma.nfseSyncControle.updateMany.mockResolvedValue({ count: 1 });
     prisma.nfseSyncLog.create.mockResolvedValue({});
+    prisma.nfseSyncLog.findMany.mockResolvedValue([]);
+    prisma.nfseNsuRecuperacao.findMany.mockResolvedValue([]);
+    prisma.nfseNsuRecuperacao.findUnique.mockResolvedValue(null);
+    prisma.nfseNsuRecuperacao.upsert.mockResolvedValue({});
     prisma.nfseDocumento.upsert.mockResolvedValue({});
     prisma.nfseDocumento.update.mockResolvedValue({});
     prisma.nfseDocumento.delete.mockResolvedValue({});
@@ -158,11 +169,13 @@ describe('SyncService', () => {
     prisma.nfseDocumento.findMany.mockResolvedValue([]);
     prisma.nfseDocumentoVinculo.findUnique.mockResolvedValue(null);
     prisma.nfseDocumentoVinculo.findFirst.mockResolvedValue(null);
+    prisma.nfseDocumentoVinculo.findMany.mockResolvedValue([]);
     prisma.nfseEvento.upsert.mockResolvedValue({});
     prisma.nfseEvento.updateMany.mockResolvedValue({ count: 0 });
     prisma.nfeDocumento.findMany.mockResolvedValue([]);
     storage.getObject.mockRejectedValue(new Error('ENOENT: no such file or directory'));
     storage.putObject.mockResolvedValue(undefined);
+    storage.deleteObject.mockResolvedValue(undefined);
     nfseService.sincronizarEventos.mockResolvedValue({
       documentosAnalisados: 0,
       documentosComEventos: 0,
@@ -1002,6 +1015,10 @@ describe('SyncService', () => {
         updatedAt: new Date('2026-06-01T00:00:00.000Z')
       }
     ]);
+    prisma.nfseSyncLog.findMany.mockResolvedValue([
+      { nsuConsultado: 1n, status: 'sucesso' },
+      { nsuConsultado: 3n, status: 'sucesso' }
+    ]);
     prisma.nfseDocumento.findFirst.mockImplementation(({ where }) => {
       if (where.nsu === 1n || where.nsu === 3n) {
         return Promise.resolve({
@@ -1042,9 +1059,9 @@ describe('SyncService', () => {
       expect.objectContaining({
         controlesEncontrados: 1,
         controlesProcessados: 1,
-        nsusAvaliados: 3,
+        nsusAvaliados: 1,
         nsusConsultados: 1,
-        nsusIgnoradosComDocumento: 2,
+        nsusIgnoradosComDocumento: 0,
         documentosSalvos: 1
       })
     );
@@ -1062,6 +1079,303 @@ describe('SyncService', () => {
     expect(prisma.nfseSyncControle.update.mock.calls.at(-1)?.[0].data.ultimoNsuConsultado).toBeUndefined();
   });
 
+  it('nao consulta ADN quando todos os NSUs ja tem resultado duravel', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 3n
+      }
+    ]);
+    prisma.nfseNsuRecuperacao.findMany.mockResolvedValue([
+      { nsu: 1n, status: 'recovered', payloadPath: null },
+      { nsu: 2n, status: 'no_document', payloadPath: null },
+      { nsu: 3n, status: 'recovered', payloadPath: null }
+    ]);
+
+    const result = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+
+    expect(adnClient.getDFeByNsu).not.toHaveBeenCalled();
+    expect(result).toEqual(
+      expect.objectContaining({
+        controlesProcessados: 1,
+        nsusAvaliados: 0,
+        nsusConsultados: 0,
+        falhas: 0
+      })
+    );
+  });
+
+  it('consulta somente o NSU sem resultado entre NSUs ja concluidos', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 3n
+      }
+    ]);
+    prisma.nfseNsuRecuperacao.findMany.mockResolvedValue([
+      { nsu: 1n, status: 'recovered', payloadPath: null },
+      { nsu: 3n, status: 'no_document', payloadPath: null }
+    ]);
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 2n,
+      hasDocument: false,
+      statusCode: 404,
+      message: 'Sem documento para o NSU informado',
+      rawResponse: {}
+    });
+
+    const result = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledWith(
+      expect.objectContaining({ cnpjConsulta: '12345678000199', nsu: 2n })
+    );
+    expect(result).toEqual(expect.objectContaining({ nsusAvaliados: 1, nsusConsultados: 1, semDocumento: 1 }));
+  });
+
+  it('retoma apenas o NSU com falha e nao avanca o cursor incremental atraves dele', async () => {
+    const previousRetryCount = process.env.SYNC_PAST_NSU_RETRY_COUNT;
+    const previousRetryDelay = process.env.SYNC_PAST_NSU_RETRY_DELAY_MS;
+    process.env.SYNC_PAST_NSU_RETRY_COUNT = '0';
+    process.env.SYNC_PAST_NSU_RETRY_DELAY_MS = '1';
+    service = buildService();
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 3n
+      }
+    ]);
+    const stateRows = [
+      { nsu: 1n, status: 'recovered', payloadPath: null },
+      { nsu: 2n, status: 'failed', payloadPath: null },
+      { nsu: 3n, status: 'no_document', payloadPath: null }
+    ];
+    prisma.nfseNsuRecuperacao.findMany.mockResolvedValue(stateRows);
+    (adnClient.getDFeByNsu as jest.Mock)
+      .mockResolvedValueOnce({ nsu: 2n, hasDocument: false, statusCode: 503, message: 'Servico indisponivel', rawResponse: {} })
+      .mockResolvedValueOnce({ nsu: 2n, hasDocument: false, statusCode: 404, message: 'Sem documento', rawResponse: {} });
+
+    try {
+      const first = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+      const second = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+
+      expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(2);
+      expect((adnClient.getDFeByNsu as jest.Mock).mock.calls.map(([params]) => params.nsu)).toEqual([2n, 2n]);
+      expect(prisma.nfseNsuRecuperacao.upsert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { controleId_nsu: { controleId: 'ctrl-1', nsu: 2n } },
+          create: expect.objectContaining({ status: 'failed' })
+        })
+      );
+      expect(first).toEqual(expect.objectContaining({ falhas: 1, nsusConsultados: 1 }));
+      expect(second).toEqual(expect.objectContaining({ semDocumento: 1 }));
+      const finalControlUpdate = prisma.nfseSyncControle.update.mock.calls.at(-1)?.[0].data;
+      expect(finalControlUpdate?.ultimoNsuConsultado).toBeUndefined();
+    } finally {
+      restoreEnv('SYNC_PAST_NSU_RETRY_COUNT', previousRetryCount);
+      restoreEnv('SYNC_PAST_NSU_RETRY_DELAY_MS', previousRetryDelay);
+      service = buildService();
+    }
+  });
+
+  it('usa estado persistido para nao baixar novamente uma recuperacao concluida', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 1n
+      }
+    ]);
+    const states = new Map<string, Record<string, unknown>>();
+    prisma.nfseNsuRecuperacao.findMany.mockImplementation(async () => [...states.values()]);
+    prisma.nfseNsuRecuperacao.findUnique.mockImplementation(async ({ where }) => {
+      return states.get(`${where.controleId_nsu.controleId}:${where.controleId_nsu.nsu.toString()}`) ?? null;
+    });
+    prisma.nfseNsuRecuperacao.upsert.mockImplementation(async ({ where, create, update }) => {
+      const key = `${where.controleId_nsu.controleId}:${where.controleId_nsu.nsu.toString()}`;
+      const next = { ...(states.get(key) ?? create), ...update };
+      states.set(key, next);
+      return next;
+    });
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 1n,
+      hasDocument: true,
+      xml: '<NFSe><chaveAcesso>42110092206960810000176000000000000126062205552001</chaveAcesso><numeroNFSe>1</numeroNFSe></NFSe>',
+      statusCode: 200,
+      rawResponse: {}
+    });
+    parser.parse.mockReturnValue({
+      chaveAcesso: '42110092206960810000176000000000000126062205552001',
+      numeroNfse: '1',
+      dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+      status: '100',
+      cnpjPrestador: '12345678000199'
+    });
+
+    await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+    await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+
+    expect(states.get('ctrl-1:1')).toEqual(expect.objectContaining({ status: 'recovered', payloadPath: null }));
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
+    expect(prisma.nfseDocumento.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('retoma processamento local do XML armazenado sem baixar o NSU novamente', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 1n
+      }
+    ]);
+    const states = new Map<string, Record<string, unknown>>();
+    const payloads = new Map<string, Buffer>();
+    prisma.nfseNsuRecuperacao.findMany.mockImplementation(async () => [...states.values()]);
+    prisma.nfseNsuRecuperacao.findUnique.mockImplementation(async ({ where }) => {
+      return states.get(`${where.controleId_nsu.controleId}:${where.controleId_nsu.nsu.toString()}`) ?? null;
+    });
+    prisma.nfseNsuRecuperacao.upsert.mockImplementation(async ({ where, create, update }) => {
+      const key = `${where.controleId_nsu.controleId}:${where.controleId_nsu.nsu.toString()}`;
+      const next = { ...(states.get(key) ?? create), ...update };
+      states.set(key, next);
+      return next;
+    });
+    storage.putObject.mockImplementation(async (path: string, content: Buffer | string) => {
+      payloads.set(path, Buffer.isBuffer(content) ? content : Buffer.from(content));
+      return path;
+    });
+    storage.getObject.mockImplementation(async (path: string) => {
+      const payload = payloads.get(path);
+      if (!payload) throw new Error('ENOENT');
+      return payload;
+    });
+    storage.deleteObject.mockImplementation(async (path: string) => {
+      payloads.delete(path);
+    });
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 1n,
+      hasDocument: true,
+      xml: '<NFSe><conteudoFiscal/></NFSe>',
+      statusCode: 200,
+      rawResponse: {}
+    });
+    parser.parse
+      .mockImplementationOnce(() => {
+        throw new Error('Falha de parse local');
+      })
+      .mockReturnValue({
+        chaveAcesso: '42110092206960810000176000000000000126062205552001',
+        numeroNfse: '1',
+        dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+        status: '100',
+        cnpjPrestador: '12345678000199'
+      });
+
+    const first = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+    const second = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+
+    expect(first).toEqual(expect.objectContaining({ falhas: 1, nsusConsultados: 1 }));
+    expect(second).toEqual(expect.objectContaining({ documentosSalvos: 1, falhas: 0, nsusConsultados: 0 }));
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
+    expect(storage.getObject).toHaveBeenCalledWith('nfse/adn-recovery/ctrl-1/1.json');
+    expect(storage.deleteObject).toHaveBeenCalledWith('nfse/adn-recovery/ctrl-1/1.json');
+  });
+
+  it('mantem falha de autenticacao pendente sem repetir a chamada', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 1n
+      }
+    ]);
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 1n,
+      hasDocument: false,
+      statusCode: 401,
+      message: 'Unauthorized',
+      rawResponse: {}
+    });
+
+    const result = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
+    expect(result).toEqual(expect.objectContaining({ falhas: 1, nsusConsultados: 1 }));
+    expect(prisma.nfseNsuRecuperacao.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ status: 'failed', ultimaMensagem: 'Falha permanente da API ADN (HTTP 401).' })
+      })
+    );
+  });
+
+  it('impede duas recuperacoes concorrentes no mesmo controle', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 1n
+      }
+    ]);
+    let leaseActive = false;
+    prisma.nfseSyncControle.updateMany.mockImplementation(async ({ where, data }) => {
+      if (typeof data.recuperacaoNsuLeaseId === 'string') {
+        if (leaseActive) return { count: 0 };
+        leaseActive = true;
+        return { count: 1 };
+      }
+      if (
+        where.recuperacaoNsuLeaseId &&
+        Object.prototype.hasOwnProperty.call(data, 'recuperacaoNsuLeaseId') &&
+        data.recuperacaoNsuLeaseId === null
+      ) {
+        leaseActive = false;
+      }
+      return { count: leaseActive ? 1 : 0 };
+    });
+    let completeRequest!: (result: { nsu: bigint; hasDocument: boolean; statusCode: number; message: string; rawResponse: object }) => void;
+    const pendingRequest = new Promise<{ nsu: bigint; hasDocument: boolean; statusCode: number; message: string; rawResponse: object }>((resolve) => {
+      completeRequest = resolve;
+    });
+    (adnClient.getDFeByNsu as jest.Mock).mockReturnValue(pendingRequest);
+
+    const firstRun = service.reprocessPastNsus({ clienteId: 'cliente-1' });
+    for (let attempt = 0; attempt < 50 && !(adnClient.getDFeByNsu as jest.Mock).mock.calls.length; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    const secondRun = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+    completeRequest({ nsu: 1n, hasDocument: false, statusCode: 404, message: 'Sem documento', rawResponse: {} });
+    const first = await firstRun;
+
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
+    expect(secondRun).toEqual(expect.objectContaining({ falhas: 1, nsusConsultados: 0 }));
+    expect(first).toEqual(expect.objectContaining({ semDocumento: 1 }));
+    expect(leaseActive).toBe(false);
+  });
+
   it('nao conta como salvo um XML ja existente por chave durante o reprocessamento de NSUs', async () => {
     prisma.nfseSyncControle.findMany.mockResolvedValue([
       {
@@ -1077,6 +1391,7 @@ describe('SyncService', () => {
         updatedAt: new Date('2026-06-01T00:00:00.000Z')
       }
     ]);
+    prisma.nfseSyncLog.findMany.mockResolvedValue([{ nsuConsultado: 1n, status: 'sucesso' }]);
     prisma.nfseDocumento.findFirst.mockImplementation(({ where }) => {
       if (where?.nsu === 1n) {
         return Promise.resolve({
@@ -1137,15 +1452,17 @@ describe('SyncService', () => {
 
     const result = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
 
-    expect(storage.putObject).not.toHaveBeenCalled();
+    expect(storage.putObject).toHaveBeenCalledTimes(1);
+    expect(storage.putObject.mock.calls[0]?.[0]).toBe('nfse/adn-recovery/ctrl-1/2.json');
+    expect(storage.deleteObject).toHaveBeenCalledWith('nfse/adn-recovery/ctrl-1/2.json');
     expect(prisma.nfseDocumento.upsert).not.toHaveBeenCalled();
     expect(prisma.nfseDocumento.update).not.toHaveBeenCalled();
     expect(result).toEqual(
       expect.objectContaining({
-        nsusAvaliados: 2,
+        nsusAvaliados: 1,
         nsusConsultados: 1,
         documentosSalvos: 0,
-        nsusIgnoradosComDocumento: 1,
+        nsusIgnoradosComDocumento: 0,
         documentosIgnoradosExistentes: 2,
         semDocumento: 0
       })
@@ -1155,7 +1472,7 @@ describe('SyncService', () => {
         where: { id: 'ctrl-1' },
         data: expect.objectContaining({
           ultimaMensagem:
-            'Recuperacao de NSUs passados: 0 documento(s) salvo(s), 3 ja existente(s), 0 sem documento.'
+            'Recuperacao de NSUs passados: 0 documento(s) salvo(s), 2 ja existente(s), 0 sem documento.'
         })
       })
     );
@@ -1176,7 +1493,37 @@ describe('SyncService', () => {
         updatedAt: new Date('2026-06-01T00:00:00.000Z')
       }
     ]);
+    prisma.nfseNsuRecuperacao.findMany.mockResolvedValue(
+      Array.from({ length: 53 }, (_, index) => {
+        const nsu = BigInt(index < 51 ? index + 1 : index + 2);
+        return { nsu, status: 'recovered', payloadPath: null };
+      })
+    );
     prisma.nfseDocumento.findFirst.mockImplementation(({ where }) => {
+      if (where?.chaveAcesso === '4211009221065205400019500000000003526010859256454') {
+        return Promise.resolve({
+          ambiente: Ambiente.producao,
+          status: 'autorizada',
+          dataCancelamento: null,
+          nsu: 53n,
+          xmlPath: 'nfse/producao/12345678000199/2026/06/xml/53.xml',
+          numeroNfse: '53',
+          dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+          hashXml: 'hash'
+        });
+      }
+      if (where?.chaveAcesso === '4211009221065205400019500000000004526010859256455') {
+        return Promise.resolve({
+          ambiente: Ambiente.producao,
+          status: 'autorizada',
+          dataCancelamento: null,
+          nsu: 54n,
+          xmlPath: 'nfse/producao/12345678000199/2026/06/xml/54.xml',
+          numeroNfse: '54',
+          dataEmissao: new Date('2026-06-03T12:00:00.000Z'),
+          hashXml: 'hash'
+        });
+      }
       if (typeof where?.nsu === 'bigint' && where.nsu !== 52n) {
         return Promise.resolve({
           xmlPath: `nfse/producao/12345678000199/2026/06/xml/${where.nsu.toString()}.xml`,
@@ -1210,7 +1557,7 @@ describe('SyncService', () => {
     const execution = await service.startPastNsuRecoveryExecution({ clienteId: 'cliente-1' });
 
     let latestExecution = execution;
-    for (let attempt = 0; attempt < 20 && latestExecution.status === 'running'; attempt += 1) {
+    for (let attempt = 0; attempt < 100 && latestExecution.status === 'running'; attempt += 1) {
       await new Promise((resolve) => setImmediate(resolve));
       latestExecution = service.getPastNsuRecoveryExecution(execution.executionId);
     }
@@ -1219,9 +1566,9 @@ describe('SyncService', () => {
     expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
     expect(latestExecution.summary).toEqual(
       expect.objectContaining({
-        nsusAvaliados: 54,
+        nsusAvaliados: 1,
         nsusConsultados: 1,
-        nsusIgnoradosComDocumento: 53,
+        nsusIgnoradosComDocumento: 0,
         documentosSalvos: 0,
         documentosIgnoradosExistentes: 2,
         semDocumento: 1,
@@ -1316,9 +1663,12 @@ describe('SyncService', () => {
         estabelecimentoId: 'estab-1',
         cnpjConsulta: '12345678000199',
         ambiente: Ambiente.producao,
-        ultimoNsuConsultado: 8n
+        ultimoNsuConsultado: 9n
       }
     ]);
+    prisma.nfseNsuRecuperacao.findMany.mockResolvedValue(
+      Array.from({ length: 8 }, (_, index) => ({ nsu: BigInt(index + 1), status: 'recovered', payloadPath: null }))
+    );
 
     (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
       nsu: 9n,
@@ -1362,6 +1712,11 @@ describe('SyncService', () => {
         documentKind: 'evento',
         chaveAcesso: '42110092206960810000176000000000033326062205552016',
         mensagem: 'Evento recuperado com sucesso para este NSU.'
+      })
+    );
+    expect(prisma.nfseNsuRecuperacao.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        update: expect.objectContaining({ status: 'recovered', tipoDocumento: 'evento' })
       })
     );
   });
@@ -1506,7 +1861,7 @@ describe('SyncService', () => {
           data: expect.objectContaining({
             status: 'erro_api',
             nsuConsultado: 1n,
-            mensagem: 'Timeout ao consultar API ADN'
+            mensagem: 'Falha temporaria ao consultar ADN.'
           })
         })
       );
