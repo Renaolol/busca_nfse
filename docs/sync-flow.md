@@ -8,13 +8,14 @@
 - Deduplicacao por chave de acesso.
 - Ciclo automatico em background para controles `ativo`.
 - Backoff para erros temporarios de API sem avancar NSU.
+- No reprocessamento de NSUs passados, novas tentativas usam intervalo exponencial com jitter e teto configuravel por `SYNC_PAST_NSU_RETRY_MAX_DELAY_MS` (padrao: 30s); o total de tentativas continua configuravel por `SYNC_PAST_NSU_RETRY_COUNT`.
 - Suporte a modo diario (`somente_novas`) com agendamento de 24h apos detectar ausencia de novos documentos.
 
 ## Operacao no painel
 
 - O menu `Busca API` dispara ciclos continuos de `POST /sync/rodar-agora` ate detectar fim da fila (status `sem_documento`).
 - O botao `Recuperar NSUs passados` permite selecionar um cliente especifico ou todos os clientes. Ele usa o cursor existente como limite e consulta somente NSUs sem resultado terminal registrado para aquele controle (`cliente/cnpj/ambiente`), incluindo falhas anteriores. Resultados conclusivos ficam em `nfse_nsu_recuperacoes`; XMLs baixados aguardando processamento ficam no storage para retomada local. O cursor incremental nao e alterado.
-- Cada controle tem uma reserva persistida com expiracao para impedir recuperacoes concorrentes. Se o processo ou servidor parar, outra execucao retoma falhas e processamentos incompletos, sem consultar novamente NSUs ja concluidos. Consultas ADN continuam seriais e passam pela fila global de requisicoes.
+- Cada controle tem uma reserva persistida com expiracao para impedir recuperacoes concorrentes. Se o processo ou servidor parar, outra execucao retoma falhas e processamentos incompletos, sem consultar novamente NSUs ja concluidos. A recuperacao noturna tambem verifica o estado duravel de cada NSU ao retomar um lote interrompido. Consultas ADN sao ritmadas pelo intervalo configurado em cada processo.
 - A integracao real usa `GET /contribuintes/DFe/{NSU}` (configuravel pelo prefixo `NFSE_ADN_PATH_PREFIX`, padrao `contribuintes`) com `cnpjConsulta` e `lote=true`, por mTLS com certificado do contexto consultado. O Manual de Contribuintes ADN v1.0 documenta `GET /DFe/{NSU}` para DF-e por NSU e `GET /NFSe/{ChaveAcesso}/Eventos` apenas para eventos vinculados a chave: [manual oficial do ADN](https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/manual-contribuintes-apis-adn-sistema-nacional-nfse.pdf).
 - O endpoint ADN por chave documentado retorna eventos, nao o XML principal da NFS-e. A recuperacao de NFS-e por chave existente no projeto usa o adapter separado do Emissor Publico; quando esse servico/ambiente nao disponibilizar a consulta, a recuperacao deve ser feita por NSU. A recuperacao por chave nao inicia uma varredura de NSUs silenciosa.
 - Os botoes `Pausar` e `Retomar` atuam no mesmo fluxo continuo e atualizam o estado dos controles do cliente.
@@ -31,7 +32,7 @@
 - A busca manual em lote `POST /sync/eventos/sincronizar-empresas` permite consultar NF-e e CT-e de todas as empresas ou de empresas selecionadas. Ela percorre somente documentos com ate 90 dias e processa em lotes de 200 documentos para evitar sobrecarga do servidor.
 - Para acompanhamento visual, `POST /sync/eventos/sincronizar-empresas/execucao` inicia uma execucao em segundo plano; `GET /sync/eventos/sincronizar-empresas/execucao/:executionId` retorna o total elegivel e a quantidade ja consultada. A interface consulta esse status periodicamente ate a conclusao e entao exibe o detalhamento final.
 - O endpoint `PUT /sync/scheduler-settings` permite ativar/desativar a rotina noturna global e selecionar os horarios ativos entre `18:00`, `20:00`, `22:00`, `00:00`, `02:00`, `04:00` e `06:00`.
-- A consulta de logs (`GET /sync/logs`) exige `clienteId` (UUID valido) para retornar apenas o escopo do cliente informado.
+- A consulta de logs (`GET /sync/logs`) exige `clienteId` (UUID valido) para retornar apenas o escopo do cliente informado. As tentativas do reprocessamento registram o status HTTP e o tempo acumulado das chamadas ADN em `httpStatus` e `tempoRespostaMs`.
 
 ## Jobs implementados
 

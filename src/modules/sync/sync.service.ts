@@ -278,6 +278,10 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     6 * 60 * 60 * 1000
   );
   private readonly pastNsuRecoveryExecutions = new Map<string, PastNsuRecoveryExecutionState>();
+  private readonly pastNsuRecoveryExecutionRowsById = new WeakMap<
+    PastNsuRecoveryExecutionState,
+    Map<string, PastNsuRecoveryExecutionRow>
+  >();
   private readonly sincronizacaoEventosEmpresasExecutions = new Map<string, SincronizacaoEventosEmpresasExecutionState>();
   private readonly apiRetryDelayMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_DELAY_MS', 120000);
   private readonly dailySyncIntervalMs = this.parsePositiveNumberEnv('SYNC_DAILY_INTERVAL_MS', 24 * 60 * 60 * 1000);
@@ -289,6 +293,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   private readonly adnRequestIntervalMs = this.parsePositiveNumberEnv('SYNC_ADN_REQUEST_INTERVAL_MS', 250);
   private readonly pastNsuRetryCount = this.parseBoundedIntegerEnv('SYNC_PAST_NSU_RETRY_COUNT', 2, 0, 10);
   private readonly pastNsuRetryDelayMs = this.parsePositiveNumberEnv('SYNC_PAST_NSU_RETRY_DELAY_MS', 1000);
+  private readonly pastNsuRetryMaxDelayMs = this.parsePositiveNumberEnv('SYNC_PAST_NSU_RETRY_MAX_DELAY_MS', 30000);
   private readonly apiRetryJitterMs = this.parsePositiveNumberEnv('SYNC_API_RETRY_JITTER_MS', 60000);
   private readonly rateLimitGlobalCooldownMs = this.parsePositiveNumberEnv('SYNC_ADN_RATE_LIMIT_COOLDOWN_MS', 300000);
   private readonly controlClaimTtlMs = this.parsePositiveNumberEnv('SYNC_CONTROL_CLAIM_TTL_MS', 10 * 60 * 1000);
@@ -906,6 +911,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         continue;
       }
 
+      let recoveryLeaseExpiresAtMs = Date.now() + this.controlClaimTtlMs;
       try {
       const certificate = await this.findCertificateForEstablishment(control.clienteId, control.estabelecimentoId);
 
@@ -940,10 +946,14 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
       let maxRecoveredNsu: bigint | null = null;
       let shouldStopAll = false;
+      let shouldStopControl = false;
 
       for (const range of plannedRanges) {
         for (let nsu = range.nsuInicial; nsu <= range.nsuFinal; nsu += 1n) {
-          await this.renewPastNsuRecoveryControl(control.id, leaseId);
+          if (Date.now() >= recoveryLeaseExpiresAtMs - Math.floor(this.controlClaimTtlMs / 3)) {
+            await this.renewPastNsuRecoveryControl(control.id, leaseId);
+            recoveryLeaseExpiresAtMs = Date.now() + this.controlClaimTtlMs;
+          }
           detail.nsusAvaliados += 1;
           result.nsusAvaliados += 1;
           if (execution) {
@@ -963,9 +973,37 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             where: { controleId_nsu: { controleId: control.id, nsu } }
           });
 
+          if (
+            !priorState?.payloadPath &&
+            (priorState?.status === 'recovered' || priorState?.status === 'no_document')
+          ) {
+            if (priorState.status === 'recovered') {
+              detail.nsusIgnoradosComDocumento += 1;
+              result.nsusIgnoradosComDocumento += 1;
+              maxRecoveredNsu = maxRecoveredNsu && maxRecoveredNsu > nsu ? maxRecoveredNsu : nsu;
+            } else {
+              detail.semDocumento += 1;
+              result.semDocumento += 1;
+            }
+
+            if (execution) {
+              this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
+                status: priorState.status === 'recovered' ? 'ja_baixado' : 'sem_documento',
+                documentKind:
+                  priorState.tipoDocumento === 'evento' || priorState.tipoDocumento === 'nfse'
+                    ? priorState.tipoDocumento
+                    : null,
+                chaveAcesso: priorState.chaveAcesso,
+                mensagem: priorState.ultimaMensagem ?? 'NSU ja possui resultado terminal persistido.'
+              });
+            }
+            continue;
+          }
+
           let payloadPath: string | null = priorState?.payloadPath ?? null;
           let documents = payloadPath ? await this.loadPastNsuRecoveryPayload(payloadPath) : null;
           let dfeResult: AdnDFeResult;
+          let responseTimeMs: number | null = null;
 
           if (documents) {
             dfeResult = {
@@ -992,6 +1030,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               certificateId: certificate.id
             });
             dfeResult = fetched.result;
+            responseTimeMs = fetched.responseTimeMs;
             detail.nsusConsultados += fetched.attempts;
             result.nsusConsultados += fetched.attempts;
             if (fetched.attempts > 0) {
@@ -1023,7 +1062,17 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
                 });
                 this.syncPastNsuRecoveryExecution(execution, result, message);
               }
-              await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nsu, 'erro_certificado', message);
+              await this.logSync(
+                control.clienteId,
+                control.id,
+                certificate.id,
+                control.ambiente,
+                nsu,
+                'erro_certificado',
+                message,
+                { httpStatus: dfeResult.statusCode, tempoRespostaMs: responseTimeMs }
+              );
+              shouldStopControl = true;
               break;
             }
 
@@ -1064,7 +1113,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
                 control.ambiente,
                 nsu,
                 isRateLimitError ? 'rate_limit' : 'erro_api',
-                message
+                message,
+                { httpStatus: dfeResult.statusCode, tempoRespostaMs: responseTimeMs }
               );
 
               if (isRateLimitError) {
@@ -1094,7 +1144,20 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
                 });
                 this.syncPastNsuRecoveryExecution(execution, result, message);
               }
-              await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nsu, 'erro_api', message);
+              await this.logSync(
+                control.clienteId,
+                control.id,
+                certificate.id,
+                control.ambiente,
+                nsu,
+                'erro_api',
+                message,
+                { httpStatus: dfeResult.statusCode, tempoRespostaMs: responseTimeMs }
+              );
+              if (dfeResult.statusCode === 401 || dfeResult.statusCode === 403) {
+                shouldStopControl = true;
+                break;
+              }
               continue;
             }
 
@@ -1108,6 +1171,16 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
                 chaveAcesso: dfeResult.chaveAcesso ?? null,
                 ultimaMensagem: 'Consulta concluida sem DF-e para o NSU.'
               });
+              await this.logSync(
+                control.clienteId,
+                control.id,
+                certificate.id,
+                control.ambiente,
+                nsu,
+                'sem_documento',
+                message,
+                { httpStatus: dfeResult.statusCode, tempoRespostaMs: responseTimeMs }
+              );
               detail.semDocumento += 1;
               result.semDocumento += 1;
               if (execution) {
@@ -1248,7 +1321,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               'sucesso',
               persisted.kind === 'evento'
                 ? 'Evento recuperado no reprocessamento de NSUs passados'
-                : 'Documento recuperado no reprocessamento de NSUs passados'
+                : 'Documento recuperado no reprocessamento de NSUs passados',
+              { httpStatus: dfeResult.statusCode, tempoRespostaMs: responseTimeMs }
             );
           }
 
@@ -1306,11 +1380,20 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               });
               this.syncPastNsuRecoveryExecution(execution, result, message);
             }
-            await this.logSync(control.clienteId, control.id, certificate.id, control.ambiente, nsu, 'erro_processamento', message);
+            await this.logSync(
+              control.clienteId,
+              control.id,
+              certificate.id,
+              control.ambiente,
+              nsu,
+              'erro_processamento',
+              message,
+              { httpStatus: dfeResult.statusCode, tempoRespostaMs: responseTimeMs }
+            );
           }
         }
 
-        if (shouldStopAll) {
+        if (shouldStopAll || shouldStopControl) {
           break;
         }
       }
@@ -3105,7 +3188,13 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     patch: Partial<Omit<PastNsuRecoveryExecutionRow, 'id' | 'controleId' | 'cnpjConsulta' | 'ambiente' | 'nsu'>>
   ): void {
     const rowId = `${controleId}:${nsu.toString()}`;
-    const row = execution.rows.find((candidate) => candidate.id === rowId);
+    let rowsById = this.pastNsuRecoveryExecutionRowsById.get(execution);
+    if (!rowsById) {
+      rowsById = new Map(execution.rows.map((row) => [row.id, row]));
+      this.pastNsuRecoveryExecutionRowsById.set(execution, rowsById);
+    }
+
+    const row = rowsById.get(rowId);
     if (!row) {
       return;
     }
@@ -4124,21 +4213,30 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     nsu: bigint;
     ambiente: NfseAmbiente;
     certificateId: string;
-  }): Promise<{ result: AdnDFeResult; attempts: number }> {
+  }): Promise<{ result: AdnDFeResult; attempts: number; responseTimeMs: number }> {
     const maxAttempts = this.pastNsuRetryCount + 1;
+    let responseTimeMs = 0;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       await this.waitForAdnRequestSlot();
+      const requestStartedAt = Date.now();
       const result = await this.adnClient.getDFeByNsu(params);
+      responseTimeMs += Date.now() - requestStartedAt;
 
       if (!this.shouldRetryPastNsuRequest(result) || attempt === maxAttempts) {
-        return { result, attempts: attempt };
+        return { result, attempts: attempt, responseTimeMs };
       }
 
-      this.logger.warn(
-        `Reprocessamento ADN falhou temporariamente para o NSU ${params.nsu.toString()}; tentativa ${attempt} de ${maxAttempts}. Nova tentativa em ${this.pastNsuRetryDelayMs}ms.`
+      const baseDelayMs = Math.min(
+        this.pastNsuRetryDelayMs * 2 ** (attempt - 1),
+        this.pastNsuRetryMaxDelayMs
       );
-      await this.sleep(this.pastNsuRetryDelayMs);
+      const jitterMs = Math.floor(Math.random() * Math.min(1000, baseDelayMs * 0.25));
+      const retryDelayMs = Math.min(baseDelayMs + jitterMs, this.pastNsuRetryMaxDelayMs);
+      this.logger.warn(
+        `Reprocessamento ADN falhou temporariamente para o NSU ${params.nsu.toString()}; tentativa ${attempt} de ${maxAttempts}. Nova tentativa em ${retryDelayMs}ms.`
+      );
+      await this.sleep(retryDelayMs);
     }
 
     return {
@@ -4149,7 +4247,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         message: 'Falha temporaria ao consultar ADN',
         rawResponse: null
       },
-      attempts: maxAttempts
+      attempts: maxAttempts,
+      responseTimeMs
     };
   }
 
@@ -4591,7 +4690,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     ambiente: Ambiente,
     nsu: bigint | null,
     status: string,
-    mensagem: string
+    mensagem: string,
+    metadata?: { httpStatus?: number | null; tempoRespostaMs?: number | null }
   ): Promise<void> {
     await this.prisma.nfseSyncLog.create({
       data: {
@@ -4601,7 +4701,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         ambiente,
         nsuConsultado: nsu,
         status,
-        mensagem
+        mensagem,
+        ...(metadata?.httpStatus !== undefined ? { httpStatus: metadata.httpStatus } : {}),
+        ...(metadata?.tempoRespostaMs !== undefined ? { tempoRespostaMs: metadata.tempoRespostaMs } : {})
       }
     });
   }

@@ -1329,6 +1329,38 @@ describe('SyncService', () => {
     );
   });
 
+  it('interrompe o controle ao receber erro de autenticacao e deixa os outros NSUs pendentes', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 3n
+      }
+    ]);
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 1n,
+      hasDocument: false,
+      statusCode: 401,
+      message: 'Unauthorized',
+      rawResponse: {}
+    });
+
+    const result = await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
+    expect((adnClient.getDFeByNsu as jest.Mock).mock.calls[0][0].nsu).toBe(1n);
+    expect(result).toEqual(expect.objectContaining({ nsusConsultados: 1, falhas: 1 }));
+    expect(prisma.nfseNsuRecuperacao.upsert.mock.calls.every(([call]) => call.where.controleId_nsu.nsu === 1n)).toBe(true);
+    expect(prisma.nfseSyncLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ httpStatus: 401, tempoRespostaMs: expect.any(Number) })
+      })
+    );
+  });
+
   it('impede duas recuperacoes concorrentes no mesmo controle', async () => {
     prisma.nfseSyncControle.findMany.mockResolvedValue([
       {
@@ -1639,6 +1671,31 @@ describe('SyncService', () => {
       })
     );
     expect(sleepSpy).toHaveBeenCalled();
+  });
+
+  it('usa backoff exponencial com teto nas novas tentativas de NSU passado', async () => {
+    (service as unknown as { adnRequestIntervalMs: number; pastNsuRetryMaxDelayMs: number }).adnRequestIntervalMs = 0;
+    (service as unknown as { pastNsuRetryMaxDelayMs: number }).pastNsuRetryMaxDelayMs = 1500;
+    const randomSpy = jest.spyOn(Math, 'random').mockReturnValue(0);
+    const sleepSpy = jest.spyOn(service as any, 'sleep').mockImplementation(async () => undefined);
+    (adnClient.getDFeByNsu as jest.Mock)
+      .mockResolvedValueOnce({ nsu: 1n, hasDocument: false, statusCode: 503, message: 'Servico indisponivel' })
+      .mockResolvedValueOnce({ nsu: 1n, hasDocument: false, statusCode: 503, message: 'Servico indisponivel' })
+      .mockResolvedValueOnce({ nsu: 1n, hasDocument: false, statusCode: 404, message: 'Sem documento' });
+
+    try {
+      const fetched = await (service as any).fetchPastNsuWithRetries({
+        cnpjConsulta: '12345678000199',
+        nsu: 1n,
+        ambiente: NfseAmbiente.PRODUCAO,
+        certificateId: 'cert-1'
+      });
+
+      expect(fetched.attempts).toBe(3);
+      expect(sleepSpy.mock.calls).toEqual([[1000], [1500]]);
+    } finally {
+      randomSpy.mockRestore();
+    }
   });
 
   it('marca explicitamente quando o NSU consultado corresponde a um evento', async () => {
@@ -2488,6 +2545,72 @@ describe('SyncService', () => {
     );
     expect(nfeService.sincronizarEventos).not.toHaveBeenCalled();
     expect(cteService.sincronizarEventos).not.toHaveBeenCalled();
+  });
+
+  it('nao consulta novamente NSUs noturnos concluidos quando outro NSU do lote falha', async () => {
+    const previousRetryCount = process.env.SYNC_PAST_NSU_RETRY_COUNT;
+    process.env.SYNC_PAST_NSU_RETRY_COUNT = '0';
+    service = buildService();
+    (service as unknown as { adnRequestIntervalMs: number }).adnRequestIntervalMs = 0;
+
+    const control = {
+      id: 'controle-1',
+      clienteId: 'cliente-1',
+      estabelecimentoId: 'estab-1',
+      cnpjConsulta: '12345678000199',
+      ambiente: Ambiente.producao,
+      status: 'ativo',
+      ultimoNsuConsultado: 3n,
+      ultimoNsuComDocumento: 0n,
+      totalDocumentosBaixados: 0,
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+    prisma.nfseSyncControle.findMany.mockResolvedValue([control]);
+
+    const recoveryStates = new Map<string, Record<string, unknown>>();
+    prisma.nfseNsuRecuperacao.findUnique.mockImplementation(async ({ where }) => {
+      const { controleId, nsu } = where.controleId_nsu;
+      return recoveryStates.get(`${controleId}:${nsu.toString()}`) ?? null;
+    });
+    prisma.nfseNsuRecuperacao.upsert.mockImplementation(async ({ where, create, update }) => {
+      const { controleId, nsu } = where.controleId_nsu;
+      const key = `${controleId}:${nsu.toString()}`;
+      const next = { ...(recoveryStates.get(key) ?? create), ...update };
+      recoveryStates.set(key, next);
+      return next;
+    });
+
+    const storedObjects = new Map<string, Buffer>();
+    storage.getObject.mockImplementation(async (path: string) => {
+      const value = storedObjects.get(path);
+      if (!value) throw new Error('ENOENT: no such file or directory');
+      return value;
+    });
+    storage.putObject.mockImplementation(async (path: string, content: Buffer | string) => {
+      storedObjects.set(path, Buffer.isBuffer(content) ? content : Buffer.from(content));
+      return path;
+    });
+
+    (adnClient.getDFeByNsu as jest.Mock)
+      .mockResolvedValueOnce({ nsu: 1n, hasDocument: false, statusCode: 404, message: 'Sem documento' })
+      .mockResolvedValueOnce({ nsu: 2n, hasDocument: false, statusCode: 503, message: 'Servico indisponivel' })
+      .mockResolvedValueOnce({ nsu: 3n, hasDocument: false, statusCode: 404, message: 'Sem documento' })
+      .mockResolvedValueOnce({ nsu: 2n, hasDocument: false, statusCode: 404, message: 'Sem documento' });
+
+    try {
+      await (service as unknown as { runNightlyPastNsuRecoveryCycle: () => Promise<void> }).runNightlyPastNsuRecoveryCycle();
+      await (service as unknown as { runNightlyPastNsuRecoveryCycle: () => Promise<void> }).runNightlyPastNsuRecoveryCycle();
+
+      expect((adnClient.getDFeByNsu as jest.Mock).mock.calls.map(([params]) => params.nsu)).toEqual([
+        1n, 2n, 3n, 2n
+      ]);
+      expect(JSON.parse(storedObjects.get('settings/nightly-past-nsu-recovery-state.json')!.toString('utf8')))
+        .toEqual({ controls: { 'controle-1': expect.objectContaining({ nextNsu: '4', lastStatus: 'concluido' }) } });
+    } finally {
+      restoreEnv('SYNC_PAST_NSU_RETRY_COUNT', previousRetryCount);
+      service = buildService();
+    }
   });
 
   it('separa as tarefas da grade noturna pelos horarios definidos', async () => {
