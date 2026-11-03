@@ -9,6 +9,7 @@ describe('SyncController', () => {
 
   it('permite admin e comum no reprocessamento de NSUs passados', () => {
     expect(getRoles('reprocessPastNsus')).toEqual(['admin', 'comum']);
+    expect(getRoles('previewPastNsuRecovery')).toEqual(['admin', 'comum']);
     expect(getRoles('startPastNsuRecoveryExecution')).toEqual(['admin', 'comum']);
     expect(getRoles('getPastNsuRecoveryExecution')).toEqual(['admin', 'comum']);
   });

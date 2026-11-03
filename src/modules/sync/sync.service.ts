@@ -77,6 +77,7 @@ type PastNsuRecoveryExecutionRowStatus =
   | 'ja_baixado'
   | 'baixado'
   | 'sem_documento'
+  | 'nao_necessario'
   | 'erro';
 
 type PastNsuRecoveryExecutionRowDocumentKind = 'evento' | 'nfse' | null;
@@ -144,6 +145,7 @@ type StoredNfseNumberIndexItem = {
 type PlannedPastNsuRange = {
   nsuInicial: bigint;
   nsuFinal: bigint;
+  nsusPrioritarios: bigint[];
   lacunaLabels: string[];
 };
 
@@ -157,6 +159,40 @@ type PreparedPastNsuRecoveryPlan = {
   mode: 'full' | 'gap-audit';
   controls: PreparedPastNsuRecoveryControl[];
   currentMessage: string;
+};
+
+type PastNsuRecoveryPreviewRange = {
+  nsuInicial: string;
+  nsuFinal: string;
+  quantidade: number;
+  lacunas: string[];
+};
+
+type PastNsuRecoveryPreviewControl = {
+  controleId: string;
+  cnpjConsulta: string;
+  ambiente: Ambiente;
+  nsusPlanejados: number;
+  faixas: PastNsuRecoveryPreviewRange[];
+};
+
+type PastNsuRecoveryPreview = {
+  modo: 'gap-audit';
+  lacunasInformadas: number;
+  controlesEncontrados: number;
+  nsusPlanejados: number;
+  controles: PastNsuRecoveryPreviewControl[];
+};
+
+type GapRecoveryTargetRange = {
+  serie: string | null;
+  numeroInicial: number;
+  numeroFinal: number;
+};
+
+type GapRecoveryTargetTracker = {
+  remainingNumbers: bigint;
+  resolve: (document: Pick<PersistDfeDocumentResult, 'kind' | 'numeroNfse' | 'serie'>) => boolean;
 };
 
 type PersistDfeDocumentResult = {
@@ -777,6 +813,45 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     return this.reprocessPastNsusInternal(options);
   }
 
+  async previewPastNsuRecovery(dto: StartPastNsuRecoveryExecutionDto): Promise<PastNsuRecoveryPreview> {
+    const gaps = this.normalizeGapAuditRanges(dto.lacunas);
+    if (gaps.length === 0) {
+      throw new BadRequestException('Informe ao menos uma lacuna de numeracao para estimar os NSUs.');
+    }
+
+    const options: ReprocessPastNsusDto = {
+      clienteId: dto.clienteId,
+      cnpjConsulta: dto.cnpjConsulta,
+      ambiente: dto.ambiente,
+      lacunas: dto.lacunas
+    };
+    const plan = await this.preparePastNsuRecoveryPlan(options);
+    const controles = plan.controls.map(({ control, ranges }) => {
+      const faixas = ranges.map((range) => ({
+        nsuInicial: range.nsuInicial.toString(),
+        nsuFinal: range.nsuFinal.toString(),
+        quantidade: this.countNsusInRange(range),
+        lacunas: [...range.lacunaLabels]
+      }));
+
+      return {
+        controleId: control.id,
+        cnpjConsulta: control.cnpjConsulta,
+        ambiente: control.ambiente,
+        nsusPlanejados: faixas.reduce((total, range) => this.addCappedCounts(total, range.quantidade), 0),
+        faixas
+      };
+    });
+
+    return {
+      modo: 'gap-audit',
+      lacunasInformadas: gaps.length,
+      controlesEncontrados: controles.length,
+      nsusPlanejados: controles.reduce((total, control) => this.addCappedCounts(total, control.nsusPlanejados), 0),
+      controles
+    };
+  }
+
   async startPastNsuRecoveryExecution(dto: StartPastNsuRecoveryExecutionDto): Promise<PastNsuRecoveryExecutionState> {
     if (dto.clienteId) {
       await this.ensureClient(dto.clienteId);
@@ -860,6 +935,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       const control = controlPlan.control;
       const controlGaps = controlPlan.gaps;
       const plannedRanges = controlPlan.ranges;
+      const gapTargetTracker = plan.mode === 'gap-audit' ? this.createGapRecoveryTargetTracker(controlGaps) : null;
 
       if (execution) {
         execution.currentClienteId = control.clienteId;
@@ -932,9 +1008,20 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
       let maxRecoveredNsu: bigint | null = null;
       let shouldStopAll = false;
+      let allGapTargetsResolved = false;
 
       for (const range of plannedRanges) {
-        for (let nsu = range.nsuInicial; nsu <= range.nsuFinal; nsu += 1n) {
+        for (const nsu of this.iteratePastNsuScanOrder(range)) {
+          if (gapTargetTracker?.remainingNumbers === 0n) {
+            this.markPastNsuRowsNotNeeded(
+              execution,
+              control.id,
+              'Todos os numeros esperados das lacunas ja foram encontrados; este NSU nao precisou ser consultado.'
+            );
+            allGapTargetsResolved = true;
+            break;
+          }
+
           detail.nsusAvaliados += 1;
           result.nsusAvaliados += 1;
           if (execution) {
@@ -950,22 +1037,48 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             );
           }
 
-          if (
-            await this.hasFiscalDocumentForNsu({
-              clienteId: control.clienteId,
-              ambiente: control.ambiente,
-              nsu
-            })
-          ) {
+          const existingNsuDocument = await this.findClienteNsuReference({
+            clienteId: control.clienteId,
+            ambiente: control.ambiente,
+            nsu
+          });
+          if (existingNsuDocument && this.hasDocumentoFiscalData(existingNsuDocument)) {
+            const existingDocumentResolvedGap =
+              gapTargetTracker?.resolve({
+                kind: 'nfse',
+                numeroNfse: existingNsuDocument.numeroNfse,
+                serie: existingNsuDocument.serie
+              }) ?? false;
             detail.nsusIgnoradosComDocumento += 1;
             result.nsusIgnoradosComDocumento += 1;
+            if (existingDocumentResolvedGap) {
+              detail.documentosGapResolvidos += 1;
+              result.documentosGapResolvidos += 1;
+            }
             if (execution) {
               this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
                 status: 'ja_baixado',
                 documentKind: 'nfse',
-                mensagem: 'NFS-e deste NSU ja estava armazenada.'
+                mensagem: existingDocumentResolvedGap
+                  ? 'NFS-e esperada para a lacuna ja estava armazenada.'
+                  : 'NFS-e deste NSU ja estava armazenada.'
               });
-              this.syncPastNsuRecoveryExecution(execution, result, `NSU ${nsu.toString()} ja estava baixado.`);
+              this.syncPastNsuRecoveryExecution(
+                execution,
+                result,
+                existingDocumentResolvedGap
+                  ? `NFS-e da lacuna ja estava armazenada no NSU ${nsu.toString()}.`
+                  : `NSU ${nsu.toString()} ja estava baixado.`
+              );
+            }
+            if (gapTargetTracker?.remainingNumbers === 0n) {
+              this.markPastNsuRowsNotNeeded(
+                execution,
+                control.id,
+                'Todos os numeros esperados das lacunas ja foram encontrados; este NSU nao precisou ser consultado.'
+              );
+              allGapTargetsResolved = true;
+              break;
             }
             continue;
           }
@@ -1065,16 +1178,24 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
                 nsu: document.nsu
               }))
             ) {
+              const existingReturnedDocumentResolvedGap = gapTargetTracker
+                ? this.resolveGapTargetFromXml(gapTargetTracker, document.xml)
+                : false;
               detail.documentosIgnoradosExistentes += 1;
               result.documentosIgnoradosExistentes += 1;
+              if (existingReturnedDocumentResolvedGap) {
+                detail.documentosGapResolvidos += 1;
+                result.documentosGapResolvidos += 1;
+              }
               requestedNsuResolved = requestedNsuResolved || document.nsu === nsu;
               const documentKind = this.inferDfeDocumentKind(document);
               if (execution) {
                 this.updatePastNsuRecoveryExecutionRow(execution, control.id, document.nsu ?? nsu, {
                   status: 'ja_baixado',
                   documentKind,
-                  mensagem:
-                    documentKind === 'evento'
+                  mensagem: existingReturnedDocumentResolvedGap
+                    ? 'NFS-e esperada para a lacuna ja estava armazenada.'
+                    : documentKind === 'evento'
                       ? 'Evento deste NSU ja estava armazenado.'
                       : 'Documento retornado pelo ADN ja estava armazenado.',
                   chaveAcesso: dfeResult.chaveAcesso ?? null
@@ -1082,7 +1203,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
                 this.syncPastNsuRecoveryExecution(
                   execution,
                   result,
-                  `NSU ${(document.nsu ?? nsu).toString()} retornou documento ja existente.`
+                  existingReturnedDocumentResolvedGap
+                    ? `NFS-e da lacuna ja estava armazenada no NSU ${(document.nsu ?? nsu).toString()}.`
+                    : `NSU ${(document.nsu ?? nsu).toString()} retornou documento ja existente.`
                 );
               }
               continue;
@@ -1093,9 +1216,16 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               document
             });
             const persistedNsu = persisted.nsu ?? nsu;
+            const persistedDocumentResolvedGap = gapTargetTracker
+              ? gapTargetTracker.resolve(persisted)
+              : this.matchesPersistedDocumentToGap(persisted, controlGaps);
             if (persisted.outcome === 'existing' || persisted.outcome === 'updated') {
               detail.documentosIgnoradosExistentes += 1;
               result.documentosIgnoradosExistentes += 1;
+              if (persistedDocumentResolvedGap) {
+                detail.documentosGapResolvidos += 1;
+                result.documentosGapResolvidos += 1;
+              }
               requestedNsuResolved = requestedNsuResolved || persistedNsu === nsu;
               if (execution) {
                 this.updatePastNsuRecoveryExecutionRow(execution, control.id, persistedNsu, {
@@ -1126,7 +1256,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               maxRecoveredNsu && maxRecoveredNsu > persistedNsu ? maxRecoveredNsu : persistedNsu;
             detail.documentosSalvos += 1;
             result.documentosSalvos += 1;
-            if (this.matchesPersistedDocumentToGap(persisted, controlGaps)) {
+            if (persistedDocumentResolvedGap) {
               detail.documentosGapResolvidos += 1;
               result.documentosGapResolvidos += 1;
             } else {
@@ -1179,9 +1309,19 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               );
             }
           }
+
+          if (gapTargetTracker?.remainingNumbers === 0n) {
+            this.markPastNsuRowsNotNeeded(
+              execution,
+              control.id,
+              'Todos os numeros esperados das lacunas foram encontrados; os NSUs restantes foram dispensados.'
+            );
+            allGapTargetsResolved = true;
+            break;
+          }
         }
 
-        if (shouldStopAll) {
+        if (shouldStopAll || allGapTargetsResolved) {
           break;
         }
       }
@@ -1706,7 +1846,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
           return {
             control,
             gaps: [],
-            ranges: [{ nsuInicial, nsuFinal, lacunaLabels: [] }]
+            ranges: [{ nsuInicial, nsuFinal, nsusPrioritarios: [], lacunaLabels: [] }]
           };
         }),
         currentMessage: 'Preparando recuperacao noturna e incremental de NSUs passados...'
@@ -2364,6 +2504,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     const normalizedGaps = this.normalizeGapAuditRanges(options.lacunas);
+    if (options.lacunas && options.lacunas.length !== normalizedGaps.length) {
+      throw new BadRequestException('Informe faixas de lacuna validas para iniciar a auditoria por NSU.');
+    }
     const cnpjConsulta = this.normalizeCnpj(options.cnpjConsulta);
     const where: Prisma.NfseSyncControleWhereInput = {};
 
@@ -2399,6 +2542,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
                   {
                     nsuInicial: 1n,
                     nsuFinal: control.ultimoNsuConsultado,
+                    nsusPrioritarios: [],
                     lacunaLabels: []
                   }
                 ]
@@ -2439,11 +2583,12 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         orderBy: [{ nsu: 'asc' }]
       });
 
-      const ranges = this.buildGapAuditRangesForControl(control, controlGaps, storedDocs);
-      if (ranges.length > 0) {
+      const pendingGaps = this.removeStoredNfseNumbersFromGaps(controlGaps, storedDocs);
+      const ranges = this.buildGapAuditRangesForControl(control, pendingGaps, storedDocs);
+      if (pendingGaps.length > 0) {
         preparedControls.push({
           control,
-          gaps: controlGaps,
+          gaps: pendingGaps,
           ranges
         });
       }
@@ -2470,7 +2615,12 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     for (const gap of gaps ?? []) {
       const numeroInicial = Math.trunc(Number(gap?.numeroInicial || 0));
       const numeroFinal = Math.trunc(Number(gap?.numeroFinal || 0));
-      if (numeroInicial <= 0 || numeroFinal < numeroInicial) {
+      if (
+        !Number.isSafeInteger(numeroInicial) ||
+        !Number.isSafeInteger(numeroFinal) ||
+        numeroInicial <= 0 ||
+        numeroFinal < numeroInicial
+      ) {
         continue;
       }
 
@@ -2505,6 +2655,171 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       .filter((range): range is PlannedPastNsuRange => Boolean(range));
 
     return this.mergePlannedPastNsuRanges(ranges);
+  }
+
+  private removeStoredNfseNumbersFromGaps(
+    gaps: NormalizedGapAuditRange[],
+    storedDocs: Array<{ nsu: bigint | null; numeroNfse: string | null; serie: string | null }>
+  ): NormalizedGapAuditRange[] {
+    const storedBySerie = new Map<string, number[]>();
+    for (const doc of storedDocs) {
+      if (doc.nsu == null) continue;
+      const numero = this.parseNumeroNfse(doc.numeroNfse);
+      if (!numero) continue;
+      const key = this.normalizeSerie(doc.serie) ?? '';
+      const numbers = storedBySerie.get(key) ?? [];
+      numbers.push(numero);
+      storedBySerie.set(key, numbers);
+    }
+
+    for (const numbers of storedBySerie.values()) {
+      numbers.sort((left, right) => left - right);
+    }
+
+    const pending: NormalizedGapAuditRange[] = [];
+    for (const gap of gaps) {
+      const numbers = storedBySerie.get(gap.serie ?? '') ?? [];
+      let nextNumber = gap.numeroInicial;
+      for (const number of numbers) {
+        if (number < nextNumber) continue;
+        if (number > gap.numeroFinal) break;
+        if (number > nextNumber) {
+          pending.push(this.createNormalizedGapSlice(gap, nextNumber, number - 1));
+        }
+        nextNumber = number + 1;
+      }
+      if (nextNumber <= gap.numeroFinal) {
+        pending.push(this.createNormalizedGapSlice(gap, nextNumber, gap.numeroFinal));
+      }
+    }
+
+    return pending;
+  }
+
+  private createNormalizedGapSlice(
+    gap: NormalizedGapAuditRange,
+    numeroInicial: number,
+    numeroFinal: number
+  ): NormalizedGapAuditRange {
+    return {
+      ...gap,
+      numeroInicial,
+      numeroFinal,
+      quantidade: numeroFinal - numeroInicial + 1,
+      label: this.buildGapLabel({
+        ambiente: gap.ambiente,
+        serie: gap.serie,
+        numeroInicial,
+        numeroFinal
+      })
+    };
+  }
+
+  private countNsusInRange(range: Pick<PlannedPastNsuRange, 'nsuInicial' | 'nsuFinal'>): number {
+    const count = range.nsuFinal - range.nsuInicial + 1n;
+    return Number(count > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : count);
+  }
+
+  private addCappedCounts(total: number, value: number): number {
+    return Math.min(Number.MAX_SAFE_INTEGER, total + value);
+  }
+
+  private *iteratePastNsuScanOrder(range: PlannedPastNsuRange): Generator<bigint> {
+    const prioritySet = new Set<string>();
+    for (const nsu of range.nsusPrioritarios) {
+      if (nsu < range.nsuInicial || nsu > range.nsuFinal || prioritySet.has(nsu.toString())) continue;
+      prioritySet.add(nsu.toString());
+      yield nsu;
+    }
+
+    for (let nsu = range.nsuInicial; nsu <= range.nsuFinal; nsu += 1n) {
+      if (!prioritySet.has(nsu.toString())) yield nsu;
+    }
+  }
+
+  private createGapRecoveryTargetTracker(gaps: NormalizedGapAuditRange[]): GapRecoveryTargetTracker {
+    const grouped = new Map<string, GapRecoveryTargetRange[]>();
+    for (const gap of gaps) {
+      const key = gap.serie ?? '';
+      const ranges = grouped.get(key) ?? [];
+      ranges.push({
+        serie: gap.serie,
+        numeroInicial: gap.numeroInicial,
+        numeroFinal: gap.numeroFinal
+      });
+      grouped.set(key, ranges);
+    }
+
+    const remaining: GapRecoveryTargetRange[] = [];
+    for (const ranges of grouped.values()) {
+      ranges.sort((left, right) => left.numeroInicial - right.numeroInicial);
+      for (const range of ranges) {
+        const current = remaining[remaining.length - 1];
+        if (current && current.serie === range.serie && range.numeroInicial <= current.numeroFinal + 1) {
+          current.numeroFinal = Math.max(current.numeroFinal, range.numeroFinal);
+        } else {
+          remaining.push({ ...range });
+        }
+      }
+    }
+
+    let remainingNumbers = remaining.reduce(
+      (total, range) => total + BigInt(range.numeroFinal - range.numeroInicial + 1),
+      0n
+    );
+
+    return {
+      get remainingNumbers() {
+        return remainingNumbers;
+      },
+      resolve: (document) => {
+        if (document.kind !== 'nfse') return false;
+        const numero = this.parseNumeroNfse(document.numeroNfse);
+        if (!numero) return false;
+        const serie = this.normalizeSerie(document.serie);
+        const index = remaining.findIndex(
+          (range) => range.serie === serie && numero >= range.numeroInicial && numero <= range.numeroFinal
+        );
+        if (index < 0) return false;
+
+        const [range] = remaining.splice(index, 1);
+        if (range.numeroInicial < numero) {
+          remaining.push({ ...range, numeroFinal: numero - 1 });
+        }
+        if (numero < range.numeroFinal) {
+          remaining.push({ ...range, numeroInicial: numero + 1 });
+        }
+        remainingNumbers = remainingNumbers > 0n ? remainingNumbers - 1n : 0n;
+        return true;
+      }
+    };
+  }
+
+  private resolveGapTargetFromXml(tracker: GapRecoveryTargetTracker, xml: string): boolean {
+    try {
+      const parsed = this.parser.parseAny(xml);
+      if (parsed.kind !== 'nfse') return false;
+      return tracker.resolve({
+        kind: 'nfse',
+        numeroNfse: parsed.nfse.numeroNfse,
+        serie: parsed.nfse.serie
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  private markPastNsuRowsNotNeeded(
+    execution: PastNsuRecoveryExecutionState | undefined,
+    controleId: string,
+    message: string
+  ): void {
+    if (!execution) return;
+    for (const row of execution.rows) {
+      if (row.controleId !== controleId || row.status !== 'na_fila') continue;
+      row.status = 'nao_necessario';
+      row.mensagem = message;
+    }
   }
 
   private buildStoredNfseNumberIndex(
@@ -2553,7 +2868,11 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     if (lower && upper && upper.nsu > lower.nsu) {
       const nsuDistance = this.toSafeNumber(upper.nsu - lower.nsu);
       if (nsuDistance <= 250) {
-        return this.createPlannedPastNsuRange(lower.nsu + 1n, upper.nsu - 1n, gap.label);
+        const range = this.createPlannedPastNsuRange(lower.nsu + 1n, upper.nsu - 1n, gap.label);
+        if (range) {
+          range.nsusPrioritarios = this.estimateGapPriorityNsus(gap, lower, upper, range);
+        }
+        return range;
       }
 
       const numeroDistance = upper.numero - lower.numero;
@@ -2561,11 +2880,15 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       if (numeroDistance > 0) {
         const startApprox = this.toSafeNumber(lower.nsu) + Math.floor(((gap.numeroInicial - lower.numero) / numeroDistance) * nsuDistance);
         const endApprox = this.toSafeNumber(lower.nsu) + Math.ceil(((gap.numeroFinal - lower.numero) / numeroDistance) * nsuDistance);
-        return this.createPlannedPastNsuRange(
+        const range = this.createPlannedPastNsuRange(
           BigInt(Math.max(this.toSafeNumber(lower.nsu) + 1, startApprox - buffer)),
           BigInt(Math.min(this.toSafeNumber(upper.nsu) - 1, endApprox + buffer)),
           gap.label
         );
+        if (range) {
+          range.nsusPrioritarios = this.estimateGapPriorityNsus(gap, lower, upper, range);
+        }
+        return range;
       }
     }
 
@@ -2578,22 +2901,30 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     }
 
     if (upper) {
-      return this.createPlannedPastNsuRange(
+      const range = this.createPlannedPastNsuRange(
         this.maxBigInt(1n, upper.nsu - BigInt(trailingFallbackWindow)),
         upper.nsu - 1n,
         gap.label
       );
+      if (range) {
+        range.nsusPrioritarios = this.prioritizeRangeFromEnd(range);
+      }
+      return range;
     }
 
     if (control.ultimoNsuConsultado < 1n) {
       return null;
     }
 
-    return this.createPlannedPastNsuRange(
+    const range = this.createPlannedPastNsuRange(
       this.maxBigInt(1n, control.ultimoNsuConsultado - BigInt(trailingFallbackWindow - 1)),
       control.ultimoNsuConsultado,
       gap.label
     );
+    if (range) {
+      range.nsusPrioritarios = this.prioritizeRangeFromEnd(range);
+    }
+    return range;
   }
 
   private createPlannedPastNsuRange(nsuInicial: bigint, nsuFinal: bigint, lacunaLabel: string): PlannedPastNsuRange | null {
@@ -2604,8 +2935,50 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     return {
       nsuInicial,
       nsuFinal,
+      nsusPrioritarios: [],
       lacunaLabels: lacunaLabel ? [lacunaLabel] : []
     };
+  }
+
+  private estimateGapPriorityNsus(
+    gap: NormalizedGapAuditRange,
+    lower: StoredNfseNumberIndexItem,
+    upper: StoredNfseNumberIndexItem,
+    range: PlannedPastNsuRange
+  ): bigint[] {
+    const maxPriorityTargets = 250;
+    const targetCount = Math.min(gap.quantidade, maxPriorityTargets);
+    const numberDistance = BigInt(upper.numero - lower.numero);
+    const nsuDistance = upper.nsu - lower.nsu;
+    const priorities = new Set<string>();
+
+    for (let index = 0; index < targetCount; index += 1) {
+      const offset =
+        targetCount === gap.quantidade
+          ? index
+          : targetCount === 1
+            ? Math.floor((gap.quantidade - 1) / 2)
+            : Math.round((index * (gap.quantidade - 1)) / (targetCount - 1));
+      const targetNumber = gap.numeroInicial + offset;
+      const numberOffset = BigInt(targetNumber - lower.numero);
+      const scaledNsuOffset = (numberOffset * nsuDistance + numberDistance / 2n) / numberDistance;
+      const candidate = lower.nsu + scaledNsuOffset;
+      const bounded = this.maxBigInt(range.nsuInicial, this.minBigInt(range.nsuFinal, candidate));
+      priorities.add(bounded.toString());
+    }
+
+    return [...priorities].map((nsu) => BigInt(nsu));
+  }
+
+  private prioritizeRangeFromEnd(range: PlannedPastNsuRange): bigint[] {
+    const priorities: bigint[] = [];
+    const maximum = 250n;
+    const first = range.nsuFinal;
+    const last = this.maxBigInt(range.nsuInicial, range.nsuFinal - maximum + 1n);
+    for (let nsu = first; nsu >= last; nsu -= 1n) {
+      priorities.push(nsu);
+    }
+    return priorities;
   }
 
   private mergePlannedPastNsuRanges(ranges: PlannedPastNsuRange[]): PlannedPastNsuRange[] {
@@ -2623,6 +2996,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       if (!current) {
         merged.push({
           ...range,
+          nsusPrioritarios: [...range.nsusPrioritarios],
           lacunaLabels: [...range.lacunaLabels]
         });
         continue;
@@ -2630,12 +3004,14 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
       if (range.nsuInicial <= current.nsuFinal + 1n) {
         current.nsuFinal = this.maxBigInt(current.nsuFinal, range.nsuFinal);
+        current.nsusPrioritarios = [...new Set([...current.nsusPrioritarios, ...range.nsusPrioritarios])];
         current.lacunaLabels = [...new Set([...current.lacunaLabels, ...range.lacunaLabels])];
         continue;
       }
 
       merged.push({
         ...range,
+        nsusPrioritarios: [...range.nsusPrioritarios],
         lacunaLabels: [...range.lacunaLabels]
       });
     }
@@ -2815,7 +3191,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     clienteId: string;
     ambiente: Ambiente;
     nsu: bigint;
-  }): Promise<{ xmlPath: string | null; numeroNfse: string | null; dataEmissao: Date | null } | null> {
+  }): Promise<{ xmlPath: string | null; numeroNfse: string | null; serie: string | null; dataEmissao: Date | null } | null> {
     const ownDocumento = await this.prisma.nfseDocumento.findFirst({
       where: {
         clienteId: params.clienteId,
@@ -2825,6 +3201,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       select: {
         xmlPath: true,
         numeroNfse: true,
+        serie: true,
         dataEmissao: true
       }
     });
@@ -2842,7 +3219,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       },
       select: {
         documento: {
-          select: { xmlPath: true, numeroNfse: true, dataEmissao: true }
+          select: { xmlPath: true, numeroNfse: true, serie: true, dataEmissao: true }
         }
       }
     });
