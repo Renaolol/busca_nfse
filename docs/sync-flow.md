@@ -13,7 +13,7 @@
 ## Operacao no painel
 
 - O menu `Busca API` dispara ciclos continuos de `POST /sync/rodar-agora` ate detectar fim da fila (status `sem_documento`).
-- O botao `Recuperar NSUs passados` permite selecionar um cliente especifico ou todos os clientes. Ele chama `POST /sync/reprocessar-nsus-passados` para varrer do NSU 1 ate o `ultimo_nsu_consultado`, pular documentos fiscais existentes e baixar apenas lacunas ainda ausentes no app.
+- O botao `Recuperar NSUs passados` permite selecionar um cliente especifico ou todos os clientes. Ele chama `POST /sync/reprocessar-nsus-passados/execucao` e consulta `GET /sync/reprocessar-nsus-passados/execucao/:executionId` periodicamente para mostrar o progresso durante a varredura do NSU 1 ate o `ultimo_nsu_consultado`. Documentos fiscais existentes sao pulados; NSUs ausentes sao consultados no ADN. O modo de todos os clientes informa progresso agregado sem criar uma linha em memoria para cada NSU.
 - Os botoes `Pausar` e `Retomar` atuam no mesmo fluxo continuo e atualizam o estado dos controles do cliente.
 - A interface diferencia `Busca habilitada` (cliente elegivel para rotinas) de `Executando agora` (consulta em andamento no monitor).
 - O endpoint `GET /sync/scheduler-status` informa se o ciclo automatico e a busca noturna estao ligados, rodando, quais horarios noturnos estao ativos e qual a proxima execucao noturna.

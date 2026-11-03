@@ -4483,7 +4483,13 @@ function renderSearchRunsPage() {
 
 function renderExecutionMonitorCard() {
   const monitor = state.executionMonitor;
-  const statusLabel = monitor.active ? 'Em execucao' : monitor.finishedAt ? 'Concluida' : 'Aguardando';
+  const statusLabel = monitor.active
+    ? 'Em execucao'
+    : monitor.mode === 'Recuperacao' && monitor.failed > 0
+      ? 'Concluida com falhas'
+      : monitor.finishedAt
+        ? 'Concluida'
+        : 'Aguardando';
   const statusTone = monitor.active ? 'info' : monitor.failed > 0 ? 'warning' : monitor.finishedAt ? 'success' : 'neutral';
   const progress = monitor.total > 0 ? Math.min(100, Math.round((monitor.processed / monitor.total) * 100)) : 0;
   const lastXml = monitor.lastXml;
@@ -4501,8 +4507,8 @@ function renderExecutionMonitorCard() {
       <div class="progress-meta">
         <span>Modo: <strong>${escapeHtml(monitor.mode || '-')}</strong></span>
         <span>Executando para: <strong>${escapeHtml(monitor.currentClientName || '-')}</strong></span>
-        <span>Processados: <strong>${monitor.processed}/${monitor.total || '-'}</strong></span>
-        <span>Sucessos: <strong>${monitor.successful}</strong></span>
+        <span>${monitor.mode === 'Recuperacao' ? 'NSUs avaliados' : 'Processados'}: <strong>${monitor.processed}/${monitor.total || '-'}</strong></span>
+        <span>${monitor.mode === 'Recuperacao' ? 'Documentos salvos' : 'Sucessos'}: <strong>${monitor.successful}</strong></span>
         <span>Falhas: <strong>${monitor.failed}</strong></span>
       </div>
       <div class="card" style="margin-top:12px; border:1px dashed var(--line-strong); box-shadow:none;">
@@ -18834,45 +18840,43 @@ async function runPastNsuRecovery(clientId = null) {
         rows: []
       });
     }
-    startExecutionMonitor(
-      'Recuperacao',
-      selectedClient ? 1 : state.clients.length || 1,
-      'Reprocessando NSUs ja consultados. Notas existentes serao ignoradas...'
-    );
-    state.executionMonitor.currentClientName = selectedClient?.razaoSocial || 'Todos os controles';
+    startExecutionMonitor('Recuperacao', 0, 'Preparando a fila de NSUs...');
+    state.executionMonitor.currentClientName = selectedClient?.razaoSocial || 'Preparando todos os clientes';
     state.executionMonitor.updatedAt = new Date().toISOString();
     render();
 
     let result;
+    let latestExecution = await apiRequest('/sync/reprocessar-nsus-passados/execucao', {
+      method: 'POST',
+      body: clientId ? { clienteId } : {},
+      timeoutMs: 2 * 60 * 1000
+    });
 
-    if (shouldOpenOverlay && clientId) {
-      const execution = await apiRequest('/sync/reprocessar-nsus-passados/execucao', {
-        method: 'POST',
-        body: { clienteId: clientId },
-        timeoutMs: 2 * 60 * 1000
-      });
-
+    updateExecutionMonitorFromPastNsuRecovery(latestExecution, selectedClient?.razaoSocial);
+    if (shouldOpenOverlay) {
       updatePastNsuRecoveryOverlayState({
-        running: execution?.status === 'running',
+        running: latestExecution?.status === 'running',
         executionMode: 'full',
         rowMode: 'nsu',
-        totalCount: Number(execution?.summary?.controlesEncontrados || 0),
-        currentMessage: String(execution?.currentMessage || 'Execucao iniciada.'),
-        summary: execution?.summary || {},
-        rows: buildPastNsuRecoveryLiveRows(execution)
+        totalCount: Number(latestExecution?.summary?.controlesEncontrados || 0),
+        currentMessage: String(latestExecution?.currentMessage || 'Execucao iniciada.'),
+        summary: latestExecution?.summary || {},
+        rows: buildPastNsuRecoveryLiveRows(latestExecution)
       });
+    }
 
-      let latestExecution = execution;
-      while (latestExecution?.status === 'running') {
-        await wait(900);
-        latestExecution = await apiRequest(
-          `/sync/reprocessar-nsus-passados/execucao/${encodeURIComponent(String(execution?.executionId || ''))}`,
-          {
-            method: 'GET',
-            timeoutMs: 2 * 60 * 1000
-          }
-        );
+    while (latestExecution?.status === 'running') {
+      await wait(900);
+      latestExecution = await apiRequest(
+        `/sync/reprocessar-nsus-passados/execucao/${encodeURIComponent(String(latestExecution?.executionId || ''))}`,
+        {
+          method: 'GET',
+          timeoutMs: 2 * 60 * 1000
+        }
+      );
 
+      updateExecutionMonitorFromPastNsuRecovery(latestExecution, selectedClient?.razaoSocial);
+      if (shouldOpenOverlay) {
         updatePastNsuRecoveryOverlayState({
           running: latestExecution?.status === 'running',
           executionMode: 'full',
@@ -18883,15 +18887,9 @@ async function runPastNsuRecovery(clientId = null) {
           rows: buildPastNsuRecoveryLiveRows(latestExecution)
         });
       }
-
-      result = latestExecution?.summary || {};
-    } else {
-      result = await apiRequest('/sync/reprocessar-nsus-passados', {
-        method: 'POST',
-        body: clientId ? { clienteId: clientId } : {},
-        timeoutMs: 10 * 60 * 1000
-      });
     }
+
+    result = latestExecution?.summary || {};
 
     if (shouldOpenOverlay) {
       updatePastNsuRecoveryOverlayState({
@@ -18910,13 +18908,7 @@ async function runPastNsuRecovery(clientId = null) {
       });
     }
 
-    state.executionMonitor.total = Number(result?.controlesEncontrados || state.executionMonitor.total || 0);
-    state.executionMonitor.processed = Number(result?.controlesProcessados || 0);
-    state.executionMonitor.successful = Number(result?.documentosSalvos || 0);
-    state.executionMonitor.failed = Number(result?.falhas || 0);
-    state.executionMonitor.message = 'Recuperacao concluida. Atualizando painel...';
-    state.executionMonitor.updatedAt = new Date().toISOString();
-    render();
+    updateExecutionMonitorFromPastNsuRecovery(latestExecution, selectedClient?.razaoSocial);
 
     await refreshApiData();
     finishExecutionMonitor(
@@ -18951,6 +18943,32 @@ async function runPastNsuRecovery(clientId = null) {
     }
     pushToast(`Falha ao recuperar NSUs passados: ${toErrorMessage(error)}`, 'error');
   }
+}
+
+function updateExecutionMonitorFromPastNsuRecovery(execution, fallbackClientName = null) {
+  if (!execution) return;
+
+  const monitor = state.executionMonitor;
+  const summary = execution.summary || {};
+  const currentClient = execution.currentClienteId ? findClientById(execution.currentClienteId) : null;
+  const isRunning = execution.status === 'running';
+
+  monitor.mode = 'Recuperacao';
+  monitor.active = isRunning;
+  monitor.startedAt = execution.startedAt || monitor.startedAt;
+  monitor.finishedAt = isRunning ? null : execution.finishedAt || new Date().toISOString();
+  monitor.currentClientName =
+    currentClient?.razaoSocial ||
+    execution.currentCnpjConsulta ||
+    fallbackClientName ||
+    (execution.clienteId ? 'Cliente selecionado' : 'Todos os clientes');
+  monitor.processed = Number(summary.nsusAvaliados || 0);
+  monitor.total = Number(execution.nsusPlanejados || 0);
+  monitor.successful = Number(summary.documentosSalvos || 0);
+  monitor.failed = Number(summary.falhas || 0);
+  monitor.message = execution.currentMessage || 'Reprocessamento de NSUs em andamento...';
+  monitor.updatedAt = new Date().toISOString();
+  render();
 }
 
 async function runNfseGapAuditForContext(context) {
@@ -24017,10 +24035,12 @@ function syncExecutionMonitorWithData() {
     return;
   }
 
-  state.executionMonitor.currentClientName = latestActivity.clientName || state.executionMonitor.currentClientName;
+  if (state.executionMonitor.mode !== 'Recuperacao') {
+    state.executionMonitor.currentClientName = latestActivity.clientName || state.executionMonitor.currentClientName;
+  }
   state.executionMonitor.updatedAt = latestActivity.createdAt || new Date().toISOString();
 
-  if (!state.executionMonitor.active) {
+  if (!state.executionMonitor.active && state.executionMonitor.mode !== 'Recuperacao') {
     state.executionMonitor.message = latestActivity.message || 'Ultima atividade de sincronizacao registrada.';
   }
 }

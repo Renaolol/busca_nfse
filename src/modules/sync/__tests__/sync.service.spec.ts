@@ -1020,6 +1020,142 @@ describe('SyncService', () => {
     expect(prisma.nfseSyncControle.update.mock.calls.at(-1)?.[0].data.ultimoNsuConsultado).toBeUndefined();
   });
 
+  it('reprocessa os controles de todos os clientes quando clienteId nao e informado', async () => {
+    (service as unknown as { adnRequestIntervalMs: number }).adnRequestIntervalMs = 0;
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 1n,
+        ultimoNsuComDocumento: 0n,
+        totalDocumentosBaixados: 0,
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-01T00:00:00.000Z')
+      },
+      {
+        id: 'ctrl-2',
+        clienteId: 'cliente-2',
+        estabelecimentoId: 'estab-2',
+        cnpjConsulta: '98765432000199',
+        ambiente: Ambiente.producao_restrita,
+        ultimoNsuConsultado: 1n,
+        ultimoNsuComDocumento: 0n,
+        totalDocumentosBaixados: 0,
+        createdAt: new Date('2026-06-02T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-02T00:00:00.000Z')
+      }
+    ]);
+    (adnClient.getDFeByNsu as jest.Mock).mockImplementation(async ({ nsu }) => ({
+      nsu,
+      hasDocument: false,
+      statusCode: 404,
+      message: 'Sem documento',
+      rawResponse: {}
+    }));
+
+    const result = await service.reprocessPastNsus({});
+
+    expect(prisma.nfseSyncControle.findMany).toHaveBeenCalledWith({
+      where: {},
+      orderBy: [{ updatedAt: 'asc' }, { createdAt: 'asc' }]
+    });
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(2);
+    expect((adnClient.getDFeByNsu as jest.Mock).mock.calls.map(([params]) => params.cnpjConsulta)).toEqual([
+      '12345678000199',
+      '98765432000199'
+    ]);
+    expect(result).toEqual(
+      expect.objectContaining({
+        controlesEncontrados: 2,
+        controlesProcessados: 2,
+        nsusAvaliados: 2,
+        nsusConsultados: 2,
+        semDocumento: 2,
+        falhas: 0
+      })
+    );
+  });
+
+  it('acompanha em segundo plano o progresso agregado de todos os clientes', async () => {
+    (service as unknown as { adnRequestIntervalMs: number }).adnRequestIntervalMs = 0;
+    prisma.nfseSyncControle.findMany.mockResolvedValue(
+      [
+        ['ctrl-1', 'cliente-1', 'estab-1', '12345678000199', Ambiente.producao],
+        ['ctrl-2', 'cliente-2', 'estab-2', '98765432000199', Ambiente.producao_restrita]
+      ].map(([id, clienteId, estabelecimentoId, cnpjConsulta, ambiente], index) => ({
+        id,
+        clienteId,
+        estabelecimentoId,
+        cnpjConsulta,
+        ambiente,
+        ultimoNsuConsultado: 1n,
+        ultimoNsuComDocumento: 0n,
+        totalDocumentosBaixados: 0,
+        createdAt: new Date(Date.UTC(2026, 5, index + 1)),
+        updatedAt: new Date(Date.UTC(2026, 5, index + 1))
+      })) as never[]
+    );
+    let requestCount = 0;
+    let markFirstRequestStarted!: () => void;
+    let releaseFirstRequest!: () => void;
+    const firstRequestStarted = new Promise<void>((resolve) => {
+      markFirstRequestStarted = resolve;
+    });
+    const firstRequestGate = new Promise<void>((resolve) => {
+      releaseFirstRequest = resolve;
+    });
+    (adnClient.getDFeByNsu as jest.Mock).mockImplementation(async ({ nsu }) => {
+      requestCount += 1;
+      if (requestCount === 1) {
+        markFirstRequestStarted();
+        await firstRequestGate;
+      }
+      return {
+        nsu,
+        hasDocument: false,
+        statusCode: 404,
+        message: 'Sem documento',
+        rawResponse: {}
+      };
+    });
+
+    const started = await service.startPastNsuRecoveryExecution({});
+    expect(started.nsusPlanejados).toBe(2);
+    expect(started.rows).toEqual([]);
+
+    await firstRequestStarted;
+    const inProgress = service.getPastNsuRecoveryExecution(started.executionId);
+    releaseFirstRequest();
+    expect(inProgress.status).toBe('running');
+    expect(inProgress.summary.nsusAvaliados).toBe(1);
+    expect(inProgress.nsusPlanejados).toBe(2);
+
+    let latest = inProgress;
+    for (let attempt = 0; attempt < 50 && latest.status === 'running'; attempt += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+      latest = service.getPastNsuRecoveryExecution(started.executionId);
+    }
+
+    expect(latest.status).toBe('completed');
+    expect(latest.summary).toEqual(
+      expect.objectContaining({
+        controlesEncontrados: 2,
+        controlesProcessados: 2,
+        nsusAvaliados: 2,
+        nsusConsultados: 2,
+        semDocumento: 2,
+        falhas: 0
+      })
+    );
+    expect((adnClient.getDFeByNsu as jest.Mock).mock.calls.map(([params]) => params.cnpjConsulta)).toEqual([
+      '12345678000199',
+      '98765432000199'
+    ]);
+  });
+
   it('nao conta como salvo um XML ja existente por chave durante o reprocessamento de NSUs', async () => {
     prisma.nfseSyncControle.findMany.mockResolvedValue([
       {

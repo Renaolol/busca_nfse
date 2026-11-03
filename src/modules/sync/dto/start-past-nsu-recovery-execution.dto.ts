@@ -1,15 +1,16 @@
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { Ambiente } from '@prisma/client';
 import { IsArray, IsEnum, IsOptional, IsString, IsUUID, Matches, ValidateNested } from 'class-validator';
 import { NfseGapAuditRangeDto } from './nfse-gap-audit.dto';
 
 export class StartPastNsuRecoveryExecutionDto {
-  @ApiProperty({
+  @ApiPropertyOptional({
     description: 'Cliente alvo da execucao manual com progresso visual por NSU'
   })
+  @IsOptional()
   @IsUUID()
-  clienteId!: string;
+  clienteId?: string;
 
   @ApiPropertyOptional({
     description: 'Quando informado junto das lacunas, limita a auditoria ao CNPJ consultado'

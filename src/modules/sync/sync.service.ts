@@ -95,7 +95,10 @@ type PastNsuRecoveryExecutionRow = {
 
 type PastNsuRecoveryExecutionState = {
   executionId: string;
-  clienteId: string;
+  clienteId: string | null;
+  currentClienteId: string | null;
+  currentCnpjConsulta: string | null;
+  nsusPlanejados: number;
   requestSignature: string;
   status: 'running' | 'completed' | 'failed';
   startedAt: string;
@@ -775,7 +778,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   async startPastNsuRecoveryExecution(dto: StartPastNsuRecoveryExecutionDto): Promise<PastNsuRecoveryExecutionState> {
-    await this.ensureClient(dto.clienteId);
+    if (dto.clienteId) {
+      await this.ensureClient(dto.clienteId);
+    }
 
     const requestOptions: ReprocessPastNsusDto = {
       clienteId: dto.clienteId,
@@ -794,16 +799,30 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     const plan = await this.preparePastNsuRecoveryPlan(requestOptions);
     const summary = this.createEmptyReprocessPastNsusResult(plan.controls.length);
+    const plannedNsus = plan.controls.reduce(
+      (total, controlPlan) =>
+        total +
+        controlPlan.ranges.reduce(
+          (rangeTotal, range) => rangeTotal + range.nsuFinal - range.nsuInicial + 1n,
+          0n
+        ),
+      0n
+    );
     const execution: PastNsuRecoveryExecutionState = {
       executionId: randomUUID(),
-      clienteId: dto.clienteId,
+      clienteId: dto.clienteId ?? null,
+      currentClienteId: null,
+      currentCnpjConsulta: null,
+      nsusPlanejados: Number(
+        plannedNsus > BigInt(Number.MAX_SAFE_INTEGER) ? BigInt(Number.MAX_SAFE_INTEGER) : plannedNsus
+      ),
       requestSignature,
       status: plan.controls.length > 0 ? 'running' : 'completed',
       startedAt: new Date().toISOString(),
       finishedAt: plan.controls.length > 0 ? null : new Date().toISOString(),
       currentMessage: plan.currentMessage,
       summary,
-      rows: this.createPastNsuRecoveryExecutionRows(plan.controls)
+      rows: dto.clienteId ? this.createPastNsuRecoveryExecutionRows(plan.controls) : []
     };
 
     this.pastNsuRecoveryExecutions.set(execution.executionId, execution);
@@ -841,6 +860,11 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       const control = controlPlan.control;
       const controlGaps = controlPlan.gaps;
       const plannedRanges = controlPlan.ranges;
+
+      if (execution) {
+        execution.currentClienteId = control.clienteId;
+        execution.currentCnpjConsulta = control.cnpjConsulta;
+      }
 
       if (this.isRateLimitCooldownActive()) {
         result.interrompidoPorRateLimit = true;
