@@ -48,7 +48,8 @@ describe('SyncService', () => {
     },
     nfseDocumentoVinculo: {
       findUnique: jest.fn(),
-      findFirst: jest.fn()
+      findFirst: jest.fn(),
+      findMany: jest.fn()
     },
     nfseEvento: {
       upsert: jest.fn(),
@@ -158,6 +159,7 @@ describe('SyncService', () => {
     prisma.nfseDocumento.findMany.mockResolvedValue([]);
     prisma.nfseDocumentoVinculo.findUnique.mockResolvedValue(null);
     prisma.nfseDocumentoVinculo.findFirst.mockResolvedValue(null);
+    prisma.nfseDocumentoVinculo.findMany.mockResolvedValue([]);
     prisma.nfseEvento.upsert.mockResolvedValue({});
     prisma.nfseEvento.updateMany.mockResolvedValue({ count: 0 });
     prisma.nfeDocumento.findMany.mockResolvedValue([]);
@@ -960,17 +962,21 @@ describe('SyncService', () => {
         updatedAt: new Date('2026-06-01T00:00:00.000Z')
       }
     ]);
-    prisma.nfseDocumento.findFirst.mockImplementation(({ where }) => {
-      if (where.nsu === 1n || where.nsu === 3n) {
-        return Promise.resolve({
-          xmlPath: `nfse/producao/12345678000199/2026/06/xml/${where.nsu}.xml`,
-          numeroNfse: String(where.nsu),
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      { clienteId: 'cliente-1', ambiente: Ambiente.producao, nsu: 1n }
+    ]);
+    prisma.nfseDocumentoVinculo.findMany.mockResolvedValue([
+      {
+        clienteId: 'cliente-1',
+        ambiente: Ambiente.producao,
+        nsu: 3n,
+        documento: {
+          xmlPath: 'nfse/producao/12345678000199/2026/06/xml/3.xml',
+          numeroNfse: '3',
           dataEmissao: new Date('2026-06-03T12:00:00.000Z')
-        });
+        }
       }
-
-      return Promise.resolve(null);
-    });
+    ]);
     (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
       nsu: 2n,
       hasDocument: true,
@@ -1000,7 +1006,7 @@ describe('SyncService', () => {
       expect.objectContaining({
         controlesEncontrados: 1,
         controlesProcessados: 1,
-        nsusAvaliados: 3,
+        nsusAvaliados: 1,
         nsusConsultados: 1,
         nsusIgnoradosComDocumento: 2,
         documentosSalvos: 1
@@ -1171,6 +1177,9 @@ describe('SyncService', () => {
         updatedAt: new Date('2026-06-01T00:00:00.000Z')
       }
     ]);
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      { clienteId: 'cliente-1', ambiente: Ambiente.producao, nsu: 1n }
+    ]);
     prisma.nfseDocumento.findFirst.mockImplementation(({ where }) => {
       if (where?.nsu === 1n) {
         return Promise.resolve({
@@ -1236,7 +1245,7 @@ describe('SyncService', () => {
     expect(prisma.nfseDocumento.update).not.toHaveBeenCalled();
     expect(result).toEqual(
       expect.objectContaining({
-        nsusAvaliados: 2,
+        nsusAvaliados: 1,
         nsusConsultados: 1,
         documentosSalvos: 0,
         nsusIgnoradosComDocumento: 1,
@@ -1270,6 +1279,11 @@ describe('SyncService', () => {
         updatedAt: new Date('2026-06-01T00:00:00.000Z')
       }
     ]);
+    prisma.nfseDocumento.findMany.mockResolvedValue(
+      Array.from({ length: 53 }, (_, index) => index + 1)
+        .filter((nsu) => nsu !== 52)
+        .map((nsu) => ({ clienteId: 'cliente-1', ambiente: Ambiente.producao, nsu: BigInt(nsu) }))
+    );
     prisma.nfseDocumento.findFirst.mockImplementation(({ where }) => {
       if (typeof where?.nsu === 'bigint' && where.nsu !== 52n) {
         return Promise.resolve({
@@ -1313,7 +1327,7 @@ describe('SyncService', () => {
     expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
     expect(latestExecution.summary).toEqual(
       expect.objectContaining({
-        nsusAvaliados: 54,
+        nsusAvaliados: 1,
         nsusConsultados: 1,
         nsusIgnoradosComDocumento: 53,
         documentosSalvos: 0,

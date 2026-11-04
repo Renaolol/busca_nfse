@@ -151,6 +151,9 @@ type PreparedPastNsuRecoveryControl = {
   control: NfseSyncControle;
   gaps: NormalizedGapAuditRange[];
   ranges: PlannedPastNsuRange[];
+  savedNsus: Set<string>;
+  nsusIgnoradosComDocumento: number;
+  cursorNsuFinal?: bigint;
 };
 
 type PreparedPastNsuRecoveryPlan = {
@@ -876,6 +879,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       }
 
       const detail = this.createReprocessDetail(control, plannedRanges);
+      detail.nsusIgnoradosComDocumento = controlPlan.nsusIgnoradosComDocumento;
+      result.nsusIgnoradosComDocumento += controlPlan.nsusIgnoradosComDocumento;
       result.detalhes.push(detail);
       if (execution) {
         this.syncPastNsuRecoveryExecution(
@@ -941,7 +946,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             this.updatePastNsuRecoveryExecutionRow(execution, control.id, nsu, {
               status: 'consultando',
               documentKind: null,
-              mensagem: 'Verificando se o NSU ja possui documento salvo...'
+              mensagem: 'Consultando o NSU no ADN...'
             });
             this.syncPastNsuRecoveryExecution(
               execution,
@@ -950,13 +955,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             );
           }
 
-          if (
-            await this.hasFiscalDocumentForNsu({
-              clienteId: control.clienteId,
-              ambiente: control.ambiente,
-              nsu
-            })
-          ) {
+          if (controlPlan.savedNsus.has(nsu.toString())) {
             detail.nsusIgnoradosComDocumento += 1;
             result.nsusIgnoradosComDocumento += 1;
             if (execution) {
@@ -1695,6 +1694,8 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         return;
       }
 
+      const savedNsusByScope = await this.loadSavedFiscalNsusByScope(eligibleControls);
+
       const plan: PreparedPastNsuRecoveryPlan = {
         mode: 'full',
         controls: eligibleControls.map((control) => {
@@ -1703,10 +1704,16 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             control.ultimoNsuConsultado,
             nsuInicial + BigInt(this.nightlyPastNsuRecoveryNsusPerControl - 1)
           );
+          const fullRange = [{ nsuInicial, nsuFinal, lacunaLabels: [] }];
+          const savedNsus = savedNsusByScope.get(this.buildSavedNsuScopeKey(control.clienteId, control.ambiente)) ?? new Set();
+          const filtered = this.excludeSavedPastNsusFromRanges(fullRange, savedNsus);
           return {
             control,
             gaps: [],
-            ranges: [{ nsuInicial, nsuFinal, lacunaLabels: [] }]
+            ranges: filtered.ranges,
+            savedNsus,
+            nsusIgnoradosComDocumento: filtered.nsusIgnoradosComDocumento,
+            cursorNsuFinal: nsuFinal
           };
         }),
         currentMessage: 'Preparando recuperacao noturna e incremental de NSUs passados...'
@@ -1717,9 +1724,10 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
       for (const detail of result.detalhes) {
         const existing = controlState[detail.controleId] ?? {};
         const succeeded = detail.falhas === 0 && !result.interrompidoPorRateLimit;
+        const plannedFinal = plan.controls.find((controlPlan) => controlPlan.control.id === detail.controleId)?.cursorNsuFinal;
         controlState[detail.controleId] = {
           ...existing,
-          ...(succeeded ? { nextNsu: (BigInt(detail.nsuFinal) + 1n).toString() } : {}),
+          ...(succeeded ? { nextNsu: ((plannedFinal ?? BigInt(detail.nsuFinal)) + 1n).toString() } : {}),
           lastAttemptAt: completedAt,
           lastStatus: succeeded ? 'concluido' : 'falha'
         };
@@ -2388,30 +2396,34 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     });
 
     if (normalizedGaps.length === 0) {
+      const savedNsusByScope = await this.loadSavedFiscalNsusByScope(controls);
       return {
         mode: 'full',
-        controls: controls.map((control) => ({
-          control,
-          gaps: [],
-          ranges:
+        controls: controls.map((control) => {
+          const fullRange =
             control.ultimoNsuConsultado >= 1n
-              ? [
-                  {
-                    nsuInicial: 1n,
-                    nsuFinal: control.ultimoNsuConsultado,
-                    lacunaLabels: []
-                  }
-                ]
-              : []
-        })),
+              ? [{ nsuInicial: 1n, nsuFinal: control.ultimoNsuConsultado, lacunaLabels: [] }]
+              : [];
+          const savedNsus = savedNsusByScope.get(this.buildSavedNsuScopeKey(control.clienteId, control.ambiente)) ?? new Set();
+          const filtered = this.excludeSavedPastNsusFromRanges(fullRange, savedNsus);
+
+          return {
+            control,
+            gaps: [],
+            ranges: filtered.ranges,
+            savedNsus,
+            nsusIgnoradosComDocumento: filtered.nsusIgnoradosComDocumento
+          };
+        }),
         currentMessage:
           controls.length > 0
-            ? 'Preparando reprocessamento dos NSUs do cliente...'
+            ? 'Separando NSUs sem documento salvo para consultar no ADN...'
             : 'Nenhum controle encontrado para este cliente.'
       };
     }
 
     const preparedControls: PreparedPastNsuRecoveryControl[] = [];
+    const savedNsusByScope = await this.loadSavedFiscalNsusByScope(controls);
 
     for (const control of controls) {
       const controlGaps = normalizedGaps.filter((gap) => gap.ambiente === control.ambiente);
@@ -2439,12 +2451,16 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         orderBy: [{ nsu: 'asc' }]
       });
 
-      const ranges = this.buildGapAuditRangesForControl(control, controlGaps, storedDocs);
-      if (ranges.length > 0) {
+      const inferredRanges = this.buildGapAuditRangesForControl(control, controlGaps, storedDocs);
+      const savedNsus = savedNsusByScope.get(this.buildSavedNsuScopeKey(control.clienteId, control.ambiente)) ?? new Set();
+      const filtered = this.excludeSavedPastNsusFromRanges(inferredRanges, savedNsus);
+      if (filtered.ranges.length > 0 || filtered.nsusIgnoradosComDocumento > 0) {
         preparedControls.push({
           control,
           gaps: controlGaps,
-          ranges
+          ranges: filtered.ranges,
+          savedNsus,
+          nsusIgnoradosComDocumento: filtered.nsusIgnoradosComDocumento
         });
       }
     }
@@ -2456,6 +2472,135 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
         preparedControls.length > 0
           ? 'Preparando auditoria das lacunas pelos NSUs provaveis...'
           : 'Nenhuma faixa NSU provavel foi encontrada para as lacunas informadas.'
+    };
+  }
+
+  private buildSavedNsuScopeKey(clienteId: string, ambiente: Ambiente): string {
+    return `${clienteId}:${ambiente}`;
+  }
+
+  private async loadSavedFiscalNsusByScope(
+    controls: Array<Pick<NfseSyncControle, 'clienteId' | 'ambiente' | 'ultimoNsuConsultado'>>
+  ): Promise<Map<string, Set<string>>> {
+    const scopesByKey = new Map<string, { clienteId: string; ambiente: Ambiente; maxNsu: bigint }>();
+    for (const control of controls) {
+      if (control.ultimoNsuConsultado < 1n) {
+        continue;
+      }
+      const key = this.buildSavedNsuScopeKey(control.clienteId, control.ambiente);
+      const existing = scopesByKey.get(key);
+      if (!existing || control.ultimoNsuConsultado > existing.maxNsu) {
+        scopesByKey.set(key, {
+          clienteId: control.clienteId,
+          ambiente: control.ambiente,
+          maxNsu: control.ultimoNsuConsultado
+        });
+      }
+    }
+
+    const scopes = [...scopesByKey.values()];
+    if (scopes.length === 0) {
+      return new Map();
+    }
+
+    const documentScopeFilters: Prisma.NfseDocumentoWhereInput[] = scopes.map((scope) => ({
+      clienteId: scope.clienteId,
+      ambiente: scope.ambiente,
+      nsu: { gte: 1n, lte: scope.maxNsu }
+    }));
+    const linkScopeFilters: Prisma.NfseDocumentoVinculoWhereInput[] = scopes.map((scope) => ({
+      clienteId: scope.clienteId,
+      ambiente: scope.ambiente,
+      nsu: { gte: 1n, lte: scope.maxNsu }
+    }));
+    const fiscalDataFilters: Prisma.NfseDocumentoWhereInput[] = [
+      { xmlPath: { not: null } },
+      { numeroNfse: { not: null } },
+      { dataEmissao: { not: null } }
+    ];
+
+    const [documents, links] = await Promise.all([
+      this.prisma.nfseDocumento.findMany({
+        where: { AND: [{ OR: documentScopeFilters }, { OR: fiscalDataFilters }] },
+        select: { clienteId: true, ambiente: true, nsu: true }
+      }),
+      this.prisma.nfseDocumentoVinculo.findMany({
+        where: { OR: linkScopeFilters },
+        select: {
+          clienteId: true,
+          ambiente: true,
+          nsu: true,
+          documento: { select: { xmlPath: true, numeroNfse: true, dataEmissao: true } }
+        }
+      })
+    ]);
+
+    const savedNsusByScope = new Map<string, Set<string>>();
+    const addSavedNsu = (clienteId: string, ambiente: Ambiente, nsu: bigint | null) => {
+      if (nsu == null) {
+        return;
+      }
+      const key = this.buildSavedNsuScopeKey(clienteId, ambiente);
+      const savedNsus = savedNsusByScope.get(key) ?? new Set<string>();
+      savedNsus.add(nsu.toString());
+      savedNsusByScope.set(key, savedNsus);
+    };
+
+    for (const document of documents) {
+      addSavedNsu(document.clienteId, document.ambiente, document.nsu);
+    }
+    for (const link of links) {
+      if (this.hasDocumentoFiscalData(link.documento)) {
+        addSavedNsu(link.clienteId, link.ambiente, link.nsu);
+      }
+    }
+
+    return savedNsusByScope;
+  }
+
+  private excludeSavedPastNsusFromRanges(
+    ranges: PlannedPastNsuRange[],
+    savedNsus: Set<string>
+  ): { ranges: PlannedPastNsuRange[]; nsusIgnoradosComDocumento: number } {
+    const sortedSavedNsus = [...savedNsus]
+      .map((nsu) => BigInt(nsu))
+      .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+    const missingRanges: PlannedPastNsuRange[] = [];
+    let savedIndex = 0;
+    let nsusIgnoradosComDocumento = 0;
+
+    for (const range of this.mergePlannedPastNsuRanges(ranges)) {
+      while (savedIndex < sortedSavedNsus.length && sortedSavedNsus[savedIndex] < range.nsuInicial) {
+        savedIndex += 1;
+      }
+
+      let nextNsu = range.nsuInicial;
+      while (savedIndex < sortedSavedNsus.length && sortedSavedNsus[savedIndex] <= range.nsuFinal) {
+        const savedNsu = sortedSavedNsus[savedIndex];
+        if (savedNsu > nextNsu) {
+          missingRanges.push({
+            nsuInicial: nextNsu,
+            nsuFinal: savedNsu - 1n,
+            lacunaLabels: range.lacunaLabels
+          });
+        }
+        nextNsu = savedNsu + 1n;
+        nsusIgnoradosComDocumento += 1;
+        savedIndex += 1;
+      }
+
+      if (nextNsu <= range.nsuFinal) {
+        missingRanges.push({
+          nsuInicial: nextNsu,
+          nsuFinal: range.nsuFinal,
+          lacunaLabels: range.lacunaLabels
+        });
+      }
+    }
+
+    return {
+      ranges: this.mergePlannedPastNsuRanges(missingRanges),
+      nsusIgnoradosComDocumento
     };
   }
 
