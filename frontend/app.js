@@ -18924,7 +18924,7 @@ async function runPastNsuRecovery(clientId = null) {
     let result;
     let latestExecution = await apiRequest('/sync/reprocessar-nsus-passados/execucao', {
       method: 'POST',
-      body: clientId ? { clienteId } : {},
+      body: clientId ? { clienteId: clientId } : {},
       timeoutMs: 2 * 60 * 1000
     });
 
