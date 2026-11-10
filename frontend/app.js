@@ -12825,7 +12825,7 @@ function renderXmlManualValueModal() {
         <form id="xmlManualValueForm">
           <div class="modal-body">
             <div class="form-grid two">
-              ${detailItem('Situacao fiscal', xml.statusFiscal || '-')}
+              ${detailItem('Situacao fiscal', xmlFiscalStatusLabel(xml))}
               ${detailItem('Valor atual', formatCurrency(xml.valor))}
             </div>
             <div style="margin-top:14px; padding:12px; border:1px solid var(--line); border-radius:10px; max-height:180px; overflow:auto; white-space:pre-wrap;">
@@ -14627,7 +14627,7 @@ function renderXmlDetailsModal(xmlId) {
             ${detailItem('Codigo do servico prestado', xml.codigoServicoPrestado || '-')}
             ${detailItem('Descricao do servico', xml.descricaoServico || '-')}
             ${detailItem('Status de armazenamento', xml.statusArmazenamento)}
-            ${detailItem('Situacao fiscal', xml.statusFiscal || '-')}
+            ${detailItem('Situacao fiscal', xmlFiscalStatusLabel(xml))}
             ${detailItem('Validacao de numeracao', xml.ignorarNumeracaoValidacao ? 'Desconsiderado nesta validacao' : 'Participa normalmente')}
             ${detailItem('Obs. validacao numeracao', xml.ignorarNumeracaoObservacao || '-')}
             ${detailItem('Data de cancelamento', xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '-')}
@@ -14793,7 +14793,7 @@ function renderXmlDetailsModalLegacyUnused(xmlId) {
             ${detailItem('Codigo do servico prestado', xml.codigoServicoPrestado || '-')}
             ${detailItem('Descricao do servico', xml.descricaoServico || '-')}
             ${detailItem('Status de armazenamento', xml.statusArmazenamento)}
-            ${detailItem('Situacao fiscal', xml.statusFiscal || '-')}
+            ${detailItem('Situacao fiscal', xmlFiscalStatusLabel(xml))}
             ${detailItem('Data de cancelamento', xml.dataCancelamento ? formatDateTime(xml.dataCancelamento) : '-')}
             ${detailItem('Resumo de eventos', xml.eventosResumo || '-')}
           </div>
@@ -16481,7 +16481,7 @@ function renderXmlStatusBadges(xml) {
   } else if (xml.cancelada) {
     badges.push(statusBadge('Cancelada', 'danger', 'nfse-cancel-chip'));
   } else if (xml.statusFiscal && xml.statusFiscal !== '-') {
-    badges.push(statusBadge(xml.statusFiscal, toneFromXmlFiscalStatus(xml)));
+    badges.push(statusBadge(xmlFiscalStatusLabel(xml), toneFromXmlFiscalStatus(xml)));
   }
 
   if (xml.substituidaPor) {
@@ -16489,6 +16489,10 @@ function renderXmlStatusBadges(xml) {
   }
 
   return `<div class="status-stack">${badges.join('')}</div>`;
+}
+
+function xmlFiscalStatusLabel(xml) {
+  return canEditManualNfseValue(xml) ? 'Autorizada - 102' : xml?.statusFiscal || '-';
 }
 
 function renderXmlLinkChip(label, tone, linkedXmlId) {

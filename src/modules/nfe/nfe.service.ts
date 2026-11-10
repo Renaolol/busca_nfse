@@ -830,7 +830,7 @@ export class NfeService implements OnModuleInit, OnModuleDestroy {
     const baseCalculada = this.roundMoney(
       baseXml == null
         ? baseMercadoriaLiquida
-        : Math.min(Math.max(0, baseXml), Math.max(0, item.valorProduto))
+        : Math.min(Math.max(0, baseXml), baseMercadoriaLiquida)
     );
     // Sem ICMS ST retido no XML, nao ha credito a aproveitar no CST 060.
     const icmsCalculado = item.vICMSSTRet === 0

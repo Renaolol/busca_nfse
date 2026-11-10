@@ -224,6 +224,27 @@ describe('NfeService', () => {
     expect(row.icmsCalculado).toBe(125);
   });
 
+  it('deduz o desconto da base CST 060 mesmo quando a base retida do XML e maior', () => {
+    const row = (service as any).toCst060AnalysisItem(
+      { id: 'nfe-desconto-cst060', chaveAcesso: '2'.repeat(44), dataEmissao: new Date('2026-10-26'), cnpjEmitente: null },
+      {
+        itemNumero: 3,
+        descricaoProduto: 'OLEO DE MOTOR',
+        quantidade: 35,
+        valorUnitario: 37.34,
+        valorProduto: 1306.9,
+        desconto: 84.95,
+        vBCSTRet: 1354.5,
+        pST: 17.0026,
+        vICMSSTRet: 230.3
+      },
+      17
+    );
+
+    expect(row.baseCalculada).toBe(1221.95);
+    expect(row.icmsCalculado).toBe(207.76);
+  });
+
   it('preserva a base CST 060 do XML quando ela for menor que o valor da mercadoria', () => {
     const row = (service as any).toCst060AnalysisItem(
       { id: 'nfe-1', chaveAcesso: '1'.repeat(44), dataEmissao: new Date('2026-07-29'), cnpjEmitente: null },
