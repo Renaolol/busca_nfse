@@ -761,9 +761,34 @@ model Usuario {
   nfeScAutorizacoes          NfeScSyncControle[]         @relation("NfeScAutorizacaoConfirmadaPor")
   nfeAutomacaoAuditorias     NfeAutomacaoAuditoria[]
   simplesNacionalImportacoes SimplesNacionalImportacao[]
+  atualizacoesSistema        SistemaAtualizacao[]
 
   @@index([clienteId, ativo], map: "usuarios_cliente_id_ativo_idx")
   @@map("usuarios")
+}
+
+model SistemaAtualizacao {
+  id        String   @id @default(uuid()) @db.Uuid
+  titulo    String   @db.VarChar(160)
+  descricao String   @db.Text
+  autorId   String?  @map("autor_id") @db.Uuid
+  autorNome String   @map("autor_nome") @db.VarChar(255)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  autor Usuario? @relation(fields: [autorId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt], map: "sistema_atualizacoes_created_at_idx")
+  @@map("sistema_atualizacoes")
+}
+
+model RelatorioAtualizacaoDiario {
+  id             String   @id @default(uuid()) @db.Uuid
+  dataReferencia DateTime @unique @map("data_referencia") @db.Date
+  geradoEm       DateTime @default(now()) @map("gerado_em")
+  registros      Json
+
+  @@map("relatorios_atualizacao_diarios")
 }
 
 model DocumentoConferencia {

@@ -327,6 +327,10 @@ const pageMeta = {
     title: 'Configuracoes',
     description: 'Ajuste parametros da rotina de busca e do armazenamento interno.'
   },
+  atualizacoes: {
+    title: 'Atualizacoes do sistema',
+    description: 'Consulte os registros da equipe e os relatorios diarios gerados as 17h30.'
+  },
   'compara-sped': {
     title: 'Compara SPED',
     description: 'Compare arquivos SPED Fiscal com os documentos integrados da Dominio.'
@@ -372,6 +376,12 @@ const state = {
   clients: [],
   certificates: [],
   searchRuns: [],
+  systemUpdates: {
+    reports: [],
+    loadingReports: false,
+    reportsError: '',
+    reportsLastLoadedAt: null
+  },
   runningExecution: null,
   executionMonitor: {
     active: false,
@@ -624,6 +634,13 @@ const state = {
     },
     acessos: {
       creatingUser: false
+    },
+    atualizacoes: {
+      loading: false,
+      saving: false,
+      records: [],
+      lastLoadedAt: null,
+      errorMessage: ''
     },
     danfseReprocessRunning: false
   },
@@ -2465,9 +2482,20 @@ function onDocumentClick(event) {
       if (tab === 'acessos' && state.auth.user?.role === 'admin') {
         void loadAuthAdminData();
       }
+      if (tab === 'atualizacoes' && state.auth.user?.role === 'admin') {
+        void loadSettingsSystemUpdates();
+      }
       if (tab === 'simples-nacional') {
         void loadSimplesNacionalSettings();
       }
+      return;
+    }
+    case 'system-updates-refresh': {
+      void loadDailySystemUpdateReports();
+      return;
+    }
+    case 'settings-updates-reload': {
+      void loadSettingsSystemUpdates();
       return;
     }
     case 'settings-simples-reload': {
@@ -2819,6 +2847,11 @@ function onDocumentSubmit(event) {
     case 'settingsAuthUserForm': {
       event.preventDefault();
       void submitSettingsAuthUserForm(target);
+      return;
+    }
+    case 'settingsSystemUpdateForm': {
+      event.preventDefault();
+      void submitSettingsSystemUpdateForm(target);
       return;
     }
     case 'settingsAuthReportForm': {
@@ -3675,6 +3708,8 @@ function renderCurrentPage() {
       return renderAlertsPage();
     case 'configuracoes':
       return renderSettingsPage();
+    case 'atualizacoes':
+      return renderSystemUpdatesPage();
     default:
       return renderNotFoundPage();
   }
@@ -3756,6 +3791,16 @@ function renderDashboardPage() {
           ${statusBadge(lastRun?.status || 'Sem status', summaryTone, 'summary-status')}
         </div>
       </article>
+
+      <button class="dashboard-updates-shortcut" type="button" data-action="navigate" data-route="/atualizacoes">
+        <span class="dashboard-updates-shortcut-icon">${icon('file')}</span>
+        <span class="dashboard-updates-shortcut-copy">
+          <strong>Atualizacoes do sistema</strong>
+          <small>Consulte os relatorios diarios e os registros publicados pela equipe.</small>
+        </span>
+        <span class="dashboard-updates-shortcut-time">Relatorio diario as 17h30</span>
+        <span class="dashboard-updates-shortcut-arrow" aria-hidden="true">&#8250;</span>
+      </button>
 
       ${renderSchedulerStatusStrip()}
 
@@ -7695,8 +7740,73 @@ function renderAlertCards(alerts) {
     .join('');
 }
 
+function renderSystemUpdatesPage() {
+  const reportsState = state.systemUpdates;
+  const reports = Array.isArray(reportsState.reports) ? reportsState.reports : [];
+  const actions = [
+    actionButton(
+      reportsState.loadingReports ? 'Atualizando...' : 'Atualizar relatorios',
+      'system-updates-refresh',
+      'secondary',
+      reportsState.loadingReports
+    )
+  ];
+
+  return `
+    <section class="page-section">
+      ${renderPageHeader({
+        title: 'Atualizacoes do sistema',
+        description: 'Relatorios diarios gerados as 17h30 no horario de Brasilia com os registros publicados pela equipe.',
+        actions,
+        badgeText: '17h30'
+      })}
+      ${reportsState.reportsError ? `<article class="card table-state error">${escapeHtml(reportsState.reportsError)}</article>` : ''}
+      ${
+        reportsState.loadingReports
+          ? '<article class="card table-state loading">Carregando relatorios de atualizacoes...</article>'
+          : reports.length
+            ? reports.map(renderDailySystemUpdateReport).join('')
+            : '<article class="card table-state">Nenhum relatorio gerado ainda. O relatorio diario sera criado as 17h30 e ficara disponivel aqui.</article>'
+      }
+    </section>
+  `;
+}
+
+function renderDailySystemUpdateReport(report) {
+  const records = Array.isArray(report?.registros) ? report.registros : [];
+  return `
+    <article class="card system-update-report-card">
+      <div class="card-header" style="margin-bottom:12px;">
+        <div>
+          <h3 class="card-title">Relatorio de ${escapeHtml(formatDate(report?.dataReferencia))}</h3>
+          <p class="card-subtitle" style="margin-top:6px;">Gerado em ${escapeHtml(formatDateTime(report?.geradoEm))} - ${records.length} atualizacao(oes)</p>
+        </div>
+        ${statusBadge('Relatorio diario', 'info')}
+      </div>
+      ${
+        records.length
+          ? `<div class="system-update-report-list">${records
+              .map(
+                (record) => `
+                  <article class="system-update-entry">
+                    <div class="system-update-entry-header">
+                      <strong>${escapeHtml(record?.titulo || 'Atualizacao')}</strong>
+                      <small>${escapeHtml(record?.autorNome || 'Administrador')} - ${escapeHtml(formatDateTime(record?.createdAt))}</small>
+                    </div>
+                    <p>${escapeHtml(record?.descricao || '')}</p>
+                  </article>
+                `
+              )
+              .join('')}</div>`
+          : '<div class="table-state">Nenhuma atualizacao foi registrada neste dia.</div>'
+      }
+    </article>
+  `;
+}
+
 function renderSettingsPage() {
   const authTab = state.auth.user?.role === 'admin' ? renderTabButton('acessos', 'Acessos') : '';
+  const updatesTab = state.auth.user?.role === 'admin' ? renderTabButton('atualizacoes', 'Atualizacoes') : '';
 
   return `
     <section class="page-section">
@@ -7715,6 +7825,7 @@ function renderSettingsPage() {
           ${renderTabButton('aliquotas', 'Aliquotas')}
           ${renderTabButton('simples-nacional', 'Empresas do Simples Nacional')}
           ${authTab}
+          ${updatesTab}
           ${renderTabButton('manutencao', 'Manutencao')}
         </div>
         ${renderSettingsTabPanel()}
@@ -12568,6 +12679,8 @@ function renderSettingsTabPanel() {
       return renderSimplesNacionalSettingsPanel();
     case 'acessos':
       return renderAuthAccessSettingsPanel();
+    case 'atualizacoes':
+      return renderSettingsUpdatesPanel();
     case 'manutencao': {
       const running = state.settings.danfseReprocessRunning;
       return `
@@ -16608,7 +16721,8 @@ function parseRoute(hash) {
     '/compara-sped': 'compara-sped',
     '/leitor-xml': 'leitor-xml',
     '/alertas': 'alertas',
-    '/configuracoes': 'configuracoes'
+    '/configuracoes': 'configuracoes',
+    '/atualizacoes': 'atualizacoes'
   };
 
   return { name: map[raw] || 'dashboard', params: {} };
@@ -23060,6 +23174,71 @@ async function loadAuthAdminData(options = {}) {
   }
 }
 
+function renderSettingsUpdatesPanel() {
+  if (state.auth.user?.role !== 'admin') {
+    return '<div class="table-state error">Apenas administradores podem registrar atualizacoes do sistema.</div>';
+  }
+
+  const updates = state.settings.atualizacoes;
+  const records = Array.isArray(updates.records) ? updates.records : [];
+  return `
+    <div class="stack" style="gap:16px;">
+      <article class="card">
+        <div class="card-header" style="margin-bottom:12px;">
+          <div>
+            <h3 class="card-title">Registrar atualizacao</h3>
+            <p class="card-subtitle">Os registros publicados ate 17h30 entram no relatorio diario gerado no horario de Brasilia.</p>
+          </div>
+          ${statusBadge('Somente administrador', 'warning')}
+        </div>
+        <form id="settingsSystemUpdateForm" class="form-grid two">
+          <label class="field" style="grid-column:span 2;">
+            Titulo
+            <input name="titulo" maxlength="160" required placeholder="Ex.: Novo relatorio de atualizacoes" ${updates.saving ? 'disabled' : ''} />
+          </label>
+          <label class="field" style="grid-column:span 2;">
+            Descricao
+            <textarea name="descricao" maxlength="10000" rows="4" required placeholder="Descreva a melhoria, correcao ou mudanca disponibilizada." ${updates.saving ? 'disabled' : ''}></textarea>
+          </label>
+          ${updates.errorMessage ? `<div class="table-state error" style="grid-column:span 2;">${escapeHtml(updates.errorMessage)}</div>` : ''}
+          <div class="stack-actions" style="grid-column:span 2; justify-content:flex-start;">
+            <button class="btn primary" type="submit" ${updates.saving ? 'disabled' : ''}>${updates.saving ? 'Salvando...' : 'Registrar atualizacao'}</button>
+          </div>
+        </form>
+      </article>
+
+      <article class="card">
+        <div class="card-header" style="margin-bottom:12px;">
+          <div>
+            <h3 class="card-title">Atualizacoes registradas</h3>
+            <p class="card-subtitle">Os relatorios diarios guardam uma copia dos registros existentes no momento da geracao.</p>
+          </div>
+          <button class="btn secondary" type="button" data-action="settings-updates-reload" ${updates.loading ? 'disabled' : ''}>${updates.loading ? 'Atualizando...' : 'Atualizar lista'}</button>
+        </div>
+        ${
+          updates.loading
+            ? '<div class="table-state loading">Carregando registros...</div>'
+            : records.length
+              ? `<div class="system-update-report-list">${records
+                  .map(
+                    (record) => `
+                      <article class="system-update-entry">
+                        <div class="system-update-entry-header">
+                          <strong>${escapeHtml(record.titulo || 'Atualizacao')}</strong>
+                          <small>${escapeHtml(record.autorNome || 'Administrador')} - ${escapeHtml(formatDateTime(record.createdAt))}</small>
+                        </div>
+                        <p>${escapeHtml(record.descricao || '')}</p>
+                      </article>
+                    `
+                  )
+                  .join('')}</div>`
+              : '<div class="table-state">Nenhuma atualizacao cadastrada.</div>'
+        }
+      </article>
+    </div>
+  `;
+}
+
 function renderAuthAccessSettingsPanel() {
   if (state.auth.user?.role !== 'admin') {
     return '<div class="table-state error">Apenas administradores podem gerenciar usuarios e acessos.</div>';
@@ -23353,9 +23532,21 @@ async function ensureRouteDataLoaded(options = {}) {
     return;
   }
 
+  if (state.route.name === 'atualizacoes') {
+    onProgress?.('Carregando relatorios diarios de atualizacoes');
+    await loadDailySystemUpdateReports(options);
+    return;
+  }
+
   if (state.route.name === 'configuracoes' && state.settings.tab === 'acessos' && state.auth.user?.role === 'admin') {
     onProgress?.('Carregando usuarios, sessoes, eventos e relatorio de acesso');
     await loadAuthAdminData({ silent: options.silent });
+    return;
+  }
+
+  if (state.route.name === 'configuracoes' && state.settings.tab === 'atualizacoes' && state.auth.user?.role === 'admin') {
+    onProgress?.('Carregando registros de atualizacoes');
+    await loadSettingsSystemUpdates({ silent: options.silent });
   }
 }
 
@@ -23368,8 +23559,16 @@ function shouldLoadRouteData(route = state.route) {
     return !state.nfseGapAuditOverview.lastLoadedAt;
   }
 
+  if (route?.name === 'atualizacoes') {
+    return !state.systemUpdates.reportsLastLoadedAt;
+  }
+
   if (route?.name === 'configuracoes' && state.settings.tab === 'acessos' && state.auth.user?.role === 'admin') {
     return !state.auth.adminData.lastLoadedAt;
+  }
+
+  if (route?.name === 'configuracoes' && state.settings.tab === 'atualizacoes' && state.auth.user?.role === 'admin') {
+    return !state.settings.atualizacoes.lastLoadedAt;
   }
 
   return false;
@@ -23430,6 +23629,95 @@ async function performLogout() {
   } catch {}
 
   finalizeLoggedOutState();
+}
+
+async function loadDailySystemUpdateReports(options = {}) {
+  if (state.dataSource !== 'api') {
+    state.systemUpdates.reports = [];
+    state.systemUpdates.reportsLastLoadedAt = new Date().toISOString();
+    render();
+    return;
+  }
+
+  state.systemUpdates.loadingReports = true;
+  state.systemUpdates.reportsError = '';
+  render();
+  try {
+    const payload = await apiRequest('/atualizacoes/relatorios', { cache: false });
+    state.systemUpdates.reports = Array.isArray(payload) ? payload : [];
+    state.systemUpdates.reportsLastLoadedAt = new Date().toISOString();
+  } catch (error) {
+    state.systemUpdates.reportsError = `Falha ao carregar relatorios de atualizacoes: ${toErrorMessage(error)}`;
+    if (!options.silent) {
+      pushToast(state.systemUpdates.reportsError, 'error');
+    }
+  } finally {
+    state.systemUpdates.loadingReports = false;
+    render();
+  }
+}
+
+async function loadSettingsSystemUpdates(options = {}) {
+  if (state.auth.user?.role !== 'admin') {
+    return;
+  }
+
+  if (state.dataSource !== 'api') {
+    state.settings.atualizacoes.records = [];
+    state.settings.atualizacoes.lastLoadedAt = new Date().toISOString();
+    render();
+    return;
+  }
+
+  state.settings.atualizacoes.loading = true;
+  state.settings.atualizacoes.errorMessage = '';
+  render();
+  try {
+    const payload = await apiRequest('/atualizacoes/registros', { cache: false });
+    state.settings.atualizacoes.records = Array.isArray(payload) ? payload : [];
+    state.settings.atualizacoes.lastLoadedAt = new Date().toISOString();
+  } catch (error) {
+    state.settings.atualizacoes.errorMessage = `Falha ao carregar registros: ${toErrorMessage(error)}`;
+    if (!options.silent) {
+      pushToast(state.settings.atualizacoes.errorMessage, 'error');
+    }
+  } finally {
+    state.settings.atualizacoes.loading = false;
+    render();
+  }
+}
+
+async function submitSettingsSystemUpdateForm(form) {
+  if (state.auth.user?.role !== 'admin') {
+    pushToast('Apenas administradores podem registrar atualizacoes.', 'error');
+    return;
+  }
+
+  const formData = new FormData(form);
+  const titulo = String(formData.get('titulo') || '').trim();
+  const descricao = String(formData.get('descricao') || '').trim();
+  if (titulo.length < 3 || descricao.length < 3) {
+    pushToast('Informe um titulo e uma descricao para a atualizacao.', 'error');
+    return;
+  }
+
+  state.settings.atualizacoes.saving = true;
+  state.settings.atualizacoes.errorMessage = '';
+  render();
+  try {
+    await apiRequest('/atualizacoes/registros', {
+      method: 'POST',
+      body: { titulo, descricao }
+    });
+    pushToast('Atualizacao registrada para o proximo relatorio diario.', 'success');
+    await loadSettingsSystemUpdates({ silent: true });
+  } catch (error) {
+    state.settings.atualizacoes.errorMessage = `Falha ao registrar atualizacao: ${toErrorMessage(error)}`;
+    pushToast(state.settings.atualizacoes.errorMessage, 'error');
+  } finally {
+    state.settings.atualizacoes.saving = false;
+    render();
+  }
 }
 
 async function submitSettingsAuthUserForm(form) {

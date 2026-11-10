@@ -757,6 +757,115 @@ textarea:focus-visible,
   box-shadow: none;
 }
 
+.dashboard-updates-shortcut {
+  width: 100%;
+  min-height: 76px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text-primary);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: var(--shadow-soft);
+  transition: border-color 0.18s ease, background 0.18s ease, transform 0.18s ease;
+}
+
+.dashboard-updates-shortcut:hover {
+  border-color: var(--accent-dark);
+  background: var(--surface-hover);
+  transform: translateY(-1px);
+}
+
+.dashboard-updates-shortcut:focus-visible {
+  outline: 2px solid var(--accent-dark);
+  outline-offset: 2px;
+}
+
+.dashboard-updates-shortcut-icon {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-alt);
+  color: var(--accent-dark);
+}
+
+.dashboard-updates-shortcut-icon svg {
+  width: 21px;
+  height: 21px;
+}
+
+.dashboard-updates-shortcut-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dashboard-updates-shortcut-copy strong {
+  font-size: 0.94rem;
+}
+
+.dashboard-updates-shortcut-copy small,
+.dashboard-updates-shortcut-time {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.dashboard-updates-shortcut-time {
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+.dashboard-updates-shortcut-arrow {
+  color: var(--text-secondary);
+  font-size: 1.7rem;
+  line-height: 1;
+}
+
+.system-update-report-card {
+  margin-top: 14px;
+}
+
+.system-update-report-list {
+  display: grid;
+  gap: 10px;
+}
+
+.system-update-entry {
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--surface-alt);
+}
+
+.system-update-entry-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.system-update-entry-header small {
+  color: var(--text-secondary);
+  text-align: right;
+}
+
+.system-update-entry p {
+  margin: 10px 0 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
 .dashboard-alert-button-empty {
   border-color: rgba(28, 161, 103, 0.3);
   background: linear-gradient(180deg, #f0fff7 0%, #dcf8e9 100%);
@@ -3834,6 +3943,43 @@ tbody tr.cert-row-a-vencer:hover {
 }
 
 @media (max-width: 640px) {
+  .dashboard-updates-shortcut {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr) 18px;
+    gap: 8px 10px;
+  }
+
+  .dashboard-updates-shortcut-icon {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+  }
+
+  .dashboard-updates-shortcut-copy {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .dashboard-updates-shortcut-time {
+    grid-column: 2;
+    grid-row: 2;
+    margin-left: 0;
+    white-space: normal;
+  }
+
+  .dashboard-updates-shortcut-arrow {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+    justify-self: end;
+  }
+
+  .system-update-entry-header {
+    flex-direction: column;
+  }
+
+  .system-update-entry-header small {
+    text-align: left;
+  }
+
   .stats-grid,
   .kpi-grid,
   .scheduler-strip,

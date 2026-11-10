@@ -183,6 +183,16 @@ Veja `.env.example`.
 - O isolamento de contexto continua sendo feito por `clienteId` nos endpoints que exigem escopo (ex.: certificados vinculados, `/nfse/:id/*`, `/sync/logs`).
 - Operacoes de escrita (`POST/PATCH/DELETE`) continuam gerando trilha de auditoria automatica em `auditoria_usuario` (acao, entidade, cliente, ip e user-agent).
 
+## Atualizacoes do sistema
+
+O dashboard abre a tela de atualizacoes, que lista relatorios diarios gerados as 17h30 no horario de Brasilia. Administradores registram titulo e descricao em `Configuracoes > Atualizacoes`; cada relatorio guarda o retrato dos registros criados naquele dia. A geracao e idempotente e ocorre tambem na inicializacao da API quando o horario do dia ja passou.
+
+- `GET /atualizacoes/relatorios` (perfis `admin` e `comum`): lista os relatorios diários mais recentes.
+- `GET /atualizacoes/registros` (admin): lista os registros publicados.
+- `POST /atualizacoes/registros` (admin): cria registro com `{ "titulo": "...", "descricao": "..." }`.
+
+Detalhes de payload e comportamento: [`docs/system-updates.md`](docs/system-updates.md).
+
 ## Comandos principais
 
 ```bash
