@@ -164,8 +164,9 @@ export class NfseController {
 
   @Patch(':id/valor-servico')
   @ApiOperation({
-    summary: 'Altera manualmente o valor de servico de uma NFS-e autorizada com cStat 102',
-    description: 'Preserva o valor oficial do XML e grava o valor informado como ajuste manual persistente.'
+    summary: 'Altera manualmente o valor de servico de uma NFS-e elegivel',
+    description:
+      'Disponivel para NFS-e autorizada com cStat 102 ou nota tomada, autorizada, com valor oficial zerado e emitida pela VR Beneficios ou Empresa Brasileira de Beneficios. Preserva o valor oficial do XML e grava o valor informado como ajuste manual persistente.'
   })
   @ApiOkResponse({
     schema: {

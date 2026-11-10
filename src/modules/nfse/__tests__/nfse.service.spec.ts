@@ -94,6 +94,94 @@ describe('NfseService', () => {
     prisma.nfseContaContabilConfig.findUnique.mockResolvedValue(undefined);
   });
 
+  describe('updateManualServiceValue', () => {
+    const authorizedZeroValueNote = (razaoSocialPrestador: string, status = '100') => ({
+      id: 'nfse-beneficios-1',
+      clienteId: 'cliente-1',
+      cnpjTomador: '12345678000199',
+      status,
+      valorServico: new Prisma.Decimal('0.00'),
+      razaoSocialPrestador,
+      dataCancelamento: null,
+      eventos: [],
+      vinculos: []
+    });
+
+    it('permite ajustar nota tomada autorizada zerada da VR Beneficios', async () => {
+      prisma.cliente.findUnique.mockResolvedValue({ cnpj: '12.345.678/0001-99' } as never);
+      prisma.nfseDocumento.findUnique.mockResolvedValue(
+        authorizedZeroValueNote('VR BENEFICIOS E SERVICOS DE PROCESSAMENTO LTDA') as never
+      );
+      prisma.nfseDocumento.update.mockResolvedValue({ id: 'nfse-beneficios-1' } as never);
+
+      await service.updateManualServiceValue('nfse-beneficios-1', { clienteId: 'cliente-1', valorServico: 570 });
+
+      expect(prisma.nfseDocumento.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'nfse-beneficios-1' },
+          data: { valorServicoManual: new Prisma.Decimal('570.00') }
+        })
+      );
+    });
+
+    it('permite ajustar nota autorizada zerada da Empresa Brasileira de Beneficios', async () => {
+      prisma.cliente.findUnique.mockResolvedValue({ cnpj: '12345678000199' } as never);
+      prisma.nfseDocumento.findUnique.mockResolvedValue(
+        authorizedZeroValueNote('EMPRESA BRASILEIRA DE BENEFICIOS E PAGAMENTOS INSTITUICAO DE PAGAMENTO', 'autorizada') as never
+      );
+      prisma.nfseDocumento.update.mockResolvedValue({ id: 'nfse-beneficios-1' } as never);
+
+      await service.updateManualServiceValue('nfse-beneficios-1', { clienteId: 'cliente-1', valorServico: 880 });
+
+      expect(prisma.nfseDocumento.update).toHaveBeenCalled();
+    });
+
+    it('mantem o ajuste para NFS-e cStat 102 de qualquer prestador', async () => {
+      prisma.nfseDocumento.findUnique.mockResolvedValue({
+        ...authorizedZeroValueNote('GOLD MACHINE LTDA', '102'),
+        valorServico: new Prisma.Decimal('570.00')
+      } as never);
+      prisma.nfseDocumento.update.mockResolvedValue({ id: 'nfse-gold-machine' } as never);
+
+      await service.updateManualServiceValue('nfse-gold-machine', { clienteId: 'cliente-1', valorServico: 570 });
+
+      expect(prisma.nfseDocumento.update).toHaveBeenCalled();
+    });
+
+    it('recusa nota zerada de outro prestador fora do cStat 102', async () => {
+      prisma.nfseDocumento.findUnique.mockResolvedValue(authorizedZeroValueNote('OUTRO FORNECEDOR') as never);
+
+      await expect(
+        service.updateManualServiceValue('nfse-beneficios-1', { clienteId: 'cliente-1', valorServico: 100 })
+      ).rejects.toThrow('O ajuste manual de valor esta disponivel');
+      expect(prisma.nfseDocumento.update).not.toHaveBeenCalled();
+    });
+
+    it('recusa nota da VR Beneficios quando o valor oficial nao esta zerado', async () => {
+      prisma.nfseDocumento.findUnique.mockResolvedValue({
+        ...authorizedZeroValueNote('VR BENEFICIOS E SERVICOS DE PROCESSAMENTO LTDA'),
+        valorServico: new Prisma.Decimal('10.00')
+      } as never);
+
+      await expect(
+        service.updateManualServiceValue('nfse-beneficios-1', { clienteId: 'cliente-1', valorServico: 100 })
+      ).rejects.toThrow('O ajuste manual de valor esta disponivel');
+      expect(prisma.nfseDocumento.update).not.toHaveBeenCalled();
+    });
+
+    it('recusa nota da VR Beneficios quando o CNPJ do cliente nao e o tomador', async () => {
+      prisma.cliente.findUnique.mockResolvedValue({ cnpj: '99887766000155' } as never);
+      prisma.nfseDocumento.findUnique.mockResolvedValue(
+        authorizedZeroValueNote('VR BENEFICIOS E SERVICOS DE PROCESSAMENTO LTDA') as never
+      );
+
+      await expect(
+        service.updateManualServiceValue('nfse-beneficios-1', { clienteId: 'cliente-1', valorServico: 100 })
+      ).rejects.toThrow('O ajuste manual de valor esta disponivel');
+      expect(prisma.nfseDocumento.update).not.toHaveBeenCalled();
+    });
+  });
+
   it('pagina a listagem de NFS-e armazenadas', async () => {
     prisma.nfseDocumento.count.mockResolvedValueOnce(245);
     prisma.nfseDocumento.findMany.mockResolvedValueOnce([]);

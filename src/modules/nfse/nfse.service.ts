@@ -1619,13 +1619,30 @@ export class NfseService {
     this.assertNfseClientScope(found, dto.clienteId);
 
     const statusCode = String(found.status ?? '').trim().match(/^\d{3}/)?.[0];
+    const normalizedStatus = this.normalizeSearchText(found.status ?? '').trim();
+    const isAuthorized = statusCode === '100' || normalizedStatus === 'autorizada';
+    const providerName = this.normalizeSearchText(found.razaoSocialPrestador ?? '').replace(/\s+/g, ' ').trim();
+    const isBenefitsProvider =
+      providerName.includes('vr beneficios') || providerName.includes('empresa brasileira de beneficios');
+    const officialServiceValue = found.valorServico?.toNumber() ?? null;
+    const isZeroValueBenefitsNote = isAuthorized && isBenefitsProvider && officialServiceValue === 0;
+    const clienteTomador = isZeroValueBenefitsNote
+      ? await this.prisma.cliente.findUnique({ where: { id: dto.clienteId }, select: { cnpj: true } })
+      : null;
+    const cnpjTomador = this.normalizeCnpj(found.cnpjTomador);
+    const cnpjCliente = this.normalizeCnpj(clienteTomador?.cnpj);
+    const isZeroValueBenefitsSupplierNote =
+      isZeroValueBenefitsNote &&
+      Boolean(cnpjTomador && cnpjCliente && cnpjTomador === cnpjCliente);
     const hasCancellationEvent = (found.eventos ?? []).some((evento) => {
       const tipo = String(evento.tipoEvento ?? '').toLowerCase();
       const descricao = String(evento.descricao ?? '').toLowerCase();
       return tipo.includes('110111') || tipo.includes('cancelamento') || descricao.includes('cancelamento') || descricao.includes('cancelada');
     });
-    if (statusCode !== '102' || found.dataCancelamento || hasCancellationEvent) {
-      throw new BadRequestException('O ajuste manual de valor esta disponivel somente para NFS-e autorizada com cStat 102.');
+    if ((statusCode !== '102' && !isZeroValueBenefitsSupplierNote) || found.dataCancelamento || hasCancellationEvent) {
+      throw new BadRequestException(
+        'O ajuste manual de valor esta disponivel para NFS-e autorizada com cStat 102 ou notas tomadas zeradas autorizadas da VR Beneficios e da Empresa Brasileira de Beneficios.'
+      );
     }
 
     return this.prisma.nfseDocumento.update({

@@ -4172,7 +4172,7 @@ function renderClientDetailsPage(clientId) {
                           const clientXmlMenuId = `client-xml:${xml.id}`;
                           const clientXmlMenuItems = [
                             { label: 'Visualizar', action: 'xml-details', attrs: { 'xml-id': xml.id } },
-                            ...(xml.statusFiscal === 'Autorizada - 102'
+                            ...(canEditManualNfseValue(xml)
                               ? [{ label: 'Alterar valor pela descricao', action: 'xml-edit-value', attrs: { 'xml-id': xml.id } }]
                               : []),
                             { label: 'Baixar XML', action: 'xml-download', attrs: { 'xml-id': xml.id } },
@@ -7512,7 +7512,7 @@ function renderXmlsTableCard(xmls) {
                       ]
                     : [
                         { label: 'Visualizar detalhes', action: 'xml-details', attrs: { 'xml-id': xml.id } },
-                        ...(xml.statusFiscal === 'Autorizada - 102'
+                        ...(canEditManualNfseValue(xml)
                           ? [{ label: 'Alterar valor pela descricao', action: 'xml-edit-value', attrs: { 'xml-id': xml.id } }]
                           : []),
                         {
@@ -7551,6 +7551,21 @@ function renderXmlsTableCard(xmls) {
       </div>
     </article>
   `;
+}
+
+function canEditManualNfseValue(xml) {
+  if (xml?.statusFiscal === 'Autorizada - 102') {
+    return true;
+  }
+
+  if (xml?.statusFiscal !== 'Autorizada' || xml?.tipo !== 'Tomada') {
+    return false;
+  }
+
+  const issuer = normalizeSearchText(xml.prestador).replace(/\s+/g, ' ').trim();
+  const isBenefitsProvider =
+    issuer.includes('vr beneficios') || issuer.includes('empresa brasileira de beneficios');
+  return isBenefitsProvider && xml.valorServicoOriginal != null && Number(xml.valorServicoOriginal) === 0;
 }
 
 function renderXmlSortHeader(key, label) {
@@ -24617,7 +24632,8 @@ function buildXmlFilesFromApi(nfseDocs, clients, contextClienteId) {
         dataEmissao: doc.dataEmissao || doc.createdAt || doc.updatedAt,
         dataDownload: doc.updatedAt || doc.createdAt || doc.dataEmissao,
         valor: toNumber(doc.valorServicoManual ?? doc.valorServico),
-        valorServicoManual: toNumber(doc.valorServicoManual),
+        valorServicoOriginal: doc.valorServico == null ? null : toNumber(doc.valorServico),
+        valorServicoManual: doc.valorServicoManual == null ? null : toNumber(doc.valorServicoManual),
         tipo,
         statusArmazenamento: doc.xmlPath ? 'Armazenado' : 'Erro',
         statusFiscal,
@@ -27272,8 +27288,8 @@ async function openXmlDetails(xmlId, options = {}) {
 
 function openXmlManualValueModal(xmlId) {
   const xml = findXmlById(xmlId);
-  if (!xml || !xml.apiNfseId || !xml.clientId || xml.statusFiscal !== 'Autorizada - 102') {
-    pushToast('O ajuste manual esta disponivel somente para NFS-e Autorizada - 102.', 'error');
+  if (!xml || !xml.apiNfseId || !xml.clientId || !canEditManualNfseValue(xml)) {
+    pushToast('O ajuste manual esta disponivel para NFS-e Autorizada - 102 ou notas zeradas autorizadas da VR Beneficios e da Empresa Brasileira de Beneficios.', 'error');
     return;
   }
 
