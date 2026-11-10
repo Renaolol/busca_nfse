@@ -834,6 +834,10 @@ textarea:focus-visible,
   margin-top: 14px;
 }
 
+.settings-update-registration-card {
+  margin-bottom: 10px;
+}
+
 .system-update-report-list {
   display: grid;
   gap: 10px;

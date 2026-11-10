@@ -23183,7 +23183,7 @@ function renderSettingsUpdatesPanel() {
   const records = Array.isArray(updates.records) ? updates.records : [];
   return `
     <div class="stack" style="gap:16px;">
-      <article class="card">
+      <article class="card settings-update-registration-card">
         <div class="card-header" style="margin-bottom:12px;">
           <div>
             <h3 class="card-title">Registrar atualizacao</h3>
