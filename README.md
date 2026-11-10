@@ -286,7 +286,7 @@ Valores aceitos:
 
 Use `POST /nfse/importar-xml` para carregar XMLs legados de NFS-e ou XMLs de evento.
 Use `POST /nfse/recuperar-por-chave` para recuperar XMLs faltantes que estejam disponiveis no Portal Nacional/Emissor Publico. O endpoint recebe `clienteId`, `cnpjConsulta`, `ambiente` e a lista `chavesAcesso`; para cada chave, o backend consulta a API oficial e importa o XML retornado.
-Use `POST /sync/reprocessar-nsus-passados/execucao` com `clienteId`, `cnpjConsulta`, `ambiente` e `lacunas` para auditar apenas os NSUs mais provaveis de uma lacuna de numeracao detectada na listagem. O endpoint aceita usuarios com perfil `admin` ou `comum`. O backend usa os XMLs ja armazenados para inferir as faixas de NSU vizinhas e tenta recuperar os documentos faltantes por NSU, sem depender de consulta automatica por DPS.
+Use `POST /sync/reprocessar-nsus-passados/preview` com `clienteId`, `cnpjConsulta`, `ambiente` e `lacunas` para ver o limite de NSUs candidatos e as faixas provaveis antes de iniciar a consulta. O preview nao consulta a ADN. Em seguida, `POST /sync/reprocessar-nsus-passados/execucao` inicia a auditoria direcionada. O endpoint aceita usuarios com perfil `admin` ou `comum`. O backend usa os XMLs ja armazenados para inferir e priorizar os NSUs associados a cada lacuna; encerra a busca quando todos os numeros pendentes forem encontrados e continua pela faixa se algum permanecer faltando. A estimativa do preview e um limite superior, pois documentos ja armazenados sao pulados.
 Use `GET /nfse/leitura-fiscal` para montar a tabela consolidada de leitura fiscal das NFS-e filtradas na tela `XMLs NFS-e`. O endpoint reutiliza os mesmos filtros de `GET /nfse`, processa apenas documentos com XML salvo e retorna totais de servico/retercoes, incluindo `valorIrrfTotal` e `valorCsllTotal`, mais uma linha por nota com colunas de tomador, municipio do tomador, ISS, PIS, COFINS, INSS, IRRF, CSLL, retencao federal e status de processamento. O municipio do tomador e lido do endereco no XML, com fallback pelo cadastro, e nomes reconhecidos sao exibidos na grafia oficial do IBGE.
 `POST /nfse/leitura-fiscal/exportar-dominio` aceita `incluirEstoque` (padrao `true`); envie `false` para gerar o layout sem os registros de produto `1030`/`3030`, mantendo os demais lancamentos fiscais e contabeis.
 Notas aplicam deduplicacao por `ambiente + chave_acesso` e geram/salvam o DANFSE em PDF.
@@ -530,9 +530,6 @@ Quando houver pendencias (sem certificado, sem sync ou sem notas), o painel exib
 - Manual ADN: https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/manual-contribuintes-apis-adn-sistema-nacional-nfse.pdf
 - Manual Emissor Publico API: https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/documentacao-atual/manual-contribuintes-emissor-publico-api-sistema-nacional-nfs-e-v1-2-out2025.pdf
 
-<<<<<<< Updated upstream
-=======
 ## NFC-e Santa Catarina
 
 A tela `NFC-e SC` configura controles e executa consulta manual ao servico da SEF/SC. O NSU estadual tem controle separado do NSU da distribuicao nacional; os XMLs modelo 65 entram no acervo de NF-e com origem `sef_sc_nfce` e deduplicacao por `ambiente + chave_acesso`. Veja [docs/nfce-sc.md](docs/nfce-sc.md) para endpoints, certificado contabilista, configuracao e limites de consulta.
->>>>>>> Stashed changes

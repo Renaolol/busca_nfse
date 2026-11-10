@@ -1854,6 +1854,15 @@ function onDocumentClick(event) {
       void runNfseGapAuditFromCurrentSearch();
       return;
     }
+    case 'nfse-gap-audit-start': {
+      if (state.modal?.kind !== 'nfse-gap-audit-preview' || state.modal.loading || !state.modal.preview?.nsusPlanejados) {
+        return;
+      }
+      const context = state.modal.context;
+      closeModal();
+      void executeNfseGapAuditForContext(context);
+      return;
+    }
     case 'gap-audit-refresh': {
       void loadNfseGapAuditOverview();
       return;
@@ -12597,6 +12606,8 @@ function renderModal() {
       return renderXmlManualValueModal();
     case 'recover-past-nsus':
       return renderRecoverPastNsusModal();
+    case 'nfse-gap-audit-preview':
+      return renderNfseGapAuditPreviewModal();
     case 'import-clients':
       return `
         <div class="overlay" data-action="overlay-close">
@@ -12845,7 +12856,7 @@ function renderRecoverPastNsusModal() {
                 </select>
               </label>
               <p class="card-subtitle" style="grid-column: span 2; margin:0;">
-                A rotina varre NSUs ja consultados, pula notas que ja existem e consulta o ADN apenas para lacunas. A execucao pode demorar.
+                Esta recuperacao varre todo o historico de NSUs consultados. Para corrigir lacunas de numeracao ja identificadas, use "Auditar lacunas por NSU" na auditoria de NFS-e; ela mostra as faixas provaveis antes de iniciar.
               </p>
             </div>
           </div>
@@ -14156,6 +14167,69 @@ function renderEventsSyncReportModal() {
   `;
 }
 
+function renderNfseGapAuditPreviewModal() {
+  if (state.modal?.kind !== 'nfse-gap-audit-preview') {
+    return '';
+  }
+
+  const loading = Boolean(state.modal.loading);
+  const preview = state.modal.preview || null;
+  const errorMessage = String(state.modal.errorMessage || '').trim();
+  const controls = Array.isArray(preview?.controles) ? preview.controles : [];
+  const nsusPlanejados = Number(preview?.nsusPlanejados || 0);
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 920px); max-width:920px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Prévia da auditoria por NSU</h3>
+          <p class="modal-subtitle">${escapeHtml(state.modal.clientName || 'Empresa selecionada')} • lacunas de numeração identificadas</p>
+        </div>
+        <div class="modal-body">
+          ${
+            errorMessage
+              ? `<div class="table-state error">${escapeHtml(errorMessage)}</div>`
+              : loading
+                ? '<div class="table-state loading">Estimando as faixas de NSU prováveis...</div>'
+                : `
+                  <div class="form-grid two" style="margin-bottom:16px;">
+                    ${detailItem('Lacunas informadas', String(Number(preview?.lacunasInformadas || 0)))}
+                    ${detailItem('NSUs candidatos (limite máximo)', String(nsusPlanejados))}
+                  </div>
+                  <p class="card-subtitle" style="margin:0 0 14px;">A busca consulta primeiro os NSUs mais prováveis e encerra assim que todos os números pendentes forem encontrados. Se algum continuar faltando, percorre o restante da faixa.</p>
+                  ${
+                    controls.length
+                      ? controls
+                          .map(
+                            (control) => `
+                              <section style="padding:12px 14px; border:1px solid var(--line); border-radius:12px; margin-bottom:10px;">
+                                <strong>${escapeHtml(formatCpfCnpj(control?.cnpjConsulta || '') || control?.cnpjConsulta || '-')}</strong>
+                                <span class="row-sub">${escapeHtml(mapNfseAmbienteLabel(control?.ambiente))} • ${escapeHtml(String(control?.nsusPlanejados || 0))} NSU(s) candidato(s)</span>
+                                <ul style="margin:10px 0 0; padding-left:20px;">
+                                  ${(Array.isArray(control?.faixas) ? control.faixas : [])
+                                    .map(
+                                      (range) => `<li>${escapeHtml(String(range?.nsuInicial || '0'))} a ${escapeHtml(String(range?.nsuFinal || '0'))} (${escapeHtml(String(range?.quantidade || 0))} NSU(s)): ${escapeHtml((Array.isArray(range?.lacunas) ? range.lacunas : []).join('; ') || 'lacuna identificada')}</li>`
+                                    )
+                                    .join('') || '<li>Nenhuma faixa provável de NSU encontrada.</li>'}
+                                </ul>
+                              </section>
+                            `
+                          )
+                          .join('')
+                      : '<div class="table-state">Nenhuma faixa provável de NSU foi encontrada para as lacunas. A busca não consultará a ADN.</div>'
+                  }
+                `
+          }
+        </div>
+        <div class="modal-footer">
+          <button class="btn secondary" type="button" data-action="close-modal">Fechar</button>
+          ${!loading && !errorMessage && nsusPlanejados > 0 ? '<button class="btn primary" type="button" data-action="nfse-gap-audit-start">Iniciar auditoria</button>' : ''}
+        </div>
+      </div>
+    </div>
+  `;
+}
+
 function renderPastNsuRecoveryReportModal() {
   if (state.modal?.kind !== 'past-nsu-recovery-report') {
     return '';
@@ -14186,6 +14260,7 @@ function renderPastNsuRecoveryReportModal() {
   const falhas = Number(summary?.falhas || 0);
   const foundNsuCount = rows.length || nsusAvaliados;
   const resolvedNsuCount = rows.filter((row) => ['ja_baixado', 'baixado', 'sem_documento'].includes(String(row?.status || ''))).length;
+  const notNeededNsuCount = rows.filter((row) => String(row?.status || '') === 'nao_necessario').length;
   const pendingNsuCount = rows.filter((row) => ['na_fila', 'consultando', 'erro'].includes(String(row?.status || ''))).length;
 
   return `
@@ -14205,6 +14280,7 @@ function renderPastNsuRecoveryReportModal() {
             ${detailItem('Controles processados', `${processedCount}${totalCount ? ` / ${totalCount}` : ''}`)}
             ${detailItem('NSUs encontrados', String(foundNsuCount))}
             ${detailItem('NSUs resolvidos', String(resolvedNsuCount))}
+            ${executionMode === 'gap-audit' ? detailItem('NSUs dispensados', String(notNeededNsuCount)) : ''}
             ${detailItem('NSUs pendentes', String(pendingNsuCount))}
             ${detailItem('NSUs consultados', String(nsusConsultados))}
             ${
@@ -18848,7 +18924,7 @@ async function runPastNsuRecovery(clientId = null) {
     let result;
     let latestExecution = await apiRequest('/sync/reprocessar-nsus-passados/execucao', {
       method: 'POST',
-      body: clientId ? { clienteId } : {},
+      body: clientId ? { clienteId: clientId } : {},
       timeoutMs: 2 * 60 * 1000
     });
 
@@ -18972,6 +19048,57 @@ function updateExecutionMonitorFromPastNsuRecovery(execution, fallbackClientName
 }
 
 async function runNfseGapAuditForContext(context) {
+  if (state.dataSource !== 'api') {
+    pushToast('A auditoria por NSU so esta disponivel com a API real conectada.', 'error');
+    return;
+  }
+
+  if (!context.clientId || !context.client || !context.cnpjConsulta || !context.lacunas.length) {
+    pushToast('Nao foi possivel preparar a auditoria das lacunas desta empresa.', 'error');
+    return;
+  }
+
+  openModal({
+    kind: 'nfse-gap-audit-preview',
+    loading: true,
+    context,
+    clientName: context.client.razaoSocial || 'Empresa selecionada',
+    preview: null,
+    errorMessage: ''
+  });
+
+  try {
+    const preview = await apiRequest('/sync/reprocessar-nsus-passados/preview', {
+      method: 'POST',
+      body: {
+        clienteId: context.clientId,
+        cnpjConsulta: context.cnpjConsulta,
+        ambiente: context.ambiente,
+        lacunas: context.lacunas
+      },
+      timeoutMs: 2 * 60 * 1000
+    });
+
+    if (state.modal?.kind !== 'nfse-gap-audit-preview') return;
+    state.modal = {
+      ...state.modal,
+      loading: false,
+      preview,
+      errorMessage: ''
+    };
+    render();
+  } catch (error) {
+    if (state.modal?.kind !== 'nfse-gap-audit-preview') return;
+    state.modal = {
+      ...state.modal,
+      loading: false,
+      errorMessage: toErrorMessage(error)
+    };
+    render();
+  }
+}
+
+async function executeNfseGapAuditForContext(context) {
   if (state.dataSource !== 'api') {
     pushToast('A auditoria por NSU so esta disponivel com a API real conectada.', 'error');
     return;
@@ -22248,6 +22375,8 @@ function mapPastNsuRecoveryLiveRowStatusLabel(status, documentKind = null) {
       return state.modal?.kind === 'past-nsu-recovery-report' && state.modal?.executionMode === 'gap-audit'
         ? 'Sem doc. proprio'
         : 'Sem documento';
+    case 'nao_necessario':
+      return 'Dispensado';
     case 'erro':
       return 'Erro';
     default:
@@ -22264,6 +22393,7 @@ function toneFromPastNsuRecoveryLiveStatus(status) {
     case 'baixado':
       return 'success';
     case 'sem_documento':
+    case 'nao_necessario':
       return 'neutral';
     case 'erro':
       return 'danger';

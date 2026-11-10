@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
-import { ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiOkResponse, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { ClienteScopeQueryDto } from '../../common/dto/cliente-scope-query.dto';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { TenantScope } from '../auth/decorators/tenant-scope.decorator';
@@ -8,6 +8,7 @@ import { TestSingleNsuDto } from './dto/test-single-nsu.dto';
 import { StartSyncDto } from './dto/start-sync.dto';
 import { ReprocessPastNsusDto } from './dto/reprocess-past-nsus.dto';
 import { StartPastNsuRecoveryExecutionDto } from './dto/start-past-nsu-recovery-execution.dto';
+import { PastNsuRecoveryPreviewDto } from './dto/past-nsu-recovery-preview.dto';
 import { UpdateSchedulerSettingsDto } from './dto/update-scheduler-settings.dto';
 import {
   SincronizarEventosEmpresasDto,
@@ -86,6 +87,14 @@ export class SyncController {
   @Roles('admin', 'comum')
   reprocessPastNsus(@Body() dto: ReprocessPastNsusDto) {
     return this.syncService.reprocessPastNsus(dto);
+  }
+
+  @Post('sync/reprocessar-nsus-passados/preview')
+  @Roles('admin', 'comum')
+  @ApiOperation({ summary: 'Estima as faixas de NSU para lacunas de numeracao identificadas' })
+  @ApiOkResponse({ type: PastNsuRecoveryPreviewDto })
+  previewPastNsuRecovery(@Body() dto: StartPastNsuRecoveryExecutionDto) {
+    return this.syncService.previewPastNsuRecovery(dto);
   }
 
   @Post('sync/reprocessar-nsus-passados/execucao')

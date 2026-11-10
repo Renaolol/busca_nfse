@@ -13,7 +13,8 @@
 ## Operacao no painel
 
 - O menu `Busca API` dispara ciclos continuos de `POST /sync/rodar-agora` ate detectar fim da fila (status `sem_documento`).
-- O botao `Recuperar NSUs passados` permite selecionar um cliente especifico ou todos os clientes. Ele chama `POST /sync/reprocessar-nsus-passados/execucao` e consulta `GET /sync/reprocessar-nsus-passados/execucao/:executionId` periodicamente para mostrar o progresso. Antes de consultar o ADN, o sistema carrega em lote os NSUs com documento fiscal salvo, incluindo vinculos de documentos de outros clientes, e cria faixas apenas para os NSUs ausentes. O modo de todos os clientes informa progresso agregado sem criar uma linha em memoria para cada NSU.
+- O botao `Recuperar NSUs passados` permite selecionar um cliente especifico ou todos os clientes. Ele chama `POST /sync/reprocessar-nsus-passados/execucao` e consulta `GET /sync/reprocessar-nsus-passados/execucao/:executionId` periodicamente para mostrar o progresso. Na recuperacao completa, o sistema carrega em lote os NSUs com documento fiscal salvo, incluindo vinculos de documentos de outros clientes, e consulta apenas os NSUs ausentes ate `ultimo_nsu_consultado`. O modo de todos os clientes informa progresso agregado sem criar uma linha em memoria para cada NSU.
+- A auditoria de lacunas identificadas calcula antes da execucao as faixas provaveis de NSU por cliente, CNPJ e ambiente. `POST /sync/reprocessar-nsus-passados/preview` retorna o limite de NSUs candidatos e as lacunas associadas a cada faixa sem consultar a ADN. A execucao consulta primeiro os NSUs estimados pela relacao entre numeracao e NSU; se todos os numeros pendentes forem encontrados, os demais candidatos sao dispensados. Se faltar algum numero, a busca continua pelo restante das faixas. A estimativa e um limite superior, pois documentos fiscais existentes sao pulados.
 - Os botoes `Pausar` e `Retomar` atuam no mesmo fluxo continuo e atualizam o estado dos controles do cliente.
 - A interface diferencia `Busca habilitada` (cliente elegivel para rotinas) de `Executando agora` (consulta em andamento no monitor).
 - O endpoint `GET /sync/scheduler-status` informa se o ciclo automatico e a busca noturna estao ligados, rodando, quais horarios noturnos estao ativos e qual a proxima execucao noturna.
@@ -49,6 +50,7 @@ Os jobs podem ser disparados manualmente pelos scripts `npm run job:*` para oper
 - Retorno sem documento definitivo (ex.: 404 sem lote): avanca NSU.
 - Erro temporario de API (ex.: 429, timeout, 5xx): **nao avanca NSU** e agenda nova tentativa.
 - Recuperacao de NSUs passados: nao altera `ultimo_nsu_consultado`; atualiza apenas contadores, logs e `ultimo_nsu_com_documento` quando encontra documento fiscal ausente.
+- A auditoria direcionada por lacunas nao altera `ultimo_nsu_consultado`. Seu preview e somente leitura; a execucao continua idempotente e mantem a deduplicacao existente por ambiente e chave de acesso.
 
 ## Modos de inicio de sync
 
