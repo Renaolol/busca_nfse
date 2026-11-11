@@ -380,6 +380,7 @@ const state = {
     reports: [],
     loadingReports: false,
     downloadingReportId: null,
+    viewingReportId: null,
     reportsError: '',
     reportsLastLoadedAt: null
   },
@@ -2497,6 +2498,10 @@ function onDocumentClick(event) {
     }
     case 'system-update-download-pdf': {
       void downloadDailySystemUpdateReport(actionNode.getAttribute('data-report-id'));
+      return;
+    }
+    case 'system-update-view-pdf': {
+      void viewDailySystemUpdateReport(actionNode.getAttribute('data-report-id'));
       return;
     }
     case 'settings-updates-reload': {
@@ -7750,7 +7755,7 @@ function renderSystemUpdatesPage() {
   const reports = Array.isArray(reportsState.reports) ? reportsState.reports : [];
   const actions = [
     actionButton(
-      reportsState.loadingReports ? 'Atualizando...' : 'Atualizar relatorios',
+      reportsState.loadingReports ? 'Atualizando...' : 'Atualizar lista',
       'system-updates-refresh',
       'secondary',
       reportsState.loadingReports
@@ -7760,18 +7765,22 @@ function renderSystemUpdatesPage() {
   return `
     <section class="page-section">
       ${renderPageHeader({
-        title: 'Atualizacoes do sistema',
-        description: 'Relatorios diarios gerados as 17h30 no horario de Brasilia com os registros publicados pela equipe.',
-        actions,
-        badgeText: '17h30'
+        title: 'Atualizações do sistema',
+        description: 'Consulte e baixe os relatórios diários de melhorias publicadas no sistema.',
+        actions
       })}
+      <div class="system-update-tabs card" aria-label="Categorias de atualizações">
+        <span class="system-update-tab active" aria-current="page">
+          Atualizações <span class="system-update-tab-count">${reports.length}</span>
+        </span>
+      </div>
       ${reportsState.reportsError ? `<article class="card table-state error">${escapeHtml(reportsState.reportsError)}</article>` : ''}
       ${
         reportsState.loadingReports
-          ? '<article class="card table-state loading">Carregando relatorios de atualizacoes...</article>'
+          ? '<article class="card table-state loading">Carregando relatórios de atualizações...</article>'
           : reports.length
-            ? reports.map(renderDailySystemUpdateReport).join('')
-            : '<article class="card table-state">Nenhum relatorio gerado ainda. O relatorio diario sera criado as 17h30 e ficara disponivel aqui.</article>'
+            ? `<div class="system-update-daily-list">${reports.map(renderDailySystemUpdateReport).join('')}</div>`
+            : '<article class="card table-state">Nenhum relatório diário gerado ainda. O próximo ficará disponível após a publicação diária.</article>'
       }
     </section>
   `;
@@ -7780,34 +7789,24 @@ function renderSystemUpdatesPage() {
 function renderDailySystemUpdateReport(report) {
   const records = Array.isArray(report?.registros) ? report.registros : [];
   const isDownloading = state.systemUpdates.downloadingReportId === report?.id;
+  const isViewing = state.systemUpdates.viewingReportId === report?.id;
+  const isPdfActionRunning = isDownloading || isViewing;
   return `
     <article class="card system-update-report-card">
-      <div class="card-header" style="margin-bottom:12px;">
-        <div>
-          <h3 class="card-title">Relatorio de ${escapeHtml(formatDate(report?.dataReferencia))}</h3>
-          <p class="card-subtitle" style="margin-top:6px;">Gerado em ${escapeHtml(formatDateTime(report?.geradoEm))} - ${records.length} atualizacao(oes)</p>
-        </div>
-        <button class="btn secondary" type="button" data-action="system-update-download-pdf" data-report-id="${escapeHtml(report?.id || '')}" ${isDownloading ? 'disabled' : ''}>
+      <div class="system-update-report-icon" aria-hidden="true">${icon('file')}</div>
+      <div class="system-update-report-copy">
+        <h3 class="system-update-report-title">Atualizações do NotaSync ${escapeHtml(formatDate(report?.dataReferencia))}</h3>
+        <p class="system-update-report-meta">Publicado às ${escapeHtml(formatSaoPauloTime(report?.geradoEm))}</p>
+        <p class="system-update-report-meta">Total de atualizações: ${records.length}</p>
+      </div>
+      <div class="system-update-report-actions">
+        <button class="btn secondary small" type="button" data-action="system-update-view-pdf" data-report-id="${escapeHtml(report?.id || '')}" ${isPdfActionRunning ? 'disabled' : ''}>
+          ${isViewing ? 'Abrindo PDF...' : 'Visualizar PDF'}
+        </button>
+        <button class="btn primary small" type="button" data-action="system-update-download-pdf" data-report-id="${escapeHtml(report?.id || '')}" ${isPdfActionRunning ? 'disabled' : ''}>
           ${isDownloading ? 'Gerando PDF...' : 'Baixar PDF'}
         </button>
       </div>
-      ${
-        records.length
-          ? `<div class="system-update-report-list">${records
-              .map(
-                (record) => `
-                  <article class="system-update-entry">
-                    <div class="system-update-entry-header">
-                      <strong>${escapeHtml(record?.titulo || 'Atualizacao')}</strong>
-                      <small>${escapeHtml(record?.autorNome || 'Administrador')} - ${escapeHtml(formatDateTime(record?.createdAt))}</small>
-                    </div>
-                    <p>${escapeHtml(record?.descricao || '')}</p>
-                  </article>
-                `
-              )
-              .join('')}</div>`
-          : '<div class="table-state">Nenhuma atualizacao foi registrada neste dia.</div>'
-      }
     </article>
   `;
 }
@@ -23685,6 +23684,45 @@ async function downloadDailySystemUpdateReport(reportId) {
   }
 }
 
+async function viewDailySystemUpdateReport(reportId) {
+  if (!reportId) {
+    pushToast('Relatorio diario sem identificador para visualizacao.', 'error');
+    return;
+  }
+
+  const previewWindow = window.open('', '_blank');
+  if (!previewWindow) {
+    pushToast('O navegador bloqueou a abertura do PDF. Permita pop-ups para visualizar o relatorio.', 'error');
+    return;
+  }
+
+  previewWindow.opener = null;
+  state.systemUpdates.viewingReportId = reportId;
+  render();
+  try {
+    const payload = await apiRequest(`/atualizacoes/relatorios/${encodeURIComponent(reportId)}/pdf`, { cache: false });
+    if (!payload?.contentBase64) {
+      throw new Error('Resposta sem conteudo para visualizar o relatorio.');
+    }
+
+    const blob = base64ToBlob(payload.contentBase64, payload.contentType || 'application/pdf');
+    const url = URL.createObjectURL(blob);
+    if (!previewWindow.closed) {
+      previewWindow.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } else {
+      URL.revokeObjectURL(url);
+      pushToast('A janela de visualizacao do PDF foi fechada.', 'info');
+    }
+  } catch (error) {
+    previewWindow.close();
+    pushToast(`Falha ao abrir o relatorio em PDF: ${toErrorMessage(error)}`, 'error');
+  } finally {
+    state.systemUpdates.viewingReportId = null;
+    render();
+  }
+}
+
 async function loadSettingsSystemUpdates(options = {}) {
   if (state.auth.user?.role !== 'admin') {
     return;
@@ -27135,6 +27173,24 @@ function formatDateTime(value) {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit'
+  }).format(date);
+}
+
+function formatSaoPauloTime(value) {
+  if (!value) {
+    return '17:30';
+  }
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return '17:30';
+  }
+
+  return new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23'
   }).format(date);
 }
 

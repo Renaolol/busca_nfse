@@ -831,7 +831,102 @@ textarea:focus-visible,
 }
 
 .system-update-report-card {
-  margin-top: 14px;
+  margin-top: 0;
+}
+
+.system-update-tabs {
+  display: flex;
+  align-items: center;
+  min-height: 52px;
+  padding: 8px 10px;
+}
+
+.system-update-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 36px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.system-update-tab.active {
+  border-color: var(--accent-dark);
+  background: rgba(250, 211, 43, 0.12);
+  color: var(--text-primary);
+}
+
+.system-update-tab-count {
+  display: inline-grid;
+  min-width: 22px;
+  height: 20px;
+  padding: 0 6px;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(250, 211, 43, 0.24);
+  color: var(--text-primary);
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.system-update-daily-list {
+  display: grid;
+  gap: 12px;
+}
+
+.system-update-report-card {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+}
+
+.system-update-report-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  place-items: center;
+  border-radius: 12px;
+  background: rgba(250, 211, 43, 0.2);
+  color: #806600;
+}
+
+.system-update-report-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.system-update-report-copy {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.system-update-report-title {
+  margin: 0;
+  font-size: 0.96rem;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.system-update-report-meta {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.35;
+}
+
+.system-update-report-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 .settings-update-registration-card {
@@ -3984,6 +4079,27 @@ tbody tr.cert-row-a-vencer:hover {
     text-align: left;
   }
 
+  .system-update-report-card {
+    grid-template-columns: 40px minmax(0, 1fr);
+    align-items: start;
+    gap: 12px;
+    padding: 14px;
+  }
+
+  .system-update-report-icon {
+    width: 40px;
+    height: 40px;
+  }
+
+  .system-update-report-actions {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .system-update-report-actions .btn {
+    flex: 1;
+  }
+
   .stats-grid,
   .kpi-grid,
   .scheduler-strip,
@@ -4187,6 +4303,10 @@ tbody tr.cert-row-a-vencer:hover {
 [data-theme='Escuro'] .btn.secondary:hover:not(:disabled) {
   background: var(--surface-hover);
   border-color: var(--line-strong);
+}
+
+[data-theme='Escuro'] .system-update-report-icon {
+  color: #f2cf45;
 }
 
 [data-theme='Escuro'] .btn.ghost {
