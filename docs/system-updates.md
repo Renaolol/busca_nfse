@@ -16,6 +16,10 @@ Administradores registram mudancas em `Configuracoes > Atualizacoes`. Cada regis
 
 Disponivel para `admin` e `comum`. Retorna ate 120 relatorios em ordem decrescente de data.
 
+### `GET /atualizacoes/relatorios/:id/pdf`
+
+Disponivel para `admin` e `comum`. Gera o PDF profissional a partir da copia salva do relatorio e retorna `fileName`, `contentType` e `contentBase64` para download.
+
 ### `GET /atualizacoes/registros`
 
 Restrito a `admin`. Retorna ate 200 registros publicados, do mais recente ao mais antigo.

@@ -4,6 +4,7 @@ import { UpdatesService } from '../updates.service';
 describe('UpdatesController', () => {
   const updatesService = {
     listDailyReports: jest.fn(),
+    getDailyReportPdf: jest.fn(),
     listSystemUpdates: jest.fn(),
     createSystemUpdate: jest.fn()
   };
@@ -16,6 +17,13 @@ describe('UpdatesController', () => {
 
     expect(controller.listDailyReports()).toEqual([{ id: 'report-1' }]);
     expect(updatesService.listDailyReports).toHaveBeenCalledTimes(1);
+  });
+
+  it('solicita o PDF do relatorio pelo identificador', async () => {
+    updatesService.getDailyReportPdf.mockResolvedValue({ fileName: 'relatorio.pdf' });
+
+    await expect(controller.downloadDailyReportPdf('report-1')).resolves.toEqual({ fileName: 'relatorio.pdf' });
+    expect(updatesService.getDailyReportPdf).toHaveBeenCalledWith('report-1');
   });
 
   it('cria registro de atualizacao com o usuario autenticado', () => {

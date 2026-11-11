@@ -188,6 +188,7 @@ Veja `.env.example`.
 O dashboard abre a tela de atualizacoes, que lista relatorios diarios gerados as 17h30 no horario de Brasilia. Administradores registram titulo e descricao em `Configuracoes > Atualizacoes`; cada relatorio guarda o retrato dos registros criados naquele dia. A geracao e idempotente e ocorre tambem na inicializacao da API quando o horario do dia ja passou.
 
 - `GET /atualizacoes/relatorios` (perfis `admin` e `comum`): lista os relatorios diários mais recentes.
+- `GET /atualizacoes/relatorios/:id/pdf` (perfis `admin` e `comum`): gera e retorna o PDF do relatorio para download.
 - `GET /atualizacoes/registros` (admin): lista os registros publicados.
 - `POST /atualizacoes/registros` (admin): cria registro com `{ "titulo": "...", "descricao": "..." }`.
 

@@ -84,6 +84,34 @@ describe('UpdatesService', () => {
     expect(prisma.relatorioAtualizacaoDiario.upsert).not.toHaveBeenCalled();
   });
 
+  it('gera um PDF do retrato diario com nome e tipo de arquivo corretos', async () => {
+    prisma.relatorioAtualizacaoDiario.findUnique.mockResolvedValue({
+      id: 'report-1',
+      dataReferencia: new Date('2026-11-10T00:00:00.000Z'),
+      geradoEm: new Date('2026-11-10T20:30:00.000Z'),
+      registros: [
+        {
+          id: 'update-1',
+          titulo: 'Nova tela',
+          descricao: 'Tela para consultar as atualizacoes do sistema.',
+          autorNome: 'Admin GCONT',
+          createdAt: '2026-11-10T20:29:00.000Z'
+        }
+      ]
+    });
+
+    const result = await service.getDailyReportPdf('report-1');
+    const pdf = Buffer.from(result.contentBase64, 'base64');
+
+    expect(result).toMatchObject({
+      id: 'report-1',
+      fileName: 'relatorio-atualizacoes-2026-11-10.pdf',
+      contentType: 'application/pdf'
+    });
+    expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-');
+    expect(pdf.length).toBeGreaterThan(1000);
+  });
+
   it('registra o nome do administrador no historico', async () => {
     await service.createSystemUpdate(
       { titulo: 'Atualização', descricao: 'Incluída uma nova tela.' },

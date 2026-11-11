@@ -379,6 +379,7 @@ const state = {
   systemUpdates: {
     reports: [],
     loadingReports: false,
+    downloadingReportId: null,
     reportsError: '',
     reportsLastLoadedAt: null
   },
@@ -2492,6 +2493,10 @@ function onDocumentClick(event) {
     }
     case 'system-updates-refresh': {
       void loadDailySystemUpdateReports();
+      return;
+    }
+    case 'system-update-download-pdf': {
+      void downloadDailySystemUpdateReport(actionNode.getAttribute('data-report-id'));
       return;
     }
     case 'settings-updates-reload': {
@@ -7774,6 +7779,7 @@ function renderSystemUpdatesPage() {
 
 function renderDailySystemUpdateReport(report) {
   const records = Array.isArray(report?.registros) ? report.registros : [];
+  const isDownloading = state.systemUpdates.downloadingReportId === report?.id;
   return `
     <article class="card system-update-report-card">
       <div class="card-header" style="margin-bottom:12px;">
@@ -7781,7 +7787,9 @@ function renderDailySystemUpdateReport(report) {
           <h3 class="card-title">Relatorio de ${escapeHtml(formatDate(report?.dataReferencia))}</h3>
           <p class="card-subtitle" style="margin-top:6px;">Gerado em ${escapeHtml(formatDateTime(report?.geradoEm))} - ${records.length} atualizacao(oes)</p>
         </div>
-        ${statusBadge('Relatorio diario', 'info')}
+        <button class="btn secondary" type="button" data-action="system-update-download-pdf" data-report-id="${escapeHtml(report?.id || '')}" ${isDownloading ? 'disabled' : ''}>
+          ${isDownloading ? 'Gerando PDF...' : 'Baixar PDF'}
+        </button>
       </div>
       ${
         records.length
@@ -23653,6 +23661,26 @@ async function loadDailySystemUpdateReports(options = {}) {
     }
   } finally {
     state.systemUpdates.loadingReports = false;
+    render();
+  }
+}
+
+async function downloadDailySystemUpdateReport(reportId) {
+  if (!reportId) {
+    pushToast('Relatorio diario sem identificador para download.', 'error');
+    return;
+  }
+
+  state.systemUpdates.downloadingReportId = reportId;
+  render();
+  try {
+    const payload = await apiRequest(`/atualizacoes/relatorios/${encodeURIComponent(reportId)}/pdf`, { cache: false });
+    downloadFromPayload(payload, `relatorio-atualizacoes-${reportId}.pdf`);
+    pushToast('Download do relatorio em PDF iniciado.', 'success');
+  } catch (error) {
+    pushToast(`Falha ao gerar o relatorio em PDF: ${toErrorMessage(error)}`, 'error');
+  } finally {
+    state.systemUpdates.downloadingReportId = null;
     render();
   }
 }
