@@ -1,11 +1,12 @@
-import { extractCteServiceSummary, extractNfeLineItems, extractNfeTotalIpiValue } from './xml-reader30-nfe-parser.js';
+import { extractCteServiceSummary, extractNfeDocumentUfs, extractNfeLineItems, extractNfeTotalIpiValue } from './xml-reader30-nfe-parser.js';
 import {
   isXmlReader30DocumentCancelled,
   isXmlReader30NfeModel,
   shouldIncludeDocumentValueInSum
 } from './xml-reader30-summary-utils.js';
 import {
-  isXmlReader30DifalIcms4,
+  isXmlReader30DifalEligible,
+  isXmlReader30DifalInterstate,
   resolveXmlReader30DifalBase,
   resolveXmlReader30DifalIcms4Amount,
   resolveXmlReader30DifalRate
@@ -8284,7 +8285,7 @@ function renderXmlReader30DifalSection() {
         </label>
         <div class="compare-upload-hint compare-span-4">
           <span class="compare-upload-dot"></span>
-          <span>Considera apenas as NF-e recebidas (compras) da empresa no periodo. A aliquota de 4% e conferida no XML, priorizando pICMSInter e usando pICMS como alternativa. Para esses itens: DIFAL = (Base de calculo ICMS - ICMS interestadual) regrossada pela aliquota interna informada, menos o ICMS interestadual. Demais itens (incluindo o monofasico) nao entram nessa soma.</span>
+          <span>Considera NF-e recebidas no periodo. O DIFAL inclui apenas itens com aliquota de 4% em notas interestaduais (UF do emitente diferente da UF do destinatario); notas sem as UFs no XML nao entram no calculo. A aliquota de 4% prioriza pICMSInter e usa pICMS como alternativa. Operacoes internas e demais itens (incluindo o monofasico) nao entram na soma do DIFAL.</span>
         </div>
         <div class="stack-actions compare-actions compare-span-4">
           <button class="btn primary" type="submit" ${hasClients ? '' : 'disabled'}>Calcular DIFAL</button>
@@ -8650,6 +8651,14 @@ function renderSortIndicator(direction) {
 
 const DIFAL_NOTES_COLUMNS = [
   { label: 'Numero NF', className: 'xml-reader30-number', value: (row) => row.numeroNf || row.numeroLabel || '-' },
+  {
+    label: 'Operacao',
+    className: 'xml-reader30-status',
+    value: (row) => {
+      if (!row.emitenteUf || !row.destinatarioUf) return 'UF nao identificada';
+      return `${row.emitenteUf} / ${row.destinatarioUf} (${row.isInterestadual ? 'interestadual' : 'interna'})`;
+    }
+  },
   {
     label: 'Status',
     className: 'xml-reader30-status',
@@ -10609,15 +10618,16 @@ function computeDifalReaderTotals(itemRows, aliquotaInterna, totalNotas) {
     const valorIcms = toNumber(row?.valorIcmsRaw);
     const aliquotaDifal = resolveXmlReader30DifalRate(row);
     const baseCalculo = resolveXmlReader30DifalBase(row);
-    const isIcms4 = isXmlReader30DifalIcms4(row);
-    const difalRaw = isIcms4 ? computeDifalPorDentro(baseCalculo, aliquotaDifal, aliquotaInterna) : 0;
-    const valorIcms4 = isIcms4 ? resolveXmlReader30DifalIcms4Amount(row) : 0;
+    const isInterestadual = isXmlReader30DifalInterstate(row);
+    const consideraDifal = isXmlReader30DifalEligible(row);
+    const difalRaw = consideraDifal ? computeDifalPorDentro(baseCalculo, aliquotaDifal, aliquotaInterna) : 0;
+    const valorIcms4 = consideraDifal ? resolveXmlReader30DifalIcms4Amount(row) : 0;
 
     if (!isCancelada) {
       totalMonofasico += toNumber(row?.valorCorretoRaw ?? row?.valorCorreto ?? row?.vICMSMonoRetRaw ?? row?.vICMSMonoRet ?? 0);
       totalIcmsProprio += valorIcms;
 
-      if (isIcms4) {
+      if (consideraDifal) {
         totalIcms4 += valorIcms4;
       }
 
@@ -10627,11 +10637,13 @@ function computeDifalReaderTotals(itemRows, aliquotaInterna, totalNotas) {
     return {
       ...row,
       isCancelada,
-      isIcms4,
+      isIcms4: consideraDifal,
+      isInterestadual,
+      consideraDifal,
       statusLabel: isCancelada ? 'Cancelada' : 'Ativa',
       difalRaw,
-      aliquotaDifal: aliquotaDifal > 0 ? formatXmlReader30DecimalValue(aliquotaDifal) : '-',
-      difalLabel: isIcms4 ? formatCurrency(difalRaw) : '-'
+      aliquotaDifal: consideraDifal && aliquotaDifal > 0 ? formatXmlReader30DecimalValue(aliquotaDifal) : '-',
+      difalLabel: consideraDifal ? formatCurrency(difalRaw) : '-'
     };
   });
 
@@ -11255,6 +11267,7 @@ function mapXmlReader30Item(documentType, doc) {
 
   if (documentType === 'nfe') {
     const nfe = doc;
+    const nfeDocumentUfs = extractNfeDocumentUfs(nfe.conteudoXml || '');
     const nfeItems = extractNfeLineItems(nfe.conteudoXml || '');
     const productSummary = summarizeXmlReader30Products(documentType, nfe);
     return {
@@ -11268,6 +11281,8 @@ function mapXmlReader30Item(documentType, doc) {
       cnpjLabel: formatCnpj(nfe.emitenteCnpj || nfe.destinatarioCnpj || ''),
       numeroLabel: nfe.numeroNfe || '-',
       chaveLabel: nfe.chaveAcesso ? `Chave ${nfe.chaveAcesso}` : 'Chave nao informada',
+      emitenteUf: String(nfe.emitenteUf || nfeDocumentUfs.emitenteUf || '').trim().toUpperCase(),
+      destinatarioUf: String(nfe.destinatarioUf || nfeDocumentUfs.destinatarioUf || '').trim().toUpperCase(),
       dataEmissao: resolveXmlReader30FiscalDate('nfe', nfe),
       statusLabel: nfe.statusFiscal || '-',
       statusTone: nfe.cancelada ? 'danger' : isAutorizadaFiscalStatus(nfe.statusFiscal) ? 'success' : 'info',

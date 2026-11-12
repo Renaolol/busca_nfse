@@ -16,6 +16,20 @@ function isXmlReader30DifalIcms4(item) {
   return isFourPercent(resolveXmlReader30DifalRate(item));
 }
 
+function isXmlReader30DifalInterstate(item) {
+  const emitenteUf = String(item?.emitenteUf ?? '').trim().toUpperCase();
+  const destinatarioUf = String(item?.destinatarioUf ?? '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(emitenteUf) || !/^[A-Z]{2}$/.test(destinatarioUf)) {
+    return false;
+  }
+
+  return emitenteUf !== destinatarioUf;
+}
+
+function isXmlReader30DifalEligible(item) {
+  return isXmlReader30DifalIcms4(item) && isXmlReader30DifalInterstate(item);
+}
+
 function resolveXmlReader30DifalBase(item) {
   const aliquotaInter = parseXmlReader30Rate(item?.aliquotaInterRaw);
   const baseInter = parseXmlReader30Rate(item?.baseCalculoInterRaw);
@@ -38,6 +52,8 @@ function resolveXmlReader30DifalIcms4Amount(item) {
 
 export {
   isXmlReader30DifalIcms4,
+  isXmlReader30DifalEligible,
+  isXmlReader30DifalInterstate,
   resolveXmlReader30DifalBase,
   resolveXmlReader30DifalIcms4Amount,
   resolveXmlReader30DifalRate

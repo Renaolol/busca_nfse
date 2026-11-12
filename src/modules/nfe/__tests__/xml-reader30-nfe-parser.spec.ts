@@ -1,4 +1,4 @@
-import { extractNfeLineItems } from '../../../../frontend/xml-reader30-nfe-parser.js';
+import { extractNfeDocumentUfs, extractNfeLineItems } from '../../../../frontend/xml-reader30-nfe-parser.js';
 
 function extractSingleItem(xml: string) {
   const items = extractNfeLineItems(xml);
@@ -7,6 +7,19 @@ function extractSingleItem(xml: string) {
 }
 
 describe('xml-reader30-nfe-parser', () => {
+  it('extrai as UFs do emitente e do destinatario da NF-e', () => {
+    const ufs = extractNfeDocumentUfs(`
+      <NFe>
+        <infNFe>
+          <emit><enderEmit><UF>sp</UF></enderEmit></emit>
+          <dest><enderDest><UF>RJ</UF></enderDest></dest>
+        </infNFe>
+      </NFe>
+    `);
+
+    expect(ufs).toEqual({ emitenteUf: 'SP', destinatarioUf: 'RJ' });
+  });
+
   it('le a aliquota interestadual pICMSInter do grupo ICMSUFDest', () => {
     const item = extractSingleItem(`
       <NFe>

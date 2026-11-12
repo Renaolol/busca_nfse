@@ -1,4 +1,5 @@
 import {
+  isXmlReader30DifalEligible,
   isXmlReader30DifalIcms4,
   resolveXmlReader30DifalBase,
   resolveXmlReader30DifalIcms4Amount,
@@ -30,5 +31,35 @@ describe('xml-reader30-difal-utils', () => {
 
   it('prioriza um campo XML que indique 4% sobre outra aliquota', () => {
     expect(resolveXmlReader30DifalRate({ aliquotaInterRaw: '12', aliquotaIcmsRaw: '4' })).toBe(4);
+  });
+
+  it('considera no DIFAL somente itens com aliquota de 4% em operacoes interestaduais', () => {
+    expect(
+      isXmlReader30DifalEligible({
+        aliquotaInterRaw: '4',
+        emitenteUf: 'SP',
+        destinatarioUf: 'RJ'
+      })
+    ).toBe(true);
+    expect(
+      isXmlReader30DifalEligible({
+        aliquotaInterRaw: '4',
+        emitenteUf: 'SP',
+        destinatarioUf: 'SP'
+      })
+    ).toBe(false);
+    expect(
+      isXmlReader30DifalEligible({
+        aliquotaInterRaw: '4',
+        emitenteUf: 'SP'
+      })
+    ).toBe(false);
+    expect(
+      isXmlReader30DifalEligible({
+        aliquotaInterRaw: '12',
+        emitenteUf: 'SP',
+        destinatarioUf: 'RJ'
+      })
+    ).toBe(false);
   });
 });

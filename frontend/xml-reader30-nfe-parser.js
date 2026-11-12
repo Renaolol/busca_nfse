@@ -125,6 +125,21 @@ function extractNfeLineItems(xmlString) {
     .filter((item) => item.description !== '-' || item.code !== '-');
 }
 
+function extractNfeDocumentUfs(xmlString) {
+  const xml = parseXmlDocumentSafe(xmlString);
+  if (!xml) {
+    return { emitenteUf: '', destinatarioUf: '' };
+  }
+
+  const emitenteNode = findXmlElementsByLocalName(xml, 'emit')[0] || null;
+  const destinatarioNode = findXmlElementsByLocalName(xml, 'dest')[0] || null;
+
+  return {
+    emitenteUf: getXmlText(emitenteNode, 'UF').toUpperCase(),
+    destinatarioUf: getXmlText(destinatarioNode, 'UF').toUpperCase()
+  };
+}
+
 function extractNfeTotalIpiValue(xmlString) {
   const xml = parseXmlDocumentSafe(xmlString);
   if (!xml) {
@@ -228,6 +243,7 @@ export {
   getXmlText,
   getFirstXmlText,
   extractNfeLineItems,
+  extractNfeDocumentUfs,
   extractNfeTotalIpiValue,
   extractNfeLineItemTaxValues,
   extractCteServiceSummary
