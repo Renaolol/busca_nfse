@@ -1022,7 +1022,7 @@ describe('SyncService', () => {
       expect.objectContaining({
         controlesEncontrados: 1,
         controlesProcessados: 1,
-        nsusAvaliados: 2,
+        nsusAvaliados: 1,
         nsusConsultados: 1,
         nsusIgnoradosComDocumento: 2,
         documentosSalvos: 1
@@ -1396,9 +1396,9 @@ describe('SyncService', () => {
     expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
     expect(latestExecution.summary).toEqual(
       expect.objectContaining({
-        nsusAvaliados: 1,
         nsusConsultados: 1,
         nsusIgnoradosComDocumento: 53,
+        nsusAvaliados: 2,
         documentosSalvos: 0,
         documentosIgnoradosExistentes: 2,
         semDocumento: 1,
@@ -1524,7 +1524,14 @@ describe('SyncService', () => {
       id: 'doc-evento',
       chaveAcesso: '42110092206960810000176000000000033326062205552016'
     });
-    prisma.nfseDocumento.findMany.mockResolvedValue([]);
+    prisma.nfseDocumento.findMany.mockResolvedValue(
+  Array.from({ length: 8 }, (_, index) => ({
+    clienteId: 'cliente-1',
+    estabelecimentoId: 'estab-1',
+    ambiente: Ambiente.producao,
+    nsu: BigInt(index + 1)
+  }))
+);
     prisma.nfseDocumentoVinculo.findMany.mockResolvedValue([]);
 
     const execution = await service.startPastNsuRecoveryExecution({ clienteId: 'cliente-1' });
