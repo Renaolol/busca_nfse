@@ -53,7 +53,8 @@ describe('SyncService', () => {
     },
     nfseEvento: {
       upsert: jest.fn(),
-      updateMany: jest.fn()
+      updateMany: jest.fn(),
+      deleteMany: jest.fn()
     },
     nfeDocumento: {
       count: jest.fn(),
@@ -162,6 +163,7 @@ describe('SyncService', () => {
     prisma.nfseDocumentoVinculo.findMany.mockResolvedValue([]);
     prisma.nfseEvento.upsert.mockResolvedValue({});
     prisma.nfseEvento.updateMany.mockResolvedValue({ count: 0 });
+    prisma.nfseEvento.deleteMany.mockResolvedValue({ count: 0 });
     prisma.nfeDocumento.findMany.mockResolvedValue([]);
     storage.getObject.mockRejectedValue(new Error('ENOENT: no such file or directory'));
     storage.putObject.mockResolvedValue(undefined);
@@ -498,7 +500,7 @@ describe('SyncService', () => {
     prisma.nfseDocumento.upsert.mockRejectedValue({
       code: 'P2002',
       meta: {
-        target: ['cliente_id', 'ambiente', 'nsu']
+        target: ['cliente_id', 'ambiente', 'estabelecimento_id', 'nsu']
       }
     });
     prisma.nfseDocumento.findUnique.mockImplementation(({ where }) => {
@@ -506,9 +508,12 @@ describe('SyncService', () => {
         return Promise.resolve(null);
       }
 
-      if (where?.clienteId_ambiente_nsu) {
+      if (where?.clienteId_ambiente_estabelecimentoId_nsu) {
         return Promise.resolve({
           id: 'doc-existing',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: Ambiente.producao,
           chaveAcesso: '42110092206960810000176000000000000126062205552001'
         });
       }
@@ -572,13 +577,19 @@ describe('SyncService', () => {
       if (where?.ambiente_chaveAcesso) {
         return Promise.resolve({
           id: 'doc-by-chave',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: Ambiente.producao,
           chaveAcesso: '42110092206960810000176000000000000926062205552016'
         });
       }
 
-      if (where?.clienteId_ambiente_nsu) {
+      if (where?.clienteId_ambiente_estabelecimentoId_nsu) {
         return Promise.resolve({
           id: 'doc-by-nsu',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: Ambiente.producao,
           chaveAcesso: '42110092206960810000176000000000000126062205552001'
         });
       }
@@ -656,7 +667,7 @@ describe('SyncService', () => {
       .mockRejectedValueOnce({
         code: 'P2002',
         meta: {
-          target: ['cliente_id', 'ambiente', 'nsu']
+          target: ['cliente_id', 'ambiente', 'estabelecimento_id', 'nsu']
         }
       })
       .mockResolvedValueOnce({
@@ -668,7 +679,7 @@ describe('SyncService', () => {
         return Promise.resolve(null);
       }
 
-      if (where?.clienteId_ambiente_nsu) {
+      if (where?.clienteId_ambiente_estabelecimentoId_nsu) {
         return Promise.resolve(null);
       }
 
@@ -717,13 +728,16 @@ describe('SyncService', () => {
     prisma.nfseDocumento.upsert.mockRejectedValue({
       code: 'P2002',
       meta: {
-        target: 'nfse_documentos_cliente_id_ambiente_nsu_key'
+        target: 'nfse_docs_cli_amb_est_nsu_key'
       }
     });
     prisma.nfseDocumento.findUnique.mockImplementation(({ where }) => {
-      if (where?.clienteId_ambiente_nsu) {
+      if (where?.clienteId_ambiente_estabelecimentoId_nsu) {
         return Promise.resolve({
           id: 'doc-existing',
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: Ambiente.producao,
           chaveAcesso: '42110092206960810000176000000000000126062205552001'
         });
       }
@@ -963,11 +977,12 @@ describe('SyncService', () => {
       }
     ]);
     prisma.nfseDocumento.findMany.mockResolvedValue([
-      { clienteId: 'cliente-1', ambiente: Ambiente.producao, nsu: 1n }
+      { clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: Ambiente.producao, nsu: 1n }
     ]);
     prisma.nfseDocumentoVinculo.findMany.mockResolvedValue([
       {
         clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
         ambiente: Ambiente.producao,
         nsu: 3n,
         documento: {
@@ -1024,6 +1039,53 @@ describe('SyncService', () => {
       })
     );
     expect(prisma.nfseSyncControle.update.mock.calls.at(-1)?.[0].data.ultimoNsuConsultado).toBeUndefined();
+  });
+
+  it('nao ignora NSU salvo para outro estabelecimento do mesmo cliente', async () => {
+    prisma.nfseSyncControle.findMany.mockResolvedValue([
+      {
+        id: 'ctrl-1',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-1',
+        cnpjConsulta: '12345678000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 1n,
+        ultimoNsuComDocumento: 1n,
+        createdAt: new Date('2026-06-01T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-01T00:00:00.000Z')
+      },
+      {
+        id: 'ctrl-2',
+        clienteId: 'cliente-1',
+        estabelecimentoId: 'estab-2',
+        cnpjConsulta: '98765432000199',
+        ambiente: Ambiente.producao,
+        ultimoNsuConsultado: 1n,
+        ultimoNsuComDocumento: 0n,
+        createdAt: new Date('2026-06-02T00:00:00.000Z'),
+        updatedAt: new Date('2026-06-02T00:00:00.000Z')
+      }
+    ]);
+    prisma.nfseDocumento.findMany.mockResolvedValue([
+      { clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: Ambiente.producao, nsu: 1n }
+    ]);
+    (adnClient.getDFeByNsu as jest.Mock).mockResolvedValue({
+      nsu: 1n,
+      hasDocument: false,
+      statusCode: 404,
+      message: 'Sem documento',
+      rawResponse: {}
+    });
+
+    await service.reprocessPastNsus({ clienteId: 'cliente-1' });
+
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledTimes(1);
+    expect(adnClient.getDFeByNsu).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cnpjConsulta: '98765432000199',
+        nsu: 1n
+      })
+    );
   });
 
   it('reprocessa os controles de todos os clientes quando clienteId nao e informado', async () => {
@@ -1178,7 +1240,7 @@ describe('SyncService', () => {
       }
     ]);
     prisma.nfseDocumento.findMany.mockResolvedValue([
-      { clienteId: 'cliente-1', ambiente: Ambiente.producao, nsu: 1n }
+      { clienteId: 'cliente-1', estabelecimentoId: 'estab-1', ambiente: Ambiente.producao, nsu: 1n }
     ]);
     prisma.nfseDocumento.findFirst.mockImplementation(({ where }) => {
       if (where?.nsu === 1n) {
@@ -1265,6 +1327,7 @@ describe('SyncService', () => {
   });
 
   it('finaliza o NSU consultado como sem documento quando o ADN retorna apenas itens de outros NSUs', async () => {
+    (service as unknown as { adnRequestIntervalMs: number }).adnRequestIntervalMs = 0;
     prisma.nfseSyncControle.findMany.mockResolvedValue([
       {
         id: 'ctrl-1',
@@ -1282,7 +1345,12 @@ describe('SyncService', () => {
     prisma.nfseDocumento.findMany.mockResolvedValue(
       Array.from({ length: 53 }, (_, index) => index + 1)
         .filter((nsu) => nsu !== 52)
-        .map((nsu) => ({ clienteId: 'cliente-1', ambiente: Ambiente.producao, nsu: BigInt(nsu) }))
+        .map((nsu) => ({
+          clienteId: 'cliente-1',
+          estabelecimentoId: 'estab-1',
+          ambiente: Ambiente.producao,
+          nsu: BigInt(nsu)
+        }))
     );
     prisma.nfseDocumento.findFirst.mockImplementation(({ where }) => {
       if (typeof where?.nsu === 'bigint' && where.nsu !== 52n) {
@@ -1403,6 +1471,7 @@ describe('SyncService', () => {
   });
 
   it('marca explicitamente quando o NSU consultado corresponde a um evento', async () => {
+    (service as unknown as { adnRequestIntervalMs: number }).adnRequestIntervalMs = 0;
     const eventXml = `<?xml version="1.0" encoding="UTF-8"?>
 <evento xmlns="http://www.sped.fazenda.gov.br/nfse">
   <infEvento>
@@ -1424,7 +1493,7 @@ describe('SyncService', () => {
         estabelecimentoId: 'estab-1',
         cnpjConsulta: '12345678000199',
         ambiente: Ambiente.producao,
-        ultimoNsuConsultado: 8n
+        ultimoNsuConsultado: 9n
       }
     ]);
 

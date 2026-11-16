@@ -280,7 +280,7 @@ model NfseDocumento {
   vinculos        NfseDocumentoVinculo[]
 
   @@unique([ambiente, chaveAcesso], map: "nfse_documentos_ambiente_chave_acesso_key")
-  @@unique([clienteId, ambiente, nsu], map: "nfse_documentos_cliente_id_ambiente_nsu_key")
+  @@unique([clienteId, ambiente, estabelecimentoId, nsu], map: "nfse_docs_cli_amb_est_nsu_key")
   @@index([ambiente, chaveSubstituida], map: "nfse_documentos_ambiente_chave_substituida_idx")
   @@map("nfse_documentos")
 }
@@ -301,7 +301,7 @@ model NfseDocumentoVinculo {
   estabelecimento ClienteEstabelecimento? @relation(fields: [estabelecimentoId], references: [id], onDelete: SetNull)
 
   @@unique([nfseDocumentoId, papel], map: "nfse_documento_vinculos_documento_papel_key")
-  @@unique([clienteId, ambiente, nsu], map: "nfse_documento_vinculos_cliente_ambiente_nsu_key")
+  @@unique([clienteId, ambiente, estabelecimentoId, nsu], map: "nfse_doc_vinc_cli_amb_est_nsu_key")
   @@index([clienteId], map: "nfse_documento_vinculos_cliente_id_idx")
   @@map("nfse_documento_vinculos")
 }

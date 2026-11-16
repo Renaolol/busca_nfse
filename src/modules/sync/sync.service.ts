@@ -1046,6 +1046,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             plan.mode === 'gap-audit'
               ? await this.findClienteNsuReference({
                   clienteId: control.clienteId,
+                  estabelecimentoId: control.estabelecimentoId,
                   ambiente: control.ambiente,
                   nsu
                 })
@@ -1188,10 +1189,14 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               document.nsu &&
               (await this.hasFiscalDocumentForNsu({
                 clienteId: control.clienteId,
+                estabelecimentoId: control.estabelecimentoId,
                 ambiente: control.ambiente,
                 nsu: document.nsu
               }))
             ) {
+              if (plan.mode === 'full' && document.nsu) {
+                controlPlan.savedNsus.add(document.nsu.toString());
+              }
               const existingReturnedDocumentResolvedGap = gapTargetTracker
                 ? this.resolveGapTargetFromXml(gapTargetTracker, document.xml)
                 : false;
@@ -1230,6 +1235,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
               document
             });
             const persistedNsu = persisted.nsu ?? nsu;
+            if (plan.mode === 'full') {
+              controlPlan.savedNsus.add(persistedNsu.toString());
+            }
             const persistedDocumentResolvedGap = gapTargetTracker
               ? gapTargetTracker.resolve(persisted)
               : this.matchesPersistedDocumentToGap(persisted, controlGaps);
@@ -1860,7 +1868,10 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             nsuInicial + BigInt(this.nightlyPastNsuRecoveryNsusPerControl - 1)
           );
           const fullRange = [{ nsuInicial, nsuFinal, nsusPrioritarios: [], lacunaLabels: [] }];
-          const savedNsus = savedNsusByScope.get(this.buildSavedNsuScopeKey(control.clienteId, control.ambiente)) ?? new Set();
+          const savedNsus =
+            savedNsusByScope.get(
+              this.buildSavedNsuScopeKey(control.clienteId, control.estabelecimentoId, control.ambiente)
+            ) ?? new Set();
           const filtered = this.excludeSavedPastNsusFromRanges(fullRange, savedNsus);
           return {
             control,
@@ -2562,7 +2573,10 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
             control.ultimoNsuConsultado >= 1n
               ? [{ nsuInicial: 1n, nsuFinal: control.ultimoNsuConsultado, nsusPrioritarios: [], lacunaLabels: [] }]
               : [];
-          const savedNsus = savedNsusByScope.get(this.buildSavedNsuScopeKey(control.clienteId, control.ambiente)) ?? new Set();
+          const savedNsus =
+            savedNsusByScope.get(
+              this.buildSavedNsuScopeKey(control.clienteId, control.estabelecimentoId, control.ambiente)
+            ) ?? new Set();
           const filtered = this.excludeSavedPastNsusFromRanges(fullRange, savedNsus);
 
           return {
@@ -2631,23 +2645,27 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     };
   }
 
-  private buildSavedNsuScopeKey(clienteId: string, ambiente: Ambiente): string {
-    return `${clienteId}:${ambiente}`;
+  private buildSavedNsuScopeKey(clienteId: string, estabelecimentoId: string, ambiente: Ambiente): string {
+    return `${clienteId}:${estabelecimentoId}:${ambiente}`;
   }
 
   private async loadSavedFiscalNsusByScope(
-    controls: Array<Pick<NfseSyncControle, 'clienteId' | 'ambiente' | 'ultimoNsuConsultado'>>
+    controls: Array<Pick<NfseSyncControle, 'clienteId' | 'estabelecimentoId' | 'ambiente' | 'ultimoNsuConsultado'>>
   ): Promise<Map<string, Set<string>>> {
-    const scopesByKey = new Map<string, { clienteId: string; ambiente: Ambiente; maxNsu: bigint }>();
+    const scopesByKey = new Map<
+      string,
+      { clienteId: string; estabelecimentoId: string; ambiente: Ambiente; maxNsu: bigint }
+    >();
     for (const control of controls) {
       if (control.ultimoNsuConsultado < 1n) {
         continue;
       }
-      const key = this.buildSavedNsuScopeKey(control.clienteId, control.ambiente);
+      const key = this.buildSavedNsuScopeKey(control.clienteId, control.estabelecimentoId, control.ambiente);
       const existing = scopesByKey.get(key);
       if (!existing || control.ultimoNsuConsultado > existing.maxNsu) {
         scopesByKey.set(key, {
           clienteId: control.clienteId,
+          estabelecimentoId: control.estabelecimentoId,
           ambiente: control.ambiente,
           maxNsu: control.ultimoNsuConsultado
         });
@@ -2661,11 +2679,13 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     const documentScopeFilters: Prisma.NfseDocumentoWhereInput[] = scopes.map((scope) => ({
       clienteId: scope.clienteId,
+      estabelecimentoId: scope.estabelecimentoId,
       ambiente: scope.ambiente,
       nsu: { gte: 1n, lte: scope.maxNsu }
     }));
     const linkScopeFilters: Prisma.NfseDocumentoVinculoWhereInput[] = scopes.map((scope) => ({
       clienteId: scope.clienteId,
+      estabelecimentoId: scope.estabelecimentoId,
       ambiente: scope.ambiente,
       nsu: { gte: 1n, lte: scope.maxNsu }
     }));
@@ -2678,12 +2698,13 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     const [documents, links] = await Promise.all([
       this.prisma.nfseDocumento.findMany({
         where: { AND: [{ OR: documentScopeFilters }, { OR: fiscalDataFilters }] },
-        select: { clienteId: true, ambiente: true, nsu: true }
+        select: { clienteId: true, estabelecimentoId: true, ambiente: true, nsu: true }
       }),
       this.prisma.nfseDocumentoVinculo.findMany({
         where: { OR: linkScopeFilters },
         select: {
           clienteId: true,
+          estabelecimentoId: true,
           ambiente: true,
           nsu: true,
           documento: { select: { xmlPath: true, numeroNfse: true, dataEmissao: true } }
@@ -2692,22 +2713,27 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     ]);
 
     const savedNsusByScope = new Map<string, Set<string>>();
-    const addSavedNsu = (clienteId: string, ambiente: Ambiente, nsu: bigint | null) => {
-      if (nsu == null) {
+    const addSavedNsu = (
+      clienteId: string,
+      estabelecimentoId: string | null,
+      ambiente: Ambiente,
+      nsu: bigint | null
+    ) => {
+      if (nsu == null || estabelecimentoId == null) {
         return;
       }
-      const key = this.buildSavedNsuScopeKey(clienteId, ambiente);
+      const key = this.buildSavedNsuScopeKey(clienteId, estabelecimentoId, ambiente);
       const savedNsus = savedNsusByScope.get(key) ?? new Set<string>();
       savedNsus.add(nsu.toString());
       savedNsusByScope.set(key, savedNsus);
     };
 
     for (const document of documents) {
-      addSavedNsu(document.clienteId, document.ambiente, document.nsu);
+      addSavedNsu(document.clienteId, document.estabelecimentoId, document.ambiente, document.nsu);
     }
     for (const link of links) {
       if (this.hasDocumentoFiscalData(link.documento)) {
-        addSavedNsu(link.clienteId, link.ambiente, link.nsu);
+        addSavedNsu(link.clienteId, link.estabelecimentoId, link.ambiente, link.nsu);
       }
     }
 
@@ -3333,6 +3359,7 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
   private async hasFiscalDocumentForNsu(params: {
     clienteId: string;
+    estabelecimentoId: string;
     ambiente: Ambiente;
     nsu: bigint;
   }): Promise<boolean> {
@@ -3341,18 +3368,20 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
   }
 
   /**
-   * O NSU de uma nota e por cliente consultante, nao por documento: quando este cliente e o
-   * tomador (ou emissor) de uma nota cuja custodia pertence a outro cliente, o NSU dele fica
-   * registrado no NfseDocumentoVinculo, nao na linha principal de NfseDocumento.
+   * O NSU e especifico do estabelecimento/CNPJ consultante, nao da chave da nota: quando esta
+   * consulta encontra um documento sob custodia de outro cliente, a referencia fica no
+   * NfseDocumentoVinculo para o estabelecimento atual, nao na linha principal.
    */
   private async findClienteNsuReference(params: {
     clienteId: string;
+    estabelecimentoId: string;
     ambiente: Ambiente;
     nsu: bigint;
   }): Promise<{ xmlPath: string | null; numeroNfse: string | null; serie: string | null; dataEmissao: Date | null } | null> {
     const ownDocumento = await this.prisma.nfseDocumento.findFirst({
       where: {
         clienteId: params.clienteId,
+        estabelecimentoId: params.estabelecimentoId,
         ambiente: params.ambiente,
         nsu: params.nsu
       },
@@ -3369,8 +3398,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     const vinculo = await this.prisma.nfseDocumentoVinculo.findUnique({
       where: {
-        clienteId_ambiente_nsu: {
+        clienteId_ambiente_estabelecimentoId_nsu: {
           clienteId: params.clienteId,
+          estabelecimentoId: params.estabelecimentoId,
           ambiente: params.ambiente,
           nsu: params.nsu
         }
@@ -4002,8 +4032,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
 
     const existingByNsu = await this.prisma.nfseDocumento.findUnique({
       where: {
-        clienteId_ambiente_nsu: {
+        clienteId_ambiente_estabelecimentoId_nsu: {
           clienteId: params.clienteId,
+          estabelecimentoId: params.createData.estabelecimentoId,
           ambiente: params.ambiente,
           nsu: params.nsu
         }
@@ -4116,8 +4147,9 @@ export class SyncService implements OnModuleInit, OnModuleDestroy {
     const nsu = params.nsu;
     const existing = await this.prisma.nfseDocumento.findUnique({
       where: {
-        clienteId_ambiente_nsu: {
+        clienteId_ambiente_estabelecimentoId_nsu: {
           clienteId: params.clienteId,
+          estabelecimentoId: params.createData.estabelecimentoId,
           ambiente: params.ambiente,
           nsu
         }
