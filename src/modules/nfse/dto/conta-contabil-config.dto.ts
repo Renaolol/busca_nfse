@@ -21,7 +21,7 @@ export class NfseContaContabilConfigResponseDto {
   @ApiProperty()
   contaContabil!: string;
 
-  @ApiPropertyOptional({ description: 'Codigo alfanumerico opcional do produto Dominio a ser usado no registro 1030 para esse codigo de servico' })
+  @ApiPropertyOptional({ description: 'Codigo opcional do produto Dominio, aceitando caracteres imprimiveis exceto | e caracteres de controle' })
   produto?: string | null;
 
   @ApiProperty()
@@ -49,11 +49,11 @@ export class CreateNfseContaContabilConfigDto {
   @MaxLength(50)
   contaContabil!: string;
 
-  @ApiPropertyOptional({ description: 'Codigo alfanumerico opcional do produto Dominio a ser usado no registro 1030 para esse codigo de servico', pattern: '^[A-Za-z0-9]+$' })
+  @ApiPropertyOptional({ description: 'Codigo opcional do produto Dominio, aceitando caracteres imprimiveis exceto | e caracteres de controle', pattern: '^[^\\u0000-\\u001F\\u007F|]+$' })
   @IsOptional()
   @IsString()
   @MaxLength(50)
-  @Matches(/^[A-Za-z0-9]+$/, { message: 'produto deve conter apenas letras e numeros.' })
+  @Matches(/^[^\u0000-\u001F\u007F|]+$/, { message: 'produto nao pode conter caracteres de controle nem |.' })
   produto?: string;
 
   @ApiPropertyOptional({ default: true })
@@ -69,11 +69,11 @@ export class UpdateNfseContaContabilConfigDto {
   @MaxLength(50)
   contaContabil?: string;
 
-  @ApiPropertyOptional({ description: 'Codigo alfanumerico opcional do produto Dominio para esse codigo de servico', pattern: '^[A-Za-z0-9]+$' })
+  @ApiPropertyOptional({ description: 'Codigo opcional do produto Dominio, aceitando caracteres imprimiveis exceto | e caracteres de controle', pattern: '^[^\\u0000-\\u001F\\u007F|]+$' })
   @IsOptional()
   @IsString()
   @MaxLength(50)
-  @Matches(/^[A-Za-z0-9]+$/, { message: 'produto deve conter apenas letras e numeros.' })
+  @Matches(/^[^\u0000-\u001F\u007F|]+$/, { message: 'produto nao pode conter caracteres de controle nem |.' })
   produto?: string;
 
   @ApiPropertyOptional()

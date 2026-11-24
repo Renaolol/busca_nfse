@@ -13470,7 +13470,7 @@ function renderNfseContaContabilConfigModal() {
               </label>
               <label>
                 <span>Produto</span>
-                <input type="text" name="produto" placeholder="Ex.: 557" value="${escapeHtml(String(state.modal.produto || ''))}" ${submitting ? 'disabled' : ''} />
+                <input type="text" name="produto" maxlength="50" placeholder="Ex.: 557 ou 14.04" value="${escapeHtml(String(state.modal.produto || ''))}" ${submitting ? 'disabled' : ''} />
               </label>
             </div>
             ${errorMessage ? `<div class="table-state error" style="margin-top:14px;">${escapeHtml(errorMessage)}</div>` : ''}
@@ -15553,12 +15553,10 @@ function renderNfseFiscalReaderCard() {
           name="produtoPadrao"
           type="text"
           inputmode="text"
-          pattern="[A-Za-z0-9]+"
-          title="Use apenas letras e numeros."
           value="${escapeHtml(String(exportConfig.produtoPadrao || ''))}"
           placeholder="Opcional"
         />
-        <span style="color:var(--text-secondary); font-size:12px;">Opcional. Aceita codigos numericos ou alfanumericos, como A ou A12.</span>
+        <span style="color:var(--text-secondary); font-size:12px;">Opcional. Aceita caracteres imprimiveis, como ponto em 14.04.</span>
       </label>
       <label class="field nfse-dominio-stock-switch-field">
         Estoque
@@ -20448,8 +20446,8 @@ async function submitNfseFiscalDominioExportForm(form) {
     return;
   }
 
-  if (produtoPadrao && !/^[A-Za-z0-9]+$/.test(produtoPadrao)) {
-    pushToast('Informe um produto padrao com apenas letras e numeros.', 'error');
+  if (produtoPadrao && /[\u0000-\u001F\u007F|]/.test(produtoPadrao)) {
+    pushToast('Informe um produto padrao sem caracteres de controle ou |.', 'error');
     return;
   }
 

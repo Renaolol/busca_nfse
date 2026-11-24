@@ -32,8 +32,8 @@ export class ExportarLeituraFiscalDominioDto extends QueryNfseDto {
   incluirEstoque?: boolean;
 
   @ApiPropertyOptional({
-    description: 'Codigo alfanumerico opcional do produto para os registros 1030/3030',
-    pattern: '^[A-Za-z0-9]+$'
+    description: 'Codigo opcional do produto para os registros 1030/3030; aceita caracteres imprimiveis exceto | e caracteres de controle',
+    pattern: '^[^\\u0000-\\u001F\\u007F|]+$'
   })
   @IsOptional()
   @Transform(({ value }) => {
@@ -44,7 +44,7 @@ export class ExportarLeituraFiscalDominioDto extends QueryNfseDto {
     return normalized || undefined;
   })
   @IsString()
-  @Matches(/^[A-Za-z0-9]+$/, { message: 'produtoPadrao deve conter apenas letras e numeros.' })
+  @Matches(/^[^\u0000-\u001F\u007F|]+$/, { message: 'produtoPadrao nao pode conter caracteres de controle nem |.' })
   produtoPadrao?: string;
 
   @ApiPropertyOptional({

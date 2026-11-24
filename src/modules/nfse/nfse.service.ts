@@ -1567,8 +1567,8 @@ export class NfseService {
     if (!normalized) {
       return null;
     }
-    if (!/^[A-Za-z0-9]+$/.test(normalized)) {
-      throw new BadRequestException('Informe um produto com apenas letras e numeros.');
+    if (!/^[^\u0000-\u001F\u007F|]+$/.test(normalized)) {
+      throw new BadRequestException('Informe um produto sem caracteres de controle ou |.');
     }
     return normalized;
   }

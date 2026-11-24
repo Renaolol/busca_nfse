@@ -94,6 +94,22 @@ describe('NfseService', () => {
     prisma.nfseContaContabilConfig.findUnique.mockResolvedValue(undefined);
   });
 
+  it('salva produto com ponto na configuracao de conta contabil por servico', async () => {
+    await service.createContaContabilConfig({
+      clienteId: 'd2719f42-4a29-45ae-a2c3-799fc92278b3',
+      codigoServico: '170101',
+      contaContabil: '670',
+      produto: '14.04'
+    });
+
+    expect(prisma.nfseContaContabilConfig.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        create: expect.objectContaining({ produto: '14.04' }),
+        update: expect.objectContaining({ produto: '14.04' })
+      })
+    );
+  });
+
   describe('updateManualServiceValue', () => {
     const authorizedZeroValueNote = (razaoSocialPrestador: string, status = '100') => ({
       id: 'nfse-beneficios-1',
@@ -2526,7 +2542,7 @@ describe('NfseService', () => {
         clienteId: 'cliente-1',
         codigoServico: '170101',
         contaContabil: '999',
-        produto: 'ABC123',
+        produto: '14.04',
         ativo: true,
         createdAt: new Date('2026-07-01T00:00:00.000Z'),
         updatedAt: new Date('2026-07-01T00:00:00.000Z')
@@ -2620,7 +2636,7 @@ describe('NfseService', () => {
     // debito (registro 1300) vem da configuracao (999); credito continua o fornecedor padrao (506), pois contas=Padrao nao aciona a busca ODBC.
     expect(content).toContain('|1300|09/07/2026|999|506|180,00|| NFS-E N 333 Prestador Exportacao|||');
     // produto configurado para o codigo de servico prevalece sobre o produto padrao no registro 1030.
-    expect(content).toContain('|1030|ABC123|1|180,00|');
+    expect(content).toContain('|1030|14.04|1|180,00|');
   });
 
   it('usa a conta padrao 467 e mantem os lancamentos ao exportar sem estoque', async () => {
