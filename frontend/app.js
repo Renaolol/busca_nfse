@@ -1360,14 +1360,30 @@ function onDocumentClick(event) {
       return;
     }
     case 'nfse-fiscal-ibscbs-bulk-edit': {
-      openModal({ kind: 'nfse-fiscal-ibscbs-bulk-editor' });
+      const documentIds = getNfseFiscalReaderExportableRows(state.nfseFiscalReader.rows)
+        .map((row) => String(row?.id || '').trim())
+        .filter(Boolean);
+      openModal({ kind: 'nfse-fiscal-ibscbs-bulk-editor', selectedDocumentIds: documentIds });
       return;
     }
     case 'nfse-fiscal-ibscbs-bulk-reset': {
-      state.nfseFiscalReader.ibscbsOverrides = {};
+      const selectedIds = Array.from(
+        document.querySelectorAll('#nfseFiscalIbsCbsBulkEditForm input[name="documentIds"]:checked')
+      )
+        .map((input) => String(input.value || '').trim())
+        .filter(Boolean);
+      if (!selectedIds.length) {
+        pushToast('Selecione ao menos uma NFS-e para restaurar os dados do XML.', 'error');
+        return;
+      }
+      const overrides = { ...(state.nfseFiscalReader.ibscbsOverrides || {}) };
+      for (const documentId of selectedIds) {
+        delete overrides[documentId];
+      }
+      state.nfseFiscalReader.ibscbsOverrides = overrides;
       closeModal();
       render();
-      pushToast('Ajustes IBS/CBS removidos; todas as notas voltaram a usar os dados do XML.', 'success');
+      pushToast(`Ajustes removidos de ${selectedIds.length} NFS-e; os dados voltaram a vir do XML.`, 'success');
       return;
     }
     case 'nfse-fiscal-ibscbs-reset': {
@@ -2972,6 +2988,59 @@ function onDocumentChange(event) {
 
   if (target instanceof HTMLInputElement && target.hasAttribute('data-cst060-item-key')) {
     updateCst060ItemRate(target);
+    return;
+  }
+
+  const ibsCbsBulkSelectionAction = target.getAttribute('data-action');
+  if (
+    target instanceof HTMLInputElement &&
+    (ibsCbsBulkSelectionAction === 'nfse-fiscal-ibscbs-bulk-select-all' ||
+      ibsCbsBulkSelectionAction === 'nfse-fiscal-ibscbs-bulk-select-document')
+  ) {
+    const form = target.closest('#nfseFiscalIbsCbsBulkEditForm');
+    if (!form || state.modal?.kind !== 'nfse-fiscal-ibscbs-bulk-editor') {
+      return;
+    }
+    const allDocumentIds = getNfseFiscalReaderExportableRows(state.nfseFiscalReader.rows)
+      .map((row) => String(row?.id || '').trim())
+      .filter(Boolean);
+    const selectedIds = new Set(
+      Array.isArray(state.modal.selectedDocumentIds) ? state.modal.selectedDocumentIds.map((value) => String(value)) : []
+    );
+
+    if (ibsCbsBulkSelectionAction === 'nfse-fiscal-ibscbs-bulk-select-all') {
+      selectedIds.clear();
+      if (target.checked) {
+        allDocumentIds.forEach((documentId) => selectedIds.add(documentId));
+      }
+      form.querySelectorAll('input[name="documentIds"]').forEach((input) => {
+        input.checked = target.checked;
+      });
+    } else {
+      const documentId = String(target.value || '').trim();
+      if (documentId && target.checked) {
+        selectedIds.add(documentId);
+      } else if (documentId) {
+        selectedIds.delete(documentId);
+      }
+    }
+
+    state.modal.selectedDocumentIds = Array.from(selectedIds);
+    const selectedCount = selectedIds.size;
+    const allSelectedInput = form.querySelector('[data-action="nfse-fiscal-ibscbs-bulk-select-all"]');
+    if (allSelectedInput) {
+      allSelectedInput.checked = allDocumentIds.length > 0 && selectedCount === allDocumentIds.length;
+      allSelectedInput.indeterminate = selectedCount > 0 && selectedCount < allDocumentIds.length;
+    }
+    const selectedCountLabel = form.querySelector('[data-bulk-selected-count]');
+    if (selectedCountLabel) {
+      selectedCountLabel.textContent = `${selectedCount} selecionada(s)`;
+    }
+    const submitButton = form.querySelector('[data-bulk-submit]');
+    if (submitButton) {
+      submitButton.disabled = selectedCount === 0;
+      submitButton.textContent = `Aplicar a ${selectedCount} NFS-e`;
+    }
     return;
   }
 
@@ -13652,19 +13721,56 @@ function renderNfseFiscalIbsCbsBulkEditorModal() {
   }
 
   const rows = getNfseFiscalReaderExportableRows(state.nfseFiscalReader.rows);
+  const allDocumentIds = rows.map((row) => String(row?.id || '').trim()).filter(Boolean);
+  const selectedIds = new Set(
+    Array.isArray(state.modal.selectedDocumentIds) ? state.modal.selectedDocumentIds.map((value) => String(value)) : allDocumentIds
+  );
+  const selectedRows = rows.filter((row) => selectedIds.has(String(row?.id || '')));
+  const selectedCount = selectedRows.length;
   const field = (name, label, pattern, title, maxlength = '') => `
     <label class="field">
       ${label}
-      <input name="${name}" type="text" inputmode="decimal" value="${escapeHtml(getNfseFiscalIbsCbsBulkEditorValue(rows, name))}" ${pattern ? `pattern="${pattern}"` : ''} ${title ? `title="${title}"` : ''} ${maxlength ? `maxlength="${maxlength}"` : ''} />
+      <input name="${name}" type="text" inputmode="decimal" value="${escapeHtml(getNfseFiscalIbsCbsBulkEditorValue(selectedRows, name))}" ${pattern ? `pattern="${pattern}"` : ''} ${title ? `title="${title}"` : ''} ${maxlength ? `maxlength="${maxlength}"` : ''} />
     </label>
   `;
+  const noteRows = rows
+    .map((row) => {
+      const documentId = String(row?.id || '').trim();
+      const cstClass = [row.cstIbsCbs, row.cClassTribIbsCbs].filter(Boolean).join(' / ') || 'Sem CST/cClassTrib no XML';
+      const provider = row.prestador || row.tomador || row.chaveAcesso || 'Prestador nao informado';
+      const amounts = [
+        row.valorIbsTotal !== '' && row.valorIbsTotal != null ? `IBS ${formatOptionalCurrency(row.valorIbsTotal)}` : '',
+        row.valorCbs !== '' && row.valorCbs != null ? `CBS ${formatOptionalCurrency(row.valorCbs)}` : ''
+      ]
+        .filter(Boolean)
+        .join(' | ');
+      const detail = [cstClass, amounts].filter(Boolean).join(' | ');
+      return `
+        <label class="nfse-fiscal-ibscbs-bulk-note">
+          <input
+            type="checkbox"
+            name="documentIds"
+            value="${escapeHtml(documentId)}"
+            data-action="nfse-fiscal-ibscbs-bulk-select-document"
+            ${selectedIds.has(documentId) ? 'checked' : ''}
+            aria-label="Selecionar NFS-e ${escapeHtml(row.numeroNfse || row.chaveAcesso || '')}"
+          />
+          <span class="nfse-fiscal-ibscbs-bulk-note-content">
+            <strong>NFS-e ${escapeHtml(row.numeroNfse || '-')}</strong>
+            <span>${escapeHtml(provider)}</span>
+            <small>${escapeHtml(detail)}</small>
+          </span>
+        </label>
+      `;
+    })
+    .join('');
 
   return `
     <div class="overlay" data-action="overlay-close">
       <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 900px); max-width:900px;">
         <div class="modal-header">
           <h3 class="modal-title">Ajustar IBS/CBS em lote</h3>
-          <p class="modal-subtitle">Aplica os campos preenchidos às ${escapeHtml(String(rows.length))} NFS-e não canceladas desta leitura.</p>
+          <p class="modal-subtitle">Ajuste os campos e escolha quais notas receberao as alteracoes.</p>
         </div>
         <form id="nfseFiscalIbsCbsBulkEditForm">
           <div class="modal-body">
@@ -13677,12 +13783,30 @@ function renderNfseFiscalIbsCbsBulkEditorModal() {
               ${field('aliquotaCbs', 'Aliquota CBS', '[0-9]+([.,][0-9]{1,6})?', 'Use ate seis casas decimais.')}
               ${field('valorCbs', 'Valor total CBS', '[0-9]+([.,][0-9]{1,2})?', 'Use ate duas casas decimais.')}
             </div>
-            <p class="card-subtitle" style="margin-top:12px;">Os campos com o mesmo valor em todas as notas aparecem preenchidos. Deixe em branco para manter o XML e os ajustes individuais já salvos de cada NFS-e. A edição é aplicada somente nesta exportação.</p>
+            <div class="nfse-fiscal-ibscbs-bulk-list">
+              <div class="nfse-fiscal-ibscbs-bulk-list-header">
+                <label>
+                  <input
+                    type="checkbox"
+                    data-action="nfse-fiscal-ibscbs-bulk-select-all"
+                    ${rows.length > 0 && selectedCount === rows.length ? 'checked' : ''}
+                    ${rows.length ? '' : 'disabled'}
+                    aria-label="Selecionar todas as NFS-e"
+                  />
+                  <strong>Selecionar todas (${escapeHtml(String(rows.length))})</strong>
+                </label>
+                <span data-bulk-selected-count>${selectedCount} selecionada(s)</span>
+              </div>
+              <div class="nfse-fiscal-ibscbs-bulk-notes">
+                ${noteRows || '<div class="table-state">Nao ha NFS-e nao cancelada nesta leitura.</div>'}
+              </div>
+            </div>
+            <p class="card-subtitle" style="margin-top:12px;">Campos com o mesmo valor nas notas selecionadas aparecem preenchidos. Deixe em branco para manter o XML e os ajustes individuais de cada nota.</p>
           </div>
           <div class="modal-footer">
-            <button class="btn secondary" type="button" data-action="nfse-fiscal-ibscbs-bulk-reset">Restaurar XML de todas</button>
+            <button class="btn secondary" type="button" data-action="nfse-fiscal-ibscbs-bulk-reset">Restaurar XML das selecionadas</button>
             <button class="btn secondary" type="button" data-action="close-modal">Cancelar</button>
-            <button class="btn primary" type="submit" ${rows.length ? '' : 'disabled'}>Aplicar às ${escapeHtml(String(rows.length))} NFS-e</button>
+            <button class="btn primary" type="submit" data-bulk-submit ${selectedCount ? '' : 'disabled'}>Aplicar a ${escapeHtml(String(selectedCount))} NFS-e</button>
           </div>
         </form>
       </div>
@@ -15767,13 +15891,12 @@ function renderNfseFiscalReaderCard() {
         >
           Gerenciar contas por codigo de servico
         </button>
-        <span style="color:var(--text-secondary); font-size:13px;">
-          ${
-            rows.length
-              ? `O arquivo segue o padrao do LeitorXML para NFS-e e ignora automaticamente ${escapeHtml(String(rows.length - exportableRows.length))} nota(s) cancelada(s).`
-              : 'Busque NFS-e com XML valido para habilitar a exportacao.'
-          }
-        </span>
+        <button class="btn secondary" type="button" data-action="nfse-fiscal-ibscbs-bulk-edit" ${exportableRows.length ? '' : 'disabled'}>
+          Ajustar IBS/CBS em lote (${escapeHtml(String(exportableRows.length))})
+        </button>
+        <button class="btn secondary" type="button" data-action="nfse-fiscal-show-all-columns" ${hiddenCount ? '' : 'disabled'}>
+          Restaurar colunas${hiddenCount ? ` (${escapeHtml(String(hiddenCount))})` : ''}
+        </button>
       </div>
     </form>
   `;
@@ -15790,14 +15913,6 @@ function renderNfseFiscalReaderCard() {
             <span>Atualizado: <strong>${escapeHtml(formatDateTime(state.nfseFiscalReader.lastLoadedAt || new Date().toISOString()))}</strong></span>
             <span>Linhas: <strong>${escapeHtml(String(rows.length))}</strong></span>
             <span>Colunas visiveis: <strong>${escapeHtml(String(visibleColumns.length))}</strong></span>
-          </div>
-          <div class="table-actions" style="justify-content:flex-end;">
-            <button class="btn secondary" type="button" data-action="nfse-fiscal-ibscbs-bulk-edit" ${exportableRows.length ? '' : 'disabled'}>
-              Ajustar IBS/CBS em lote (${escapeHtml(String(exportableRows.length))})
-            </button>
-            <button class="btn secondary" type="button" data-action="nfse-fiscal-show-all-columns" ${hiddenCount ? '' : 'disabled'}>
-              Restaurar colunas${hiddenCount ? ` (${escapeHtml(String(hiddenCount))})` : ''}
-            </button>
           </div>
         </div>
       </div>
@@ -20754,6 +20869,13 @@ function submitNfseFiscalIbsCbsBulkEditForm(form) {
   }
 
   const data = new FormData(form);
+  const selectedIds = new Set(data.getAll('documentIds').map((value) => String(value || '').trim()).filter(Boolean));
+  const selectedRows = rows.filter((row) => selectedIds.has(String(row?.id || '').trim()));
+  if (!selectedRows.length) {
+    pushToast('Selecione ao menos uma NFS-e para aplicar os ajustes.', 'error');
+    return;
+  }
+
   const fields = [
     'cstIbsCbs',
     'cClassTribIbsCbs',
@@ -20774,7 +20896,7 @@ function submitNfseFiscalIbsCbsBulkEditForm(form) {
     return;
   }
 
-  for (const row of rows) {
+  for (const row of selectedRows) {
     const cst = values.cstIbsCbs || String(getNfseFiscalIbsCbsEditorValue(row, 'cstIbsCbs') || '').trim();
     const cClassTrib = values.cClassTribIbsCbs || String(getNfseFiscalIbsCbsEditorValue(row, 'cClassTribIbsCbs') || '').trim();
     if (cst && cClassTrib && !cClassTrib.startsWith(cst)) {
@@ -20784,7 +20906,7 @@ function submitNfseFiscalIbsCbsBulkEditForm(form) {
   }
 
   const overrides = { ...(state.nfseFiscalReader.ibscbsOverrides || {}) };
-  for (const row of rows) {
+  for (const row of selectedRows) {
     const documentId = String(row?.id || '').trim();
     if (!documentId) {
       continue;
@@ -20797,7 +20919,7 @@ function submitNfseFiscalIbsCbsBulkEditForm(form) {
   state.nfseFiscalReader.ibscbsOverrides = overrides;
   closeModal();
   render();
-  pushToast(`Ajustes IBS/CBS aplicados a ${rows.length} NFS-e.`, 'success');
+  pushToast(`Ajustes IBS/CBS aplicados a ${selectedRows.length} NFS-e.`, 'success');
 }
 
 async function loadNfseGapAuditOverview(options = {}) {

@@ -1746,6 +1746,79 @@ textarea:focus-visible,
   transform: translateX(-6px);
 }
 
+.nfse-fiscal-ibscbs-bulk-list {
+  margin-top: 16px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.nfse-fiscal-ibscbs-bulk-list-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface-alt);
+  color: var(--text-primary);
+  font-size: 0.84rem;
+}
+
+.nfse-fiscal-ibscbs-bulk-list-header label,
+.nfse-fiscal-ibscbs-bulk-note {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.nfse-fiscal-ibscbs-bulk-list-header input,
+.nfse-fiscal-ibscbs-bulk-note input {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.nfse-fiscal-ibscbs-bulk-list-header > span {
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.nfse-fiscal-ibscbs-bulk-notes {
+  max-height: min(38vh, 360px);
+  overflow: auto;
+}
+
+.nfse-fiscal-ibscbs-bulk-note {
+  align-items: flex-start;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  color: var(--text-primary);
+}
+
+.nfse-fiscal-ibscbs-bulk-note:last-child {
+  border-bottom: 0;
+}
+
+.nfse-fiscal-ibscbs-bulk-note-content {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+  font-size: 0.82rem;
+}
+
+.nfse-fiscal-ibscbs-bulk-note-content > span,
+.nfse-fiscal-ibscbs-bulk-note-content > small {
+  overflow: hidden;
+  color: var(--text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .nfse-fiscal-reader-rate,
 .nfse-fiscal-reader-flag {
   min-width: 88px;
