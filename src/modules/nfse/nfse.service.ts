@@ -726,11 +726,22 @@ export class NfseService {
     const contaDebitoEntrada = configuracaoServico?.contaContabil || '467';
     const produtoEntrada = configuracaoServico?.produto || produtoPadrao;
     const classEfd = valorInss > 0 ? '100000003' : '';
-    const codEfd = valorInss > 0 ? '0' : '';
+    const indicativoEfdReinf = valorInss > 0 ? '0' : '';
     const linhas: string[] = [];
 
     if (tipoRegistro === 'Entrada') {
-      linhas.push(this.createDominioRegistro1000(prestadorCnpj, numeroNfse, dataEmissao, valorServicoAposDesconto, prestadorUf, acumulador, classEfd, codEfd));
+      linhas.push(
+        this.createDominioRegistro1000(
+          prestadorCnpj,
+          numeroNfse,
+          dataEmissao,
+          valorServicoAposDesconto,
+          prestadorUf,
+          acumulador,
+          classEfd,
+          indicativoEfdReinf
+        )
+      );
     } else {
       const cnpjClienteServico = destinatarioCnpj || tomadorCnpj || prestadorCnpj;
       const cfps = this.resolveDominioCfopsServico(data);
@@ -745,7 +756,7 @@ export class NfseService {
           prestadorUf,
           acumulador,
           classEfd,
-          codEfd,
+          indicativoEfdReinf,
           cfps
         )
       );
@@ -1043,10 +1054,17 @@ export class NfseService {
     estadoEmitente: string,
     acumulador: string,
     classEfd: string,
-    codEfd: string
+    indicativoEfdReinf: string
   ): string {
     const cfop = estadoEmitente === 'SC' ? '1933' : '2933';
-    return `|1000|39|${cnpj}||${acumulador}|${cfop}||${numeroDocumento}|U||${dataEmissao}|${dataEmissao}|${this.formatDominioNumber(valorContabil)}|||S|||||||||||||||||||||||${this.formatDominioNumber(valorContabil)}|0|||||||||||||||||||||||||||||||||||||||||||||||||||${codEfd}|${classEfd}|||||||`;
+    const fields = `|1000|39|${cnpj}||${acumulador}|${cfop}||${numeroDocumento}|U||${dataEmissao}|${dataEmissao}|${this.formatDominioNumber(valorContabil)}|||S|||||||||||||||||||||||${this.formatDominioNumber(valorContabil)}|0|||||||||||||||||||||||||||||||||||||||||||||||||||${indicativoEfdReinf}|${classEfd}|||||||`
+      .split('|')
+      .slice(1, -1);
+
+    fields[90] = ''; // Campo 91: ICMS ST, sem valor para este registro.
+    fields[92] = indicativoEfdReinf; // Campo 93: Indicativo de Prestacao de Servico da EFD-Reinf.
+
+    return `|${fields.join('|')}|`;
   }
 
   private createDominioRegistro3000(
@@ -1059,7 +1077,7 @@ export class NfseService {
     estadoEmitente: string,
     acumulador: string,
     classEfd: string,
-    codEfd: string,
+    indicativoEfdReinf: string,
     cfps: string
   ): string {
     const campos = [
@@ -1090,7 +1108,7 @@ export class NfseService {
       '',
       '',
       classEfd,
-      codEfd,
+      indicativoEfdReinf,
       this.formatDominioNumber(valorServico),
       valorDesconto > 0 ? this.formatDominioNumber(valorDesconto) : '',
       '',

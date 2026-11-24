@@ -2326,6 +2326,11 @@ describe('NfseService', () => {
     expect(result.fileName).toContain('DOMINIO-NFSE-ENTRADA-');
     expect(content).toContain('|0000|11111111000111|');
     expect(content).toContain(`|1000|39|06960810000176||804|1933||333|U||${dataEmissaoFormatada}|${dataEmissaoFormatada}|180,00`);
+    const registroEntrada = content.split('\n').find((line) => line.startsWith('|1000|'));
+    const camposRegistroEntrada = registroEntrada?.split('|').slice(1, -1) ?? [];
+    expect(camposRegistroEntrada[90]).toBe(''); // Campo 91: ICMS ST.
+    expect(camposRegistroEntrada[91]).toBe('100000003'); // Campo 92: tipo de servico da EFD-Reinf.
+    expect(camposRegistroEntrada[92]).toBe('0'); // Campo 93: nao e obra de construcao civil.
     expect(content).toContain('|1020|25||180,00|2,22|4,00');
     expect(content).toContain('|1020|16||180,00|1,67|3,00');
     expect(content).toContain('|1020|26||180,00|1,11|2,00');
