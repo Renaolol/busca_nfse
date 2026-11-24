@@ -2276,6 +2276,9 @@ describe('NfseService', () => {
           </tribMun>
         </trib>
       </valores>
+      <IBSCBS>
+        <valores><trib><CST>200</CST><cClassTrib>200001</cClassTrib></trib></valores>
+      </IBSCBS>
     </infDPS>
   </DPS>
   <infNFSe Id="NFS42110092206960810000176000000000033326071005552016">
@@ -2289,6 +2292,19 @@ describe('NfseService', () => {
       <vISSRet>9.00</vISSRet>
       <pAliqAplic>5.00</pAliqAplic>
     </valores>
+    <IBSCBS>
+      <valores>
+        <trib>
+          <gIBSCBS>
+            <vBC>180.00</vBC>
+            <vIBSTot>0.54</vIBSTot>
+            <gIBSUF><pAliqEfetUF>0.10</pAliqEfetUF><vIBSUF>0.18</vIBSUF></gIBSUF>
+            <gIBSMun><pAliqEfetMun>0.20</pAliqEfetMun><vIBSMun>0.36</vIBSMun></gIBSMun>
+            <gCBS><pAliqEfetCBS>0.90</pAliqEfetCBS><vCBS>1.62</vCBS></gCBS>
+          </gIBSCBS>
+        </trib>
+      </valores>
+    </IBSCBS>
   </infNFSe>
 </NFSe>`,
         'utf8'
@@ -2315,6 +2331,8 @@ describe('NfseService', () => {
     expect(content).toContain('|1020|26||180,00|1,11|2,00');
     expect(content).toContain('|1020|3||180,00|5,00|9,00');
     expect(content).toContain('|1020|18||180,00|5,00|9,00');
+    expect(content).toContain('|1020|183||180,00|0,30|0,54');
+    expect(content).toContain('|1020|184||180,00|0,90|1,62');
     expect(content).toContain('|1030|557|1|180,00');
     const registroEntradaItem = content.split('\n').find((line) => line.startsWith('|1030|'));
     const camposEntradaItem = registroEntradaItem?.split('|').slice(1, -1) ?? [];
@@ -2328,6 +2346,14 @@ describe('NfseService', () => {
     expect(camposEntradaItem[36]).toBe(''); // Campo 37: valor do PIS.
     expect(camposEntradaItem[37]).toBe(''); // Campo 38: aliquota da COFINS.
     expect(camposEntradaItem[38]).toBe(''); // Campo 39: valor da COFINS.
+    expect(camposEntradaItem[103]).toBe('200001'); // Campo 104: classificacao IBS.
+    expect(camposEntradaItem[104]).toBe('180,00'); // Campo 105: base IBS.
+    expect(camposEntradaItem[105]).toBe('0,30'); // Campo 106: aliquota IBS.
+    expect(camposEntradaItem[106]).toBe('0,54'); // Campo 107: valor IBS.
+    expect(camposEntradaItem[107]).toBe('200001'); // Campo 108: classificacao CBS.
+    expect(camposEntradaItem[108]).toBe('180,00'); // Campo 109: base CBS.
+    expect(camposEntradaItem[109]).toBe('0,90'); // Campo 110: aliquota CBS.
+    expect(camposEntradaItem[110]).toBe('1,62'); // Campo 111: valor CBS.
     expect(camposEntradaItem[69]).toBe(''); // Campo 70: CST PIS de nota devolvida.
     expect(content).toContain(`|1300|${dataEmissaoFormatada}|0|183|9,00||ISS RETIDO SOBRE NFS-E N 333 Prestador Exportacao|||`);
     expect(content).toContain(`|1500|${dataEmissaoFormatada}|180,00|2,22|4,00|3,00|9,00|2,00||1,00|1,50|1,50||333|`);
@@ -2847,6 +2873,35 @@ describe('NfseService', () => {
     expect(conteudoSemEstoque).toContain('|3000|');
     expect(conteudoSemEstoque).toContain('|3500|');
     expect(conteudoSemEstoque).not.toContain('|3030|');
+
+    prisma.nfseDocumento.findMany.mockResolvedValueOnce(documentos);
+    storage.getObject.mockResolvedValueOnce(xml);
+    const resultadoComAjustesIbsCbs = await service.exportarLeituraFiscalDominio({
+      clienteId: 'cliente-1',
+      all: true,
+      codigoEmpresa: 10105,
+      tipoRegistro: 'Servico',
+      contas: 'Padrao',
+      produtoPadrao: 'A',
+      ibscbsOverrides: [
+        {
+          documentId: 'doc-export-1',
+          cstIbsCbs: '220',
+          cClassTribIbsCbs: '220001',
+          baseCalculoIbsCbs: '99.99',
+          aliquotaIbsTotal: '1.23',
+          valorIbsTotal: '4.56',
+          aliquotaCbs: '7.89',
+          valorCbs: '0.12'
+        }
+      ]
+    });
+    const conteudoComAjustesIbsCbs = Buffer.from(resultadoComAjustesIbsCbs.contentBase64, 'base64').toString('utf8');
+    const itemComAjustes = conteudoComAjustesIbsCbs.split('\n').find((line) => line.startsWith('|3030|'))?.split('|').slice(1, -1) ?? [];
+    expect(itemComAjustes[35]).toBe('220');
+    expect(itemComAjustes[36]).toBe('220001');
+    expect(conteudoComAjustesIbsCbs).toContain('|3020|183||99,99|1,23|4,56');
+    expect(conteudoComAjustesIbsCbs).toContain('|3020|184||99,99|7,89|0,12');
   });
 
   it('rejeita exportacao por fornecedor sem configuracao ODBC da Dominio', async () => {

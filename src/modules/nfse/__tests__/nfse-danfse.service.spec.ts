@@ -85,6 +85,45 @@ describe('NfseDanfseService', () => {
     expect(content).toContain('Codigo de Tributacao Municipal');
     expect(content).toContain('1.1406.31.00');
   });
+
+  it('extrai IBS e CBS do grupo tributario novo e calcula os totais quando necessario', () => {
+    const xml = `
+      <NFSe xmlns="http://www.sped.fazenda.gov.br/nfse">
+        <DPS>
+          <infDPS>
+            <IBSCBS>
+              <valores><trib><CST>200</CST><cClassTrib>200001</cClassTrib></trib></valores>
+            </IBSCBS>
+          </infDPS>
+        </DPS>
+        <infNFSe>
+          <IBSCBS>
+            <valores>
+              <trib>
+                <gIBSCBS>
+                  <vBC>100.00</vBC>
+                  <gIBSUF><pAliqEfetUF>0.10</pAliqEfetUF><vIBSUF>0.10</vIBSUF></gIBSUF>
+                  <gIBSMun><pAliqEfetMun>0.90</pAliqEfetMun><vIBSMun>0.90</vIBSMun></gIBSMun>
+                  <gCBS><pAliqEfetCBS>0.90</pAliqEfetCBS><vCBS>0.90</vCBS></gCBS>
+                </gIBSCBS>
+              </trib>
+            </valores>
+          </IBSCBS>
+        </infNFSe>
+      </NFSe>
+    `;
+
+    expect(service.extractLeituraFiscal(xml)).toMatchObject({
+      cstIbsCbs: '200',
+      cClassTribIbsCbs: '200001',
+      baseCalculoIbsCbs: '100.00',
+      aliquotaIbsTotal: '1.00',
+      valorIbsTotal: '1.00',
+      aliquotaCbs: '0.90',
+      valorCbs: '0.90'
+    });
+  });
+
   it('marca visualmente DANFSE cancelada', () => {
     const pdf = service.generatePdf({
       chaveAcesso: '42110092206960810000176000000000033326062205552016',

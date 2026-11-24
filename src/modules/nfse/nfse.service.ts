@@ -674,6 +674,15 @@ export class NfseService {
     const valorIbs = this.roundTo2(data.valorIbsTotal ?? (data.valorIbsEstadual ?? 0) + (data.valorIbsMunicipal ?? 0));
     const aliquotaCbs = this.roundTo2(data.aliquotaCbsInformada ?? data.aliquotaCbsEfetiva ?? 0);
     const valorCbs = this.roundTo2(data.valorCbs ?? 0);
+    const possuiValoresIbs =
+      data.aliquotaIbsTotalInformada !== undefined ||
+      data.valorIbsTotal !== undefined ||
+      data.aliquotaIbsEstadualEfetiva !== undefined ||
+      data.aliquotaIbsMunicipalEfetiva !== undefined ||
+      data.valorIbsEstadual !== undefined ||
+      data.valorIbsMunicipal !== undefined;
+    const possuiValoresCbs =
+      data.aliquotaCbsInformada !== undefined || data.aliquotaCbsEfetiva !== undefined || data.valorCbs !== undefined;
     const possuiDadosIbsCbs = Boolean(
       data.cstIbsCbs ||
         data.cClassTribIbsCbs ||
@@ -759,8 +768,10 @@ export class NfseService {
     if (data.retencaoIss === 'Retido') {
       linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoServico, aliquotaIss, valorIss, '18', ''));
     }
-    if (possuiDadosIbsCbs) {
+    if (possuiValoresIbs) {
       linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoIbsCbs, aliquotaIbs, valorIbs, '183', ''));
+    }
+    if (possuiValoresCbs) {
       linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoIbsCbs, aliquotaCbs, valorCbs, '184', ''));
     }
 

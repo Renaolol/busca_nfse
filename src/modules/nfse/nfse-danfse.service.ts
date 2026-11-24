@@ -404,8 +404,8 @@ export class NfseDanfseService {
       valorCsll: this.toFixedCurrencyString(csll),
       valorPis: this.toFixedCurrencyString(pis),
       valorCofins: this.toFixedCurrencyString(cofins),
-      cstIbsCbs: extracted.cstIbsCbs,
-      cClassTribIbsCbs: extracted.cClassTribIbsCbs,
+      cstIbsCbs: extracted.cstIbsCbs ?? undefined,
+      cClassTribIbsCbs: extracted.cClassTribIbsCbs ?? undefined,
       baseCalculoIbsCbs: this.toFixedCurrencyString(this.toNumber(extracted.baseCalculoAposExclusoesIbsCbs)),
       aliquotaIbsTotal: this.toFixedRateString(aliquotaIbsTotal),
       valorIbsTotal: this.toFixedCurrencyString(valorIbsTotal),
@@ -480,8 +480,8 @@ export class NfseDanfseService {
       valorCsll: this.toNumber(extracted.valorContribuicoesSociais),
       valorPis: this.toNumber(extracted.valorPis),
       valorCofins: this.toNumber(extracted.valorCofins),
-      cstIbsCbs: extracted.cstIbsCbs,
-      cClassTribIbsCbs: extracted.cClassTribIbsCbs,
+      cstIbsCbs: extracted.cstIbsCbs ?? undefined,
+      cClassTribIbsCbs: extracted.cClassTribIbsCbs ?? undefined,
       baseCalculoIbsCbs: this.toNumber(extracted.baseCalculoAposExclusoesIbsCbs),
       aliquotaIbsEstadualEfetiva: this.toNumber(extracted.aliquotaEfetivaIbsEstadual),
       aliquotaIbsMunicipalEfetiva: this.toNumber(extracted.aliquotaEfetivaIbsMunicipal),
@@ -1524,8 +1524,14 @@ export class NfseDanfseService {
       ['InfDeclaracaoPrestacaoServico', 'Servico', 'Valores', 'ValorCofins']
     ]);
 
-    const vIbsTot = this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'gIBS', 'vIBSTot']]);
-    const vCbs = this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'gCBS', 'vCBS']]);
+    const vIbsTot = this.extractFromPaths(xml, [
+      ['infNFSe', 'IBSCBS', 'totCIBS', 'gIBS', 'vIBSTot'],
+      ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'vIBSTot']
+    ]);
+    const vCbs = this.extractFromPaths(xml, [
+      ['infNFSe', 'IBSCBS', 'totCIBS', 'gCBS', 'vCBS'],
+      ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'gCBS', 'vCBS']
+    ]);
     const valorTotalIbscbs = this.sumValues(vIbsTot, vCbs);
 
     return {
@@ -1813,13 +1819,17 @@ export class NfseDanfseService {
         ['infDPS', 'IBSCBS', 'valores', 'trib', 'CST'],
         ['infDPS', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'CST'],
         ['infDPS', 'IBSCBS', 'valores', 'trib', 'CST'],
-        ['infDPS', 'IBSCBS', 'CST']
+        ['infDPS', 'IBSCBS', 'CST'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'CST'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'CST']
       ]),
       cClassTribIbsCbs: this.extractFromPaths(xml, [
         ['infDPS', 'IBSCBS', 'valores', 'trib', 'cClassTrib'],
         ['infDPS', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'cClassTrib'],
         ['infDPS', 'IBSCBS', 'valores', 'trib', 'cClassTrib'],
-        ['infDPS', 'IBSCBS', 'cClassTrib']
+        ['infDPS', 'IBSCBS', 'cClassTrib'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'cClassTrib'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'cClassTrib']
       ]),
       indicadorOperacaoIbsCbs: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'cIndOp']]),
       municipioIncidenciaIbsCbs: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'xLocIncid']]),
