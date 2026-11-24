@@ -1736,6 +1736,16 @@ textarea:focus-visible,
   min-width: 138px;
 }
 
+.nfse-fiscal-reader-ibscbs {
+  min-width: 160px;
+  padding-right: 18px !important;
+  white-space: nowrap;
+}
+
+.nfse-fiscal-reader-ibscbs > div {
+  transform: translateX(-6px);
+}
+
 .nfse-fiscal-reader-rate,
 .nfse-fiscal-reader-flag {
   min-width: 88px;
