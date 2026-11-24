@@ -1195,6 +1195,10 @@ function onDocumentClick(event) {
     return;
   }
 
+  if (action === 'nfse-fiscal-ibscbs-bulk-select-all' || action === 'nfse-fiscal-ibscbs-bulk-select-document') {
+    return;
+  }
+
   if (action === 'xml-reader30-column-resize') {
     return;
   }
