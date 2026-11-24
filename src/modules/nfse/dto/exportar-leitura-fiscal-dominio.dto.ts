@@ -1,7 +1,72 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Transform, Type } from 'class-transformer';
-import { IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, Min } from 'class-validator';
+import { ArrayMaxSize, IsArray, IsBoolean, IsIn, IsInt, IsOptional, IsString, IsUUID, Matches, Min, ValidateNested } from 'class-validator';
 import { QueryNfseDto } from './query-nfse.dto';
+
+function normalizeIbsCbsOverrideValue(value: unknown): string | null | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null || String(value).trim() === '') {
+    return null;
+  }
+  return String(value).trim();
+}
+
+export class NfseDominioIbsCbsOverrideDto {
+  @ApiProperty({ format: 'uuid', description: 'ID do documento NFS-e exibido no Leitor Fiscal' })
+  @IsUUID()
+  documentId!: string;
+
+  @ApiPropertyOptional({ nullable: true, pattern: '^\\d{3}$', description: 'CST do IBS/CBS; nulo limpa o valor do XML' })
+  @IsOptional()
+  @Transform(({ value }) => normalizeIbsCbsOverrideValue(value))
+  @IsString()
+  @Matches(/^\d{3}$/)
+  cstIbsCbs?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, pattern: '^\\d{6}$', description: 'cClassTrib; nulo limpa o valor do XML' })
+  @IsOptional()
+  @Transform(({ value }) => normalizeIbsCbsOverrideValue(value))
+  @IsString()
+  @Matches(/^\d{6}$/)
+  cClassTribIbsCbs?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, pattern: '^\\d+(?:[.,]\\d{1,2})?$' })
+  @IsOptional()
+  @Transform(({ value }) => normalizeIbsCbsOverrideValue(value))
+  @IsString()
+  @Matches(/^\d+(?:[.,]\d{1,2})?$/)
+  baseCalculoIbsCbs?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, pattern: '^\\d+(?:[.,]\\d{1,6})?$' })
+  @IsOptional()
+  @Transform(({ value }) => normalizeIbsCbsOverrideValue(value))
+  @IsString()
+  @Matches(/^\d+(?:[.,]\d{1,6})?$/)
+  aliquotaIbsTotal?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, pattern: '^\\d+(?:[.,]\\d{1,2})?$' })
+  @IsOptional()
+  @Transform(({ value }) => normalizeIbsCbsOverrideValue(value))
+  @IsString()
+  @Matches(/^\d+(?:[.,]\d{1,2})?$/)
+  valorIbsTotal?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, pattern: '^\\d+(?:[.,]\\d{1,6})?$' })
+  @IsOptional()
+  @Transform(({ value }) => normalizeIbsCbsOverrideValue(value))
+  @IsString()
+  @Matches(/^\d+(?:[.,]\d{1,6})?$/)
+  aliquotaCbs?: string | null;
+
+  @ApiPropertyOptional({ nullable: true, pattern: '^\\d+(?:[.,]\\d{1,2})?$' })
+  @IsOptional()
+  @Transform(({ value }) => normalizeIbsCbsOverrideValue(value))
+  @IsString()
+  @Matches(/^\d+(?:[.,]\d{1,2})?$/)
+  valorCbs?: string | null;
+}
 
 export class ExportarLeituraFiscalDominioDto extends QueryNfseDto {
   @ApiProperty()
@@ -22,6 +87,17 @@ export class ExportarLeituraFiscalDominioDto extends QueryNfseDto {
   @IsOptional()
   @IsIn(['Padrao', 'PorFornecedor', 'Caixa'])
   contas?: 'Padrao' | 'PorFornecedor' | 'Caixa';
+
+  @ApiPropertyOptional({
+    type: [NfseDominioIbsCbsOverrideDto],
+    description: 'Edicoes de IBS/CBS por documento. Quando um campo for omitido, o valor do XML sera usado; envie nulo para limpar um campo.'
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(2000)
+  @ValidateNested({ each: true })
+  @Type(() => NfseDominioIbsCbsOverrideDto)
+  ibscbsOverrides?: NfseDominioIbsCbsOverrideDto[];
 
   @ApiPropertyOptional({
     description: 'Inclui os registros de produtos/estoque 1030 (Entrada) ou 3030 (Servico) no arquivo',

@@ -83,6 +83,8 @@ export interface DanfseRenderInput {
   valorCofins?: string | null;
   descricaoContribuicoesSociais?: string | null;
   cstClassTribIbsCbs?: string | null;
+  cstIbsCbs?: string | null;
+  cClassTribIbsCbs?: string | null;
   indicadorOperacaoIbsCbs?: string | null;
   municipioIncidenciaIbsCbs?: string | null;
   exclusoesReducoesBcIbsCbs?: string | null;
@@ -146,6 +148,13 @@ export interface NfseLeituraFiscal {
   valorCsll?: string;
   valorPis?: string;
   valorCofins?: string;
+  cstIbsCbs?: string;
+  cClassTribIbsCbs?: string;
+  baseCalculoIbsCbs?: string;
+  aliquotaIbsTotal?: string;
+  valorIbsTotal?: string;
+  aliquotaCbs?: string;
+  valorCbs?: string;
   aliquotaIss?: string;
   aliquotaRealIss?: string;
   retencaoIss?: string;
@@ -186,6 +195,18 @@ export interface NfseDominioExportData {
   valorCsll?: number;
   valorPis?: number;
   valorCofins?: number;
+  cstIbsCbs?: string;
+  cClassTribIbsCbs?: string;
+  baseCalculoIbsCbs?: number;
+  aliquotaIbsEstadualEfetiva?: number;
+  aliquotaIbsMunicipalEfetiva?: number;
+  aliquotaIbsTotalInformada?: number;
+  valorIbsEstadual?: number;
+  valorIbsMunicipal?: number;
+  valorIbsTotal?: number;
+  aliquotaCbsInformada?: number;
+  aliquotaCbsEfetiva?: number;
+  valorCbs?: number;
   aliquotaIssInformada?: number;
   aliquotaIssCalculada?: number;
   retencaoIss?: 'Retido' | 'Nao Retido';
@@ -289,6 +310,16 @@ export class NfseDanfseService {
     const csll = this.toNumber(extracted.valorContribuicoesSociais) ?? 0;
     const pis = this.toNumber(extracted.valorPis) ?? 0;
     const cofins = this.toNumber(extracted.valorCofins) ?? 0;
+    const aliquotaIbsEstadual = this.toNumber(extracted.aliquotaEfetivaIbsEstadual);
+    const aliquotaIbsMunicipal = this.toNumber(extracted.aliquotaEfetivaIbsMunicipal);
+    const aliquotaIbsTotal =
+      aliquotaIbsEstadual !== undefined || aliquotaIbsMunicipal !== undefined
+        ? (aliquotaIbsEstadual ?? 0) + (aliquotaIbsMunicipal ?? 0)
+        : this.toNumber(extracted.aliquotaIbsEstadualMunicipal);
+    const valorIbsTotal =
+      this.toNumber(extracted.valorTotalApuradoIbs) ??
+      this.toNumber(this.sumValues(extracted.valorApuradoIbsEstadual, extracted.valorApuradoIbsMunicipal));
+    const aliquotaCbs = this.toNumber(extracted.aliquotaEfetivaCbs) ?? this.toNumber(extracted.aliquotaCbs);
     const valorTotalRetencoesObservado = this.computeObservedRetentionTotal({
       valorServico: extracted.valorServico,
       valorLiquidoNfse: extracted.valorLiquidoNfse,
@@ -373,6 +404,13 @@ export class NfseDanfseService {
       valorCsll: this.toFixedCurrencyString(csll),
       valorPis: this.toFixedCurrencyString(pis),
       valorCofins: this.toFixedCurrencyString(cofins),
+      cstIbsCbs: extracted.cstIbsCbs,
+      cClassTribIbsCbs: extracted.cClassTribIbsCbs,
+      baseCalculoIbsCbs: this.toFixedCurrencyString(this.toNumber(extracted.baseCalculoAposExclusoesIbsCbs)),
+      aliquotaIbsTotal: this.toFixedRateString(aliquotaIbsTotal),
+      valorIbsTotal: this.toFixedCurrencyString(valorIbsTotal),
+      aliquotaCbs: this.toFixedRateString(aliquotaCbs),
+      valorCbs: this.toFixedCurrencyString(this.toNumber(extracted.valorTotalApuradoCbs)),
       aliquotaIss: this.toFixedRateString(this.toNumber(extracted.aliquotaIss)),
       aliquotaRealIss: this.toFixedRateString(aliquotaRealIss),
       retencaoIss,
@@ -442,6 +480,23 @@ export class NfseDanfseService {
       valorCsll: this.toNumber(extracted.valorContribuicoesSociais),
       valorPis: this.toNumber(extracted.valorPis),
       valorCofins: this.toNumber(extracted.valorCofins),
+      cstIbsCbs: extracted.cstIbsCbs,
+      cClassTribIbsCbs: extracted.cClassTribIbsCbs,
+      baseCalculoIbsCbs: this.toNumber(extracted.baseCalculoAposExclusoesIbsCbs),
+      aliquotaIbsEstadualEfetiva: this.toNumber(extracted.aliquotaEfetivaIbsEstadual),
+      aliquotaIbsMunicipalEfetiva: this.toNumber(extracted.aliquotaEfetivaIbsMunicipal),
+      aliquotaIbsTotalInformada:
+        this.toNumber(extracted.aliquotaEfetivaIbsEstadual) !== undefined || this.toNumber(extracted.aliquotaEfetivaIbsMunicipal) !== undefined
+          ? (this.toNumber(extracted.aliquotaEfetivaIbsEstadual) ?? 0) + (this.toNumber(extracted.aliquotaEfetivaIbsMunicipal) ?? 0)
+          : this.toNumber(extracted.aliquotaIbsEstadualMunicipal),
+      valorIbsEstadual: this.toNumber(extracted.valorApuradoIbsEstadual),
+      valorIbsMunicipal: this.toNumber(extracted.valorApuradoIbsMunicipal),
+      valorIbsTotal:
+        this.toNumber(extracted.valorTotalApuradoIbs) ??
+        this.toNumber(this.sumValues(extracted.valorApuradoIbsEstadual, extracted.valorApuradoIbsMunicipal)),
+      aliquotaCbsInformada: this.toNumber(extracted.aliquotaEfetivaCbs) ?? this.toNumber(extracted.aliquotaCbs),
+      aliquotaCbsEfetiva: this.toNumber(extracted.aliquotaEfetivaCbs),
+      valorCbs: this.toNumber(extracted.valorTotalApuradoCbs),
       aliquotaIssInformada: this.toNumber(extracted.aliquotaIss),
       aliquotaIssCalculada,
       retencaoIss: this.isIssRetido(extracted.retencaoIss, extracted.valorIssRetido, layoutNfse) ? 'Retido' : 'Nao Retido',
@@ -1249,7 +1304,8 @@ export class NfseDanfseService {
 
     if (hasIbsCbs) {
       pushSection('TRIBUTACAO IBS/CBS');
-      pushField('CST / cClassTrib', this.safeValue(input.cstClassTribIbsCbs));
+      pushField('CST', this.safeValue(input.cstIbsCbs ?? input.cstClassTribIbsCbs));
+      pushField('cClassTrib', this.safeValue(input.cClassTribIbsCbs));
       pushField('Indicador de Operacao', this.safeValue(input.indicadorOperacaoIbsCbs));
       pushField('Municipio de Incidencia IBS/CBS', this.safeValue(input.municipioIncidenciaIbsCbs));
       pushField('Exclusoes e Reducoes da Base de Calculo', this.safeValue(input.exclusoesReducoesBcIbsCbs));
@@ -1744,21 +1800,66 @@ export class NfseDanfseService {
         ['infNFSe', 'valores', 'trib', 'tribFed', 'piscofins', 'tpRetPisCofins'],
         ['valores', 'trib', 'tribFed', 'piscofins', 'tpRetPisCofins']
       ]),
-      cstClassTribIbsCbs: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'cClassTrib'], ['infDPS', 'IBSCBS', 'CST']]),
+      cstClassTribIbsCbs:
+        this.extractFromPaths(xml, [
+          ['infDPS', 'IBSCBS', 'valores', 'trib', 'CST'],
+          ['infDPS', 'IBSCBS', 'CST']
+        ]) ??
+        this.extractFromPaths(xml, [
+          ['infDPS', 'IBSCBS', 'valores', 'trib', 'cClassTrib'],
+          ['infDPS', 'IBSCBS', 'cClassTrib']
+        ]),
+      cstIbsCbs: this.extractFromPaths(xml, [
+        ['infDPS', 'IBSCBS', 'valores', 'trib', 'CST'],
+        ['infDPS', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'CST'],
+        ['infDPS', 'IBSCBS', 'valores', 'trib', 'CST'],
+        ['infDPS', 'IBSCBS', 'CST']
+      ]),
+      cClassTribIbsCbs: this.extractFromPaths(xml, [
+        ['infDPS', 'IBSCBS', 'valores', 'trib', 'cClassTrib'],
+        ['infDPS', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'cClassTrib'],
+        ['infDPS', 'IBSCBS', 'valores', 'trib', 'cClassTrib'],
+        ['infDPS', 'IBSCBS', 'cClassTrib']
+      ]),
       indicadorOperacaoIbsCbs: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'cIndOp']]),
       municipioIncidenciaIbsCbs: this.extractFromPaths(xml, [['infDPS', 'IBSCBS', 'xLocIncid']]),
       exclusoesReducoesBcIbsCbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'vDescIncond']]),
-      baseCalculoAposExclusoesIbsCbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'vBC']]),
+      baseCalculoAposExclusoesIbsCbs: this.extractFromPaths(xml, [
+        ['infNFSe', 'IBSCBS', 'valores', 'vBC'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'vBC'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'vBC']
+      ]),
       reducaoAliquotaIbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'pRedAliqIBS']]),
       reducaoAliquotaCbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'pRedAliqCBS']]),
       aliquotaIbsEstadualMunicipal: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'pAliqIBSMunUF']]),
-      aliquotaEfetivaIbsMunicipal: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'mun', 'pAliqEfetMun']]),
-      valorApuradoIbsMunicipal: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'gIBS', 'gIBSMunTot', 'vIBSMun']]),
-      aliquotaEfetivaIbsEstadual: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'uf', 'pAliqEfetUF']]),
-      valorApuradoIbsEstadual: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'totCIBS', 'gIBS', 'gIBSUFTot', 'vIBSUF']]),
+      aliquotaEfetivaIbsMunicipal: this.extractFromPaths(xml, [
+        ['infNFSe', 'IBSCBS', 'valores', 'mun', 'pAliqEfetMun'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'gIBSMun', 'pAliqEfetMun'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'gIBSMun', 'pAliqEfet']
+      ]),
+      valorApuradoIbsMunicipal: this.extractFromPaths(xml, [
+        ['infNFSe', 'IBSCBS', 'totCIBS', 'gIBS', 'gIBSMunTot', 'vIBSMun'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'gIBSMun', 'vIBSMun']
+      ]),
+      aliquotaEfetivaIbsEstadual: this.extractFromPaths(xml, [
+        ['infNFSe', 'IBSCBS', 'valores', 'uf', 'pAliqEfetUF'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'gIBSUF', 'pAliqEfetUF'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'gIBSUF', 'pAliqEfet']
+      ]),
+      valorApuradoIbsEstadual: this.extractFromPaths(xml, [
+        ['infNFSe', 'IBSCBS', 'totCIBS', 'gIBS', 'gIBSUFTot', 'vIBSUF'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'gIBSUF', 'vIBSUF']
+      ]),
       valorTotalApuradoIbs: vIbsTot,
-      aliquotaCbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'fed', 'pCBS']]),
-      aliquotaEfetivaCbs: this.extractFromPaths(xml, [['infNFSe', 'IBSCBS', 'valores', 'fed', 'pAliqEfetCBS']]),
+      aliquotaCbs: this.extractFromPaths(xml, [
+        ['infNFSe', 'IBSCBS', 'valores', 'fed', 'pCBS'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'gCBS', 'pCBS']
+      ]),
+      aliquotaEfetivaCbs: this.extractFromPaths(xml, [
+        ['infNFSe', 'IBSCBS', 'valores', 'fed', 'pAliqEfetCBS'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'gCBS', 'pAliqEfetCBS'],
+        ['infNFSe', 'IBSCBS', 'valores', 'trib', 'gIBSCBS', 'gCBS', 'pAliqEfet']
+      ]),
       valorTotalApuradoCbs: vCbs,
       codigoServicoNacional,
       codigoServicoMunicipal,

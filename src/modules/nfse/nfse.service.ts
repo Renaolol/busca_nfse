@@ -483,6 +483,7 @@ export class NfseService {
     }
 
     const acumuladores = this.resolveDominioAcumuladores(dto, tipoRegistro);
+    const ibscbsOverridesByDocumentId = new Map((dto.ibscbsOverrides ?? []).map((override) => [override.documentId, override]));
 
     const documentos = (await this.findLeituraFiscalDocumentos(dto)).filter((doc) => !this.hasCancelamento(doc));
     const sources: NfseDominioExportSource[] = [];
@@ -498,8 +499,15 @@ export class NfseService {
         if (doc.valorServicoManual != null) {
           exportData.valorServico = doc.valorServicoManual.toNumber();
         }
+        const ibscbsOverride = ibscbsOverridesByDocumentId.get(doc.id);
+        if (ibscbsOverride) {
+          this.applyDominioIbsCbsOverride(exportData, ibscbsOverride);
+        }
         sources.push({ documento: doc, exportData });
       } catch (error) {
+        if (error instanceof BadRequestException) {
+          throw error;
+        }
         this.logger.warn(`Falha ao preparar NFS-e ${doc.id} para exportacao Dominio: ${this.toErrorMessage(error)}`);
       }
     }
@@ -659,6 +667,27 @@ export class NfseService {
     const valorIrrf = this.roundTo2(data.valorIrrf ?? 0);
     const valorInss = this.roundTo2(data.valorInss ?? 0);
     const valorCsll = this.roundTo2(data.valorCsll ?? 0);
+    const baseCalculoIbsCbs = this.roundTo2(data.baseCalculoIbsCbs ?? 0);
+    const aliquotaIbs = this.roundTo2(
+      data.aliquotaIbsTotalInformada ?? (data.aliquotaIbsEstadualEfetiva ?? 0) + (data.aliquotaIbsMunicipalEfetiva ?? 0)
+    );
+    const valorIbs = this.roundTo2(data.valorIbsTotal ?? (data.valorIbsEstadual ?? 0) + (data.valorIbsMunicipal ?? 0));
+    const aliquotaCbs = this.roundTo2(data.aliquotaCbsInformada ?? data.aliquotaCbsEfetiva ?? 0);
+    const valorCbs = this.roundTo2(data.valorCbs ?? 0);
+    const possuiDadosIbsCbs = Boolean(
+      data.cstIbsCbs ||
+        data.cClassTribIbsCbs ||
+        data.baseCalculoIbsCbs !== undefined ||
+        data.aliquotaIbsTotalInformada !== undefined ||
+        data.valorIbsTotal !== undefined ||
+        data.aliquotaCbsInformada !== undefined ||
+        data.valorCbs !== undefined ||
+        data.aliquotaIbsEstadualEfetiva !== undefined ||
+        data.aliquotaIbsMunicipalEfetiva !== undefined ||
+        data.valorIbsEstadual !== undefined ||
+        data.valorIbsMunicipal !== undefined ||
+        data.aliquotaCbsEfetiva !== undefined
+    );
     const valorPisRetido = this.roundTo2(data.pisRetido ? data.valorPis ?? 0 : 0);
     const valorCofinsRetido = this.roundTo2(data.cofinsRetido ? data.valorCofins ?? 0 : 0);
     const valorCrf = this.roundTo2(valorCsll + valorPisRetido + valorCofinsRetido);
@@ -730,6 +759,10 @@ export class NfseService {
     if (data.retencaoIss === 'Retido') {
       linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoServico, aliquotaIss, valorIss, '18', ''));
     }
+    if (possuiDadosIbsCbs) {
+      linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoIbsCbs, aliquotaIbs, valorIbs, '183', ''));
+      linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoIbsCbs, aliquotaCbs, valorCbs, '184', ''));
+    }
 
     if (tipoRegistro === 'Entrada') {
       if (incluirEstoque) {
@@ -742,7 +775,10 @@ export class NfseService {
             valorIss,
             valorIssRetidoReal,
             prestadorUf,
-            produtoEntrada
+            produtoEntrada,
+            possuiDadosIbsCbs
+              ? { cClassTrib: data.cClassTribIbsCbs, base: data.baseCalculoIbsCbs, aliquotaIbs, valorIbs, aliquotaCbs, valorCbs }
+              : undefined
           )
         );
       }
@@ -796,7 +832,16 @@ export class NfseService {
     const totalRetencoesLancto = this.roundTo2(valorIrrf + valorPisRetido + valorCofinsRetido + valorCsll);
     if (incluirEstoque) {
       linhas.push(
-        this.createDominioRegistro3030(valorServico, baseCalculoServico, dataEmissao, aliquotaIss, valorIss, valorIssRetidoReal, produtoPadrao)
+        this.createDominioRegistro3030(
+          valorServico,
+          baseCalculoServico,
+          dataEmissao,
+          aliquotaIss,
+          valorIss,
+          valorIssRetidoReal,
+          produtoPadrao,
+          possuiDadosIbsCbs ? { cst: data.cstIbsCbs, cClassTrib: data.cClassTribIbsCbs } : undefined
+        )
       );
     }
     linhas.push(this.createDominioRegistro3300(dataEmissao, '0', '412', valorServico, numeroNfse, nomeDescricao, ''));
@@ -865,6 +910,41 @@ export class NfseService {
       (data.pisRetido === true && (data.valorPis ?? 0) > 0) ||
       (data.cofinsRetido === true && (data.valorCofins ?? 0) > 0)
     );
+  }
+
+  private applyDominioIbsCbsOverride(
+    data: NfseDominioExportData,
+    override: NonNullable<ExportarLeituraFiscalDominioDto['ibscbsOverrides']>[number]
+  ): void {
+    const hasField = (field: keyof typeof override) => Object.prototype.hasOwnProperty.call(override, field);
+    const parseNumber = (value: string | null | undefined): number | undefined =>
+      value === null || value === undefined ? undefined : this.toNumber(value);
+
+    if (hasField('cstIbsCbs')) {
+      data.cstIbsCbs = override.cstIbsCbs ?? undefined;
+    }
+    if (hasField('cClassTribIbsCbs')) {
+      data.cClassTribIbsCbs = override.cClassTribIbsCbs ?? undefined;
+    }
+    if (hasField('baseCalculoIbsCbs')) {
+      data.baseCalculoIbsCbs = parseNumber(override.baseCalculoIbsCbs);
+    }
+    if (hasField('aliquotaIbsTotal')) {
+      data.aliquotaIbsTotalInformada = parseNumber(override.aliquotaIbsTotal);
+    }
+    if (hasField('valorIbsTotal')) {
+      data.valorIbsTotal = parseNumber(override.valorIbsTotal);
+    }
+    if (hasField('aliquotaCbs')) {
+      data.aliquotaCbsInformada = parseNumber(override.aliquotaCbs);
+    }
+    if (hasField('valorCbs')) {
+      data.valorCbs = parseNumber(override.valorCbs);
+    }
+
+    if (data.cstIbsCbs && data.cClassTribIbsCbs && !data.cClassTribIbsCbs.startsWith(data.cstIbsCbs)) {
+      throw new BadRequestException('O CST IBS/CBS deve corresponder aos tres primeiros digitos do cClassTrib.');
+    }
   }
 
   private resolveDominioHeaderCnpj(
@@ -1033,10 +1113,11 @@ export class NfseService {
     valorIss: number,
     valorIssRetido: number,
     estadoEmitente: string,
-    produtoPadrao: string
+    produtoPadrao: string,
+    ibscbs?: { cClassTrib?: string; base?: number; aliquotaIbs: number; valorIbs: number; aliquotaCbs: number; valorCbs: number }
   ): string {
     const cfop = estadoEmitente === 'SC' ? '1933' : '2933';
-    return this.createDominioRecordFromFields(111, {
+    const valuesByField: Record<number, string> = {
       1: '1030',
       2: produtoPadrao,
       3: '1',
@@ -1051,7 +1132,18 @@ export class NfseService {
       32: this.formatDominioNumber(aliquota),
       33: this.formatDominioNumber(valorIss),
       34: cfop
-    });
+    };
+    if (ibscbs) {
+      valuesByField[104] = ibscbs.cClassTrib || '';
+      valuesByField[105] = ibscbs.base === undefined ? '' : this.formatDominioNumber(ibscbs.base);
+      valuesByField[106] = this.formatDominioNumber(ibscbs.aliquotaIbs);
+      valuesByField[107] = this.formatDominioNumber(ibscbs.valorIbs);
+      valuesByField[108] = ibscbs.cClassTrib || '';
+      valuesByField[109] = ibscbs.base === undefined ? '' : this.formatDominioNumber(ibscbs.base);
+      valuesByField[110] = this.formatDominioNumber(ibscbs.aliquotaCbs);
+      valuesByField[111] = this.formatDominioNumber(ibscbs.valorCbs);
+    }
+    return this.createDominioRecordFromFields(111, valuesByField);
   }
 
   private createDominioRegistro3030(
@@ -1061,9 +1153,10 @@ export class NfseService {
     aliquota: number,
     valorIss: number,
     valorIssRetido: number,
-    produtoPadrao: string
+    produtoPadrao: string,
+    ibscbs?: { cst?: string; cClassTrib?: string }
   ): string {
-    return this.createDominioRecordFromFields(40, {
+    const valuesByField: Record<number, string> = {
       1: '3030',
       2: produtoPadrao,
       3: dataEmissao,
@@ -1075,7 +1168,12 @@ export class NfseService {
       10: this.formatDominioNumber(aliquota),
       11: this.formatDominioNumber(valorIss),
       14: this.formatDominioNumber(valorIssRetido)
-    });
+    };
+    if (ibscbs) {
+      valuesByField[36] = ibscbs.cst || '';
+      valuesByField[37] = ibscbs.cClassTrib || '';
+    }
+    return this.createDominioRecordFromFields(40, valuesByField);
   }
 
   private createDominioRecordFromFields(fieldCount: number, valuesByField: Record<number, string>): string {

@@ -97,6 +97,27 @@ export class NfseLeituraFiscalRowDto {
   @ApiPropertyOptional()
   valorCofins?: string;
 
+  @ApiPropertyOptional({ description: 'CST do IBS/CBS extraido do XML' })
+  cstIbsCbs?: string;
+
+  @ApiPropertyOptional({ description: 'cClassTrib do IBS/CBS extraido do XML' })
+  cClassTribIbsCbs?: string;
+
+  @ApiPropertyOptional({ description: 'Base de calculo de IBS/CBS extraida do XML' })
+  baseCalculoIbsCbs?: string;
+
+  @ApiPropertyOptional({ description: 'Aliquota total efetiva do IBS (UF + municipio) extraida/calculada pelo XML' })
+  aliquotaIbsTotal?: string;
+
+  @ApiPropertyOptional({ description: 'Valor total do IBS extraido do XML' })
+  valorIbsTotal?: string;
+
+  @ApiPropertyOptional({ description: 'Aliquota efetiva da CBS extraida do XML' })
+  aliquotaCbs?: string;
+
+  @ApiPropertyOptional({ description: 'Valor total da CBS extraido do XML' })
+  valorCbs?: string;
+
   @ApiPropertyOptional()
   aliquotaIss?: string;
 

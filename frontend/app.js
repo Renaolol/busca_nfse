@@ -112,6 +112,7 @@ const NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER = [
   'valorIss',
   'valorPis',
   'valorCofins',
+  'ibsCbs',
   'valorInss',
   'valorIrrf',
   'valorCsll',
@@ -501,6 +502,7 @@ const state = {
       acumuladorServicoComRetencoes: '900',
       exporting: false
     },
+    ibscbsOverrides: {},
     columnOrder: [...NFSE_FISCAL_READER_DEFAULT_COLUMN_ORDER],
     hiddenColumns: new Set(),
     columnMenuOpenKey: null,
@@ -1347,6 +1349,26 @@ function onDocumentClick(event) {
     }
     case 'nfse-fiscal-show-all-columns': {
       restoreAllNfseFiscalReaderColumns();
+      return;
+    }
+    case 'nfse-fiscal-ibscbs-edit': {
+      const documentId = actionNode.getAttribute('data-document-id') || '';
+      if (!documentId) {
+        return;
+      }
+      openModal({ kind: 'nfse-fiscal-ibscbs-editor', documentId });
+      return;
+    }
+    case 'nfse-fiscal-ibscbs-reset': {
+      const documentId = state.modal?.documentId || '';
+      if (!documentId) {
+        return;
+      }
+      const overrides = { ...(state.nfseFiscalReader.ibscbsOverrides || {}) };
+      delete overrides[documentId];
+      state.nfseFiscalReader.ibscbsOverrides = overrides;
+      closeModal();
+      render();
       return;
     }
     case 'nfse-fiscal-download': {
@@ -2754,6 +2776,11 @@ function onDocumentSubmit(event) {
     case 'nfseFiscalDominioExportForm': {
       event.preventDefault();
       void submitNfseFiscalDominioExportForm(target);
+      return;
+    }
+    case 'nfseFiscalIbsCbsEditForm': {
+      event.preventDefault();
+      submitNfseFiscalIbsCbsEditForm(target);
       return;
     }
     case 'nfseRecoverByDpsForm': {
@@ -12809,6 +12836,8 @@ function renderModal() {
       return renderNfseNumberingExceptionModal();
     case 'nfse-conta-contabil-config':
       return renderNfseContaContabilConfigModal();
+    case 'nfse-fiscal-ibscbs-editor':
+      return renderNfseFiscalIbsCbsEditorModal();
     case 'download-by-key-report':
       return renderDownloadByKeyReportModal();
     case 'dominio-import-report':
@@ -13517,6 +13546,75 @@ function renderNfseContaContabilConfigModal() {
             }
           </div>
         </div>
+      </div>
+    </div>
+  `;
+}
+
+function getNfseFiscalIbsCbsEditorValue(row, field) {
+  const documentId = String(row?.id || '');
+  const overrides = state.nfseFiscalReader.ibscbsOverrides || {};
+  const currentOverride = overrides[documentId];
+  if (currentOverride && Object.prototype.hasOwnProperty.call(currentOverride, field)) {
+    return currentOverride[field] ?? '';
+  }
+  return row?.[field] ?? '';
+}
+
+function renderNfseFiscalIbsCbsEditorModal() {
+  if (state.modal?.kind !== 'nfse-fiscal-ibscbs-editor') {
+    return '';
+  }
+
+  const documentId = String(state.modal.documentId || '');
+  const row = (Array.isArray(state.nfseFiscalReader.rows) ? state.nfseFiscalReader.rows : []).find(
+    (item) => String(item?.id || '') === documentId
+  );
+  if (!row) {
+    return `
+      <div class="overlay" data-action="overlay-close">
+        <div class="modal" role="dialog" aria-modal="true">
+          <div class="modal-header"><h3 class="modal-title">Dados de IBS/CBS</h3><p class="modal-subtitle">A NFS-e selecionada nao esta mais na leitura atual.</p></div>
+          <div class="modal-footer"><button class="btn secondary" type="button" data-action="close-modal">Fechar</button></div>
+        </div>
+      </div>
+    `;
+  }
+
+  const field = (name, label, pattern, title, maxlength = '') => `
+    <label class="field">
+      ${label}
+      <input name="${name}" type="text" inputmode="decimal" value="${escapeHtml(String(getNfseFiscalIbsCbsEditorValue(row, name)))}" ${pattern ? `pattern="${pattern}"` : ''} ${title ? `title="${title}"` : ''} ${maxlength ? `maxlength="${maxlength}"` : ''} />
+    </label>
+  `;
+
+  return `
+    <div class="overlay" data-action="overlay-close">
+      <div class="modal" role="dialog" aria-modal="true" style="width:min(calc(100vw - 24px), 900px); max-width:900px;">
+        <div class="modal-header">
+          <h3 class="modal-title">IBS/CBS da NFS-e ${escapeHtml(row.numeroNfse || row.chaveAcesso || '')}</h3>
+          <p class="modal-subtitle">Os dados abaixo foram carregados do XML. Ajustes valem somente para esta exportacao e esta nota.</p>
+        </div>
+        <form id="nfseFiscalIbsCbsEditForm">
+          <div class="modal-body">
+            <input type="hidden" name="documentId" value="${escapeHtml(documentId)}" />
+            <div class="form-grid three">
+              ${field('cstIbsCbs', 'CST IBS/CBS', '[0-9]{3}', 'Informe tres digitos.', '3')}
+              ${field('cClassTribIbsCbs', 'cClassTrib', '[0-9]{6}', 'Informe seis digitos.', '6')}
+              ${field('baseCalculoIbsCbs', 'Base de calculo IBS/CBS', '[0-9]+([.,][0-9]{1,2})?', 'Use ate duas casas decimais.')}
+              ${field('aliquotaIbsTotal', 'Aliquota IBS (UF + municipio)', '[0-9]+([.,][0-9]{1,6})?', 'Use ate seis casas decimais.')}
+              ${field('valorIbsTotal', 'Valor total IBS', '[0-9]+([.,][0-9]{1,2})?', 'Use ate duas casas decimais.')}
+              ${field('aliquotaCbs', 'Aliquota CBS', '[0-9]+([.,][0-9]{1,6})?', 'Use ate seis casas decimais.')}
+              ${field('valorCbs', 'Valor total CBS', '[0-9]+([.,][0-9]{1,2})?', 'Use ate duas casas decimais.')}
+            </div>
+            <p class="card-subtitle" style="margin-top:12px;">Estes campos alimentam os impostos 183 (IBS) e 184 (CBS) e a classificacao tributaria dos itens no layout Domínio. Deixe em branco para remover o dado do XML desta nota.</p>
+          </div>
+          <div class="modal-footer">
+            <button class="btn secondary" type="button" data-action="nfse-fiscal-ibscbs-reset">Restaurar dados do XML</button>
+            <button class="btn secondary" type="button" data-action="close-modal">Cancelar</button>
+            <button class="btn primary" type="submit">Salvar ajustes</button>
+          </div>
+        </form>
       </div>
     </div>
   `;
@@ -15885,6 +15983,26 @@ function getNfseFiscalReaderColumnDefinitions() {
       className: 'xml-reader30-money',
       html: false,
       render: (row) => formatOptionalCurrency(row.valorCsll)
+    },
+    {
+      key: 'ibsCbs',
+      label: 'IBS/CBS',
+      className: 'nfse-fiscal-reader-ibscbs',
+      html: true,
+      render: (row) => {
+        const hasData = [
+          row.cstIbsCbs,
+          row.cClassTribIbsCbs,
+          row.baseCalculoIbsCbs,
+          row.aliquotaIbsTotal,
+          row.valorIbsTotal,
+          row.aliquotaCbs,
+          row.valorCbs
+        ].some((value) => value !== undefined && value !== null && String(value).trim() !== '');
+        const cstClass = [row.cstIbsCbs, row.cClassTribIbsCbs].filter(Boolean).join(' / ');
+        const status = hasData ? escapeHtml(cstClass || 'Dados carregados do XML') : 'Sem dados no XML';
+        return `<div style="display:grid; gap:5px; min-width:130px;"><button class="btn secondary" type="button" data-action="nfse-fiscal-ibscbs-edit" data-document-id="${escapeHtml(row.id || '')}">Editar IBS/CBS</button><small style="color:var(--text-secondary);">${status}</small></div>`;
+      }
     },
     {
       key: 'dataEmissao',
@@ -20218,6 +20336,7 @@ function resetXmlSearch() {
   state.nfseFiscalReader.rows = [];
   state.nfseFiscalReader.summary = null;
   state.nfseFiscalReader.resumoPorMunicipio = null;
+  state.nfseFiscalReader.ibscbsOverrides = {};
   state.nfseFiscalReader.lastQuery = null;
   state.nfseFiscalReader.lastLoadedAt = null;
   state.nfseFiscalReader.exportConfig = {
@@ -20339,6 +20458,7 @@ async function executeXmlSearch() {
   state.nfseFiscalReader.rows = [];
   state.nfseFiscalReader.summary = null;
   state.nfseFiscalReader.resumoPorMunicipio = null;
+  state.nfseFiscalReader.ibscbsOverrides = {};
   state.nfseFiscalReader.lastQuery = { ...state.filters.xmls };
   state.nfseFiscalReader.exportConfig = {
     ...(state.nfseFiscalReader.exportConfig || {}),
@@ -20436,6 +20556,10 @@ async function submitNfseFiscalDominioExportForm(form) {
   const acumuladorEntradaComRetencoes = String(data.get('acumuladorEntradaComRetencoes') || '').trim();
   const acumuladorServicoSemRetencoes = String(data.get('acumuladorServicoSemRetencoes') || '').trim();
   const acumuladorServicoComRetencoes = String(data.get('acumuladorServicoComRetencoes') || '').trim();
+  const exportableDocumentIds = new Set(exportableRows.map((row) => String(row?.id || '')).filter(Boolean));
+  const ibscbsOverrides = Object.entries(state.nfseFiscalReader.ibscbsOverrides || {})
+    .filter(([documentId]) => exportableDocumentIds.has(documentId))
+    .map(([documentId, values]) => ({ documentId, ...values }));
   const acumuladoresDoTipo =
     tipoRegistro === 'Entrada'
       ? [acumuladorEntradaSemRetencoes, acumuladorEntradaComRetencoes]
@@ -20487,7 +20611,8 @@ async function submitNfseFiscalDominioExportForm(form) {
         acumuladorEntradaSemRetencoes: acumuladorEntradaSemRetencoes || undefined,
         acumuladorEntradaComRetencoes: acumuladorEntradaComRetencoes || undefined,
         acumuladorServicoSemRetencoes: acumuladorServicoSemRetencoes || undefined,
-        acumuladorServicoComRetencoes: acumuladorServicoComRetencoes || undefined
+        acumuladorServicoComRetencoes: acumuladorServicoComRetencoes || undefined,
+        ibscbsOverrides: ibscbsOverrides.length ? ibscbsOverrides : undefined
       },
       timeoutMs: 2 * 60 * 1000
     });
@@ -20515,6 +20640,37 @@ async function submitNfseFiscalDominioExportForm(form) {
     };
     render();
   }
+}
+
+function submitNfseFiscalIbsCbsEditForm(form) {
+  const data = new FormData(form);
+  const documentId = String(data.get('documentId') || '').trim();
+  const fields = [
+    'cstIbsCbs',
+    'cClassTribIbsCbs',
+    'baseCalculoIbsCbs',
+    'aliquotaIbsTotal',
+    'valorIbsTotal',
+    'aliquotaCbs',
+    'valorCbs'
+  ];
+  const values = Object.fromEntries(fields.map((field) => [field, String(data.get(field) || '').trim()]));
+  if (!documentId) {
+    pushToast('Nao foi possivel identificar a NFS-e para editar IBS/CBS.', 'error');
+    return;
+  }
+  if (values.cstIbsCbs && values.cClassTribIbsCbs && !values.cClassTribIbsCbs.startsWith(values.cstIbsCbs)) {
+    pushToast('O CST IBS/CBS deve corresponder aos tres primeiros digitos do cClassTrib.', 'error');
+    return;
+  }
+
+  state.nfseFiscalReader.ibscbsOverrides = {
+    ...(state.nfseFiscalReader.ibscbsOverrides || {}),
+    [documentId]: values
+  };
+  closeModal();
+  render();
+  pushToast('Ajustes de IBS/CBS salvos para esta NFS-e.', 'success');
 }
 
 async function loadNfseGapAuditOverview(options = {}) {
