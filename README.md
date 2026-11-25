@@ -134,6 +134,7 @@ Veja `.env.example`.
 - `NFE_SYNC_NIGHTLY_SWEEP_TIMEZONE_OFFSET_MINUTES`: offset de fuso do agendamento noturno de NF-e (padrao `-180`, UTC-3).
 - `NFE_SYNC_NIGHTLY_SWEEP_CHECK_INTERVAL_MS`: intervalo de verificacao do agendamento noturno de NF-e (padrao `60000`).
 - `ENABLE_SWAGGER`: habilita docs em `/api/docs` (`false` recomendado em producao).
+- `AUTH_SESSION_IDLE_TIMEOUT_SECONDS`: encerra sessoes sem atividade apos o numero de segundos configurado; `0` desativa o encerramento por inatividade.
 - `SYNC_AUTO_RUN_ENABLED`: habilita ciclo automatico de sync em background (padrao `true`).
 - `SYNC_AUTO_RUN_INTERVAL_MS`: intervalo entre ciclos automaticos (padrao `30000`).
 - `SYNC_AUTO_RUN_STARTUP_DELAY_MS`: atraso inicial apos boot para primeiro ciclo automatico (padrao `3000`).

@@ -7,7 +7,18 @@ import { PrismaService } from '../../../prisma/prisma.service';
 describe('AuthService', () => {
   const originalEnv = process.env;
 
-  let prisma: jest.Mocked<PrismaService>;
+  let prisma: {
+    usuario: { findUnique: jest.Mock; update: jest.Mock; create: jest.Mock; findMany: jest.Mock };
+    sessaoUsuario: {
+      create: jest.Mock;
+      update: jest.Mock;
+      findUnique: jest.Mock;
+      updateMany: jest.Mock;
+      findMany: jest.Mock;
+    };
+    eventoAcesso: { create: jest.Mock; findMany: jest.Mock };
+    $transaction: jest.Mock;
+  };
   let passwordHashService: jest.Mocked<PasswordHashService>;
   let service: AuthService;
 
@@ -30,7 +41,8 @@ describe('AuthService', () => {
       ...originalEnv,
       JWT_SECRET: 'super-secret-key-for-tests',
       JWT_EXPIRES_IN_SECONDS: '3600',
-      JWT_REFRESH_EXPIRES_IN_SECONDS: '7200'
+      JWT_REFRESH_EXPIRES_IN_SECONDS: '7200',
+      AUTH_SESSION_IDLE_TIMEOUT_SECONDS: '0'
     };
 
     prisma = {
@@ -56,16 +68,16 @@ describe('AuthService', () => {
           return Promise.all(input as Promise<unknown>[]);
         }
 
-        return (input as (tx: PrismaService) => Promise<unknown>)(prisma);
+        return (input as (tx: PrismaService) => Promise<unknown>)(prisma as unknown as PrismaService);
       })
-    } as unknown as jest.Mocked<PrismaService>;
+    };
 
     passwordHashService = {
       verify: jest.fn(),
       hash: jest.fn()
     } as unknown as jest.Mocked<PasswordHashService>;
 
-    service = new AuthService(prisma, passwordHashService);
+    service = new AuthService(prisma as unknown as PrismaService, passwordHashService);
   });
 
   afterAll(() => {
@@ -352,7 +364,7 @@ describe('AuthService', () => {
     expect(result[0].lastActivityAt).toBe('2026-08-11T09:45:00.000Z');
   });
 
-  it('expira sessao apos 10 minutos sem interacao', async () => {
+  it('mantem sessao ativa apos longo periodo sem interacao quando o timeout esta desativado', async () => {
     prisma.usuario.findUnique.mockResolvedValue(baseUser as never);
     passwordHashService.verify.mockResolvedValue(true);
     prisma.sessaoUsuario.create.mockResolvedValue({
@@ -410,16 +422,15 @@ describe('AuthService', () => {
       { ip: '127.0.0.1', userAgent: 'jest', path: '/auth/login', method: 'POST' }
     );
 
-    await expect(
-      service.verifyAccessToken(login.accessToken, {
-        ip: '127.0.0.1',
-        userAgent: 'jest',
-        path: '/clientes',
-        method: 'GET',
-        interactive: false
-      })
-    ).rejects.toThrow(UnauthorizedException);
+    const user = await service.verifyAccessToken(login.accessToken, {
+      ip: '127.0.0.1',
+      userAgent: 'jest',
+      path: '/clientes',
+      method: 'GET',
+      interactive: false
+    });
 
-    expect(prisma.sessaoUsuario.updateMany).toHaveBeenCalled();
+    expect(user.userId).toBe(baseUser.id);
+    expect(prisma.sessaoUsuario.updateMany).not.toHaveBeenCalled();
   });
 });

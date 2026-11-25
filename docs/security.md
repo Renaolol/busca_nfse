@@ -10,6 +10,7 @@
 - Controle de acesso por cliente com validacao de escopo (`clienteId`) quando o recurso esta vinculado a cliente.
 - Usuarios internos autenticam por `username + senha` com hash via `scrypt`; senha nunca e salva em texto puro.
 - Sessoes autenticadas usam `access token` JWT e `refresh token` persistido no banco.
+- `AUTH_SESSION_IDLE_TIMEOUT_SECONDS=0` desativa o encerramento por inatividade; a expiracao normal dos tokens continua valendo.
 - Login, logout, falhas de autenticacao, renovacao de sessao e acessos negados geram trilha em `eventos_acesso`.
 - Tempo logado e calculado por sessao em `sessoes_usuario` a partir de `login_at`, `last_seen_at`, `logout_at`, `expires_at` e `revoked_at`.
 - `CERT_MASTER_KEY` obrigatoria no bootstrap (valor placeholder `CHANGE_ME...` nao e aceito).

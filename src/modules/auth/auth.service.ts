@@ -23,7 +23,7 @@ import { PrismaService } from '../../prisma/prisma.service';
 const DEFAULT_ACCESS_EXPIRES_IN_SECONDS = 12 * 60 * 60;
 const DEFAULT_REFRESH_EXPIRES_IN_SECONDS = 7 * 24 * 60 * 60;
 const DEFAULT_SESSION_TOUCH_INTERVAL_SECONDS = 60;
-const DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS = 20 * 60;
+const DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS = 0;
 
 type SessionWithUser = SessaoUsuario & {
   usuario: Usuario;
@@ -51,7 +51,7 @@ export class AuthService {
       'AUTH_SESSION_TOUCH_INTERVAL_SECONDS',
       DEFAULT_SESSION_TOUCH_INTERVAL_SECONDS
     );
-    this.sessionIdleTimeoutSeconds = this.readPositiveIntegerEnv(
+    this.sessionIdleTimeoutSeconds = this.readNonNegativeIntegerEnv(
       'AUTH_SESSION_IDLE_TIMEOUT_SECONDS',
       DEFAULT_SESSION_IDLE_TIMEOUT_SECONDS
     );
@@ -488,9 +488,11 @@ export class AuthService {
       where.expiresAt = {
         gt: new Date()
       };
-      where.lastSeenAt = {
-        gt: new Date(now.getTime() - this.sessionIdleTimeoutSeconds * 1000)
-      };
+      if (this.sessionIdleTimeoutSeconds > 0) {
+        where.lastSeenAt = {
+          gt: new Date(now.getTime() - this.sessionIdleTimeoutSeconds * 1000)
+        };
+      }
     }
 
     const sessions = await this.prisma.sessaoUsuario.findMany({
@@ -696,7 +698,8 @@ export class AuthService {
     }
 
     const sessionTerminalDate = this.resolveSessionValidityLimit(session);
-    const idleExpired = this.getSessionIdleExpiresAt(session).getTime() <= now.getTime();
+    const idleExpired =
+      this.sessionIdleTimeoutSeconds > 0 && this.getSessionIdleExpiresAt(session).getTime() <= now.getTime();
     if (sessionTerminalDate.getTime() <= now.getTime()) {
       await this.expireSession(session, context, sessionTerminalDate, idleExpired ? 'inatividade' : 'expiracao');
       throw new UnauthorizedException('Sessao expirada');
@@ -813,6 +816,10 @@ export class AuthService {
   }
 
   private resolveSessionValidityLimit(session: Pick<SessaoUsuario, 'expiresAt' | 'lastSeenAt'>): Date {
+    if (this.sessionIdleTimeoutSeconds <= 0) {
+      return session.expiresAt;
+    }
+
     const idleExpiresAt = this.getSessionIdleExpiresAt(session);
     return idleExpiresAt.getTime() < session.expiresAt.getTime() ? idleExpiresAt : session.expiresAt;
   }
@@ -1038,6 +1045,20 @@ export class AuthService {
     const parsed = Number(raw);
     if (!Number.isInteger(parsed) || parsed <= 0) {
       throw new Error(`${envName} deve ser inteiro positivo`);
+    }
+
+    return parsed;
+  }
+
+  private readNonNegativeIntegerEnv(envName: string, defaultValue: number): number {
+    const raw = process.env[envName]?.trim();
+    if (!raw) {
+      return defaultValue;
+    }
+
+    const parsed = Number(raw);
+    if (!Number.isInteger(parsed) || parsed < 0) {
+      throw new Error(`${envName} deve ser inteiro maior ou igual a zero`);
     }
 
     return parsed;

@@ -39,7 +39,7 @@ const INITIAL_LOADING_MIN_MS = 500;
 const SEARCH_PAGE_SIZE = 100;
 const DASHBOARD_AUTO_REFRESH_INTERVAL_MS = 60000;
 const NFCE_SC_POLL_INTERVAL_MS = 5000;
-const AUTH_IDLE_TIMEOUT_MS = 20 * 60 * 1000;
+const AUTH_IDLE_TIMEOUT_MS = 0;
 const AUTH_ACTIVE_REQUEST_WINDOW_MS = 30 * 1000;
 const AUTH_ACTIVITY_PING_INTERVAL_MS = 60 * 1000;
 const AUTH_STORAGE_KEY = 'gcont:auth:v1';
@@ -227,7 +227,7 @@ async function syncAuthSessionActivity() {
 function scheduleAuthInactivityTimeout() {
   clearAuthInactivityTimer();
 
-  if ((!state.auth.accessToken && !state.auth.refreshToken) || !lastAuthInteractionAt) {
+  if (AUTH_IDLE_TIMEOUT_MS <= 0 || (!state.auth.accessToken && !state.auth.refreshToken) || !lastAuthInteractionAt) {
     return;
   }
 
