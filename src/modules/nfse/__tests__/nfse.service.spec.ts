@@ -2336,8 +2336,8 @@ describe('NfseService', () => {
     expect(content).toContain('|1020|26||180,00|1,11|2,00');
     expect(content).toContain('|1020|3||180,00|5,00|9,00');
     expect(content).toContain('|1020|18||180,00|5,00|9,00');
-    expect(content).toContain('|1020|183||180,00|0,30|0,54');
-    expect(content).toContain('|1020|184||180,00|0,90|1,62');
+    expect(content).not.toContain('|1020|183|');
+    expect(content).not.toContain('|1020|184|');
     expect(content).toContain('|1030|557|1|180,00');
     const registroEntradaItem = content.split('\n').find((line) => line.startsWith('|1030|'));
     const camposEntradaItem = registroEntradaItem?.split('|').slice(1, -1) ?? [];

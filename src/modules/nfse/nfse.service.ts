@@ -697,6 +697,7 @@ export class NfseService {
         data.valorIbsMunicipal !== undefined ||
         data.aliquotaCbsEfetiva !== undefined
     );
+    const possuiIbsCbsNoItemEntrada = tipoRegistro === 'Entrada' && incluirEstoque && possuiDadosIbsCbs;
     const valorPisRetido = this.roundTo2(data.pisRetido ? data.valorPis ?? 0 : 0);
     const valorCofinsRetido = this.roundTo2(data.cofinsRetido ? data.valorCofins ?? 0 : 0);
     const valorCrf = this.roundTo2(valorCsll + valorPisRetido + valorCofinsRetido);
@@ -779,10 +780,10 @@ export class NfseService {
     if (data.retencaoIss === 'Retido') {
       linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoServico, aliquotaIss, valorIss, '18', ''));
     }
-    if (possuiValoresIbs) {
+    if (possuiValoresIbs && !possuiIbsCbsNoItemEntrada) {
       linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoIbsCbs, aliquotaIbs, valorIbs, '183', ''));
     }
-    if (possuiValoresCbs) {
+    if (possuiValoresCbs && !possuiIbsCbsNoItemEntrada) {
       linhas.push(this.createDominioRegistroImposto(tipoRegistro, baseCalculoIbsCbs, aliquotaCbs, valorCbs, '184', ''));
     }
 
